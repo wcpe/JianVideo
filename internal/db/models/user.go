@@ -16,7 +16,7 @@ type User struct {
 // CreateUser 创建用户
 func CreateUser(d *sql.DB, username, passwordHash string) (*User, error) {
 	result, err := d.Exec(
-		"INSERT INTO users (username, password_hash) VALUES (?, ?)",
+		"INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, datetime('now'))",
 		username, passwordHash,
 	)
 	if err != nil {
@@ -29,6 +29,7 @@ func CreateUser(d *sql.DB, username, passwordHash string) (*User, error) {
 		ID:           int(id),
 		Username:     username,
 		PasswordHash: passwordHash,
+		CreatedAt:    time.Now(),
 	}, nil
 }
 

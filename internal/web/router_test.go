@@ -8,23 +8,30 @@ import (
 	"testing"
 	"time"
 
-	"jianvideo/config"
-	"jianvideo/internal/db"
-
 	"github.com/gin-gonic/gin"
-	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	"jianvideo/config"
+	"jianvideo/internal/db/models"
+	"jianvideo/internal/player"
 )
 
 func setupTestRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	d, err := db.Open(":memory:")
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := db.InitSchema(d); err != nil {
-		t.Fatalf("初始化表结构失败: %v", err)
+	if err := gormDB.AutoMigrate(
+		&models.LibraryPath{},
+		&models.MediaFile{},
+		&models.User{},
+		&models.PlaybackSession{},
+	); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
 	}
 
 	cfg := &config.Config{
@@ -34,7 +41,9 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 		DBPath:       ":memory:",
 	}
 
-	return NewRouter(cfg, d)
+	hlsMgr := player.NewHLSManager(t.TempDir())
+
+	return NewRouter(cfg, gormDB, hlsMgr, nil)
 }
 
 func TestLogin_Success(t *testing.T) {

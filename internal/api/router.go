@@ -1,9 +1,9 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -11,11 +11,13 @@ import (
 	"gorm.io/gorm"
 
 	"jianvideo/internal/db/models"
+	"jianvideo/internal/player"
 	"jianvideo/internal/playback"
 )
 
 // RegisterRoutes 注册 API 路由。
-// pbSvc 可选：传入时注册播放相关路由，不传入时跳过。
+// pbSvc 可选：传入时注册播放相关路由。
+// hlsMgr 可选：传入时注册 HLS 切片路由。
 func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	lib := r.Group("/api/library")
 	{
@@ -78,6 +80,44 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	}
 }
 
+// RegisterHLSRoutes 注册 HLS 切片和 m3u8 路由。
+func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
+	hls := r.Group("/api/play/hls")
+	{
+		hls.GET("/:id/index.m3u8", func(c *gin.Context) {
+			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+				return
+			}
+			content, err := hlsMgr.GetM3U8(id)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+				return
+			}
+			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
+		})
+		hls.GET("/:id/:segment", func(c *gin.Context) {
+			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+				return
+			}
+			segment := c.Param("segment")
+			if !strings.HasSuffix(segment, ".ts") {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "仅支持 .ts 切片"})
+				return
+			}
+			data, err := hlsMgr.GetSegment(id, segment)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+				return
+			}
+			c.Data(http.StatusOK, "video/mp2t", data)
+		})
+	}
+}
+
 // setupTestDB 创建测试用的内存数据库。
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -85,7 +125,6 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("创建测试数据库失败: %v", err)
 	}
-	// 自动迁移
 	db.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
@@ -94,6 +133,3 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	)
 	return db
 }
-
-// Ensure sql is used (prevent unused import).
-var _ *sql.DB

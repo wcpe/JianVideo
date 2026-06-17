@@ -30,7 +30,7 @@ func TestPipeline_SelectBestEncoder(t *testing.T) {
 // TestPipeline_BuildArgs 验证 ffmpeg 参数构建。
 func TestPipeline_BuildArgs(t *testing.T) {
 	p := NewPipeline()
-	args := p.buildArgs("/tmp/test.mkv")
+	args := p.buildArgs("/tmp/test.mkv", 0)
 
 	// 验证关键参数存在
 	assertContains(t, args, "-g", "48")

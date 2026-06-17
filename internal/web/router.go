@@ -1,39 +1,70 @@
 package web
 
 import (
-	"database/sql"
+	"io/fs"
 	"net/http"
 
-	"jianvideo/config"
-	"jianvideo/internal/auth"
-
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"jianvideo/config"
+	"jianvideo/internal/api"
+	"jianvideo/internal/auth"
+	"jianvideo/internal/library"
+	"jianvideo/internal/player"
 )
 
 // NewRouter 创建并配置路由
-func NewRouter(cfg *config.Config, db *sql.DB) *gin.Engine {
+// frontendDist 为嵌入的前端静态资源（由 main 通过 go:embed 传入）
+func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, frontendDist fs.FS) *gin.Engine {
 	r := gin.Default()
 
-	svc := auth.NewService(db, cfg.JWTSecret)
+	// 静态文件服务（前端嵌入）
+	if frontendDist != nil {
+		distFS, _ := fs.Sub(frontendDist, "frontend/dist")
+		r.StaticFS("/static", http.FS(distFS))
+		r.GET("/*filepath", func(c *gin.Context) {
+			indexData, err := fs.ReadFile(frontendDist, "frontend/dist/index.html")
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", indexData)
+		})
+	}
+
+	// 认证（从 gorm.DB 提取底层 sql.DB）
+	sqlDB, _ := db.DB()
+	svc := auth.NewService(sqlDB, cfg.JWTSecret)
 	authMW := auth.Middleware(cfg.JWTSecret)
 
 	// 确保默认用户存在
 	if err := svc.CreateDefaultUser(); err != nil {
-		// 启动时创建失败只记录日志，不中断启动
-		// 生产环境应接入正式日志库，此处用 gin 自带的 Error 日志
 		gin.DefaultErrorWriter.Write([]byte("创建默认用户失败: " + err.Error() + "\n"))
 	}
 
-	api := r.Group("/api")
+	// 创建 API Handler
+	libSvc := library.NewService(db)
+	apiHandler := api.NewHandler(libSvc)
+
+	// 注册 API 路由（库路由）
+	api.RegisterRoutes(r, apiHandler)
+
+	// HLS 路由
+	if hlsMgr != nil {
+		api.RegisterHLSRoutes(r, hlsMgr)
+	}
+
+	// 认证路由
+	apiGroup := r.Group("/api")
 	{
-		authGroup := api.Group("/auth")
+		authGroup := apiGroup.Group("/auth")
 		{
 			authGroup.POST("/login", handleLogin(svc, cfg))
 			authGroup.POST("/logout", handleLogout)
 		}
 
-		// 受保护的路由
-		protected := api.Group("")
+		protected := apiGroup.Group("")
 		protected.Use(authMW)
 		{
 			protected.GET("/me", handleMe)

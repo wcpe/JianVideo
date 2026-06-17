@@ -43,7 +43,12 @@ func NewPipeline() *Pipeline {
 // Run 启动转码管道，将 ffmpeg stdout 写入 dst。
 // ctx 取消时自动终止 ffmpeg 进程。
 func (p *Pipeline) Run(ctx context.Context, inputPath string, dst io.Writer) error {
-	args := p.buildArgs(inputPath)
+	return p.RunWithSeek(ctx, inputPath, dst, 0)
+}
+
+// RunWithSeek 启动转码管道，支持 Seek 位置（秒）。
+func (p *Pipeline) RunWithSeek(ctx context.Context, inputPath string, dst io.Writer, seekPosition float64) error {
+	args := p.buildArgs(inputPath, seekPosition)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	cmd.Stdout = dst
@@ -72,10 +77,16 @@ func (p *Pipeline) Run(ctx context.Context, inputPath string, dst io.Writer) err
 }
 
 // buildArgs 构建 ffmpeg 命令行参数。
-func (p *Pipeline) buildArgs(inputPath string) []string {
+// seekPosition 为 Seek 位置（秒），0 表示从头开始。
+func (p *Pipeline) buildArgs(inputPath string, seekPosition float64) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
+	}
+
+	// Seek 位置（在 -i 之前，加速定位）
+	if seekPosition > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.2f", seekPosition))
 	}
 
 	// 硬件加速设备初始化
