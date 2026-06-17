@@ -1,0 +1,238 @@
+import { useRef, useEffect, useState, useCallback } from 'react'
+import mpegts from 'mpegts.js'
+
+interface VideoPlayerProps {
+  /** TS 流 URL */
+  url: string
+  /** 自动播放 */
+  autoPlay?: boolean
+}
+
+/**
+ * mpegts.js 播放内核组件
+ *
+ * 通过 MSE API 播放 MPEG-TS 流，支持边下边播和精准 Seek。
+ * 禁止原生 video 标签直接处理 TS 流。
+ */
+export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const playerRef = useRef<mpegts.Player | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(1)
+  const [isMuted, setIsMuted] = useState(false)
+
+  // 销毁播放器
+  const destroyPlayer = useCallback(() => {
+    const player = playerRef.current
+    if (player) {
+      player.pause()
+      player.unload()
+      player.destroy()
+      playerRef.current = null
+    }
+  }, [])
+
+  // 初始化播放器
+  const initPlayer = useCallback(
+    (streamUrl: string) => {
+      if (!videoRef.current) return
+
+      // 清理旧实例
+      destroyPlayer()
+
+      const player = mpegts.createPlayer(
+        {
+          type: 'mpegts',
+          url: streamUrl,
+          isLive: true,
+        },
+        {
+          enableWorker: true,
+          enableStashBuffer: true,
+          stashInitialSize: 1024 * 1024, // 1MB，约 3-5 秒追播延迟
+          accurateSeek: true,
+          seekType: 'range',
+        }
+      )
+
+      player.attachMediaElement(videoRef.current)
+      player.load()
+
+      // 使用字符串事件名（mpegts.js 运行时触发的事件，不在 d.ts 中声明）
+      player.on('loadeddata', () => {
+        if (autoPlay) {
+          // play() 返回 Promise<void> | void
+          void (player.play() as Promise<void>)?.catch?.(() => {
+            // 自动播放可能被浏览器策略阻止
+          })
+        }
+      })
+
+      player.on('playing', () => {
+        setIsPlaying(true)
+      })
+
+      player.on('pause', () => {
+        setIsPlaying(false)
+      })
+
+      playerRef.current = player
+    },
+    [autoPlay, destroyPlayer]
+  )
+
+  // 挂载 / URL 变化时初始化
+  useEffect(() => {
+    initPlayer(url)
+
+    return () => {
+      destroyPlayer()
+    }
+  }, [url, initPlayer, destroyPlayer])
+
+  // 监听时间更新
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const onTimeUpdate = () => setCurrentTime(video.currentTime)
+    const onDurationChange = () => setDuration(video.duration)
+    const onVolumeChange = () => {
+      setVolume(video.volume)
+      setIsMuted(video.muted)
+    }
+
+    video.addEventListener('timeupdate', onTimeUpdate)
+    video.addEventListener('durationchange', onDurationChange)
+    video.addEventListener('volumechange', onVolumeChange)
+
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate)
+      video.removeEventListener('durationchange', onDurationChange)
+      video.removeEventListener('volumechange', onVolumeChange)
+    }
+  }, [])
+
+  const togglePlay = () => {
+    const player = playerRef.current
+    if (!player) return
+    if (isPlaying) {
+      player.pause()
+    } else {
+      void (player.play() as Promise<void>)?.catch?.(() => {})
+    }
+  }
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value)
+    const player = playerRef.current
+    if (!player) return
+    player.currentTime = time
+    setCurrentTime(time)
+  }
+
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const vol = parseFloat(e.target.value)
+    const player = playerRef.current
+    if (!player) return
+    player.volume = vol
+    player.muted = vol === 0
+    setVolume(vol)
+    setIsMuted(vol === 0)
+  }
+
+  const toggleMute = () => {
+    const player = playerRef.current
+    if (!player) return
+    player.muted = !isMuted
+    setIsMuted(!isMuted)
+  }
+
+  const formatTime = (seconds: number) => {
+    if (!isFinite(seconds) || isNaN(seconds)) return '0:00'
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="flex flex-col w-full bg-black rounded-lg overflow-hidden">
+      {/* video 元素 — 仅作为 mpegts.js 渲染目标，不设置 src */}
+      <video
+        ref={videoRef}
+        className="w-full aspect-video bg-black"
+        playsInline
+      />
+
+      {/* 播放控制栏 */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-slate-900">
+        {/* 播放/暂停 */}
+        <button
+          onClick={togglePlay}
+          className="text-white hover:text-blue-400 transition-colors"
+          aria-label={isPlaying ? '暂停' : '播放'}
+        >
+          {isPlaying ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" />
+              <rect x="14" y="4" width="4" height="16" />
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5,3 19,12 5,21" />
+            </svg>
+          )}
+        </button>
+
+        {/* 进度条 */}
+        <div className="flex-1 flex items-center gap-2">
+          <span className="text-xs text-slate-400 tabular-nums">
+            {formatTime(currentTime)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={currentTime}
+            onChange={handleSeek}
+            className="flex-1 h-1 accent-blue-500 cursor-pointer"
+          />
+          <span className="text-xs text-slate-400 tabular-nums">
+            {formatTime(duration)}
+          </span>
+        </div>
+
+        {/* 音量控制 */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggleMute}
+            className="text-white hover:text-blue-400 transition-colors"
+            aria-label={isMuted ? '取消静音' : '静音'}
+          >
+            {isMuted || volume === 0 ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+              </svg>
+            )}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={isMuted ? 0 : volume}
+            onChange={handleVolumeChange}
+            className="w-20 h-1 accent-blue-500 cursor-pointer"
+          />
+        </div>
+      </div>
+    </div>
+  )
+}

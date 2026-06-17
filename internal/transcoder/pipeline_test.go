@@ -6,8 +6,6 @@ import (
 	"io"
 	"testing"
 	"time"
-
-	"jianvideo/internal/hwaccel"
 )
 
 // mockTranscoder 是 Transcoder 接口的模拟实现，用于测试。
@@ -22,14 +20,11 @@ func (m *mockTranscoder) Run(ctx context.Context, inputPath string, dst io.Write
 // TestPipeline_SelectBestEncoder 验证管道能选择编码器。
 func TestPipeline_SelectBestEncoder(t *testing.T) {
 	p := NewPipeline()
-	if p.encoder == nil {
-		t.Fatal("期望编码器不为 nil")
+	if p.encoderName == "" {
+		t.Fatal("期望编码器名称不为空")
 	}
 	// 在没有硬件加速的环境中，应降级为软件编码
-	if p.encoder.Codec != "h264" {
-		t.Fatalf("期望 codec=h264, 实际 %s", p.encoder.Codec)
-	}
-	t.Logf("选择的编码器: %s (accel=%d)", p.encoder.Name, p.encoder.Accel)
+	t.Logf("选择的编码器: %s (device=%s, hwaccel=%s)", p.encoderName, p.deviceType, p.hwAccel)
 }
 
 // TestPipeline_BuildArgs 验证 ffmpeg 参数构建。
@@ -43,7 +38,7 @@ func TestPipeline_BuildArgs(t *testing.T) {
 	assertContains(t, args, "-sc_threshold", "0")
 	assertContains(t, args, "-f", "mpegts")
 	assertContains(t, args, "-i", "/tmp/test.mkv")
-	assertContains(t, args, "-c:v", p.encoder.Name)
+	assertContains(t, args, "-c:v", p.encoderName)
 	assertContains(t, args, "-c:a", "copy")
 
 	// 验证输出到 stdout
@@ -119,27 +114,18 @@ func assertContains(t *testing.T, args []string, flag, value string) {
 	t.Fatalf("参数中未找到 %s %s, 实际: %v", flag, value, args)
 }
 
-// 确保 hwaccel.SelectBestEncoder 在无 ffmpeg 环境下降级。
+// TestSelectBestEncoder_Fallback 验证无硬件环境下降级为软件编码。
 func TestSelectBestEncoder_Fallback(t *testing.T) {
-	info := hwaccel.SelectBestEncoder("h264")
-	if info == nil {
-		t.Fatal("SelectBestEncoder 不应返回 nil")
+	name, deviceType, err := SelectBestEncoder()
+	if err != nil {
+		t.Fatalf("SelectBestEncoder 不应返回错误: %v", err)
 	}
-	if info.Accel != hwaccel.Software {
-		t.Logf("检测到硬件加速: %s, 跳过降级验证", info.Name)
+	// 在没有硬件加速的环境中，应降级为软件编码
+	if deviceType != "" {
+		t.Logf("检测到硬件加速: %s (%s)，跳过降级验证", name, deviceType)
 	} else {
-		if info.Name != "libx264" {
-			t.Fatalf("期望软件编码为 libx264, 实际 %s", info.Name)
+		if name != "libx264" {
+			t.Fatalf("期望软件编码为 libx264, 实际 %s", name)
 		}
-	}
-}
-
-func TestSelectBestEncoder_HEVC(t *testing.T) {
-	info := hwaccel.SelectBestEncoder("hevc")
-	if info == nil {
-		t.Fatal("SelectBestEncoder 不应返回 nil")
-	}
-	if info.Codec != "hevc" {
-		t.Fatalf("期望 codec=hevc, 实际 %s", info.Codec)
 	}
 }

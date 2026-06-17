@@ -7,20 +7,37 @@ import (
 	"log"
 	"os/exec"
 	"strings"
-	"time"
-
-	"jianvideo/internal/hwaccel"
 )
+
+// logWriter 将 ffmpeg  stderr 输出重定向到日志。
+type logWriter struct {
+	prefix string
+}
+
+func (w *logWriter) Write(p []byte) (int, error) {
+	log.Printf("%s %s", w.prefix, string(p))
+	return len(p), nil
+}
 
 // Pipeline 封装一次 ffmpeg 转码会话。
 type Pipeline struct {
-	encoder *hwaccel.Info
+	encoderName  string
+	deviceType   string
+	hwAccel      string
 }
 
 // NewPipeline 创建转码管道，自动选择最佳编码器。
 func NewPipeline() *Pipeline {
-	encoder := hwaccel.SelectBestEncoder("h264")
-	return &Pipeline{encoder: encoder}
+	name, deviceType, _ := SelectBestEncoder()
+	hwAccel := ""
+	if deviceType != "" {
+		hwAccel = deviceType
+	}
+	return &Pipeline{
+		encoderName: name,
+		deviceType:  deviceType,
+		hwAccel:     hwAccel,
+	}
 }
 
 // Run 启动转码管道，将 ffmpeg stdout 写入 dst。
@@ -56,20 +73,19 @@ func (p *Pipeline) Run(ctx context.Context, inputPath string, dst io.Writer) err
 
 // buildArgs 构建 ffmpeg 命令行参数。
 func (p *Pipeline) buildArgs(inputPath string) []string {
-	enc := p.encoder
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
 	}
 
 	// 硬件加速设备初始化
-	if enc.HWAccel != "" {
-		args = append(args, "-hwaccel", enc.HWAccel)
+	if p.hwAccel != "" {
+		args = append(args, "-hwaccel", p.hwAccel)
 	}
 
 	args = append(args,
 		"-i", inputPath,
-		"-c:v", enc.Name,
+		"-c:v", p.encoderName,
 		// 固定 GOP = 48 帧
 		"-g", "48",
 		"-keyint_min", "48",
@@ -82,34 +98,4 @@ func (p *Pipeline) buildArgs(inputPath string) []string {
 		"-",
 	)
 	return args
-}
-
-// Transcoder 接口抽象，便于未来替换为 CGO 实现。
-type Transcoder interface {
-	Run(ctx context.Context, inputPath string, dst io.Writer) error
-}
-
-// 确保 Pipeline 实现 Transcoder 接口。
-var _ Transcoder = (*Pipeline)(nil)
-
-// --- 内部工具 ---
-
-// logWriter 将 ffmpeg stderr 重定向到 log。
-type logWriter struct {
-	prefix string
-}
-
-func (w *logWriter) Write(p []byte) (int, error) {
-	lines := strings.Split(strings.TrimSpace(string(p)), "\n")
-	for _, line := range lines {
-		if line != "" {
-			log.Printf("%s %s", w.prefix, line)
-		}
-	}
-	return len(p), nil
-}
-
-// init 包初始化时记录启动时间（用于未来健康检查）。
-func init() {
-	_ = time.Now()
 }

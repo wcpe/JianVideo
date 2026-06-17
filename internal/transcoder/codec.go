@@ -115,10 +115,10 @@ func IsBrowserCompatible(info *MediaInfo) bool {
 	if info == nil {
 		return false
 	}
-	if info.VideoCodec != "h264" {
+	if strings.ToLower(info.VideoCodec) != "h264" {
 		return false
 	}
-	if info.AudioCodec != "aac" {
+	if strings.ToLower(info.AudioCodec) != "aac" {
 		return false
 	}
 	// 检查容器格式是否包含 mp4/mov

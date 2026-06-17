@@ -1,3 +1,4 @@
+// Package transcoder 提供 FFmpeg 转码管道和硬件加速检测。
 package transcoder
 
 import (

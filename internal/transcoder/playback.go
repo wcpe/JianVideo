@@ -17,7 +17,12 @@ type PlayInfo struct {
 // 直出条件：容器=mp4 AND 视频编码=h264 AND 音频编码=aac。
 // 直出返回文件路径，转码返回 HLS 占位 URL。
 func DecidePlayback(filePath, container, videoCodec, audioCodec string) PlayInfo {
-	if IsBrowserCompatible(container, videoCodec, audioCodec) {
+	info := &MediaInfo{
+		ContainerFormat: container,
+		VideoCodec:      videoCodec,
+		AudioCodec:      audioCodec,
+	}
+	if IsBrowserCompatible(info) {
 		return PlayInfo{
 			URL:             filePath,
 			Format:          "direct",

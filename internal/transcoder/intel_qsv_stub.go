@@ -1,5 +1,5 @@
-//go:build !cgo
-// +build !cgo
+//go:build !ffmpeg
+// +build !ffmpeg
 
 package transcoder
 

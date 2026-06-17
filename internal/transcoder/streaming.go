@@ -13,9 +13,14 @@ import (
 	"jianvideo/internal/library"
 )
 
+// Transcoder 定义转码器接口。
+type Transcoder interface {
+	Run(ctx context.Context, inputPath string, dst io.Writer) error
+}
+
 // StreamHandler 处理流式播放的 HTTP 请求。
 type StreamHandler struct {
-	library  *library.Service
+	library         *library.Service
 	pipelineFactory func() Transcoder
 }
 

@@ -140,6 +140,20 @@ func (s *Service) DeleteMediaFile(id int64) error {
 	return s.db.Delete(&models.MediaFile{}, id).Error
 }
 
+// GetMediaFileByPath 根据文件路径查询媒体文件。
+func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error) {
+	var mf models.MediaFile
+	if err := s.db.Where("file_path = ?", filePath).First(&mf).Error; err != nil {
+		return nil, err
+	}
+	return &mf, nil
+}
+
+// DeleteMediaFileByPath 根据文件路径删除媒体文件记录。
+func (s *Service) DeleteMediaFileByPath(filePath string) error {
+	return s.db.Where("file_path = ?", filePath).Delete(&models.MediaFile{}).Error
+}
+
 // ScanLibrary 扫描指定目录，索引所有视频文件。
 func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 	entries, err := os.ReadDir(dirPath)
