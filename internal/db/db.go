@@ -1,46 +1,44 @@
 package db
 
 import (
-	"log"
-	"os"
-	"path/filepath"
+	"database/sql"
+	"fmt"
 
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-
-	"jianvideo/internal/db/models"
+	_ "github.com/mattn/go-sqlite3"
 )
 
-// DB 数据库连接。
-type DB struct {
-	*gorm.DB
-}
-
-// Init 初始化数据库连接并执行迁移。
-func Init(dbPath string) (*DB, error) {
-	// 确保目录存在
-	dir := filepath.Dir(dbPath)
-	if dir != "" && dir != "." {
-		if err := ensureDir(dir); err != nil {
-			return nil, err
-		}
-	}
-
-	dsn := "file:" + dbPath + "?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
-	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+// Open 打开 SQLite 数据库并启用 WAL 模式
+func Open(dataSourceName string) (*sql.DB, error) {
+	d, err := sql.Open("sqlite3", dataSourceName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	// 自动迁移
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}); err != nil {
-		return nil, err
+	if _, err := d.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("启用 WAL 模式失败: %w", err)
 	}
 
-	log.Println("[INFO] 数据库初始化完成，路径:", dbPath)
-	return &DB{gdb}, nil
+	if err := d.Ping(); err != nil {
+		d.Close()
+		return nil, fmt.Errorf("数据库连接失败: %w", err)
+	}
+
+	return d, nil
 }
 
-func ensureDir(path string) error {
-	return os.MkdirAll(path, 0o755)
+// InitSchema 初始化数据库表结构
+func InitSchema(d *sql.DB) error {
+	query := `
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+`
+	if _, err := d.Exec(query); err != nil {
+		return fmt.Errorf("创建 users 表失败: %w", err)
+	}
+	return nil
 }

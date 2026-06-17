@@ -1,32 +1,33 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 
-	"github.com/gin-gonic/gin"
-
-	"jianvideo/internal/api"
-	"jianvideo/internal/config"
+	"jianvideo/config"
 	"jianvideo/internal/db"
-	"jianvideo/internal/library"
+	"jianvideo/internal/web"
 )
 
 func main() {
 	cfg := config.Load()
 
-	database, err := db.Init(cfg.DBPath)
+	d, err := db.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("[ERROR] 数据库初始化失败: %v", err)
+		log.Fatalf("数据库初始化失败: %v", err)
+	}
+	defer d.Close()
+
+	if err := db.InitSchema(d); err != nil {
+		log.Fatalf("数据库建表失败: %v", err)
 	}
 
-	libService := library.NewService(database.DB)
-	handler := api.NewHandler(libService)
+	r := web.NewRouter(cfg, d)
 
-	r := gin.Default()
-	api.RegisterRoutes(r, handler)
-
-	log.Printf("[INFO] 服务启动，端口: %d", cfg.ServerPort)
-	if err := r.Run(":8080"); err != nil {
-		log.Fatalf("[ERROR] 服务启动失败: %v", err)
+	addr := fmt.Sprintf(":%d", cfg.ServerPort)
+	log.Printf("JianVideo 启动于 %s", addr)
+	if err := r.Run(addr); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("服务启动失败: %v", err)
 	}
 }
