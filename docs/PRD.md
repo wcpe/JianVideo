@@ -42,7 +42,7 @@
 | FR-07 | 自适应码率（ABR）：提供多码率阶梯转换，根据客户端带宽动态切换（1080p→720p→480p） | P2 | 计划 |
 | FR-08 | 后端流式输出：FFmpeg 转码数据通过 HTTP Response Writer 实时刷新给客户端，禁止等待整个文件转完再返回 | P1 | 计划 |
 | FR-09 | 并发 Range 请求支持：Seek 时后端能中断旧连接并迅速开启新 Range 请求线程 | P1 | 计划 |
-| FR-10 | Intel 硬件加速转码：支持 Intel QSV 和 VAAPI | P1 | 计划 |
+| FR-10 | Intel 硬件加速转码：支持 Intel QSV 和 VAAPI | P1 | 开发中 |
 | FR-11 | NVIDIA 硬件加速转码：支持 NVIDIA NVENC/NVDEC | P1 | 计划 |
 | FR-12 | 自动降级机制：优先检测硬件加速能力，不支持时自动降级为软件解码 | P1 | 计划 |
 | FR-13 | 单用户认证：极简账号+密码登录体系 | P1 | 计划 |
