@@ -8,6 +8,7 @@
 
 ### 新增
 - 初始化项目结构与 SDD 治理文档
+- 多目录聚合管理的目录注册、媒体文件 CRUD API（internal/library + internal/api）
 
 ### 变更
 （无）

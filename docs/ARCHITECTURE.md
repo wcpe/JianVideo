@@ -46,7 +46,7 @@
 | 模块 | 职责 | 依赖方向 |
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `media-library`, `transcoder` |
-| `media-library` | 媒体库管理、目录注册、文件索引、元数据读写 | → `db`, `watcher` |
+| `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify）、SMB 路径监控 | → `media-library` |
 | `transcoder` | CGO 转码管道、硬件加速检测/选择、流式输出、进程池 | → `db` |
 | `hwaccel` | 硬件加速能力检测（Intel 核显/AMD/NVIDIA）、编码器枚举 | 被 `transcoder` 依赖 |
