@@ -8,9 +8,7 @@
 
 ### 新增
 - 初始化项目结构与 SDD 治理文档
-- 多目录聚合管理的目录注册、媒体文件 CRUD API（internal/library + internal/api）
-- NVIDIA NVENC 硬件加速检测：通过 FFmpeg C API 检测 CUDA 设备与 h264_nvenc/hevc_nvenc 编码器，支持 H.264 和 H.265 双编码检测
-- 单用户认证（JWT + bcrypt）：登录/登出 API、认证中间件、首次启动自动创建默认用户
+- 实现 fsnotify 实时路径监控（FR-03）：递归监听媒体库目录，视频文件自动入库/移除，500ms 去抖机制
 
 ### 变更
 （无）
