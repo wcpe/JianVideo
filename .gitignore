@@ -1,2 +1,48 @@
+# Go 构建产物
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+
+# 依赖与覆盖率
+/vendor/
+coverage.out
+
+# Node 构建产物与依赖
+node_modules/
+dist/
+build/
+.cache/
+*.tsbuildinfo
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE / 操作系统
 /.idea/
-.tmp
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 过程性文档与临时文件（不入库）
+/.tmp/
+
+# 运行时数据（不入库）
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# 环境与密钥（不入库）
+.env
+.env.local
+/.narrafork/

@@ -1,0 +1,201 @@
+# 架构设计：轻量级单用户视频媒体服务器
+
+> 系统当前真貌（HOW）。始终原地更新到现状；结构 / 机制变了就改它。
+
+## 1. 定位与边界
+
+一款单用户私有视频媒体服务器，将分散在多个硬盘或 NAS 中的视频汇聚到一个 Web 媒体库，通过浏览器直接播放所有格式的视频（不兼容格式自动转码为 HLS/TS 流），支持硬件加速转码降低 CPU 负载。
+
+**边界**：
+- 系统仅服务单用户，无多租户、权限管理。
+- 前端编译产物通过 `go:embed` 内嵌于 Go 二进制，Web 服务器由 Go 统一承载。
+- 不依赖外部数据库服务，元数据使用 SQLite（WAL 模式）本地存储。
+- 不依赖外部消息队列、缓存或容器编排。
+- FFmpeg 通过 CGO 绑定（csnewman/ffmpeg-go）直接调用 libavcodec/libavformat/libavutil/libswscale C API，编译时需链接 FFmpeg 开发库（libavcodec-dev 等）。
+- 支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan），必须同时支持 H.264 和 H.265。
+- 硬件加速能力在启动时自动检测，通过 `GET /api/transcode/hwaccel` 接口暴露。
+
+## 2. 模块与依赖
+
+```
+┌─────────────────────────────────────────────────┐
+│                    main.go                       │
+│  ┌───────────┐  ┌──────────┐  ┌──────────────┐ │
+│  │  Web 服务  │  │ 媒体库   │  │  转码管理器   │ │
+│  │ (HTTP API) │  │ 管理器   │  │              │ │
+│  └─────┬─────┘  └────┬─────┘  └──────┬───────┘ │
+│        │             │               │          │
+│  ┌─────┴─────┐  ┌────┴─────┐  ┌─────┴───────┐ │
+│  │ 认证中间件 │  │ 文件监听  │  │ FFmpeg 进程  │ │
+│  │           │  │ (fsnotify)│  │  池化管理    │ │
+│  └───────────┘  └──────────┘  └─────────────┘ │
+│        │             │               │          │
+│  ┌─────┴─────────────┴───────────────┴───────┐ │
+│  │              SQLite (WAL) 元数据库          │ │
+│  └───────────────────────────────────────────┘ │
+│        │             │                          │
+│  ┌─────┴─────┐  ┌────┴─────┐                   │
+│  │ go:embed  │  │ SMB 客户端│                   │
+│  │ 前端静态资源│  │ (cifs)   │                   │
+│  └───────────┘  └──────────┘                   │
+└─────────────────────────────────────────────────┘
+```
+
+**模块职责**：
+
+| 模块 | 职责 | 依赖方向 |
+|---|---|---|
+| `web` | HTTP API 服务、静态文件服务、认证中间件 | → `media-library`, `transcoder` |
+| `media-library` | 媒体库管理、目录注册、文件索引、元数据读写 | → `db`, `watcher` |
+| `watcher` | 文件系统事件监听（fsnotify）、SMB 路径监控 | → `media-library` |
+| `transcoder` | CGO 转码管道、硬件加速检测/选择、流式输出、进程池 | → `db` |
+| `hwaccel` | 硬件加速能力检测（Intel 核显/AMD/NVIDIA）、编码器枚举 | 被 `transcoder` 依赖 |
+| `db` | SQLite 数据库初始化、元数据 CRUD | 无业务依赖 |
+| `auth` | 单用户登录/会话管理 | → `db` |
+| `static` | `go:embed` 内嵌的前端编译产物 | 被 `web` 模块引用 |
+
+**依赖方向**：`web` → `media-library` / `transcoder` → `db`，严格单向，禁止反向。
+
+## 3. 数据模型
+
+### 核心实体
+
+**媒体库目录（library_paths）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| path | TEXT UNIQUE | 目录绝对路径（本地或 SMB UNC 路径） |
+| type | TEXT | 目录类型：`local` 或 `smb` |
+| label | TEXT | 用户自定义标签 |
+| enabled | INTEGER | 是否启用（0/1） |
+| created_at | DATETIME | 添加时间 |
+
+**媒体文件（media_files）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| library_id | INTEGER FK | 所属媒体库目录 |
+| file_path | TEXT | 文件完整路径 |
+| file_name | TEXT | 文件名 |
+| file_size | INTEGER | 文件大小（字节） |
+| format | TEXT | 容器格式（mp4/mkv/avi 等） |
+| video_codec | TEXT | 视频编码格式 |
+| audio_codec | TEXT | 音频编码格式 |
+| duration | REAL | 时长（秒） |
+| width | INTEGER | 视频宽度 |
+| height | INTEGER | 视频高度 |
+| bitrate | INTEGER | 总码率 |
+| subtitle_tracks | TEXT | 字幕轨道信息（JSON） |
+| added_at | DATETIME | 入库时间 |
+| modified_at | DATETIME | 文件最后修改时间 |
+
+**转码会话（transcode_sessions）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| media_id | INTEGER FK | 关联媒体文件 |
+| pid | INTEGER | FFmpeg 进程 PID |
+| output_url | TEXT | HLS 播放 URL |
+| status | TEXT | 状态：running/stopped/error |
+| hw_accel | TEXT | 使用的硬件加速类型 |
+| created_at | DATETIME | 创建时间 |
+
+**用户（users）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键（单用户固定 id=1） |
+| username | TEXT | 用户名 |
+| password_hash | TEXT | 密码哈希（bcrypt） |
+| created_at | DATETIME | 创建时间 |
+
+## 4. 接口
+
+对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
+
+**接口概览**：
+
+| 分组 | 前缀 | 说明 |
+|---|---|---|
+| 认证 | `/api/auth` | 登录、登出、会话校验 |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索 |
+| 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
+| 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
+| 配置 | `/api/config` | 系统配置读取 |
+
+## 5. 关键机制
+
+### 5.1 文件监听与增量更新
+
+- 使用 `fsnotify` 对已注册目录进行递归监听。
+- 本地目录：直接使用 `fsnotify` 监听文件系统事件。
+- SMB 目录：通过挂载后路径使用 `fsnotify`，挂载失败时降级为定时轮询。
+- 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发元数据提取，避免读取不完整文件。
+- 元数据提取：通过 `ffprobe` 获取视频流信息，写入 SQLite。
+
+### 5.2 CGO 转码管道与流式输出
+
+- 使用 csnewman/ffmpeg-go（CGO 绑定）直接调用 libavcodec/libavformat/libavutil/libswscale C API。
+- 转码管道：`avformat_open_input` → `avcodec_open2`(解码) → 硬件帧上下文 → `avcodec_open2`(编码) → `av_write_frame`(mpegts 输出)。
+- 编码输出通过自定义 AVIO 上下文写入 HTTP ResponseWriter，实时流式传输。
+- 每个转码会话运行在独立 goroutine，通过 context.Context 管理生命周期。
+- Seek 时 cancel 旧 context，启动新 goroutine，使用 `av_seek_frame` 定位到目标位置。
+- 硬件加速编码器完整清单（必须同时支持 H.264 和 H.265）：
+
+| 平台 | H.264 编码器 | H.265 编码器 | 设备类型 |
+|---|---|---|---|
+| NVIDIA GPU | `h264_nvenc` | `hevc_nvenc` | `cuda` |
+| Intel QSV | `h264_qsv` | `hevc_qsv` | `qsv` |
+| AMD AMF | `h264_amf` | `hevc_amf` | `d3d11va` |
+| VAAPI (Linux) | `h264_vaapi` | `hevc_vaapi` | `vaapi` |
+| VideoToolbox (macOS) | `h264_videotoolbox` | `hevc_videotoolbox` | `videotoolbox` |
+| Vulkan | `h264_vulkan` | `hevc_vulkan` | `vulkan` |
+| 软件兜底 | `libx264` | `libx265` | — |
+
+- Intel 核显检测：通过 sysfs（`/sys/class/drm/card0/device/vendor` = `0x8086`）+ 驱动名（`i915`/`xe`）+ 无独立显存确认核显身份。
+- 硬件检测优先级：CUDA → QSV → VAAPI → D3D11VA → DXVA2 → VideoToolbox → Vulkan → 软件。
+- 硬件加速失败时自动降级，不中断播放。
+
+### 5.3 HLS 切片与追播
+
+- 转码输出同时写入 HLS 切片文件（`.ts`）和内存管道。
+- mpegts.js 通过 HTTP Range 请求获取最新切片数据。
+- 播放器轮询 m3u8 索引文件，检测到新切片时自动追加到 MSE 缓冲区。
+- 追播延迟控制：播放器保持 3-5 秒的缓冲距离。
+
+### 5.4 硬件加速管理
+
+- 启动时检测可用硬件加速能力（通过 `ffmpeg -hwaccels` 和 `ffmpeg -encoders`）。
+- 按优先级尝试：Intel QSV → NVIDIA NVENC/NVDEC → VAAPI → 软件。
+- 硬件加速失败时自动降级，不中断播放。
+
+## 6. 部署
+
+- **运行形态**：单个可执行文件，内嵌前端静态资源。
+- **依赖**：FFmpeg（需用户安装或通过配置指定路径）。
+- **数据库**：SQLite WAL 模式，数据库文件位于配置目录。
+- **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
+- **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。
+- **跨平台**：Go 编译目标为 Windows/Linux/macOS。
+
+## 7. 关键裁决与不做项
+
+| 决策 | 说明 | ADR |
+|---|---|---|
+| Go 作为后端语言 | 单文件部署、跨平台、高性能 | [0001](adr/0001-go-backend.md) |
+| SQLite WAL 作为元数据数据库 | 零配置、单文件、足够单用户场景 | [0002](adr/0002-sqlite-wal-metadata.md) |
+| HLS/TS 强制输出 | 确保网络兼容性与追播能力 | [0003](adr/0003-hls-ts-streaming.md) |
+| mpegts.js 作为播放内核 | 唯一可靠支持 TS 实时追加的浏览器方案 | [0004](adr/0004-mpegts-js-player.md) |
+| 原生 SMB 支持 | 避免用户手动挂载 NAS 共享 | [0005](adr/0005-native-smb-support.md) |
+| CGO 绑定 FFmpeg | 高性能硬件加速，直接调用 FFmpeg C API | — |
+| 全硬件编码器支持 | 必须同时支持 H.264 和 H.265，含 Intel 核显检测 | — |
+
+**不做项**：
+- 不做多用户/权限管理（单用户模式）
+- 不做容器化部署（Docker 等）
+- 不做分布式/集群架构
+- 不做移动端原生 App
+- 不做在线分享/社交功能
