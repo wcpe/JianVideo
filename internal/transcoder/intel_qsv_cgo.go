@@ -11,9 +11,8 @@ import "C"
 
 import "unsafe"
 
-// findEncoderByName 通过 FFmpeg C API 查找指定名称的编码器。
-// 未找到时返回 (nil, nil)。
-func findEncoderByName(name string) (interface{}, error) {
+// findQSVEncoder 通过 FFmpeg C API 查找 QSV 编码器。
+func findQSVEncoder(name string) (interface{}, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 

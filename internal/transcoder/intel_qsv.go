@@ -1,11 +1,11 @@
 package transcoder
 
+import "os"
+
 // Intel QSV 硬件加速检测。
 //
 // sysfs Intel GPU 检测使用纯 Go（os.ReadFile），编码器查找使用 CGO 条件编译。
 // 无 CGO 时编码器查找返回 nil，QSV 标记为不可用。
-
-import "os"
 
 // isIntelGPU 通过 sysfs 检测是否存在 Intel 核显。
 // 仅在 Linux 上有效，非 Linux 环境返回 (false, nil)。
