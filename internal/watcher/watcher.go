@@ -75,7 +75,10 @@ func (w *Watcher) Stop() {
 
 // addDir 递归添加目录及其子目录到监听列表。
 func (w *Watcher) addDir(libraryID int64, dir string) error {
+	w.mu.Lock()
 	w.pathToLib[dir] = libraryID
+	w.mu.Unlock()
+
 	if err := w.watcher.Add(dir); err != nil {
 		return err
 	}
@@ -87,7 +90,9 @@ func (w *Watcher) addDir(libraryID int64, dir string) error {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			subDir := filepath.Join(dir, entry.Name())
+			w.mu.Lock()
 			w.pathToLib[subDir] = libraryID
+			w.mu.Unlock()
 			if err := w.watcher.Add(subDir); err != nil {
 				log.Printf("[WARN] 添加子目录监听失败: %s, 错误: %v", subDir, err)
 			}

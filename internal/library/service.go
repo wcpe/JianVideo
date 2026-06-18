@@ -1,6 +1,7 @@
 package library
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,7 +103,10 @@ func (s *Service) ListMediaFiles(libraryID int64, sort, search string, page, pag
 		query = query.Where("library_id = ?", libraryID)
 	}
 	if search != "" {
-		query = query.Where("file_name LIKE ?", "%"+search+"%")
+		// 转义 LIKE 通配符，防止用户输入 % 或 _ 干扰查询
+		escaped := strings.ReplaceAll(search, "%", "\\%")
+		escaped = strings.ReplaceAll(escaped, "_", "\\_")
+		query = query.Where("file_name LIKE ?", "%"+escaped+"%")
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -168,7 +172,8 @@ func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 		"rmvb": true, "rm": true,
 	}
 
-	count := 0
+	// 收集所有待检查路径
+	var paths []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -177,21 +182,36 @@ func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 		if !videoExts[ext] {
 			continue
 		}
+		paths = append(paths, filepath.Join(dirPath, entry.Name()))
+	}
 
-		fullPath := filepath.Join(dirPath, entry.Name())
-		info, err := entry.Info()
+	if len(paths) == 0 {
+		return 0, nil
+	}
+
+	// 批量查询已有记录，避免 N+1 查询
+	var existingFiles []models.MediaFile
+	if err := s.db.Where("file_path IN ?", paths).Find(&existingFiles).Error; err != nil {
+		return 0, err
+	}
+	existingSet := make(map[string]bool, len(existingFiles))
+	for _, f := range existingFiles {
+		existingSet[f.FilePath] = true
+	}
+
+	count := 0
+	for _, fullPath := range paths {
+		if existingSet[fullPath] {
+			continue
+		}
+
+		info, err := os.Stat(fullPath)
 		if err != nil {
 			continue
 		}
 
-		// 检查是否已存在
-		var existing models.MediaFile
-		if err := s.db.Where("file_path = ?", fullPath).First(&existing).Error; err == nil {
-			// 已存在，跳过
-			continue
-		}
-
 		if _, err := s.CreateMediaFile(libraryID, fullPath, info.Size()); err != nil {
+			log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", fullPath, err)
 			continue
 		}
 		count++
