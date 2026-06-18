@@ -45,16 +45,18 @@
 
 | 模块 | 职责 | 依赖方向 |
 |---|---|---|
-| `web` | HTTP API 服务、静态文件服务、认证中间件 | → `media-library`, `transcoder` |
+| `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
+| `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
 | `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD | → `db` |
-| `watcher` | 文件系统事件监听（fsnotify）、SMB 路径监控 | → `media-library` |
-| `transcoder` | CGO 转码管道、硬件加速检测/选择、流式输出、进程池 | → `db` |
-| `hwaccel` | 硬件加速能力检测（Intel 核显/AMD/NVIDIA）、编码器枚举 | 被 `transcoder` 依赖 |
-| `db` | SQLite 数据库初始化、元数据 CRUD | 无业务依赖 |
-| `auth` | 单用户登录/会话管理 | → `db` |
-| `static` | `go:embed` 内嵌的前端编译产物 | 被 `web` 模块引用 |
+| `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
+| `player` | HLS 切片写入、m3u8 索引管理 | → `library` |
+| `transcoder` | FFmpeg 转码管道、硬件加速检测/选择、流式输出 | → `db` |
+| `watcher` | 文件系统事件监听（fsnotify） | → `library` |
+| `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
+| `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
+| `config` | 配置加载（环境变量优先） | 无业务依赖 |
 
-**依赖方向**：`web` → `media-library` / `transcoder` → `db`，严格单向，禁止反向。
+**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `transcoder` → `db`，严格单向，禁止反向。`config` 和 `auth` 为横切关注点。
 
 ## 3. 数据模型
 
