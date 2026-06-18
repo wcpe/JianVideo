@@ -5,6 +5,13 @@ import (
 	"sync"
 )
 
+// 转码会话状态常量。
+const (
+	SessionStatusStopped = "stopped"
+	SessionStatusRunning = "running"
+	SessionStatusSeeking = "seeking"
+)
+
 // TranscodeSession 管理单个转码会话的生命周期。
 // 每个会话关联一个媒体文件的转码 goroutine，通过 context.CancelFunc 控制中断。
 type TranscodeSession struct {
@@ -19,7 +26,7 @@ type TranscodeSession struct {
 func NewTranscodeSession(id string) *TranscodeSession {
 	return &TranscodeSession{
 		id:     id,
-		status: "stopped",
+		status: SessionStatusStopped,
 	}
 }
 
@@ -36,11 +43,15 @@ func (s *TranscodeSession) Status() string {
 }
 
 // Start 启动转码会话，使用给定的 context 和 cancel 函数。
+// 若会话已在运行，先停止旧会话再启动，防止旧 context 无法被 cancel。
 func (s *TranscodeSession) Start(ctx context.Context, cancel context.CancelFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.status == SessionStatusRunning && s.cancelFn != nil {
+		s.cancelFn()
+	}
 	s.cancelFn = cancel
-	s.status = "running"
+	s.status = SessionStatusRunning
 	_ = ctx // context 由调用方持有，通过 cancel 控制
 }
 
@@ -57,7 +68,7 @@ func (s *TranscodeSession) Seek(ctx context.Context, cancel context.CancelFunc, 
 
 	s.cancelFn = cancel
 	s.seekPos = positionSec
-	s.status = "seeking"
+	s.status = SessionStatusSeeking
 	_ = ctx
 }
 
@@ -70,7 +81,7 @@ func (s *TranscodeSession) Stop() {
 		s.cancelFn()
 		s.cancelFn = nil
 	}
-	s.status = "stopped"
+	s.status = SessionStatusStopped
 }
 
 // SeekPosition 返回最近一次 Seek 的时间位置（秒）。

@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package transcoder
 
 import "os"
@@ -13,7 +16,12 @@ func isIntelGPU() (bool, error) {
 	vendorPath := "/sys/class/drm/card0/device/vendor"
 	data, err := os.ReadFile(vendorPath)
 	if err != nil {
-		return false, nil
+		if os.IsNotExist(err) {
+			// 文件不存在说明没有 Intel GPU，不是错误
+			return false, nil
+		}
+		// 其他读取错误（权限等）需要上报
+		return false, err
 	}
 	s := string(data)
 	return s == "0x8086\n" || s == "0x8086", nil
@@ -30,5 +38,5 @@ func QSVAvailable() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return h264 != nil && h265 != nil, nil
+	return h264 && h265, nil
 }

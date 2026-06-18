@@ -1,5 +1,4 @@
 //go:build !ffmpeg
-// +build !ffmpeg
 
 package transcoder
 

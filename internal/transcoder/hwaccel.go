@@ -2,7 +2,7 @@
 package transcoder
 
 import (
-	"fmt"
+	"log"
 )
 
 // HwAccelInfo 描述一种硬件加速能力。
@@ -28,28 +28,30 @@ func DetectAllHardwareAccels() ([]HwAccelInfo, error) {
 	// 检测 NVIDIA NVENC
 	nvidia, err := DetectNVIDIA()
 	if err != nil {
-		return nil, fmt.Errorf("NVIDIA 检测失败: %w", err)
+		log.Printf("[WARN] NVIDIA 检测失败: %v，跳过", err)
+	} else {
+		results = append(results, HwAccelInfo{
+			Name:        "NVIDIA NVENC",
+			DeviceType:  "cuda",
+			H264Encoder: nvidia.H264Encoder,
+			H265Encoder: nvidia.H265Encoder,
+			Available:   nvidia.Available,
+		})
 	}
-	results = append(results, HwAccelInfo{
-		Name:        "NVIDIA NVENC",
-		DeviceType:  "cuda",
-		H264Encoder: nvidia.H264Encoder,
-		H265Encoder: nvidia.H265Encoder,
-		Available:   nvidia.Available,
-	})
 
 	// 检测 Intel QSV
 	qsvAvailable, err := QSVAvailable()
 	if err != nil {
-		return nil, fmt.Errorf("Intel QSV 检测失败: %w", err)
+		log.Printf("[WARN] Intel QSV 检测失败: %v，跳过", err)
+	} else {
+		results = append(results, HwAccelInfo{
+			Name:        "Intel QSV",
+			DeviceType:  "qsv",
+			H264Encoder: "h264_qsv",
+			H265Encoder: "hevc_qsv",
+			Available:   qsvAvailable,
+		})
 	}
-	results = append(results, HwAccelInfo{
-		Name:        "Intel QSV",
-		DeviceType:  "qsv",
-		H264Encoder: "h264_qsv",
-		H265Encoder: "hevc_qsv",
-		Available:   qsvAvailable,
-	})
 
 	return results, nil
 }

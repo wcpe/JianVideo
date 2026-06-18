@@ -21,9 +21,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 
 	// 静态文件服务（前端嵌入）
 	if frontendDist != nil {
-		distFS, _ := fs.Sub(frontendDist, "frontend/dist")
-		r.StaticFS("/static", http.FS(distFS))
-		r.GET("/*filepath", func(c *gin.Context) {
+		assetsFS, _ := fs.Sub(frontendDist, "frontend/dist/assets")
+		r.StaticFS("/assets", http.FS(assetsFS))
+		r.NoRoute(func(c *gin.Context) {
+			// SPA 回退：未匹配的路径返回 index.html
 			indexData, err := fs.ReadFile(frontendDist, "frontend/dist/index.html")
 			if err != nil {
 				c.Status(http.StatusNotFound)

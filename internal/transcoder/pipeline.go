@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // logWriter 将 ffmpeg  stderr 输出重定向到日志。
@@ -53,6 +54,7 @@ func (p *Pipeline) RunWithSeek(ctx context.Context, inputPath string, dst io.Wri
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	cmd.Stdout = dst
 	cmd.Stderr = &logWriter{prefix: "[ffmpeg]"}
+	cmd.WaitDelay = 5 * time.Second
 
 	setProcessGroup(cmd)
 
@@ -64,8 +66,10 @@ func (p *Pipeline) RunWithSeek(ctx context.Context, inputPath string, dst io.Wri
 	// 等待 ffmpeg 结束或 context 取消
 	err := cmd.Wait()
 	if ctx.Err() != nil {
-		// context 被取消，尝试杀进程
-		_ = killProcessGroup(cmd)
+		// context 已被取消，exec.CommandContext 已自动终止进程，无需额外 kill
+		if err != nil {
+			log.Printf("[INFO] context 取消后 ffmpeg 返回: %v", err)
+		}
 		return ctx.Err()
 	}
 	if err != nil {

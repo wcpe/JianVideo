@@ -1,6 +1,7 @@
 package transcoder
 
 import (
+	"log"
 	"sync"
 )
 
@@ -51,7 +52,15 @@ func SelectBestEncoder() (encoderName string, deviceType string, err error) {
 
 // BuildHWAccelInfo 构建完整的硬件加速能力信息。
 // 通过 sync.Once 确保启动时只检测一次，后续调用返回缓存结果。
-func BuildHWAccelInfo() *HWAccelInfo {
+func BuildHWAccelInfo() (info *HWAccelInfo) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[ERROR] 硬件加速检测发生 panic: %v，降级为软件编码", r)
+			// panic 后 detectOnce 已标记为完成，后续调用直接返回安全降级结果
+			cachedInfo = buildInfoFromAccels(nil)
+			info = cachedInfo
+		}
+	}()
 	detectOnce.Do(func() {
 		accels, err := DetectAllHardwareAccels()
 		if err != nil {
