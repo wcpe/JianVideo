@@ -1,6 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"log"
 	"os"
 	"time"
 )
@@ -13,14 +16,25 @@ type Config struct {
 	DBPath       string        `yaml:"db_path"`
 }
 
-// Load 加载配置（环境变量优先，硬编码默认值兜底）
+// Load 加载配置（环境变量优先，未设置 JWT_SECRET 时生成随机密钥）
 func Load() *Config {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			log.Fatalf("[ERROR] 生成随机 JWT 密钥失败: %v", err)
+		}
+		secret = hex.EncodeToString(b)
+		log.Printf("[WARN] JWT_SECRET 未设置，已生成随机密钥: %s", secret)
+		log.Printf("[WARN] 请设置 JWT_SECRET 环境变量以避免每次重启后用户需要重新登录")
+	}
 	return &Config{
 		ServerPort:   envInt("SERVER_PORT", 8080),
-		JWTSecret:    envString("JWT_SECRET", "jianvideo-default-secret-change-me"),
+		JWTSecret:    secret,
 		JWTExpiresIn: 72 * time.Hour,
 		DBPath:       envString("DB_PATH", "jianvideo.db"),
 	}
+
 }
 
 func envString(key, def string) string {
@@ -32,7 +46,12 @@ func envString(key, def string) string {
 
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
-		return int(atoi(v))
+		n := atoi(v)
+		if n == 0 && v != "0" {
+			log.Printf("[WARN] 无效的 %s 值: %q，使用默认值 %d", key, v, def)
+			return def
+		}
+		return n
 	}
 	return def
 }

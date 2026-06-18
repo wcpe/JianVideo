@@ -4,13 +4,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"testing"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
 	"jianvideo/internal/player"
 	"jianvideo/internal/playback"
 )
@@ -104,8 +100,8 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 				return
 			}
 			segment := c.Param("segment")
-			if !strings.HasSuffix(segment, ".ts") {
-				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "仅支持 .ts 切片"})
+			if !strings.HasSuffix(segment, ".ts") || strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "无效的切片名称"})
 				return
 			}
 			data, err := hlsMgr.GetSegment(id, segment)
@@ -118,18 +114,4 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 	}
 }
 
-// setupTestDB 创建测试用的内存数据库。
-func setupTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("创建测试数据库失败: %v", err)
-	}
-	db.AutoMigrate(
-		&models.LibraryPath{},
-		&models.MediaFile{},
-		&models.User{},
-		&models.PlaybackSession{},
-	)
-	return db
-}
+

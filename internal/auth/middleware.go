@@ -45,6 +45,7 @@ func Middleware(jwtSecret string) gin.HandlerFunc {
 
 // SetAuthCookie 设置认证 Cookie
 func SetAuthCookie(c *gin.Context, token string) {
+	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie(
 		cookieName,
 		token,

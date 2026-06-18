@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,7 +58,7 @@ func (h *PlayHandler) Stream(c *gin.Context) {
 	h.playback.StreamFile(c.Writer, c.Request, id, mf.FilePath, mf.FileSize, mf.Duration)
 
 	// 避免 gin 再次写入响应
-	c.Header("Content-Disposition", "inline; filename="+filename)
+	c.Header("Content-Disposition", "inline; filename="+url.PathEscape(filename))
 }
 
 // Seek 处理 Seek 请求。
