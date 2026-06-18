@@ -76,8 +76,7 @@ func (w *HLSSegmentWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if _, err := w.f.WriteString("#EXT-X-ENDLIST\n"); err != nil {
-		return fmt.Errorf("写入 ENDLIST 失败: %w", err)
-	}
+	// 写入 ENDLIST 标记，即使失败也继续关闭文件句柄以防泄露
+	_, _ = w.f.WriteString("#EXT-X-ENDLIST\n")
 	return w.f.Close()
 }

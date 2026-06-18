@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,28 +73,28 @@ func (h *StreamHandler) StreamMedia(c *gin.Context) {
 	pipeReader, pipeWriter := io.Pipe()
 
 	// 启动转码 goroutine
-	errCh := make(chan error, 1)
+	var runErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		tc := h.pipelineFactory()
-		errCh <- tc.Run(ctx, mf.FilePath, pipeWriter)
+		runErr = tc.Run(ctx, mf.FilePath, pipeWriter)
 		pipeWriter.Close()
 	}()
 
-	// 将 pipe 数据流式写入响应（手动 flush 以兼容测试环境）
+	// 将 pipe 数据流式写入响应（使用 CopyBuffer 批量传输，提升吞吐量）
 	buf := make([]byte, 32*1024)
-	for {
-		n, err := pipeReader.Read(buf)
-		if n > 0 {
-			c.Writer.Write(buf[:n])
-			c.Writer.Flush()
-		}
-		if err != nil {
-			break
-		}
+	if _, copyErr := io.CopyBuffer(c.Writer, pipeReader, buf); copyErr != nil {
+		// 客户端断开，取消 context 以通知转码 goroutine 退出
+		cancel()
 	}
+	// 确保退出写循环后 context 已取消，防止转码 goroutine 泄露
+	cancel()
 
-	// 检查转码是否有错误
-	if err := <-errCh; err != nil && err != context.Canceled && err != io.EOF {
-		log.Printf("[WARN] 转码异常: media_id=%d, err=%v", id, err)
+	// 等待转码 goroutine 结束，检查是否有错误
+	wg.Wait()
+	if runErr != nil && runErr != context.Canceled && runErr != io.EOF {
+		log.Printf("[WARN] 转码异常: media_id=%d, err=%v", id, runErr)
 	}
 }

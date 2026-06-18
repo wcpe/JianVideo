@@ -43,12 +43,47 @@ type BufferReport struct {
 type Service struct {
 	sessions map[int64]*models.PlaybackSession // key: media_id
 	mu       sync.RWMutex
+	stopCh   chan struct{}
 }
 
 // NewService 创建播放服务。
 func NewService() *Service {
-	return &Service{
+	s := &Service{
 		sessions: make(map[int64]*models.PlaybackSession),
+		stopCh:   make(chan struct{}),
+	}
+	go s.cleanupLoop()
+	return s
+}
+
+// Stop 停止服务，清理后台 goroutine。
+func (s *Service) Stop() {
+	close(s.stopCh)
+}
+
+// cleanupLoop 定期清理超过 24 小时未更新的会话。
+func (s *Service) cleanupLoop() {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanupExpiredSessions()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+// cleanupExpiredSessions 删除超过 24 小时未更新的会话。
+func (s *Service) cleanupExpiredSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	threshold := time.Now().Add(-24 * time.Hour)
+	for id, sess := range s.sessions {
+		if sess.UpdatedAt.Before(threshold) {
+			delete(s.sessions, id)
+		}
 	}
 }
 
@@ -131,6 +166,8 @@ func (s *Service) HandleBufferReport(mediaID int64, report BufferReport) {
 	// 序列化缓冲区间
 	if data, err := json.Marshal(report.BufferedRanges); err == nil {
 		sess.BufferedRanges = string(data)
+	} else {
+		log.Printf("[WARN] 序列化缓冲区间失败: mediaID=%d, err=%v", mediaID, err)
 	}
 }
 
@@ -138,6 +175,11 @@ func (s *Service) HandleBufferReport(mediaID int64, report BufferReport) {
 func (s *Service) GetProgress(mediaID int64) (*ProgressInfo, error) {
 	s.mu.RLock()
 	sess, exists := s.sessions[mediaID]
+	// 在锁内复制所需字段，避免解锁后并发读写
+	bufferedRanges := sess.BufferedRanges
+	currentPosition := sess.CurrentPosition
+	duration := sess.Duration
+	fileSize := sess.FileSize
 	s.mu.RUnlock()
 
 	if !exists {
@@ -145,14 +187,14 @@ func (s *Service) GetProgress(mediaID int64) (*ProgressInfo, error) {
 	}
 
 	var ranges [][2]int64
-	if sess.BufferedRanges != "" {
-		_ = json.Unmarshal([]byte(sess.BufferedRanges), &ranges)
+	if bufferedRanges != "" {
+		_ = json.Unmarshal([]byte(bufferedRanges), &ranges)
 	}
 
 	return &ProgressInfo{
-		CurrentPosition: sess.CurrentPosition,
-		Duration:       sess.Duration,
-		FileSize:        sess.FileSize,
+		CurrentPosition: currentPosition,
+		Duration:       duration,
+		FileSize:        fileSize,
 		BufferedRanges:  ranges,
 	}, nil
 }
