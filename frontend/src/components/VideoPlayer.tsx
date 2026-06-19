@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import mpegts from 'mpegts.js'
+import { Progress } from '@mantine/core'
 
 interface VideoPlayerProps {
   /** TS 流 URL */
@@ -22,6 +23,7 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
+  const [bufferedProgress, setBufferedProgress] = useState(0)
 
   // 销毁播放器
   const destroyPlayer = useCallback(() => {
@@ -107,15 +109,24 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
       setVolume(video.volume)
       setIsMuted(video.muted)
     }
+    const onProgress = () => {
+      // 计算缓冲区进度：取最后一个缓冲段的结束位置
+      if (video.buffered.length > 0 && video.duration > 0) {
+        const lastBuffered = video.buffered.end(video.buffered.length - 1)
+        setBufferedProgress((lastBuffered / video.duration) * 100)
+      }
+    }
 
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
     video.addEventListener('volumechange', onVolumeChange)
+    video.addEventListener('progress', onProgress)
 
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('durationchange', onDurationChange)
       video.removeEventListener('volumechange', onVolumeChange)
+      video.removeEventListener('progress', onProgress)
     }
   }, [])
 
@@ -190,19 +201,28 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
           )}
         </button>
 
-        {/* 进度条 */}
+        {/* 双进度条：播放进度 + 缓冲区进度 */}
         <div className="flex-1 flex items-center gap-2">
           <span className="text-xs text-slate-400 tabular-nums">
             {formatTime(currentTime)}
           </span>
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={0.1}
-            value={currentTime}
-            onChange={handleSeek}
-            className="flex-1 h-1 accent-blue-500 cursor-pointer"
+          <Progress
+            className="flex-1"
+            size={4}
+            radius="xl"
+            animated
+            sections={[
+              {
+                value: duration > 0 ? (currentTime / duration) * 100 : 0,
+                color: 'blue',
+                label: '播放进度',
+              },
+              {
+                value: Math.max(0, bufferedProgress - (duration > 0 ? (currentTime / duration) * 100 : 0)),
+                color: 'cyan',
+                label: '缓冲进度',
+              },
+            ]}
           />
           <span className="text-xs text-slate-400 tabular-nums">
             {formatTime(duration)}

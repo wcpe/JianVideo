@@ -4,7 +4,11 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
+<<<<<<< Updated upstream
+    "types": ["vite/client", "@testing-library/jest-dom"],
+=======
     "types": ["vite/client"],
+>>>>>>> Stashed changes
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -15,6 +19,16 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+<<<<<<< Updated upstream
+    /* 路径别名 */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "ignoreDeprecations": "6.0",
+
+=======
+>>>>>>> Stashed changes
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
