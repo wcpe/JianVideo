@@ -94,6 +94,38 @@
 - **方法 / 路径**：`DELETE /api/library/paths/:id`
 - **响应**（204）：空
 
+### 浏览目录
+
+- **方法 / 路径**：`GET /api/library/browse`
+- **查询参数**：
+  - `library_id`：媒体库 ID（必填）
+  - `parent_path`：父目录路径（必填）
+- **响应**（200）：
+  ```json
+  {
+    "breadcrumbs": [
+      {"name": "media", "path": "/media"},
+      {"name": "movies", "path": "/media/movies"}
+    ],
+    "directories": [
+      {"name": "动作片", "path": "/media/movies/动作片"}
+    ],
+    "files": [
+      {
+        "id": 1,
+        "file_name": "电影名.mkv",
+        "file_path": "/media/movies/电影名.mkv",
+        "file_size": 10737418240,
+        "format": "mkv",
+        "duration": 7200.0,
+        "width": 1920,
+        "height": 1080
+      }
+    ]
+  }
+  ```
+- **说明**：通过 `file_path` 前缀匹配一次查询，Go 层按第一级子目录聚合分组
+
 ### 获取媒体文件列表
 
 - **方法 / 路径**：`GET /api/library/media`

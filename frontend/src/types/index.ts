@@ -46,6 +46,25 @@ export interface ScanResponse {
   scanned: number
 }
 
+/** 面包屑路径段 */
+export interface BreadcrumbItem {
+  name: string
+  path: string
+}
+
+/** 子目录信息 */
+export interface DirInfo {
+  name: string
+  path: string
+}
+
+/** 目录浏览响应 */
+export interface BrowseResponse {
+  breadcrumbs: BreadcrumbItem[]
+  directories: DirInfo[]
+  files: MediaFile[]
+}
+
 /** 当前用户 */
 export interface CurrentUser {
   username: string

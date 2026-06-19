@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -156,6 +157,79 @@ func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error)
 // DeleteMediaFileByPath 根据文件路径删除媒体文件记录。
 func (s *Service) DeleteMediaFileByPath(filePath string) error {
 	return s.db.Where("file_path = ?", filePath).Delete(&models.MediaFile{}).Error
+}
+
+// BrowseDirectory 浏览指定目录下的子目录和媒体文件。
+// 通过 file_path 前缀匹配一次查询所有文件，Go 层按第一级子目录分组。
+func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error) {
+	// 规范化路径：确保以 / 结尾，用于前缀匹配
+	trimmedPath := strings.TrimRight(parentPath, "/")
+	prefix := trimmedPath + "/"
+
+	// 一次 SQL 查询：获取所有 file_path 以 prefix 开头的媒体文件
+	var allFiles []models.MediaFile
+	if err := s.db.Where("file_path LIKE ? AND library_id = ?", prefix+"%", libraryID).
+		Order("file_path ASC").Find(&allFiles).Error; err != nil {
+		return nil, err
+	}
+
+	// 构建面包屑
+	breadcrumbs := buildBreadcrumbs(trimmedPath)
+
+	// Go 层聚合：按第一级子目录分组
+	dirSet := make(map[string]bool)
+	files := make([]models.MediaFile, 0)
+
+	for _, f := range allFiles {
+		// 去掉 parentPath 前缀，得到相对路径
+		rel := strings.TrimPrefix(f.FilePath, prefix)
+		// 如果包含 / 说明在子目录中
+		if idx := strings.Index(rel, "/"); idx != -1 {
+			dirName := rel[:idx]
+			dirSet[dirName] = true
+		} else {
+			// 直接文件
+			files = append(files, f)
+		}
+	}
+
+	// 子目录排序
+	dirs := make([]models.DirInfo, 0, len(dirSet))
+	for name := range dirSet {
+		dirs = append(dirs, models.DirInfo{
+			Name: name,
+			Path: prefix + name,
+		})
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+
+	return &models.BrowseResponse{
+		Breadcrumbs: breadcrumbs,
+		Directories: dirs,
+		Files:       files,
+	}, nil
+}
+
+// buildBreadcrumbs 将路径拆分为面包屑段。
+func buildBreadcrumbs(path string) []models.BreadcrumbItem {
+	// 拆分路径
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	var items []models.BreadcrumbItem
+	var current string
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		current += "/" + p
+		items = append(items, models.BreadcrumbItem{
+			Name: p,
+			Path: current,
+		})
+	}
+	if len(items) == 0 {
+		items = append(items, models.BreadcrumbItem{Name: "/", Path: "/"})
+	}
+	return items
 }
 
 // ScanLibrary 扫描指定目录，索引所有视频文件。

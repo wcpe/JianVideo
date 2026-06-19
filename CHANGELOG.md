@@ -12,6 +12,7 @@
 - 前端全面重构：引入 Mantine UI v9 暗色主题，替换手写 Tailwind 原子类
 - 完善登录页（FR-13）：Mantine 表单 + zustand 认证状态管理 + 路由守卫
 - 完善媒体库管理页（FR-01/FR-14）：路径增删、扫描、媒体列表/搜索/分页
+- 新增文件目录浏览 API（FR-15）：`GET /api/library/browse` 按目录层级浏览媒体文件，支持面包屑导航、子目录列表、媒体文件列表，前端 Tab 切换（时间轴 | 文件目录）
 - 完善视频播放页（FR-16）：VideoPlayer 接入 HLS 流
 - 路由改造：修复 catch-all 通配符冲突，统一 BrowserRouter 模式
 

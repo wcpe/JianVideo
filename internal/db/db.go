@@ -27,16 +27,36 @@ func Open(dataSourceName string) (*sql.DB, error) {
 
 // InitSchema 初始化数据库表结构
 func InitSchema(d *sql.DB) error {
-	query := `
-CREATE TABLE IF NOT EXISTS users (
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))
-);
-`
-	if _, err := d.Exec(query); err != nil {
-		return fmt.Errorf("创建 users 表失败: %w", err)
+);`,
+		`CREATE TABLE IF NOT EXISTS media_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size INTEGER DEFAULT 0,
+    format TEXT,
+    video_codec TEXT,
+    audio_codec TEXT,
+    duration REAL DEFAULT 0,
+    width INTEGER DEFAULT 0,
+    height INTEGER DEFAULT 0,
+    bitrate INTEGER DEFAULT 0,
+    subtitle_tracks TEXT,
+    added_at DATETIME,
+    modified_at DATETIME
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_file_path ON media_files(file_path);`,
+	}
+	for _, q := range queries {
+		if _, err := d.Exec(q); err != nil {
+			return fmt.Errorf("初始化数据库失败: %w", err)
+		}
 	}
 	return nil
 }

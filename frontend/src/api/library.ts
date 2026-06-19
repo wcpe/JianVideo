@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -49,6 +49,13 @@ async function realDeleteMediaFile(id: number): Promise<void> {
 
 async function realScanLibrary(id: number): Promise<ScanResponse> {
   const res = await client.post<ScanResponse>(`/api/library/scan/${id}`)
+  return res.data
+}
+
+async function realBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
+  const res = await client.get<BrowseResponse>('/api/library/browse', {
+    params: { library_id: libraryID, parent_path: parentPath },
+  })
   return res.data
 }
 
@@ -120,6 +127,48 @@ async function mockScanLibrary(id: number): Promise<ScanResponse> {
   return { scanned: count }
 }
 
+async function mockBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
+  await mockDelay(150)
+  // 从 mockMediaFiles 中筛选匹配前缀的文件
+  const prefix = parentPath.replace(/\\/g, '/') + '/'
+  const allFiles = mockMediaFiles.filter(m => {
+    const fp = m.file_path.replace(/\\/g, '/')
+    return fp.startsWith(prefix) && m.library_id === libraryID
+  })
+
+  // 按第一级子目录分组
+  const dirSet = new Set<string>()
+  const files: typeof allFiles = []
+  for (const f of allFiles) {
+    const rel = f.file_path.replace(/\\/g, '/').replace(prefix, '')
+    const slashIdx = rel.indexOf('/')
+    if (slashIdx !== -1) {
+      dirSet.add(rel.substring(0, slashIdx))
+    } else {
+      files.push(f)
+    }
+  }
+
+  // 构建面包屑
+  const cleanPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  const parts = cleanPath.split('/').filter(Boolean)
+  const breadcrumbs: { name: string; path: string }[] = []
+  let current = ''
+  for (const p of parts) {
+    current += '/' + p
+    breadcrumbs.push({ name: p, path: current })
+  }
+  if (breadcrumbs.length === 0) {
+    breadcrumbs.push({ name: '/', path: '/' })
+  }
+
+  return {
+    breadcrumbs,
+    directories: Array.from(dirSet).sort().map(name => ({ name, path: prefix + name })),
+    files,
+  }
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function getLibraryPaths() { return useMock ? mockGetLibraryPaths() : realGetLibraryPaths() }
@@ -129,3 +178,4 @@ export function getMediaFiles(params?: { library_id?: number; sort?: string; pag
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
+export function browseDirectory(libraryID: number, parentPath: string) { return useMock ? mockBrowseDirectory(libraryID, parentPath) : realBrowseDirectory(libraryID, parentPath) }

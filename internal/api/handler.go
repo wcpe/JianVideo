@@ -125,6 +125,28 @@ func (h *Handler) DeleteMediaFile(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// BrowseDirectory GET /api/library/browse
+func (h *Handler) BrowseDirectory(c *gin.Context) {
+	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
+	if err != nil || libraryID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
+		return
+	}
+
+	parentPath := c.Query("parent_path")
+	if parentPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARENT_PATH", "message": "parent_path 不能为空"})
+		return
+	}
+
+	resp, err := h.library.BrowseDirectory(libraryID, parentPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "BROWSE_FAILED", "message": "浏览目录失败"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 // ScanLibrary POST /api/library/scan/:id
 func (h *Handler) ScanLibrary(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   SimpleGrid, Card, Text, Button, TextInput, ActionIcon, Group,
-  Pagination, Stack, Title, Box, Badge, Skeleton, Alert,
+  Pagination, Stack, Title, Box, Badge, Skeleton, Alert, Tabs,
 } from '@mantine/core'
-import { IconPlus, IconSearch, IconTrash, IconRefresh, IconFolder, IconAlertCircle } from '@tabler/icons-react'
+import { IconPlus, IconSearch, IconTrash, IconRefresh, IconFolder, IconAlertCircle, IconClock, IconFolderOpen } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
-import type { LibraryPath, MediaFile } from '@/types'
+import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
+import type { LibraryPath, MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
 /** 格式化文件大小为人类可读字符串 */
 export function formatSize(bytes: number): string {
@@ -52,6 +53,15 @@ export default function LibraryPage() {
   const [deletePathModal, setDeletePathModal] = useState<{ opened: boolean; path: LibraryPath | null; loading: boolean }>({ opened: false, path: null, loading: false })
   const [deleteMediaModal, setDeleteMediaModal] = useState<{ opened: boolean; file: MediaFile | null; loading: boolean }>({ opened: false, file: null, loading: false })
 
+  // 目录浏览状态
+  const [activeTab, setActiveTab] = useState<'timeline' | 'directory'>('timeline')
+  const [browseLibraryID, setBrowseLibraryID] = useState<number | null>(null)
+  const [browseParentPath, setBrowseParentPath] = useState('/')
+  const [browseBreadcrumbs, setBrowseBreadcrumbs] = useState<BreadcrumbItem[]>([])
+  const [browseDirectories, setBrowseDirectories] = useState<DirInfo[]>([])
+  const [browseFiles, setBrowseFiles] = useState<MediaFile[]>([])
+  const [browseLoading, setBrowseLoading] = useState(false)
+
   const pageSize = 20
 
   const loadPaths = useCallback(async () => {
@@ -86,8 +96,52 @@ export default function LibraryPage() {
     }
   }, [page, search])
 
+  const loadBrowse = useCallback(async () => {
+    if (browseLibraryID === null) return
+    setBrowseLoading(true)
+    try {
+      const res = await libApi.browseDirectory(browseLibraryID, browseParentPath)
+      setBrowseBreadcrumbs(res.breadcrumbs)
+      setBrowseDirectories(res.directories)
+      setBrowseFiles(res.files)
+    } catch {
+      setBrowseBreadcrumbs([])
+      setBrowseDirectories([])
+      setBrowseFiles([])
+    } finally {
+      setBrowseLoading(false)
+    }
+  }, [browseLibraryID, browseParentPath])
+
   useEffect(() => { loadPaths() }, [loadPaths])
   useEffect(() => { loadMedia() }, [loadMedia])
+
+  // 当选中的路径变化时，自动加载目录浏览
+  useEffect(() => {
+    if (activeTab === 'directory' && paths.length > 0 && browseLibraryID === null) {
+      const first = paths[0]
+      setBrowseLibraryID(first.id)
+      // 从路径中提取根目录（取第一级）
+      const rootPath = first.path.startsWith('/') ? '/' + first.path.split('/').filter(Boolean)[0] || '' : first.path.split('\\')[0]
+      setBrowseParentPath(rootPath)
+    }
+  }, [activeTab, paths, browseLibraryID])
+
+  useEffect(() => {
+    if (activeTab === 'directory') {
+      loadBrowse()
+    }
+  }, [activeTab, loadBrowse])
+
+  // 进入子目录
+  const handleEnterDir = (dirPath: string) => {
+    setBrowseParentPath(dirPath)
+  }
+
+  // 面包屑导航
+  const handleBreadcrumbNavigate = (path: string) => {
+    setBrowseParentPath(path)
+  }
 
   // 添加路径
   const handleAddPath = async () => {
@@ -230,76 +284,162 @@ export default function LibraryPage() {
         )}
       </Box>
 
-      {/* 搜索 */}
-      <TextInput
-        placeholder="搜索文件名..."
-        leftSection={<IconSearch size={14} />}
-        value={searchInput}
-        onChange={(e) => { setSearchInput(e.target.value); setPage(1) }}
-        size="sm"
-      />
+      {/* Tab 切换 */}
+      <Tabs value={activeTab} onChange={(v) => setActiveTab(v as 'timeline' | 'directory')} color="purple">
+        <Tabs.List>
+          <Tabs.Tab value="timeline" leftSection={<IconClock size={14} />}>时间轴</Tabs.Tab>
+          <Tabs.Tab value="directory" leftSection={<IconFolderOpen size={14} />}>文件目录</Tabs.Tab>
+        </Tabs.List>
 
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
+        <Tabs.Panel value="timeline" pt="sm">
+          {/* 搜索 */}
+          <TextInput
+            placeholder="搜索文件名..."
+            leftSection={<IconSearch size={14} />}
+            value={searchInput}
+            onChange={(e) => { setSearchInput(e.target.value); setPage(1) }}
+            size="sm"
+            mb="sm"
+          />
 
-      {/* 媒体列表 */}
-      {mediaLoading ? (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} height={100} radius="md" />
-          ))}
-        </SimpleGrid>
-      ) : mediaFiles.length === 0 ? (
-        <Box py="xl" ta="center">
-          <Box mb="sm" style={{ textAlign: 'center' }}>
-            <IconFolder size={48} color="var(--mantine-color-dark-3)" />
-          </Box>
-          <Text c="dimmed">{search ? '未找到匹配的文件' : '暂无媒体文件'}</Text>
-          <Text c="dimmed" size="sm">添加目录后点击"扫描"按钮索引视频</Text>
-        </Box>
-      ) : (
-        <>
-          <Text size="sm" c="dimmed">共 {total} 个文件</Text>
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-            {mediaFiles.map((file) => (
-              <Card
-                key={file.id}
-                withBorder p="md" radius="md" bg="dark.7"
-                style={{ cursor: 'pointer' }}
-                onClick={() => navigate(`/play/${file.id}`)}
-                className="hover-card"
-              >
-                <Text fw={500} truncate mb="xs">{file.file_name}</Text>
-                <Group gap="xs" wrap="nowrap">
-                  <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
-                  <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
-                  <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>
-                  {file.width > 0 && file.height > 0 && (
-                    <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
-                  )}
-                </Group>
-                <Group justify="flex-end" mt="xs">
-                  <ActionIcon
-                    size="sm" variant="subtle" color="red"
-                    onClick={(e) => { e.stopPropagation(); setDeleteMediaModal({ opened: true, file, loading: false }) }}
+          {error && (
+            <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={() => setError(null)} mb="sm">
+              {error}
+            </Alert>
+          )}
+
+          {/* 媒体列表 */}
+          {mediaLoading ? (
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} height={100} radius="md" />
+              ))}
+            </SimpleGrid>
+          ) : mediaFiles.length === 0 ? (
+            <Box py="xl" ta="center">
+              <Box mb="sm" style={{ textAlign: 'center' }}>
+                <IconFolder size={48} color="var(--mantine-color-dark-3)" />
+              </Box>
+              <Text c="dimmed">{search ? '未找到匹配的文件' : '暂无媒体文件'}</Text>
+              <Text c="dimmed" size="sm">添加目录后点击"扫描"按钮索引视频</Text>
+            </Box>
+          ) : (
+            <>
+              <Text size="sm" c="dimmed">共 {total} 个文件</Text>
+              <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+                {mediaFiles.map((file) => (
+                  <Card
+                    key={file.id}
+                    withBorder p="md" radius="md" bg="dark.7"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/play/${file.id}`)}
+                    className="hover-card"
                   >
-                    <IconTrash size={14} />
-                  </ActionIcon>
-                </Group>
-              </Card>
-            ))}
-          </SimpleGrid>
-        </>
-      )}
+                    <Text fw={500} truncate mb="xs">{file.file_name}</Text>
+                    <Group gap="xs" wrap="nowrap">
+                      <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
+                      <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
+                      <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>
+                      {file.width > 0 && file.height > 0 && (
+                        <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
+                      )}
+                    </Group>
+                    <Group justify="flex-end" mt="xs">
+                      <ActionIcon
+                        size="sm" variant="subtle" color="red"
+                        onClick={(e) => { e.stopPropagation(); setDeleteMediaModal({ opened: true, file, loading: false }) }}
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </Group>
+                  </Card>
+                ))}
+              </SimpleGrid>
+            </>
+          )}
 
-      {totalPages > 1 && (
-        <Group justify="center" mt="md">
-          <Pagination total={totalPages} value={page} onChange={setPage} size="sm" color="purple" />
-        </Group>
-      )}
+          {totalPages > 1 && (
+            <Group justify="center" mt="md">
+              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" color="purple" />
+            </Group>
+          )}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="directory" pt="sm">
+          {/* 面包屑导航 */}
+          {browseBreadcrumbs.length > 0 && (
+            <Box mb="sm">
+              <DirectoryBreadcrumb items={browseBreadcrumbs} onNavigate={handleBreadcrumbNavigate} />
+            </Box>
+          )}
+
+          {/* 目录浏览内容 */}
+          {browseLoading ? (
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} height={60} radius="md" />
+              ))}
+            </SimpleGrid>
+          ) : (
+            <Stack gap="xs">
+              {/* 子目录列表 */}
+              {browseDirectories.map((dir) => (
+                <Card
+                  key={dir.path}
+                  withBorder p="sm" radius="sm" bg="dark.7"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => handleEnterDir(dir.path)}
+                  className="hover-card"
+                >
+                  <Group gap="xs">
+                    <IconFolder size={16} color="var(--mantine-color-purple-4)" />
+                    <Text size="sm">{dir.name}</Text>
+                  </Group>
+                </Card>
+              ))}
+
+              {/* 当前目录下的文件列表 */}
+              {browseFiles.map((file) => (
+                <Card
+                  key={file.id}
+                  withBorder p="md" radius="md" bg="dark.7"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => navigate(`/play/${file.id}`)}
+                  className="hover-card"
+                >
+                  <Text fw={500} truncate mb="xs">{file.file_name}</Text>
+                  <Group gap="xs" wrap="nowrap">
+                    <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
+                    <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
+                    <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>
+                    {file.width > 0 && file.height > 0 && (
+                      <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
+                    )}
+                  </Group>
+                  <Group justify="flex-end" mt="xs">
+                    <ActionIcon
+                      size="sm" variant="subtle" color="red"
+                      onClick={(e) => { e.stopPropagation(); setDeleteMediaModal({ opened: true, file, loading: false }) }}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Card>
+              ))}
+
+              {/* 空状态 */}
+              {browseDirectories.length === 0 && browseFiles.length === 0 && (
+                <Box py="xl" ta="center">
+                  <Box mb="sm" style={{ textAlign: 'center' }}>
+                    <IconFolder size={48} color="var(--mantine-color-dark-3)" />
+                  </Box>
+                  <Text c="dimmed">此目录暂无内容</Text>
+                </Box>
+              )}
+            </Stack>
+          )}
+        </Tabs.Panel>
+      </Tabs>
 
       {/* 确认删除路径弹窗 */}
       <ConfirmModal

@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD | → `db` |
+| `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD、目录浏览 | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理 | → `library` |
 | `transcoder` | FFmpeg 转码管道、硬件加速检测/选择、流式输出 | → `db` |
@@ -79,7 +79,7 @@
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
 | library_id | INTEGER FK | 所属媒体库目录 |
-| file_path | TEXT | 文件完整路径 |
+| file_path | TEXT, INDEX | 文件完整路径（file_path 索引加速目录浏览前缀查询） |
 | file_name | TEXT | 文件名 |
 | file_size | INTEGER | 文件大小（字节） |
 | format | TEXT | 容器格式（mp4/mkv/avi 等） |
@@ -123,10 +123,18 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索 |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、目录浏览 |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |
+
+### 5.0 目录浏览
+
+- `GET /api/library/browse`：按 `library_id` + `parent_path` 浏览目录内容
+- 一次 SQL 查询（`file_path LIKE prefix%`）+ Go 层 map 分组聚合子目录
+- 面包屑由后端按路径分隔符拆分构建
+- `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
+- 前端 Tab 切换（时间轴 | 文件目录），面包屑导航 + 文件列表复用现有卡片样式
 
 ## 5. 关键机制
 
