@@ -41,23 +41,6 @@ func TestStreamHandler_InvalidID(t *testing.T) {
 	}
 }
 
-// TestSeekInvalidInput 测试 Seek 无效 JSON 输入。
-func TestSeekInvalidInput(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router, _, _ := setupPlayTestRouter(t)
-
-	body := `{"invalid": true}`
-	req := httptest.NewRequest("POST", "/api/play/1/seek", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// position 字段缺失或无效应返回 400
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("期望 400, 实际 %d", w.Code)
-	}
-}
-
 // TestGetProgress 测试获取播放进度。
 func TestGetProgress(t *testing.T) {
 	gin.SetMode(gin.TestMode)

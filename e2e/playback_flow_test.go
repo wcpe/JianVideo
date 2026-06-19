@@ -18,7 +18,6 @@ import (
 	"jianvideo/config"
 	"jianvideo/internal/api"
 	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
 	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
 	"jianvideo/internal/web"
@@ -60,11 +59,9 @@ func newPlaybackTestServer(t *testing.T) (*httptest.Server, *gorm.DB, *playback.
 	// 使用标准 NewRouter（包含认证和库路由）
 	r := web.NewRouter(cfg, gormDB, hlsMgr, nil)
 
-	// 额外注册播放路由（标准 NewRouter 不包含）
-	libSvc := library.NewService(gormDB)
-	apiHandler := api.NewHandler(libSvc)
+	// 仅补挂播放路由，避免重复注册 /api/library/* 触发 panic
 	pbSvc := playback.NewService()
-	api.RegisterRoutes(r, apiHandler, pbSvc)
+	api.RegisterPlaybackRoutes(r, pbSvc)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

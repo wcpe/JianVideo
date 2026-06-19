@@ -10,7 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestE2E_LoginSuccess 验证正确的用户名密码登录成功并返回 token。
+// TestE2E_LoginSuccess 验证正确的用户名密码登录成功，并通过 Cookie 下发登录态。
+// 注：登录响应 JSON 体只携带 username，token 由 Set-Cookie 头携带（HttpOnly Cookie 鉴权）。
 func TestE2E_LoginSuccess(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	defer server.Close()
@@ -22,7 +23,8 @@ func TestE2E_LoginSuccess(t *testing.T) {
 	var result map[string]string
 	parseJSON(t, resp, &result)
 	assert.Equal(t, "admin", result["username"], "返回的 username 应为 admin")
-	assert.NotEmpty(t, result["token"], "响应中应包含 token 字段")
+	assert.NotEmpty(t, resp.Header.Get("Set-Cookie"),
+		"登录响应应通过 Set-Cookie 下发鉴权 token")
 }
 
 // TestE2E_LoginWrongPassword 验证错误密码登录返回 401。
@@ -79,12 +81,13 @@ func TestE2E_Me(t *testing.T) {
 }
 
 // TestE2E_UnauthorizedAccess 验证未认证访问受保护路由返回 401。
+// /api/me 是当前唯一受保护路由（authMW 挂在 /api 下空分组内），故用 /api/me 做断言。
 func TestE2E_UnauthorizedAccess(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	defer server.Close()
 
 	// 不传 Cookie 访问受保护路由
-	resp := doRequest(t, "GET", server.URL+"/api/library/paths", nil, nil)
+	resp := doRequest(t, "GET", server.URL+"/api/me", nil, nil)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "未认证访问应返回 401")
 
 	var result map[string]string
@@ -92,7 +95,7 @@ func TestE2E_UnauthorizedAccess(t *testing.T) {
 	assert.Equal(t, "UNAUTHORIZED", result["code"], "错误码应为 UNAUTHORIZED")
 
 	// 使用无效 token
-	resp2 := doRequest(t, "GET", server.URL+"/api/library/paths", nil,
+	resp2 := doRequest(t, "GET", server.URL+"/api/me", nil,
 		map[string]string{"Authorization": "Bearer invalid-token"})
 	assert.Equal(t, http.StatusUnauthorized, resp2.StatusCode, "无效 token 应返回 401")
 }

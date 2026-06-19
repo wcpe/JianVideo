@@ -23,7 +23,7 @@ func parseMediaID(c *gin.Context) (int64, bool) {
 }
 
 // RegisterRoutes 注册 API 路由。
-// pbSvc 可选：传入时注册播放相关路由。
+// pbSvc 可选：传入时同时注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // hlsMgr 可选：传入时注册 HLS 切片路由。
 func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	lib := r.Group("/api/library")
@@ -60,61 +60,66 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
-		svc := pbSvc[0]
-		play := r.Group("/api/play")
-		{
-			play.GET("/:id/stream", func(c *gin.Context) {
-				id, ok := parseMediaID(c)
-				if !ok {
-					return
-				}
-				svc.StreamFile(c.Writer, c.Request, id, "", 0, 0)
-			})
-			play.POST("/:id/seek", func(c *gin.Context) {
-				id, ok := parseMediaID(c)
-				if !ok {
-					return
-				}
-				var req struct {
-					Position float64 `json:"position"`
-				}
-				if err := c.ShouldBindJSON(&req); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
-					return
-				}
-				resp, err := svc.HandleSeek(id, req.Position)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"code": "SEEK_FAILED", "message": err.Error()})
-					return
-				}
-				c.JSON(http.StatusOK, resp)
-			})
-			play.GET("/:id/progress", func(c *gin.Context) {
-				id, ok := parseMediaID(c)
-				if !ok {
-					return
-				}
-				progress, err := svc.GetProgress(id)
-				if err != nil {
-					c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
-					return
-				}
-				c.JSON(http.StatusOK, progress)
-			})
-			play.POST("/:id/buffer", func(c *gin.Context) {
-				id, ok := parseMediaID(c)
-				if !ok {
-					return
-				}
-				var report playback.BufferReport
-				if err := c.ShouldBindJSON(&report); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
-					return
-				}
-				svc.HandleBufferReport(id, report)
-				c.Status(http.StatusOK)
-			})
-		}
+		RegisterPlaybackRoutes(r, pbSvc[0])
+	}
+}
+
+// RegisterPlaybackRoutes 仅注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
+// 拆分出来便于在已经走过 RegisterRoutes 的引擎上单独补挂，避免重复注册。
+func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
+	play := r.Group("/api/play")
+	{
+		play.GET("/:id/stream", func(c *gin.Context) {
+			id, ok := parseMediaID(c)
+			if !ok {
+				return
+			}
+			pbSvc.StreamFile(c.Writer, c.Request, id, "", 0, 0)
+		})
+		play.POST("/:id/seek", func(c *gin.Context) {
+			id, ok := parseMediaID(c)
+			if !ok {
+				return
+			}
+			var req struct {
+				Position float64 `json:"position"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+				return
+			}
+			resp, err := pbSvc.HandleSeek(id, req.Position)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "SEEK_FAILED", "message": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, resp)
+		})
+		play.GET("/:id/progress", func(c *gin.Context) {
+			id, ok := parseMediaID(c)
+			if !ok {
+				return
+			}
+			progress, err := pbSvc.GetProgress(id)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, progress)
+		})
+		play.POST("/:id/buffer", func(c *gin.Context) {
+			id, ok := parseMediaID(c)
+			if !ok {
+				return
+			}
+			var report playback.BufferReport
+			if err := c.ShouldBindJSON(&report); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+				return
+			}
+			pbSvc.HandleBufferReport(id, report)
+			c.Status(http.StatusOK)
+		})
 	}
 }
 

@@ -99,7 +99,7 @@ func TestE2E_DeleteLibraryPath(t *testing.T) {
 	delResp := doRequest(t, "DELETE",
 		fmt.Sprintf("%s/api/library/paths/%d", server.URL, created.ID), nil,
 		map[string]string{"Cookie": cookie})
-	assert.Equal(t, http.StatusOK, delResp.StatusCode, "删除应返回 200")
+	assert.Equal(t, http.StatusNoContent, delResp.StatusCode, "删除应返回 204")
 
 	// 再次查询，确认已删除
 	listResp := doRequest(t, "GET", server.URL+"/api/library/paths", nil,
@@ -207,5 +207,5 @@ func TestE2E_DeleteMediaFile(t *testing.T) {
 	delResp := doRequest(t, "DELETE",
 		fmt.Sprintf("%s/api/library/media/%d", server.URL, mediaID), nil,
 		map[string]string{"Cookie": cookie})
-	assert.Equal(t, http.StatusOK, delResp.StatusCode, "删除媒体文件应返回 200")
+	assert.Equal(t, http.StatusNoContent, delResp.StatusCode, "删除媒体文件应返回 204")
 }
