@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Config 应用配置。
@@ -32,7 +33,10 @@ func getEnv(key, def string) string {
 
 func getEnvInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
-		// 简化：忽略解析错误，用默认值
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+		// 解析失败时降级为默认值
 		return def
 	}
 	return def

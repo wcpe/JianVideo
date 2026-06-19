@@ -146,7 +146,7 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 			}
 			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
 		})
-		hls.GET("/:id/:segment", func(c *gin.Context) {
+		hls.GET("/:id/segment/:segment", func(c *gin.Context) {
 			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})

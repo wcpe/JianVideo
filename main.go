@@ -44,7 +44,7 @@ func main() {
 
 	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist)
 
-	addr := fmt.Sprintf(":%d", cfg.ServerPort)
+	addr := fmt.Sprintf("0.0.0.0:%d", cfg.ServerPort)
 	log.Printf("JianVideo 启动于 %s", addr)
 	if err := r.Run(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("服务启动失败: %v", err)

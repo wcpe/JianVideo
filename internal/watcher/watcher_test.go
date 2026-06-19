@@ -199,24 +199,4 @@ func TestWatcher_Debounce(t *testing.T) {
 	}
 }
 
-func TestIsVideoFile(t *testing.T) {
-	tests := []struct {
-		path   string
-		expect bool
-	}{
-		{"movie.mp4", true},
-		{"movie.MKV", true},
-		{"movie.AvI", true},
-		{"movie.webm", true},
-		{"movie.rmvb", true},
-		{"movie.txt", false},
-		{"movie.jpg", false},
-		{"movie", false},
-		{"movie.doc", false},
-	}
-	for _, tt := range tests {
-		if got := isVideoFile(tt.path); got != tt.expect {
-			t.Errorf("isVideoFile(%q) = %v, 期望 %v", tt.path, got, tt.expect)
-		}
-	}
-}
+

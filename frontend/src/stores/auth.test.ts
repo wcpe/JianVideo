@@ -1,0 +1,140 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { useAuthStore } from './auth'
+
+// 模拟 localStorage
+const localStorageData: Record<string, string> = {}
+
+const mockLocalStorage = {
+  getItem: (key: string) => localStorageData[key] ?? null,
+  setItem: (key: string, value: string) => { localStorageData[key] = value },
+  removeItem: (key: string) => { delete localStorageData[key] },
+  clear: () => { Object.keys(localStorageData).forEach(k => delete localStorageData[k]) },
+}
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: mockLocalStorage,
+  writable: true,
+  configurable: true,
+})
+
+// 模拟 api/auth 模块
+const mockLogin = vi.fn()
+const mockLogout = vi.fn()
+const mockGetMe = vi.fn()
+
+vi.mock('@/api/auth', () => ({
+  login: (...args: unknown[]) => mockLogin(...args),
+  logout: (...args: unknown[]) => mockLogout(...args),
+  getMe: (...args: unknown[]) => mockGetMe(...args),
+}))
+
+describe('auth store', () => {
+  beforeEach(() => {
+    // 重置 store 状态
+    useAuthStore.setState({
+      username: null,
+      isAuthenticated: false,
+      loading: false,
+      error: null,
+    })
+    // 清理 localStorage 模拟
+    mockLocalStorage.clear()
+    // 清理 mock
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    mockLocalStorage.clear()
+  })
+
+  it('初始状态为未认证', () => {
+    const state = useAuthStore.getState()
+    expect(state.username).toBeNull()
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.loading).toBe(false)
+    expect(state.error).toBeNull()
+  })
+
+  it('login 成功更新状态', async () => {
+    mockLogin.mockResolvedValue(undefined)
+
+    await useAuthStore.getState().login('admin', '123456')
+
+    const state = useAuthStore.getState()
+    expect(state.isAuthenticated).toBe(true)
+    expect(state.username).toBe('admin')
+    expect(state.loading).toBe(false)
+    expect(state.error).toBeNull()
+    expect(localStorage.getItem('jianvideo_auth')).toBe('1')
+  })
+
+  it('login 失败设置错误', async () => {
+    mockLogin.mockRejectedValue(new Error('用户名或密码错误'))
+
+    await expect(useAuthStore.getState().login('admin', 'wrong')).rejects.toThrow('用户名或密码错误')
+
+    const state = useAuthStore.getState()
+    expect(state.error).toBe('用户名或密码错误')
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.loading).toBe(false)
+  })
+
+  it('logout 清除状态', async () => {
+    // 先登录
+    mockLogin.mockResolvedValue(undefined)
+    mockLogout.mockResolvedValue(undefined)
+    await useAuthStore.getState().login('admin', '123456')
+
+    // 再登出
+    await useAuthStore.getState().logout()
+
+    const state = useAuthStore.getState()
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.username).toBeNull()
+    expect(state.error).toBeNull()
+    expect(localStorage.getItem('jianvideo_auth')).toBeNull()
+  })
+
+  it('clearAuth 清除认证状态', () => {
+    // 手动设置已认证状态
+    useAuthStore.setState({ username: 'admin', isAuthenticated: true })
+    localStorage.setItem('jianvideo_auth', '1')
+
+    useAuthStore.getState().clearAuth()
+
+    const state = useAuthStore.getState()
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.username).toBeNull()
+    expect(state.error).toBeNull()
+    expect(localStorage.getItem('jianvideo_auth')).toBeNull()
+  })
+
+  it('clearError 清除错误', () => {
+    useAuthStore.setState({ error: 'some error' })
+
+    useAuthStore.getState().clearError()
+
+    expect(useAuthStore.getState().error).toBeNull()
+  })
+
+  it('init 从 localStorage 恢复登录态', async () => {
+    localStorage.setItem('jianvideo_auth', '1')
+    mockGetMe.mockResolvedValue({ username: 'admin' })
+
+    await useAuthStore.getState().init()
+
+    const state = useAuthStore.getState()
+    expect(state.isAuthenticated).toBe(true)
+    expect(state.username).toBe('admin')
+  })
+
+  it('init 无 localStorage 时不恢复', async () => {
+    // localStorage 无 jianvideo_auth（beforeEach 已清理）
+
+    await useAuthStore.getState().init()
+
+    const state = useAuthStore.getState()
+    expect(state.isAuthenticated).toBe(false)
+    expect(mockGetMe).not.toHaveBeenCalled()
+  })
+})

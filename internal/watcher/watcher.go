@@ -275,7 +275,11 @@ func (w *Watcher) findLibraryID(filePath string) int64 {
 		if ok {
 			return id
 		}
-		dir = filepath.Dir(dir)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // 已到达根目录，避免 Windows 上无限循环
+		}
+		dir = parent
 	}
 	return 0
 }
