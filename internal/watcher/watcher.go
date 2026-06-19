@@ -10,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"jianvideo/internal/db/models"
 	"jianvideo/internal/library"
 )
 
@@ -22,14 +23,17 @@ var videoExts = map[string]bool{
 
 const debounceInterval = 500 * time.Millisecond
 
+const smbPollInterval = 5 * time.Minute
+
 // Watcher 文件系统事件监听器。
 type Watcher struct {
-	watcher   *fsnotify.Watcher
-	library   *library.Service
-	debounce  map[string]*time.Timer
-	mu        sync.Mutex
-	done      chan struct{}
-	pathToLib map[string]int64 // 目录路径 → library_id
+	watcher    *fsnotify.Watcher
+	library    *library.Service
+	debounce   map[string]*time.Timer
+	mu         sync.Mutex
+	done       chan struct{}
+	pathToLib  map[string]int64 // 目录路径 → library_id
+	smbLibs    []models.LibraryPath // SMB 路径列表，用于轮询
 }
 
 // New 创建文件监听器。
@@ -39,11 +43,12 @@ func New(lib *library.Service) (*Watcher, error) {
 		return nil, err
 	}
 	return &Watcher{
-		watcher:   fw,
-		library:   lib,
-		debounce:  make(map[string]*time.Timer),
-		done:      make(chan struct{}),
-		pathToLib: make(map[string]int64),
+		watcher:    fw,
+		library:    lib,
+		debounce:   make(map[string]*time.Timer),
+		done:       make(chan struct{}),
+		pathToLib:  make(map[string]int64),
+		smbLibs:    make([]models.LibraryPath, 0),
 	}, nil
 }
 
@@ -58,12 +63,22 @@ func (w *Watcher) Start() error {
 		if lp.Enabled == 0 {
 			continue
 		}
+		if lp.Type == "smb" {
+			w.smbLibs = append(w.smbLibs, lp)
+			continue
+		}
 		if err := w.addDir(lp.ID, lp.Path); err != nil {
 			log.Printf("[WARN] 添加监听目录失败: %s, 错误: %v", lp.Path, err)
 		}
 	}
 
 	go w.loop()
+
+	// 启动 SMB 轮询
+	if len(w.smbLibs) > 0 {
+		go w.pollSMBLoop()
+	}
+
 	return nil
 }
 
@@ -217,6 +232,35 @@ func (w *Watcher) removeRecord(path string) {
 		log.Printf("[WARN] 删除媒体文件记录失败: %s, 错误: %v", path, err)
 	} else {
 		log.Printf("[INFO] 媒体文件记录已移除: %s", path)
+	}
+}
+
+// pollSMBLoop 定期轮询 SMB 路径，索引新增视频文件。
+func (w *Watcher) pollSMBLoop() {
+	ticker := time.NewTicker(smbPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-ticker.C:
+			w.pollAllSMB()
+		}
+	}
+}
+
+// pollAllSMB 轮询所有 SMB 媒体库路径。
+func (w *Watcher) pollAllSMB() {
+	for _, lp := range w.smbLibs {
+		count, err := w.library.ScanLibraryWithType(lp.ID, lp.Path, "smb")
+		if err != nil {
+			log.Printf("[WARN] SMB 轮询扫描失败: %s, err=%v", lp.Path, err)
+			continue
+		}
+		if count > 0 {
+			log.Printf("[INFO] SMB 轮询扫描发现 %d 个新文件: %s", count, lp.Path)
+		}
 	}
 }
 

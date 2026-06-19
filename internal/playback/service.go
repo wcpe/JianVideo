@@ -1,16 +1,21 @@
 package playback
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"jianvideo/internal/db/models"
+	"jianvideo/internal/smb"
 )
 
 // ProgressInfo 播放进度信息。
@@ -90,12 +95,22 @@ func (s *Service) cleanupExpiredSessions() {
 // StreamFile 处理带 Range 请求的文件流。
 func (s *Service) StreamFile(w http.ResponseWriter, r *http.Request, mediaID int64, filePath string, fileSize int64, duration float64) {
 	// 打开文件
-	f, err := os.Open(filePath)
+	var f io.ReadSeeker
+	var err error
+
+	if strings.HasPrefix(filePath, "smb://") {
+		f, err = openSMBFile(filePath)
+	} else {
+		f, err = os.Open(filePath)
+	}
+
 	if err != nil {
 		http.Error(w, "文件不存在", http.StatusNotFound)
 		return
 	}
-	defer f.Close()
+	if closer, ok := f.(io.Closer); ok {
+		defer closer.Close()
+	}
 
 	// 更新或创建播放会话
 	s.mu.Lock()
@@ -117,6 +132,71 @@ func (s *Service) StreamFile(w http.ResponseWriter, r *http.Request, mediaID int
 	// 使用 http.ServeContent 自动处理 Range 请求
 	http.ServeContent(w, r, filepath.Base(filePath), time.Now(), f)
 }
+
+// openSMBFile 打开 SMB 路径对应的文件。
+// 路径格式: smb://host/share/path/to/file.mp4
+func openSMBFile(smbPath string) (*smbReadSeeker, error) {
+	// 解析 smb://host/share/path
+	path := strings.TrimPrefix(smbPath, "smb://")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("SMB 路径格式错误: %s", smbPath)
+	}
+
+	host := parts[0]
+	share := parts[1]
+	filePath := parts[2]
+
+	// 加载凭据
+	store := smb.NewCredentialStore("data")
+	creds, err := store.Load("")
+	if err != nil {
+		return nil, fmt.Errorf("加载 SMB 凭据失败: %w", err)
+	}
+	creds.Host = host
+	creds.Share = share
+
+	client := smb.NewClient(*creds)
+	shareFS, err := client.EnsureConnected(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("连接 SMB 失败: %w", err)
+	}
+
+	smbFile, err := shareFS.Open(filePath)
+	if err != nil {
+		_ = client.Disconnect()
+		return nil, fmt.Errorf("打开 SMB 文件失败: %w", err)
+	}
+
+	// *smb2.File 实现了 io.ReadSeeker
+	rs := io.ReadSeeker(smbFile)
+
+	return &smbReadSeeker{
+		ReadSeeker: rs,
+		client:     client,
+	}, nil
+}
+
+// smbReadSeeker 包装 SMB 文件，实现 io.ReadSeeker 并管理连接生命周期。
+type smbReadSeeker struct {
+	io.ReadSeeker
+	client *smb.Client
+}
+
+func (s *smbReadSeeker) Close() error {
+	var err error
+	if closer, ok := s.ReadSeeker.(io.Closer); ok {
+		err = closer.Close()
+	}
+	if e := s.client.Disconnect(); err == nil {
+		err = e
+	}
+	return err
+}
+
+// 确保 smbReadSeeker 实现 io.ReadSeeker 和 io.Closer。
+var _ io.ReadSeeker = (*smbReadSeeker)(nil)
+var _ io.Closer = (*smbReadSeeker)(nil)
 
 // HandleSeek 处理 Seek 请求。
 func (s *Service) HandleSeek(mediaID int64, position float64) (*SeekResponse, error) {

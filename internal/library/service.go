@@ -1,6 +1,9 @@
 package library
 
 import (
+	"context"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,16 +14,23 @@ import (
 	"gorm.io/gorm"
 
 	"jianvideo/internal/db/models"
+	"jianvideo/internal/smb"
 )
 
 // Service 媒体库业务逻辑。
 type Service struct {
-	db *gorm.DB
+	db       *gorm.DB
+	smbCreds *smb.CredentialStore
 }
 
 // NewService 创建媒体库服务。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
+}
+
+// SetSMBCredentialStore 设置 SMB 凭据存储器。
+func (s *Service) SetSMBCredentialStore(store *smb.CredentialStore) {
+	s.smbCreds = store
 }
 
 // CreateLibraryPath 添加媒体库目录。
@@ -233,7 +243,23 @@ func buildBreadcrumbs(path string) []models.BreadcrumbItem {
 }
 
 // ScanLibrary 扫描指定目录，索引所有视频文件。
+// 根据 dirType 分发到本地扫描或 SMB 扫描。
 func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
+	return s.ScanLibraryWithType(libraryID, dirPath, "local")
+}
+
+// ScanLibraryWithType 按类型扫描指定目录，索引所有视频文件。
+func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) (int, error) {
+	switch dirType {
+	case "smb":
+		return s.scanSMBLibrary(libraryID, dirPath)
+	default:
+		return s.scanLocalLibrary(libraryID, dirPath)
+	}
+}
+
+// scanLocalLibrary 扫描本地目录。
+func (s *Service) scanLocalLibrary(libraryID int64, dirPath string) (int, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return 0, err
@@ -263,6 +289,71 @@ func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 		return 0, nil
 	}
 
+	return s.indexVideoFiles(libraryID, paths)
+}
+
+// scanSMBLibrary 扫描 SMB 共享目录。
+func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
+	// smbPath 格式: host/share/path
+	parts := strings.SplitN(smbPath, "/", 3)
+	if len(parts) < 2 {
+		return 0, fmt.Errorf("SMB 路径格式错误，应为 host/share[/path]: %s", smbPath)
+	}
+
+	host := parts[0]
+	share := parts[1]
+	remotePath := ""
+	if len(parts) == 3 {
+		remotePath = parts[2]
+	}
+
+	// 从凭据存储加载凭据
+	creds, err := s.smbCreds.Load("")
+	if err != nil {
+		return 0, fmt.Errorf("加载 SMB 凭据失败: %w", err)
+	}
+	creds.Host = host
+	creds.Share = share
+
+	client := smb.NewClient(*creds)
+	shareFS, err := client.EnsureConnected(context.Background())
+	if err != nil {
+		return 0, fmt.Errorf("连接 SMB 失败: %w", err)
+	}
+	defer client.Disconnect()
+
+	smbFS := smb.NewFS(shareFS)
+
+	// 遍历 SMB 目录
+	var paths []string
+	err = fs.WalkDir(smbFS, remotePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // 跳过不可读的条目
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(d.Name()), "."))
+		if !isVideoExt(ext) {
+			return nil
+		}
+		// 使用 smb://host/share/path 格式作为唯一标识
+		paths = append(paths, "smb://"+host+"/"+share+"/"+path)
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("遍历 SMB 目录失败: %w", err)
+	}
+
+	if len(paths) == 0 {
+		return 0, nil
+	}
+
+	return s.indexSMBMediaFiles(libraryID, paths, smbFS)
+}
+
+// indexVideoFiles 将本地视频文件路径批量入库。
+func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) {
 	// 批量查询已有记录，避免 N+1 查询
 	var existingFiles []models.MediaFile
 	if err := s.db.Where("file_path IN ?", paths).Find(&existingFiles).Error; err != nil {
@@ -291,4 +382,54 @@ func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 		count++
 	}
 	return count, nil
+}
+
+// indexSMBMediaFiles 将 SMB 视频文件路径批量入库。
+func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb.FS) (int, error) {
+	var existingFiles []models.MediaFile
+	if err := s.db.Where("file_path IN ?", paths).Find(&existingFiles).Error; err != nil {
+		return 0, err
+	}
+	existingSet := make(map[string]bool, len(existingFiles))
+	for _, f := range existingFiles {
+		existingSet[f.FilePath] = true
+	}
+
+	count := 0
+	for _, smbPath := range paths {
+		if existingSet[smbPath] {
+			continue
+		}
+
+		// 从 smb:// URL 中提取相对路径
+		relPath := strings.TrimPrefix(smbPath, "smb://")
+		// 跳过 host/share/ 前缀
+		parts := strings.SplitN(relPath, "/", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		filePath := parts[2]
+
+		info, err := smbFS.Stat(filePath)
+		if err != nil {
+			continue
+		}
+
+		if _, err := s.CreateMediaFile(libraryID, smbPath, info.Size()); err != nil {
+			log.Printf("[WARN] SMB 媒体文件入库失败: %s, err=%v", smbPath, err)
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+// isVideoExt 判断扩展名是否为视频格式。
+func isVideoExt(ext string) bool {
+	switch ext {
+	case "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "ts",
+		"m4v", "mpg", "mpeg", "3gp", "rmvb", "rm":
+		return true
+	}
+	return false
 }

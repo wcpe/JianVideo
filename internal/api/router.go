@@ -37,6 +37,12 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sub.GET("/:id/subtitles/:index", h.GetSubtitleContent)
 	}
 
+	// SMB 凭据管理
+	smbGroup := r.Group("/api/smb")
+	{
+		smbGroup.POST("/credentials", h.SaveSMBCredentials)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		svc := pbSvc[0]

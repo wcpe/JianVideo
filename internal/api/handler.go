@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"jianvideo/internal/library"
+	"jianvideo/internal/smb"
 	"jianvideo/internal/transcoder"
 )
 
@@ -44,9 +46,12 @@ func (h *Handler) ListLibraryPaths(c *gin.Context) {
 // CreateLibraryPath POST /api/library/paths
 func (h *Handler) CreateLibraryPath(c *gin.Context) {
 	var req struct {
-		Path  string `json:"path" binding:"required"`
-		Type  string `json:"type" binding:"required"`
-		Label string `json:"label"`
+		Path      string `json:"path" binding:"required"`
+		Type      string `json:"type" binding:"required"`
+		Label     string `json:"label"`
+		SMBHost   string `json:"smb_host"`
+		SMBUsername string `json:"smb_username"`
+		SMBPassword string `json:"smb_password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
@@ -58,7 +63,40 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CREATE_FAILED", "message": "添加失败"})
 		return
 	}
+
+	// SMB 类型：保存凭据
+	if req.Type == "smb" && req.SMBHost != "" {
+		h.saveSMBConfig(c, req.SMBHost, req.SMBUsername, req.SMBPassword)
+	}
+
 	c.JSON(http.StatusCreated, lp)
+}
+
+// saveSMBConfig 保存 SMB 凭据到加密配置文件。
+func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string) {
+	dataDir := filepath.Join("data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		log.Printf("[WARN] 创建数据目录失败: %v", err)
+		return
+	}
+
+	store := smb.NewCredentialStore(dataDir)
+	creds := &smb.Credentials{
+		Host:     host,
+		Username: username,
+		Password: password,
+	}
+
+	// 使用默认主密码（生产环境应要求用户设置）
+	if err := store.Save("default-master-password", creds); err != nil {
+		log.Printf("[WARN] 保存 SMB 凭据失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "SMB_CONFIG_FAILED", "message": "SMB 凭据保存失败"})
+		return
+	}
+
+	// 设置到 library service
+	h.library.SetSMBCredentialStore(store)
+	log.Printf("[INFO] SMB 凭据已保存: host=%s, user=%s", host, username)
 }
 
 // DeleteLibraryPath DELETE /api/library/paths/:id
@@ -156,6 +194,44 @@ func (h *Handler) BrowseDirectory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// SaveSMBCredentials POST /api/smb/credentials
+// 保存 SMB 凭据（加密存储）。
+func (h *Handler) SaveSMBCredentials(c *gin.Context) {
+	var req struct {
+		Host      string `json:"host" binding:"required"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		Share     string `json:"share"`
+		MasterPwd string `json:"master_password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+		return
+	}
+
+	dataDir := filepath.Join("data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "创建数据目录失败"})
+		return
+	}
+
+	store := smb.NewCredentialStore(dataDir)
+	creds := &smb.Credentials{
+		Host:     req.Host,
+		Username: req.Username,
+		Password: req.Password,
+		Share:    req.Share,
+	}
+
+	if err := store.Save(req.MasterPwd, creds); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "SAVE_FAILED", "message": "保存凭据失败"})
+		return
+	}
+
+	h.library.SetSMBCredentialStore(store)
+	c.Status(http.StatusNoContent)
 }
 
 // ScanLibrary POST /api/library/scan/:id
