@@ -224,6 +224,31 @@
   }
   ```
 
+### 获取字幕轨道列表
+
+- **方法 / 路径**：`GET /api/play/:id/subtitles`
+- **响应**（200）：
+  ```json
+  {
+    "tracks": [
+      {
+        "index": 0,
+        "file_name": "电影名.srt",
+        "format": "srt",
+        "url": "/api/play/1/subtitles/0"
+      }
+    ]
+  }
+  ```
+- **说明**：返回媒体文件同目录下的外挂字幕轨道列表（SRT/ASS/SSA/SUP），按文件名匹配
+
+### 获取字幕内容
+
+- **方法 / 路径**：`GET /api/play/:id/subtitles/:index`
+- **响应**（200）：`Content-Type: text/vtt; charset=utf-8`
+- **说明**：返回指定字幕轨道的 WebVTT 转换内容，SUP 格式返回空 WebVTT 占位
+- **错误**：`400` 索引格式无效，`404` 索引超出范围
+
 ### 获取系统配置
 
 - **方法 / 路径**：`GET /api/config`

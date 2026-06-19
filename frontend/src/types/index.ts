@@ -69,3 +69,11 @@ export interface BrowseResponse {
 export interface CurrentUser {
   username: string
 }
+
+/** 外挂字幕轨道 */
+export interface SubtitleTrack {
+  index: number
+  file_name: string
+  format: string
+  url: string
+}

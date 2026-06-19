@@ -30,6 +30,13 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.POST("/scan/:id", h.ScanLibrary)
 	}
 
+	// 字幕路由（不需要 playback 服务）
+	sub := r.Group("/api/play")
+	{
+		sub.GET("/:id/subtitles", h.GetSubtitles)
+		sub.GET("/:id/subtitles/:index", h.GetSubtitleContent)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		svc := pbSvc[0]
@@ -115,5 +122,3 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 		})
 	}
 }
-
-

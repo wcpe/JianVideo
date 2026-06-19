@@ -50,7 +50,7 @@
 | `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD、目录浏览 | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理 | → `library` |
-| `transcoder` | FFmpeg 转码管道、硬件加速检测/选择、流式输出 | → `db` |
+| `transcoder` | FFmpeg 转码管道、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |

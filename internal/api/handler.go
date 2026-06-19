@@ -1,14 +1,25 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"jianvideo/internal/library"
+	"jianvideo/internal/transcoder"
 )
+
+// SubtitleTrack 表示一个外挂字幕轨道。
+type SubtitleTrack struct {
+	Index    int    `json:"index"`
+	FileName string `json:"file_name"`
+	Format   string `json:"format"`
+	URL      string `json:"url"`
+}
 
 // Handler API 请求处理器。
 type Handler struct {
@@ -167,4 +178,79 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"scanned": count})
+}
+
+// GetSubtitles 返回媒体文件的外挂字幕轨道列表。
+// GET /api/play/:id/subtitles
+func (h *Handler) GetSubtitles(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	mf, err := h.library.GetMediaFileByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return
+	}
+
+	files, err := transcoder.FindSubtitleFiles(mf.FilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "字幕查找失败"})
+		return
+	}
+
+	tracks := make([]SubtitleTrack, len(files))
+	for i, f := range files {
+		tracks[i] = SubtitleTrack{
+			Index:    i,
+			FileName: filepath.Base(f.Path),
+			Format:   f.Format,
+			URL:      fmt.Sprintf("/api/play/%d/subtitles/%d", id, i),
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"tracks": tracks})
+}
+
+// GetSubtitleContent 返回指定字幕轨道的 WebVTT 内容。
+// GET /api/play/:id/subtitles/:index
+func (h *Handler) GetSubtitleContent(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	index, err := strconv.Atoi(c.Param("index"))
+	if err != nil || index < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INDEX", "message": "无效的字幕索引"})
+		return
+	}
+
+	mf, err := h.library.GetMediaFileByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return
+	}
+
+	files, err := transcoder.FindSubtitleFiles(mf.FilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "字幕查找失败"})
+		return
+	}
+
+	if index >= len(files) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "INDEX_OUT_OF_RANGE", "message": "字幕索引超出范围"})
+		return
+	}
+
+	vtt, err := transcoder.ConvertSubtitleFile(files[index].Path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "CONVERT_FAILED", "message": "字幕转换失败"})
+		return
+	}
+
+	c.Data(http.StatusOK, "text/vtt; charset=utf-8", []byte(vtt))
 }

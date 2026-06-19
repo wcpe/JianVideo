@@ -2,11 +2,61 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import mpegts from 'mpegts.js'
 import { Progress } from '@mantine/core'
 
+/** 一条解析后的字幕条目 */
+interface SubtitleEntry {
+  start: number
+  end: number
+  text: string
+}
+
 interface VideoPlayerProps {
   /** TS 流 URL */
   url: string
   /** 自动播放 */
   autoPlay?: boolean
+  /** 解析后的字幕条目列表 */
+  subtitleEntries?: SubtitleEntry[]
+  /** 是否显示字幕 */
+  subtitleVisible?: boolean
+}
+
+/**
+ * 轻量 WebVTT 解析器。
+ * 将 WebVTT 文本解析为按时间排序的字幕条目数组。
+ */
+function parseWebVTT(vttText: string): SubtitleEntry[] {
+  const entries: SubtitleEntry[] = []
+  const blocks = vttText.split(/\n\n+/)
+
+  for (const block of blocks) {
+    const lines = block.trim().split('\n')
+    const timingIdx = lines.findIndex(l => l.includes('-->'))
+    if (timingIdx < 0) continue
+
+    const timeLine = lines[timingIdx]
+    const parts = timeLine.split('-->')
+    if (parts.length !== 2) continue
+
+    const start = parseVTTTime(parts[0].trim())
+    const end = parseVTTTime(parts[1].trim())
+    if (start < 0 || end < 0) continue
+
+    const text = lines.slice(timingIdx + 1).join('\n').trim()
+    if (text) entries.push({ start, end, text })
+  }
+
+  return entries
+}
+
+/**
+ * 解析 WebVTT 时间戳 (HH:MM:SS.mmm 或 MM:SS.mmm) 为秒数。
+ */
+function parseVTTTime(ts: string): number {
+  const parts = ts.split(':').map(s => parseFloat(s.trim()))
+  if (parts.some(isNaN)) return -1
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return -1
 }
 
 /**
@@ -15,7 +65,12 @@ interface VideoPlayerProps {
  * 通过 MSE API 播放 MPEG-TS 流，支持边下边播和精准 Seek。
  * 禁止原生 video 标签直接处理 TS 流。
  */
-export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) {
+export default function VideoPlayer({
+  url,
+  autoPlay = true,
+  subtitleEntries,
+  subtitleVisible = false,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const playerRef = useRef<mpegts.Player | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -24,6 +79,7 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
   const [bufferedProgress, setBufferedProgress] = useState(0)
+  const [subtitleText, setSubtitleText] = useState('')
 
   // 销毁播放器
   const destroyPlayer = useCallback(() => {
@@ -130,6 +186,16 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
     }
   }, [])
 
+  // 字幕同步：根据当前播放时间匹配字幕文本
+  useEffect(() => {
+    if (!subtitleVisible || !subtitleEntries || subtitleEntries.length === 0) {
+      setSubtitleText('')
+      return
+    }
+    const entry = subtitleEntries.find(e => currentTime >= e.start && currentTime < e.end)
+    setSubtitleText(entry?.text ?? '')
+  }, [currentTime, subtitleEntries, subtitleVisible])
+
   const togglePlay = () => {
     const player = playerRef.current
     if (!player) return
@@ -174,12 +240,27 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
 
   return (
     <div className="flex flex-col w-full bg-black rounded-lg overflow-hidden">
-      {/* video 元素 — 仅作为 mpegts.js 渲染目标，不设置 src */}
-      <video
-        ref={videoRef}
-        className="w-full aspect-video bg-black"
-        playsInline
-      />
+      {/* video 容器 — 包含 video 元素和字幕 overlay */}
+      <div className="relative w-full aspect-video bg-black">
+        {/* video 元素 — 仅作为 mpegts.js 渲染目标，不设置 src */}
+        <video
+          ref={videoRef}
+          className="w-full h-full bg-black"
+          playsInline
+        />
+
+        {/* 字幕 overlay */}
+        {subtitleVisible && subtitleText && (
+          <div className="absolute inset-x-0 bottom-[8%] flex justify-center pointer-events-none px-4">
+            <span
+              className="inline-block px-3 py-1 rounded text-white text-center text-sm sm:text-base leading-relaxed max-w-[80%]"
+              style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+            >
+              {subtitleText}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* 播放控制栏 */}
       <div className="flex items-center gap-3 px-4 py-2 bg-slate-900">
@@ -260,3 +341,6 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
     </div>
   )
 }
+
+// 导出工具函数供其他模块使用
+export { parseWebVTT }
