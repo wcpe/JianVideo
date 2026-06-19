@@ -197,8 +197,14 @@
 
 ### 获取 HLS 切片
 
-- **方法 / 路径**：`GET /api/play/hls/:id/segment_001.ts`
+- **方法 / 路径**：`GET /api/play/hls/:id/1080p_segment_001.ts`
 - **响应**（200）：`Content-Type: video/mp2t`
+
+### 获取 ABR Master Playlist
+
+- **方法 / 路径**：`GET /api/play/hls/:id/master.m3u8`
+- **响应**（200）：`Content-Type: application/vnd.apple.mpegurl`
+- **说明**：返回包含多码率 `EXT-X-STREAM-INF` 标签的 master playlist，供 hls.js 自适应切换
 
 ### 获取转码状态
 

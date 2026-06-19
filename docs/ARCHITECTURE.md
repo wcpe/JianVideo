@@ -49,8 +49,8 @@
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
 | `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD、目录浏览 | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
-| `player` | HLS 切片写入、m3u8 索引管理 | → `library` |
-| `transcoder` | FFmpeg 转码管道、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
+| `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
+| `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
@@ -176,6 +176,16 @@
 - 播放器轮询 m3u8 索引文件，检测到新切片时自动追加到 MSE 缓冲区。
 - 追播延迟控制：播放器保持 3-5 秒的缓冲距离。
 
+### 5.5 多码率自适应（ABR）
+
+- `MultiPipeline` 使用 FFmpeg filter_complex split 单进程多输出，同时生成 1080p/720p/480p 三档 HLS。
+- 码率阶梯根据源分辨率自动裁剪（<720p 只输出 480p+720p，<1080p 不输出 1080p）。
+- 所有码率共享同一 GOP（-g 48 -keyint_min 48 -sc_threshold 0），确保切换时画面连续。
+- 切片文件名包含码率标识（如 `1080p_segment_000.ts`），m3u8 命名为 `{quality}.m3u8`。
+- `master.m3u8` 包含 `EXT-X-STREAM-INF` 标签，描述各码率流的 BANDWIDTH/RESOLUTION。
+- 前端 hls.js 动态 import，自动选择最佳码率；不支持 hls.js 时回退 mpegts.js。
+- 详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
+
 ### 5.4 硬件加速管理
 
 - 启动时检测可用硬件加速能力（通过 `ffmpeg -hwaccels` 和 `ffmpeg -encoders`）。
@@ -200,8 +210,7 @@
 | HLS/TS 强制输出 | 确保网络兼容性与追播能力 | [0003](adr/0003-hls-ts-streaming.md) |
 | mpegts.js 作为播放内核 | 唯一可靠支持 TS 实时追加的浏览器方案 | [0004](adr/0004-mpegts-js-player.md) |
 | 原生 SMB 支持 | 避免用户手动挂载 NAS 共享 | [0005](adr/0005-native-smb-support.md) |
-| CGO 绑定 FFmpeg | 高性能硬件加速，直接调用 FFmpeg C API | — |
-| 全硬件编码器支持 | 必须同时支持 H.264 和 H.265，含 Intel 核显检测 | — |
+| FFmpeg filter_complex split 单进程多输出 | 确保多码率 GOP 对齐，减少资源开销 | [0026](adr/0026-abr-adaptive-bitrate.md) |
 
 **不做项**：
 - 不做多用户/权限管理（单用户模式）

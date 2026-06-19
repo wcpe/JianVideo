@@ -85,7 +85,7 @@ export default function PlayPage() {
     )
   }
 
-  const hlsUrl = `/api/play/hls/${media.id}/index.m3u8`
+  const hlsUrl = `/api/play/hls/${media.id}/master.m3u8`
 
   return (
     <Stack gap="md">

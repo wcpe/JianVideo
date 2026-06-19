@@ -10,7 +10,7 @@ interface SubtitleEntry {
 }
 
 interface VideoPlayerProps {
-  /** TS 流 URL */
+  /** 流 URL（支持 master.m3u8 触发 ABR 模式） */
   url: string
   /** 自动播放 */
   autoPlay?: boolean
@@ -60,10 +60,10 @@ function parseVTTTime(ts: string): number {
 }
 
 /**
- * mpegts.js 播放内核组件
+ * 视频播放组件
  *
- * 通过 MSE API 播放 MPEG-TS 流，支持边下边播和精准 Seek。
- * 禁止原生 video 标签直接处理 TS 流。
+ * - URL 为 master.m3u8 时启用 ABR 模式（hls.js 动态加载）
+ * - 其他 URL 使用 mpegts.js 播放
  */
 export default function VideoPlayer({
   url,
@@ -72,7 +72,8 @@ export default function VideoPlayer({
   subtitleVisible = false,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const playerRef = useRef<mpegts.Player | null>(null)
+  const mpegtsPlayerRef = useRef<mpegts.Player | null>(null)
+  const hlsRef = useRef<unknown>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -81,28 +82,38 @@ export default function VideoPlayer({
   const [bufferedProgress, setBufferedProgress] = useState(0)
   const [subtitleText, setSubtitleText] = useState('')
 
-  // 销毁播放器
-  const destroyPlayer = useCallback(() => {
-    const player = playerRef.current
+  // 判断是否为 ABR 模式（URL 以 master.m3u8 结尾）
+  const isABR = url.endsWith('master.m3u8')
+
+  // 销毁 mpegts.js 播放器
+  const destroyMpegtsPlayer = useCallback(() => {
+    const player = mpegtsPlayerRef.current
     if (player) {
-      // 移除所有已注册的事件监听器
       player.off('loadeddata')
       player.off('playing')
       player.off('pause')
       player.pause()
       player.unload()
       player.destroy()
-      playerRef.current = null
+      mpegtsPlayerRef.current = null
     }
   }, [])
 
-  // 初始化播放器
-  const initPlayer = useCallback(
+  // 销毁 hls.js 播放器
+  const destroyHlsPlayer = useCallback(async () => {
+    const hls = hlsRef.current as { destroy: () => void } | null
+    if (hls) {
+      hls.destroy()
+      hlsRef.current = null
+    }
+  }, [])
+
+  // 初始化 mpegts.js 播放器
+  const initMpegtsPlayer = useCallback(
     (streamUrl: string) => {
       if (!videoRef.current) return
 
-      // 清理旧实例
-      destroyPlayer()
+      destroyMpegtsPlayer()
 
       const player = mpegts.createPlayer(
         {
@@ -122,10 +133,8 @@ export default function VideoPlayer({
       player.attachMediaElement(videoRef.current)
       player.load()
 
-      // 使用字符串事件名（mpegts.js 运行时触发的事件，不在 d.ts 中声明）
       player.on('loadeddata', () => {
         if (autoPlay) {
-          // play() 返回 Promise<void> | void
           void (player.play() as Promise<void>)?.catch?.(() => {
             // 自动播放可能被浏览器策略阻止
           })
@@ -140,19 +149,81 @@ export default function VideoPlayer({
         setIsPlaying(false)
       })
 
-      playerRef.current = player
+      mpegtsPlayerRef.current = player
     },
-    [autoPlay, destroyPlayer]
+    [autoPlay, destroyMpegtsPlayer]
+  )
+
+  // 初始化 hls.js 播放器（动态 import）
+  const initHlsPlayer = useCallback(
+    async (masterUrl: string) => {
+      if (!videoRef.current) return
+
+      destroyHlsPlayer()
+
+      try {
+        const Hls = (await import('hls.js')).default
+
+        if (!Hls.isSupported()) {
+          console.warn('[VideoPlayer] hls.js 不支持当前浏览器，回退到 mpegts.js')
+          initMpegtsPlayer(masterUrl)
+          return
+        }
+
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        })
+
+        hls.loadSource(masterUrl)
+        hls.attachMedia(videoRef.current)
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (autoPlay) {
+            void videoRef.current?.play()?.catch?.(() => {
+              // 自动播放可能被浏览器策略阻止
+            })
+          }
+        })
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+          const level = hls.levels[data.level]
+          if (level) {
+            console.info(`[VideoPlayer] ABR 切换到: ${level.width}x${height}, ${level.bitrate}`)
+          }
+        })
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            console.error('[VideoPlayer] hls.js 致命错误，回退到 mpegts.js', data)
+            hls.destroy()
+            hlsRef.current = null
+            initMpegtsPlayer(masterUrl)
+          }
+        })
+
+        hlsRef.current = hls
+      } catch (err) {
+        console.error('[VideoPlayer] 加载 hls.js 失败，回退到 mpegts.js', err)
+        initMpegtsPlayer(masterUrl)
+      }
+    },
+    [autoPlay, destroyHlsPlayer, initMpegtsPlayer]
   )
 
   // 挂载 / URL 变化时初始化
   useEffect(() => {
-    initPlayer(url)
+    if (isABR) {
+      void initHlsPlayer(url)
+    } else {
+      initMpegtsPlayer(url)
+    }
 
     return () => {
-      destroyPlayer()
+      void destroyHlsPlayer()
+      destroyMpegtsPlayer()
     }
-  }, [url, initPlayer, destroyPlayer])
+  }, [url, isABR, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
   // 监听时间更新
   useEffect(() => {
@@ -197,37 +268,37 @@ export default function VideoPlayer({
   }, [currentTime, subtitleEntries, subtitleVisible])
 
   const togglePlay = () => {
-    const player = playerRef.current
-    if (!player) return
+    const video = videoRef.current
+    if (!video) return
     if (isPlaying) {
-      player.pause()
+      video.pause()
     } else {
-      void (player.play() as Promise<void>)?.catch?.(() => {})
+      void video.play()?.catch?.(() => {})
     }
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value)
-    const player = playerRef.current
-    if (!player) return
-    player.currentTime = time
+    const video = videoRef.current
+    if (!video) return
+    video.currentTime = time
     setCurrentTime(time)
   }
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value)
-    const player = playerRef.current
-    if (!player) return
-    player.volume = vol
-    player.muted = vol === 0
+    const video = videoRef.current
+    if (!video) return
+    video.volume = vol
+    video.muted = vol === 0
     setVolume(vol)
     setIsMuted(vol === 0)
   }
 
   const toggleMute = () => {
-    const player = playerRef.current
-    if (!player) return
-    player.muted = !isMuted
+    const video = videoRef.current
+    if (!video) return
+    video.muted = !isMuted
     setIsMuted(!isMuted)
   }
 
@@ -337,6 +408,11 @@ export default function VideoPlayer({
             className="w-20 h-1 accent-blue-500 cursor-pointer"
           />
         </div>
+
+        {/* ABR 模式标识 */}
+        {isABR && (
+          <span className="text-xs text-green-400 font-medium">ABR</span>
+        )}
       </div>
     </div>
   )

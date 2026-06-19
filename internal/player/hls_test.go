@@ -11,8 +11,7 @@ import (
 func TestHLSSegmentWriter_CreatesDirectoryAndM3U8(t *testing.T) {
 	tDir := t.TempDir()
 
-	// baseDir 是 HLS 根目录，Writer 内部会创建 {media_id} 子目录
-	w, err := NewHLSSegmentWriter(tDir, 42)
+	w, err := NewHLSSegmentWriter(tDir, 42, "1080p")
 	if err != nil {
 		t.Fatalf("NewHLSSegmentWriter 失败: %v", err)
 	}
@@ -25,9 +24,9 @@ func TestHLSSegmentWriter_CreatesDirectoryAndM3U8(t *testing.T) {
 	}
 
 	// m3u8 文件应已创建
-	m3u8Path := filepath.Join(mediaDir, "index.m3u8")
+	m3u8Path := filepath.Join(mediaDir, "1080p.m3u8")
 	if _, err := os.Stat(m3u8Path); os.IsNotExist(err) {
-		t.Fatal("index.m3u8 未被创建")
+		t.Fatal("1080p.m3u8 未被创建")
 	}
 
 	// 验证 m3u8 头部内容
@@ -53,7 +52,7 @@ func TestHLSSegmentWriter_CreatesDirectoryAndM3U8(t *testing.T) {
 func TestHLSSegmentWriter_WriteSegment(t *testing.T) {
 	tDir := t.TempDir()
 
-	w, err := NewHLSSegmentWriter(tDir, 1)
+	w, err := NewHLSSegmentWriter(tDir, 1, "720p")
 	if err != nil {
 		t.Fatalf("NewHLSSegmentWriter 失败: %v", err)
 	}
@@ -67,18 +66,18 @@ func TestHLSSegmentWriter_WriteSegment(t *testing.T) {
 	}
 
 	// 验证切片文件存在
-	seg0 := filepath.Join(mediaDir, "segment_000.ts")
+	seg0 := filepath.Join(mediaDir, "720p_segment_000.ts")
 	if _, err := os.Stat(seg0); os.IsNotExist(err) {
-		t.Fatal("segment_000.ts 未被创建")
+		t.Fatal("720p_segment_000.ts 未被创建")
 	}
 
 	// 验证 m3u8 包含第一个切片
-	content, _ := os.ReadFile(filepath.Join(mediaDir, "index.m3u8"))
+	content, _ := os.ReadFile(filepath.Join(mediaDir, "720p.m3u8"))
 	if !strings.Contains(string(content), "#EXTINF:3.000,") {
 		t.Fatalf("m3u8 缺少 EXTINF 标签, 内容: %s", string(content))
 	}
-	if !strings.Contains(string(content), "segment_000.ts") {
-		t.Fatal("m3u8 缺少 segment_000.ts 引用")
+	if !strings.Contains(string(content), "720p_segment_000.ts") {
+		t.Fatal("m3u8 缺少 720p_segment_000.ts 引用")
 	}
 
 	// 写入第二个切片
@@ -86,15 +85,15 @@ func TestHLSSegmentWriter_WriteSegment(t *testing.T) {
 		t.Fatalf("写入切片 1 失败: %v", err)
 	}
 
-	seg1 := filepath.Join(mediaDir, "segment_001.ts")
+	seg1 := filepath.Join(mediaDir, "720p_segment_001.ts")
 	if _, err := os.Stat(seg1); os.IsNotExist(err) {
-		t.Fatal("segment_001.ts 未被创建")
+		t.Fatal("720p_segment_001.ts 未被创建")
 	}
 
 	// 验证 m3u8 包含两个切片，且没有 ENDLIST
-	content, _ = os.ReadFile(filepath.Join(mediaDir, "index.m3u8"))
-	if !strings.Contains(string(content), "segment_001.ts") {
-		t.Fatal("m3u8 缺少 segment_001.ts 引用")
+	content, _ = os.ReadFile(filepath.Join(mediaDir, "720p.m3u8"))
+	if !strings.Contains(string(content), "720p_segment_001.ts") {
+		t.Fatal("m3u8 缺少 720p_segment_001.ts 引用")
 	}
 	if strings.Contains(string(content), "#EXT-X-ENDLIST") {
 		t.Fatal("追播模式下不应包含 #EXT-X-ENDLIST")
@@ -105,7 +104,7 @@ func TestHLSSegmentWriter_WriteSegment(t *testing.T) {
 func TestHLSSegmentWriter_Close(t *testing.T) {
 	tDir := t.TempDir()
 
-	w, err := NewHLSSegmentWriter(tDir, 2)
+	w, err := NewHLSSegmentWriter(tDir, 2, "480p")
 	if err != nil {
 		t.Fatalf("NewHLSSegmentWriter 失败: %v", err)
 	}
@@ -116,7 +115,7 @@ func TestHLSSegmentWriter_Close(t *testing.T) {
 	}
 
 	mediaDir := filepath.Join(tDir, "2")
-	content, _ := os.ReadFile(filepath.Join(mediaDir, "index.m3u8"))
+	content, _ := os.ReadFile(filepath.Join(mediaDir, "480p.m3u8"))
 	if !strings.Contains(string(content), "#EXT-X-ENDLIST") {
 		t.Fatalf("Close 后 m3u8 应包含 ENDLIST, 内容: %s", string(content))
 	}
@@ -127,31 +126,41 @@ func TestHLSManager_GetOrCreateWriter(t *testing.T) {
 	tDir := t.TempDir()
 	mgr := NewHLSManager(tDir)
 
-	w1, err := mgr.GetOrCreateWriter(100)
+	w1, err := mgr.GetOrCreateWriter(100, "1080p")
 	if err != nil {
 		t.Fatalf("GetOrCreateWriter 失败: %v", err)
 	}
 
 	// 再次获取应返回同一个实例
-	w2, err := mgr.GetOrCreateWriter(100)
+	w2, err := mgr.GetOrCreateWriter(100, "1080p")
 	if err != nil {
 		t.Fatalf("第二次 GetOrCreateWriter 失败: %v", err)
 	}
 	if w1 != w2 {
-		t.Fatal("同一 media_id 应返回同一个 Writer 实例")
+		t.Fatal("同一 media_id+quality 应返回同一个 Writer 实例")
+	}
+
+	// 不同 quality 应返回不同实例
+	w3, err := mgr.GetOrCreateWriter(100, "720p")
+	if err != nil {
+		t.Fatalf("GetOrCreateWriter(720p) 失败: %v", err)
+	}
+	if w1 == w3 {
+		t.Fatal("不同 quality 应返回不同 Writer 实例")
 	}
 
 	// 不同 media_id 应返回不同实例
-	w3, err := mgr.GetOrCreateWriter(200)
+	w4, err := mgr.GetOrCreateWriter(200, "1080p")
 	if err != nil {
 		t.Fatalf("GetOrCreateWriter(200) 失败: %v", err)
 	}
-	if w1 == w3 {
+	if w1 == w4 {
 		t.Fatal("不同 media_id 应返回不同 Writer 实例")
 	}
 
 	_ = w1.Close()
 	_ = w3.Close()
+	_ = w4.Close()
 }
 
 // TestHLSManager_GetM3U8 验证读取 m3u8。
@@ -159,10 +168,10 @@ func TestHLSManager_GetM3U8(t *testing.T) {
 	tDir := t.TempDir()
 	mgr := NewHLSManager(tDir)
 
-	w, _ := mgr.GetOrCreateWriter(10)
+	w, _ := mgr.GetOrCreateWriter(10, "480p")
 	_ = w.WriteSegment([]byte("data"))
 
-	content, err := mgr.GetM3U8(10)
+	content, err := mgr.GetM3U8(10, "480p")
 	if err != nil {
 		t.Fatalf("GetM3U8 失败: %v", err)
 	}
@@ -171,9 +180,15 @@ func TestHLSManager_GetM3U8(t *testing.T) {
 	}
 
 	// 不存在的 media_id 应返回错误
-	_, err = mgr.GetM3U8(999)
+	_, err = mgr.GetM3U8(999, "480p")
 	if err == nil {
 		t.Fatal("不存在的 media_id 应返回错误")
+	}
+
+	// 不存在的 quality 应返回错误
+	_, err = mgr.GetM3U8(10, "1080p")
+	if err == nil {
+		t.Fatal("不存在的 quality 应返回错误")
 	}
 
 	_ = w.Close()
@@ -184,11 +199,11 @@ func TestHLSManager_GetSegment(t *testing.T) {
 	tDir := t.TempDir()
 	mgr := NewHLSManager(tDir)
 
-	w, _ := mgr.GetOrCreateWriter(20)
+	w, _ := mgr.GetOrCreateWriter(20, "720p")
 	testData := []byte("hello ts segment")
 	_ = w.WriteSegment(testData)
 
-	data, err := mgr.GetSegment(20, "segment_000.ts")
+	data, err := mgr.GetSegment(20, "720p", "720p_segment_000.ts")
 	if err != nil {
 		t.Fatalf("GetSegment 失败: %v", err)
 	}
@@ -197,13 +212,13 @@ func TestHLSManager_GetSegment(t *testing.T) {
 	}
 
 	// 不存在的切片应返回错误
-	_, err = mgr.GetSegment(20, "segment_999.ts")
+	_, err = mgr.GetSegment(20, "720p", "720p_segment_999.ts")
 	if err == nil {
 		t.Fatal("不存在的切片应返回错误")
 	}
 
 	// 不存在的 media_id 应返回错误
-	_, err = mgr.GetSegment(999, "segment_000.ts")
+	_, err = mgr.GetSegment(999, "720p", "720p_segment_000.ts")
 	if err == nil {
 		t.Fatal("不存在的 media_id 应返回错误")
 	}
@@ -216,14 +231,85 @@ func TestHLSManager_RemoveWriter(t *testing.T) {
 	tDir := t.TempDir()
 	mgr := NewHLSManager(tDir)
 
-	w, _ := mgr.GetOrCreateWriter(30)
+	w, _ := mgr.GetOrCreateWriter(30, "1080p")
 	_ = w.WriteSegment([]byte("data"))
 	_ = w.Close()
 
 	// 移除后应无法获取 m3u8
-	mgr.RemoveWriter(30)
-	_, err := mgr.GetM3U8(30)
+	mgr.RemoveWriter(30, "1080p")
+	_, err := mgr.GetM3U8(30, "1080p")
 	if err == nil {
 		t.Fatal("移除后 GetM3U8 应返回错误")
+	}
+}
+
+// TestHLSManager_RemoveAllWriters 验证移除全部码率 writer。
+func TestHLSManager_RemoveAllWriters(t *testing.T) {
+	tDir := t.TempDir()
+	mgr := NewHLSManager(tDir)
+
+	w1, _ := mgr.GetOrCreateWriter(40, "1080p")
+	w2, _ := mgr.GetOrCreateWriter(40, "720p")
+	_ = w1.WriteSegment([]byte("data"))
+	_ = w2.WriteSegment([]byte("data"))
+	_ = w1.Close()
+	_ = w2.Close()
+
+	mgr.RemoveAllWriters(40)
+
+	if mgr.HasSession(40) {
+		t.Fatal("移除后不应再有活跃会话")
+	}
+}
+
+// TestHLSManager_MasterM3U8 验证 master playlist 的保存和读取。
+func TestHLSManager_MasterM3U8(t *testing.T) {
+	tDir := t.TempDir()
+	mgr := NewHLSManager(tDir)
+
+	qualities := []QualityInfo{
+		{Name: "1080p", Width: 1920, Height: 1080, Bandwidth: 5000000},
+		{Name: "720p", Width: 1280, Height: 720, Bandwidth: 2500000},
+		{Name: "480p", Width: 854, Height: 480, Bandwidth: 1000000},
+	}
+
+	content := GenerateMasterM3U8(qualities)
+	if err := mgr.SaveMasterM3U8(50, content); err != nil {
+		t.Fatalf("SaveMasterM3U8 失败: %v", err)
+	}
+
+	got, err := mgr.GetMasterM3U8(50)
+	if err != nil {
+		t.Fatalf("GetMasterM3U8 失败: %v", err)
+	}
+	if got != content {
+		t.Fatalf("master.m3u8 内容不匹配")
+	}
+
+	// 不存在的 media_id 应返回错误
+	_, err = mgr.GetMasterM3U8(999)
+	if err == nil {
+		t.Fatal("不存在的 media_id 应返回错误")
+	}
+}
+
+// TestExtractQualityFromSegment 验证切片文件名解析。
+func TestExtractQualityFromSegment(t *testing.T) {
+	tests := []struct {
+		segment string
+		want    string
+	}{
+		{"1080p_segment_000.ts", "1080p"},
+		{"720p_segment_001.ts", "720p"},
+		{"480p_segment_002.ts", "480p"},
+		{"segment_000.ts", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := ExtractQualityFromSegment(tt.segment)
+		if got != tt.want {
+			t.Errorf("ExtractQualityFromSegment(%q) = %q, want %q", tt.segment, got, tt.want)
+		}
 	}
 }

@@ -95,13 +95,28 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 	hls := r.Group("/api/play/hls")
 	{
-		hls.GET("/:id/index.m3u8", func(c *gin.Context) {
+		// master.m3u8 — ABR 多码率索引
+		hls.GET("/:id/master.m3u8", func(c *gin.Context) {
 			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 				return
 			}
-			content, err := hlsMgr.GetM3U8(id)
+			content, err := hlsMgr.GetMasterM3U8(id)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+				return
+			}
+			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
+		})
+		hls.GET("/:id/:quality.m3u8", func(c *gin.Context) {
+			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+				return
+			}
+			quality := c.Param("quality")
+			content, err := hlsMgr.GetM3U8(id, quality)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
 				return
@@ -119,7 +134,9 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "无效的切片名称"})
 				return
 			}
-			data, err := hlsMgr.GetSegment(id, segment)
+			// 从切片文件名解析码率档位（格式: {quality}_segment_xxx.ts）
+			quality := player.ExtractQualityFromSegment(segment)
+			data, err := hlsMgr.GetSegment(id, quality, segment)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
 				return
@@ -128,3 +145,4 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 		})
 	}
 }
+
