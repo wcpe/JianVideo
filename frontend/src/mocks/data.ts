@@ -1,0 +1,20 @@
+import type { LibraryPath, MediaFile } from '@/types'
+
+/** 模拟媒体库目录数据 */
+export const mockPaths: LibraryPath[] = [
+  { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z' },
+  { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T12:00:00Z' },
+  { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-03T12:00:00Z' },
+]
+
+/** 模拟媒体文件数据 */
+export const mockMediaFiles: MediaFile[] = [
+  { id: 1, library_id: 1, file_path: 'D:\\Videos\\Movies\\星际穿越.mkv', file_name: '星际穿越.mkv', file_size: 15_000_000_000, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac', duration: 10020, width: 3840, height: 2160, bitrate: 12000000, subtitle_tracks: '', added_at: '2025-01-01T12:00:00Z', modified_at: '2025-01-01T12:00:00Z' },
+  { id: 2, library_id: 1, file_path: 'D:\\Videos\\Movies\\盗梦空间.mkv', file_name: '盗梦空间.mkv', file_size: 12_000_000_000, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac', duration: 8880, width: 3840, height: 2160, bitrate: 11000000, subtitle_tracks: '', added_at: '2025-01-02T12:00:00Z', modified_at: '2025-01-02T12:00:00Z' },
+  { id: 3, library_id: 1, file_path: 'D:\\Videos\\Movies\\黑暗骑士.mp4', file_name: '黑暗骑士.mp4', file_size: 8_000_000_000, format: 'mp4', video_codec: 'h264', audio_codec: 'aac', duration: 9120, width: 1920, height: 1080, bitrate: 8000000, subtitle_tracks: '', added_at: '2025-01-03T12:00:00Z', modified_at: '2025-01-03T12:00:00Z' },
+  { id: 4, library_id: 2, file_path: 'D:\\Videos\\TV\\绝命毒师.S01E01.mkv', file_name: '绝命毒师.S01E01.mkv', file_size: 3_500_000_000, format: 'mkv', video_codec: 'h264', audio_codec: 'aac', duration: 3480, width: 1920, height: 1080, bitrate: 5000000, subtitle_tracks: '', added_at: '2025-01-04T12:00:00Z', modified_at: '2025-01-04T12:00:00Z' },
+  { id: 5, library_id: 2, file_path: 'D:\\Videos\\TV\\权力的游戏.S01E01.mkv', file_name: '权力的游戏.S01E01.mkv', file_size: 4_200_000_000, format: 'mkv', video_codec: 'h264', audio_codec: 'dts', duration: 3600, width: 1920, height: 1080, bitrate: 6000000, subtitle_tracks: '', added_at: '2025-01-05T12:00:00Z', modified_at: '2025-01-05T12:00:00Z' },
+  { id: 6, library_id: 3, file_path: 'D:\\Videos\\Anime\\千与千寻.mkv', file_name: '千与千寻.mkv', file_size: 9_000_000_000, format: 'mkv', video_codec: 'h264', audio_codec: 'flac', duration: 7500, width: 1920, height: 1080, bitrate: 9000000, subtitle_tracks: '', added_at: '2025-01-06T12:00:00Z', modified_at: '2025-01-06T12:00:00Z' },
+  { id: 7, library_id: 3, file_path: 'D:\\Videos\\Anime\\你的名字.mp4', file_name: '你的名字.mp4', file_size: 6_500_000_000, format: 'mp4', video_codec: 'h264', audio_codec: 'aac', duration: 6600, width: 1920, height: 1080, bitrate: 7000000, subtitle_tracks: '', added_at: '2025-01-07T12:00:00Z', modified_at: '2025-01-07T12:00:00Z' },
+  { id: 8, library_id: 1, file_path: 'D:\\Videos\\Movies\\阿凡达.mkv', file_name: '阿凡达.mkv', file_size: 18_000_000_000, format: 'mkv', video_codec: 'hevc', audio_codec: 'dts', duration: 10680, width: 3840, height: 2160, bitrate: 15000000, subtitle_tracks: '', added_at: '2025-01-08T12:00:00Z', modified_at: '2025-01-08T12:00:00Z' },
+]

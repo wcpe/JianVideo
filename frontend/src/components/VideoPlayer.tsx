@@ -27,6 +27,10 @@ export default function VideoPlayer({ url, autoPlay = true }: VideoPlayerProps) 
   const destroyPlayer = useCallback(() => {
     const player = playerRef.current
     if (player) {
+      // 移除所有已注册的事件监听器
+      player.off('loadeddata')
+      player.off('playing')
+      player.off('pause')
       player.pause()
       player.unload()
       player.destroy()
