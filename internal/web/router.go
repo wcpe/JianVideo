@@ -3,6 +3,7 @@ package web
 import (
 	"io/fs"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -11,12 +12,14 @@ import (
 	"jianvideo/internal/api"
 	"jianvideo/internal/auth"
 	"jianvideo/internal/library"
+	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
 )
 
 // NewRouter 创建并配置路由
 // frontendDist 为嵌入的前端静态资源（由 main 通过 go:embed 传入）
-func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, frontendDist fs.FS) *gin.Engine {
+// 可选参数 pbSvc 用于挂载 /api/play/:id/stream 等播放路由（HLS 不可用时回退）。
+func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, frontendDist fs.FS, pbSvc ...*playback.Service) *gin.Engine {
 	r := gin.Default()
 
 	// 静态文件服务（前端嵌入）
@@ -56,6 +59,12 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		api.RegisterHLSRoutes(r, hlsMgr)
 	}
 
+	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，
+	// handler 内部查 db 拿到 filePath 后转发给 pbSvc.StreamFile。
+	if len(pbSvc) > 0 && pbSvc[0] != nil {
+		registerStreamRoute(r, libSvc, pbSvc[0])
+	}
+
 	// 认证路由
 	apiGroup := r.Group("/api")
 	{
@@ -78,6 +87,24 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	})
 
 	return r
+}
+
+// registerStreamRoute 在 web 层挂载 /api/play/:id/stream。
+// 用于 HLS master.m3u8 不可用时的播放降级路径。
+func registerStreamRoute(r *gin.Engine, libSvc *library.Service, pbSvc *playback.Service) {
+	r.GET("/api/play/:id/stream", func(c *gin.Context) {
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+			return
+		}
+		mf, err := libSvc.GetMediaFileByID(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
+		pbSvc.StreamFile(c.Writer, c.Request, id, mf.FilePath, mf.FileSize, mf.Duration)
+	})
 }
 
 type loginRequest struct {

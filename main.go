@@ -14,6 +14,7 @@ import (
 	"jianvideo/config"
 	"jianvideo/internal/db"
 	"jianvideo/internal/db/models"
+	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
 	"jianvideo/internal/web"
 )
@@ -46,7 +47,11 @@ func main() {
 	}
 	hlsMgr := player.NewHLSManager(hlsDir)
 
-	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist)
+	// 播放服务：用于在 HLS 不可用时提供 /api/play/:id/stream 降级路径
+	pbSvc := playback.NewService()
+	defer pbSvc.Stop()
+
+	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist, pbSvc)
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.ServerPort)
 	log.Printf("JianVideo 启动于 %s", addr)

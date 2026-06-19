@@ -13,6 +13,17 @@ interface VideoPlayerProps {
   subtitleEntries?: SubtitleEntry[]
   /** 是否显示字幕 */
   subtitleVisible?: boolean
+  /**
+   * 显式指定是否走 ABR（hls.js）模式。
+   * 缺省时按 URL 是否以 master.m3u8 结尾推断。
+   * 用于 HLS master.m3u8 不可用、回退到 /api/play/:id/stream 时显式关闭 ABR。
+   */
+  isABR?: boolean
+  /**
+   * 显式声明流类型为 mp4 时使用浏览器原生 video 标签直接加载。
+   * 后端 stream 端点支持 Range，可被原生 video 直接消费，无需 mpegts.js / hls.js。
+   */
+  streamType?: 'mpegts' | 'mp4'
 }
 
 /**
@@ -65,6 +76,8 @@ export default function VideoPlayer({
   autoPlay = true,
   subtitleEntries,
   subtitleVisible = false,
+  isABR: isABRProp,
+  streamType = 'mpegts',
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const mpegtsPlayerRef = useRef<mpegts.Player | null>(null)
@@ -78,8 +91,8 @@ export default function VideoPlayer({
   const [bufferedProgress, setBufferedProgress] = useState(0)
   const [subtitleText, setSubtitleText] = useState('')
 
-  // 判断是否为 ABR 模式（URL 以 master.m3u8 结尾）
-  const isABR = url.endsWith('master.m3u8')
+  // 判断是否为 ABR 模式：显式 prop 优先，否则按 URL 是否以 master.m3u8 结尾推断
+  const isABR = isABRProp ?? url.endsWith('master.m3u8')
 
   // 销毁 mpegts.js 播放器
   const destroyMpegtsPlayer = useCallback(() => {
@@ -209,6 +222,21 @@ export default function VideoPlayer({
 
   // 挂载 / URL 变化时初始化
   useEffect(() => {
+    // mp4 streamType：让浏览器原生 video 标签直接加载（后端 stream 端点支持 Range）
+    if (streamType === 'mp4' && videoRef.current) {
+      destroyMpegtsPlayer()
+      void destroyHlsPlayer()
+      videoRef.current.src = url
+      if (autoPlay) {
+        void videoRef.current.play()?.catch?.(() => {
+          setAutoPlayBlocked(true)
+        })
+      }
+      return () => {
+        if (videoRef.current) videoRef.current.removeAttribute('src')
+      }
+    }
+
     if (isABR) {
       void initHlsPlayer(url)
     } else {
@@ -219,7 +247,7 @@ export default function VideoPlayer({
       void destroyHlsPlayer()
       destroyMpegtsPlayer()
     }
-  }, [url, isABR, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
+  }, [url, isABR, streamType, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
   // 监听时间更新
   useEffect(() => {

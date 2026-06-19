@@ -234,6 +234,44 @@ describe('LibraryPage', () => {
     expect(screen.queryByText('0:00')).not.toBeInTheDocument()
   })
 
+  it('图片卡片渲染缩略图指向 /raw，视频卡片不渲染缩略图', async () => {
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({
+        items: [
+          {
+            id: 200, library_id: 1,
+            file_path: 'D:\\Videos\\Movies\\海报.png',
+            file_name: '海报.png', file_size: 1200000, format: 'png',
+            video_codec: '', audio_codec: '', duration: 0,
+            width: 1200, height: 800, bitrate: 0, subtitle_tracks: '',
+            added_at: '2025-01-09T12:00:00Z', modified_at: '2025-01-09T12:00:00Z',
+          },
+          {
+            id: 201, library_id: 1,
+            file_path: 'D:\\Videos\\Movies\\星际穿越.mkv',
+            file_name: '星际穿越.mkv', file_size: 15_000_000_000, format: 'mkv',
+            video_codec: 'hevc', audio_codec: 'aac', duration: 10020,
+            width: 3840, height: 2160, bitrate: 12000000, subtitle_tracks: '',
+            added_at: '2025-01-01T12:00:00Z', modified_at: '2025-01-01T12:00:00Z',
+          },
+        ],
+        total: 2, page: 1, page_size: 20,
+      })),
+    )
+
+    renderLibraryPage()
+
+    // 等列表渲染
+    await screen.findByText('海报.png')
+    await screen.findByText('星际穿越.mkv')
+
+    const pngThumb = screen.getByRole('img', { name: '海报.png' })
+    expect(pngThumb).toHaveAttribute('src', '/api/library/media/200/raw')
+
+    // 视频卡片不应有缩略图（避免范围扩散到 Bug B）
+    expect(screen.queryByRole('img', { name: '星际穿越.mkv' })).not.toBeInTheDocument()
+  })
+
   it('自定义图片后缀扫描出的文件点击预览而非跳转播放', async () => {
     server.use(
       http.get('*/api/library/paths', () => HttpResponse.json({

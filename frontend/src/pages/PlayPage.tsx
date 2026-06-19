@@ -23,6 +23,10 @@ export default function PlayPage() {
   const [subtitleVisible, setSubtitleVisible] = useState(false)
   const [subtitleMenuOpened, setSubtitleMenuOpened] = useState(false)
 
+  // 播放器 URL / ABR 模式：探测 master.m3u8 是否可用；不可用时降级到 /api/play/:id/stream
+  const [playerUrl, setPlayerUrl] = useState<string | null>(null)
+  const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null)
+
   useEffect(() => {
     if (!id) return
     const mediaId = parseInt(id, 10)
@@ -41,6 +45,24 @@ export default function PlayPage() {
     subtitleApi.getSubtitles(mediaId)
       .then((tracks) => setSubtitleTracks(tracks))
       .catch(() => setSubtitleTracks([]))
+
+    // 解析为绝对 URL，避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
+    const toAbsolute = (path: string) => new URL(path, window.location.href).toString()
+    const hlsUrl = toAbsolute(`/api/play/hls/${mediaId}/master.m3u8`)
+    const streamUrl = toAbsolute(`/api/play/${mediaId}/stream`)
+    fetch(hlsUrl, { method: 'GET' }).then((resp) => {
+      // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
+      if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
+        setPlayerUrl(hlsUrl)
+        setPlayerIsABR(true)
+      } else {
+        setPlayerUrl(streamUrl)
+        setPlayerIsABR(false)
+      }
+    }).catch(() => {
+      setPlayerUrl(streamUrl)
+      setPlayerIsABR(false)
+    })
   }, [id])
 
   // 选择字幕轨道
@@ -77,8 +99,6 @@ export default function PlayPage() {
       </Alert>
     )
   }
-
-  const hlsUrl = `/api/play/hls/${media.id}/master.m3u8`
 
   return (
     <Stack gap="md">
@@ -125,13 +145,17 @@ export default function PlayPage() {
         )}
       </Group>
 
-      {/* 播放器 */}
-      <VideoPlayer
-        url={hlsUrl}
-        autoPlay
-        subtitleEntries={subtitleEntries}
-        subtitleVisible={subtitleVisible}
-      />
+      {/* 播放器：探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video） */}
+      {playerUrl && playerIsABR !== null && (
+        <VideoPlayer
+          url={playerUrl}
+          autoPlay
+          subtitleEntries={subtitleEntries}
+          subtitleVisible={subtitleVisible}
+          isABR={playerIsABR}
+          streamType={playerIsABR ? 'mpegts' : 'mp4'}
+        />
+      )}
 
       {/* 媒体信息 */}
       <Paper withBorder p="md" radius="md" bg="dark.7">

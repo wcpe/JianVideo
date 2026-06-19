@@ -439,6 +439,24 @@ export default function LibraryPage({ initialTab = 'timeline' }: LibraryPageProp
                     onClick={() => handleOpenFile(file)}
                     className="hover-card"
                   >
+                    {isImageFile(file) && (
+                      <Box
+                        mb="xs"
+                        style={{
+                          aspectRatio: '16 / 9',
+                          background: 'var(--mantine-color-dark-6)',
+                          overflow: 'hidden',
+                          borderRadius: 4,
+                        }}
+                      >
+                        <img
+                          src={`/api/library/media/${file.id}/raw`}
+                          alt={file.file_name}
+                          loading="lazy"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      </Box>
+                    )}
                     <Text fw={500} truncate mb="xs">{file.file_name}</Text>
                     <Group gap="xs" wrap="nowrap">
                       <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
@@ -517,6 +535,24 @@ export default function LibraryPage({ initialTab = 'timeline' }: LibraryPageProp
                   onClick={() => handleOpenFile(file)}
                   className="hover-card"
                 >
+                  {isImageFile(file) && (
+                    <Box
+                      mb="xs"
+                      style={{
+                        aspectRatio: '16 / 9',
+                        background: 'var(--mantine-color-dark-6)',
+                        overflow: 'hidden',
+                        borderRadius: 4,
+                      }}
+                    >
+                      <img
+                        src={`/api/library/media/${file.id}/raw`}
+                        alt={file.file_name}
+                        loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    </Box>
+                  )}
                   <Text fw={500} truncate mb="xs">{file.file_name}</Text>
                   <Group gap="xs" wrap="nowrap">
                     <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
