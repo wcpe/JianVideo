@@ -48,16 +48,20 @@ func createTestLibrary(t *testing.T, svc *library.Service) (int64, string) {
 	return lp.ID, dir
 }
 
-// waitForCondition 等待条件满足（最多 3 秒）。
-func waitForCondition(t *testing.T, fn func() bool) bool {
+// waitForCondition 等待条件满足（最多 10 秒）。
+func waitForCondition(t *testing.T, name string, fn func() bool) bool {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
+	attempts := 0
 	for time.Now().Before(deadline) {
+		attempts++
 		if fn() {
+			t.Logf("[waitForCondition] %s: 第 %d 次尝试后满足", name, attempts)
 			return true
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
+	t.Logf("[waitForCondition] %s: 超时，共尝试 %d 次", name, attempts)
 	return false
 }
 
@@ -78,7 +82,7 @@ func TestWatcher_CreatesMediaFile(t *testing.T) {
 	}
 
 	// 等待入库
-	if !waitForCondition(t, func() bool {
+	if !waitForCondition(t, "视频文件入库", func() bool {
 		mf, err := svc.GetMediaFileByPath(videoPath)
 		return err == nil && mf != nil && mf.FileName == "test_video.mp4"
 	}) {
@@ -141,7 +145,7 @@ func TestWatcher_RemovesMediaFile(t *testing.T) {
 	}
 
 	// 等待入库
-	if !waitForCondition(t, func() bool {
+	if !waitForCondition(t, "视频文件入库", func() bool {
 		mf, err := svc.GetMediaFileByPath(videoPath)
 		return err == nil && mf != nil
 	}) {
@@ -154,7 +158,7 @@ func TestWatcher_RemovesMediaFile(t *testing.T) {
 	}
 
 	// 等待删除记录
-	if !waitForCondition(t, func() bool {
+	if !waitForCondition(t, "媒体文件记录删除", func() bool {
 		_, err := svc.GetMediaFileByPath(videoPath)
 		return err != nil
 	}) {

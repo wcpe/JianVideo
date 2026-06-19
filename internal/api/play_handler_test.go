@@ -3,10 +3,8 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -37,13 +35,13 @@ func TestStreamHandler_InvalidID(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// 无效 ID 格式应返回 400 或 404
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
-		t.Fatalf("期望 400 或 404, 实际 %d", w.Code)
+	// 无效 ID 格式应返回 400
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
 	}
 }
 
-// TestSeekInvalidInput 测试 Seek 无效输入。
+// TestSeekInvalidInput 测试 Seek 无效 JSON 输入。
 func TestSeekInvalidInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router, _, _ := setupPlayTestRouter(t)
@@ -54,9 +52,9 @@ func TestSeekInvalidInput(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	// 无效输入应返回 400 或 200（取决于实现）
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusOK {
-		t.Fatalf("期望 400 或 200, 实际 %d", w.Code)
+	// position 字段缺失或无效应返回 400
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
 	}
 }
 
@@ -75,8 +73,9 @@ func TestGetProgress(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK && w.Code != http.StatusNotFound {
-		t.Fatalf("期望 200 或 404, 实际 %d", w.Code)
+	// 已上报进度，应返回 200
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d", w.Code)
 	}
 }
 
@@ -123,8 +122,8 @@ func TestStreamInvalidIDFormat(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
-		t.Fatalf("期望 400 或 404, 实际 %d", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
 	}
 }
 
@@ -139,22 +138,7 @@ func TestSeekInvalidJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusOK {
-		t.Fatalf("期望 400 或 200, 实际 %d", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
 	}
 }
-
-// assertContains 验证 args 中存在 flag=value 对。
-func assertContains(t *testing.T, args []string, flag, value string) {
-	t.Helper()
-	for i, a := range args {
-		if a == flag && i+1 < len(args) && args[i+1] == value {
-			return
-		}
-	}
-	t.Fatalf("参数中未找到 %s %s, 实际: %v", flag, value, args)
-}
-
-// 确保 strings 包被使用。
-var _ = strings.Contains
-var _ = fmt.Sprintf

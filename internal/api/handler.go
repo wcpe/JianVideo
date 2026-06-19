@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -68,8 +69,16 @@ func (h *Handler) DeleteLibraryPath(c *gin.Context) {
 func (h *Handler) ListMediaFiles(c *gin.Context) {
 	libraryID, _ := strconv.ParseInt(c.Query("library_id"), 10, 64)
 	sort := c.DefaultQuery("sort", "time_desc")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		log.Printf("[WARN] 分页参数 page 解析失败，使用默认值: %s", c.Query("page"))
+		page = 1
+	}
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if err != nil || pageSize < 1 || pageSize > 100 {
+		log.Printf("[WARN] 分页参数 page_size 解析失败，使用默认值: %s", c.Query("page_size"))
+		pageSize = 20
+	}
 	search := c.Query("search")
 
 	items, total, err := h.library.ListMediaFiles(libraryID, sort, search, page, pageSize)

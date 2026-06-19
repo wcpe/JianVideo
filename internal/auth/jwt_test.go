@@ -67,3 +67,48 @@ func TestParseToken_Tampered(t *testing.T) {
 		t.Fatal("篡改令牌解析应失败")
 	}
 }
+
+func TestParseToken_EmptyToken(t *testing.T) {
+	_, err := ParseToken("", "secret")
+	if err == nil {
+		t.Fatal("空令牌解析应失败")
+	}
+}
+
+func TestParseToken_InvalidFormat(t *testing.T) {
+	_, err := ParseToken("not.a.valid.jwt.token", "secret")
+	if err == nil {
+		t.Fatal("格式错误的令牌解析应失败")
+	}
+}
+
+func TestParseToken_EmptySecret(t *testing.T) {
+	token, err := GenerateToken("admin", "secret", time.Hour)
+	if err != nil {
+		t.Fatalf("生成令牌失败: %v", err)
+	}
+
+	// 用空密钥解析（与生成密钥不同，应失败）
+	_, err = ParseToken(token, "")
+	if err == nil {
+		t.Fatal("用空密钥解析应失败")
+	}
+}
+
+func TestGenerateToken_EmptyUsername(t *testing.T) {
+	token, err := GenerateToken("", "secret", time.Hour)
+	if err != nil {
+		t.Fatalf("空用户名生成令牌应成功: %v", err)
+	}
+	if token == "" {
+		t.Fatal("令牌不应为空")
+	}
+
+	claims, err := ParseToken(token, "secret")
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if claims.Username != "" {
+		t.Fatal("用户名为空")
+	}
+}

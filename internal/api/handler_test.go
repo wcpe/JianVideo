@@ -166,3 +166,78 @@ func TestScanLibrary_API(t *testing.T) {
 		t.Fatalf("期望 scanned=1, 实际 %v", resp["scanned"])
 	}
 }
+
+// ─── 错误路径测试 ──────────────────────────────────────
+
+func TestCreateLibraryPath_InvalidJSON(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/library/paths", bytes.NewBufferString("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
+	}
+}
+
+func TestDeleteLibraryPath_InvalidID(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("DELETE", "/api/library/paths/abc", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
+	}
+}
+
+func TestGetMediaFile_InvalidID(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/library/media/abc", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
+	}
+}
+
+func TestGetMediaFile_NotFound(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/library/media/99999", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("期望 404, 实际 %d", w.Code)
+	}
+}
+
+func TestDeleteMediaFile_InvalidID(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("DELETE", "/api/library/media/abc", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
+	}
+}
+
+func TestScanLibrary_InvalidID(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/library/scan/abc", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("期望 400, 实际 %d", w.Code)
+	}
+}

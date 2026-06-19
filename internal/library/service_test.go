@@ -208,6 +208,66 @@ func TestDeleteMediaFile(t *testing.T) {
 	}
 }
 
+func TestGetMediaFileByID_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, err := svc.GetMediaFileByID(99999)
+	if err == nil {
+		t.Fatal("不存在的媒体文件应返回错误")
+	}
+}
+
+func TestDeleteMediaFile_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	err := svc.DeleteMediaFile(99999)
+	if err == nil {
+		t.Fatal("删除不存在的媒体文件应返回错误")
+	}
+}
+
+func TestCreateMediaFile_EmptyPath(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, err := svc.CreateMediaFile(1, "", 1024)
+	if err == nil {
+		t.Fatal("空路径应返回错误")
+	}
+}
+
+func TestCreateLibraryPath_EmptyPath(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, err := svc.CreateLibraryPath("", "local", "")
+	if err == nil {
+		t.Fatal("空路径应返回错误")
+	}
+}
+
+func TestDeleteLibraryPath_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	err := svc.DeleteLibraryPath(99999)
+	if err == nil {
+		t.Fatal("删除不存在的目录应返回错误")
+	}
+}
+
+func TestListMediaFiles_EmptyResult(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	items, total, err := svc.ListMediaFiles(1, "time_desc", "nonexistent", 1, 20)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("期望 total=0, 实际 %d", total)
+	}
+	if len(items) != 0 {
+		t.Fatalf("期望空列表, 实际 %d 条", len(items))
+	}
+}
+
 func TestScanLibrary(t *testing.T) {
 	svc, _ := newTestService(t)
 
