@@ -8,6 +8,8 @@ interface AuthState {
   isAuthenticated: boolean
   loading: boolean
   error: string | null
+  /** JWT token（可选，用于 Authorization header） */
+  token?: string
   /** 登录 */
   login: (username: string, password: string) => Promise<void>
   /** 登出 */

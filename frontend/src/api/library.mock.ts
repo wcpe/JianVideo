@@ -32,7 +32,7 @@ export async function createLibraryPath(path: string, type = 'local', label = ''
     path,
     type,
     label: label || path,
-    enabled: 1,
+    enabled: true,
     created_at: new Date().toISOString(),
   }
   paths.push(p)

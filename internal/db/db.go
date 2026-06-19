@@ -28,6 +28,14 @@ func Open(dataSourceName string) (*sql.DB, error) {
 // InitSchema 初始化数据库表结构
 func InitSchema(d *sql.DB) error {
 	queries := []string{
+		`CREATE TABLE IF NOT EXISTS library_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'local',
+    label TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);`,
 		`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,

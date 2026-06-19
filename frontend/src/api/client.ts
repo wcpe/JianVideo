@@ -9,7 +9,7 @@ const client = axios.create({
 
 // 请求拦截器：自动附加 token
 client.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token
+  const token = useAuthStore.getState().token as string | undefined
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }

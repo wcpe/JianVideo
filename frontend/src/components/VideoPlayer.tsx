@@ -85,9 +85,9 @@ export default function VideoPlayer({
   const destroyMpegtsPlayer = useCallback(() => {
     const player = mpegtsPlayerRef.current
     if (player) {
-      player.off('loadeddata')
-      player.off('playing')
-      player.off('pause')
+      player.off('loadeddata', () => {})
+      player.off('playing', () => {})
+      player.off('pause', () => {})
       player.pause()
       player.unload()
       player.destroy()
@@ -185,7 +185,7 @@ export default function VideoPlayer({
         hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
           const level = hls.levels[data.level]
           if (level) {
-            console.info(`[VideoPlayer] ABR 切换到: ${level.width}x${height}, ${level.bitrate}`)
+            console.info(`[VideoPlayer] ABR 切换到: ${level.width}x${level.height}, ${level.bitrate}`)
           }
         })
 
@@ -274,14 +274,6 @@ export default function VideoPlayer({
     }
   }
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value)
-    const video = videoRef.current
-    if (!video) return
-    video.currentTime = time
-    setCurrentTime(time)
-  }
-
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value)
     const video = videoRef.current
@@ -368,19 +360,11 @@ export default function VideoPlayer({
             size={4}
             radius="xl"
             animated
-            sections={[
-              {
-                value: duration > 0 ? (currentTime / duration) * 100 : 0,
-                color: 'blue',
-                label: '播放进度',
-              },
-              {
-                value: Math.max(0, bufferedProgress - (duration > 0 ? (currentTime / duration) * 100 : 0)),
-                color: 'cyan',
-                label: '缓冲进度',
-              },
-            ]}
-          />
+            value={duration > 0 ? (currentTime / duration) * 100 : 0}
+          >
+            <Progress.Section value={duration > 0 ? (currentTime / duration) * 100 : 0} color="blue" />
+            <Progress.Section value={Math.max(0, bufferedProgress - (duration > 0 ? (currentTime / duration) * 100 : 0))} color="cyan" />
+          </Progress>
           <span className="text-xs text-slate-400 tabular-nums">
             {formatTime(duration)}
           </span>

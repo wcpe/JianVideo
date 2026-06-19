@@ -6,9 +6,9 @@ import type { LibraryPath, MediaFile } from '@/types'
 
 // 可变数据（支持增删）
 let paths: LibraryPath[] = [
-  { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: 1, created_at: '2025-01-01T12:00:00Z' },
-  { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: 1, created_at: '2025-01-02T12:00:00Z' },
-  { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: 1, created_at: '2025-01-03T12:00:00Z' },
+  { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z' },
+  { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T12:00:00Z' },
+  { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-03T12:00:00Z' },
 ]
 
 let mediaFiles: MediaFile[] = [
