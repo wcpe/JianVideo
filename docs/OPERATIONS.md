@@ -6,7 +6,7 @@
 
 ### 前置依赖
 
-- **FFmpeg**：需安装 FFmpeg 并确保在系统 PATH 中，或通过 `config.yml` 的 `ffmpeg_path` 指定路径。
+- **FFmpeg**：需安装 FFmpeg 并确保在系统 PATH 中，或通过环境变量 `FFMPEG_PATH` / `FFPROBE_PATH` 指定路径。
 - **硬件加速驱动**（可选）：
   - Intel QSV：安装 Intel Media SDK / VAAPI 驱动
   - NVIDIA NVENC：安装 NVIDIA 驱动 + CUDA
@@ -14,21 +14,27 @@
 
 ### 配置
 
-首次运行前创建 `config.yml`：
+通过环境变量或命令行参数配置（优先级：环境变量 > 命令行参数 > 默认值）：
 
-```yaml
-# 服务端口
-server_port: 8080
+| 环境变量 | 说明 | 默认值 |
+|---|---|---|
+| `SERVER_PORT` | 服务端口 | `8080` |
+| `JWT_SECRET` | JWT 签名密钥（未设置时自动生成随机值） | 随机生成 |
+| `JWT_EXPIRES_IN` | JWT 过期时间 | `72h` |
+| `DB_PATH` | 数据库文件路径 | `jianvideo.db` |
+| `FFMPEG_PATH` | FFmpeg 可执行文件路径 | 从 PATH 查找 |
+| `FFPROBE_PATH` | ffprobe 可执行文件路径 | 从 PATH 查找 |
+| `SMB_MASTER_PASSWORD` | SMB 凭据加密主密码 | `default-master-password`（不推荐生产使用） |
 
-# FFmpeg 路径（留空则从 PATH 查找）
-ffmpeg_path: ""
-ffprobe_path: ""
+### SMB 凭据管理
 
-# 媒体库目录
-library_paths:
-  - path: /media/movies
-    type: local
-    label: 电影
+SMB 凭据通过 API 管理，加密存储在 `data/smb_credentials.enc`：
+
+```bash
+# 保存 SMB 凭据
+curl -X POST http://localhost:8080/api/smb/credentials \
+  -H "Content-Type: application/json" \
+  -d '{"host":"192.168.1.100","username":"user","password":"pass","share":"ShareName","domain":"WORKGROUP","master_password":"your-master-password"}'
 ```
 
 ### 启动
@@ -104,4 +110,7 @@ cp data/jianvideo.db.bak data/jianvideo.db
 | 播放卡顿 | 检查网络带宽、CPU 占用 | 降低转码码率或启用硬件加速 |
 | Seek 后黑屏 | 检查 GOP 设置是否正确 | 确认 FFmpeg 使用了固定 GOP 参数 |
 | 媒体库不更新 | 检查目录权限、fsnotify 是否正常工作 | 查看日志中的 watcher 错误，尝试重启服务 |
-| SMB 路径无法访问 | 检查网络连通性、凭据是否正确 | 验证 SMB 路径在操作系统中可正常访问 |
+| SMB 路径无法访问 | 检查网络连通性、凭据是否正确 | 通过 `POST /api/smb/credentials` 配置凭据，验证 SMB 路径可达 |
+| SMB 凭据丢失 | 凭据加密密钥（`SMB_MASTER_PASSWORD`）更换后无法解密 | 使用旧主密码重新加密或删除 `data/smb_credentials.enc` 后重新配置 |
+| 字幕不显示 | 检查字幕文件是否与视频同名同目录 | 通过 `GET /api/play/:id/subtitles` 验证字幕轨道列表 |
+| ABR 不生效 | 检查浏览器是否支持 hls.js、master.m3u8 是否可访问 | 验证 `GET /api/play/hls/:id/master.m3u8` 返回有效的多码率索引 |

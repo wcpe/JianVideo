@@ -59,4 +59,33 @@
 ### 移除
 （无）
 
+### 修复（二期 FR 审查修复）
+- **CRITICAL**：SMB 流式播放中 `smbReadSeeker.Close()` 不再调用 `client.Disconnect()`，避免 HTTP 分块传输中途断开 SMB 会话
+- **CRITICAL**：`GetProgress` 的 `exists` 检查移入 `RLock` 内，消除 nil 指针解引用风险
+- **HIGH**：`openSMBFile` 加载凭据后检查 `creds == nil`，给出明确错误提示而非 panic
+- **HIGH**：`saveSMBConfig` 主密码改为从 `SMB_MASTER_PASSWORD` 环境变量读取
+- **HIGH**：`router.go` 所有播放路由添加 `parseMediaID` 错误处理，与 HLS 路由一致
+- **HIGH**：`MultiPipeline.RunMulti` 添加 `dsts` 参数被忽略的 WARN 日志
+- **HIGH**：`Credentials` 增加 `Domain` 字段，支持企业 Windows AD 环境
+- **MEDIUM**：`Service.smbCreds` 添加 `smbCredsMu` 读写锁保护并发安全
+- **MEDIUM**：`Watcher.pathToLib` 读取加 `RLock` 保护
+- **MEDIUM**：`HLSSegmentWriter.Close` 添加 `closed` 标志防止重复关闭
+- **MEDIUM**：`WriteSegment` 移除每次 `Sync()`，改为 `Close()` 时一次性 sync
+- **MEDIUM**：`BrowseDirectory` 入口添加 `filepath.Clean` + `..` 路径遍历校验
+- **MEDIUM**：`smbfs.normalize` 添加 `..` 过滤
+- **MEDIUM**：`smb.Client.EnsureConnected` 使用 `sync.Once` 消除竞态窗口
+- **MEDIUM**：`GetSubtitles` 对 SMB 路径返回空列表
+- **MEDIUM**：`GetSubtitleContent` 空内容返回 204
+- **MEDIUM**：`LibraryPage` catch 块不再静默吞错，添加错误状态和 UI 提示
+- **MEDIUM**：`LibraryPage.activeTab` 同步到 URL query 参数
+- **MEDIUM**：`LibraryPage` paths 变化时使用 `useRef` 追踪初始化，不重置浏览状态
+- **MEDIUM**：`SubtitleEntry` 接口统一到 `types/index.ts`，消除重复定义
+- **MEDIUM**：`VideoPlayer` 自动播放被阻止时显示"点击播放"提示
+- **MEDIUM**：`VideoPlayer.hlsRef` 类型从 `unknown` 改为 `Hls`
+- **LOW**：`master_test.go` 使用 `strconv.Itoa` 替代自定义 `itoa`
+- **LOW**：`credentials.go` 添加 `saltLen`/`nonceLen` 常量
+- **LOW**：`Watcher.Stop` 先关闭 watcher 再关闭 done 通道
+- **LOW**：`Credentials.Password` 添加 `json:"-"` 标签
+- **LOW**：新增 `credentials_test.go` 覆盖加解密 roundtrip、错误密码、空输入
+
 > 发版时把"未发布版本"段切成 `## [X.Y.Z] - YYYY-MM-DD`，再新建空的"未发布版本"段。

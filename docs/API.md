@@ -197,7 +197,8 @@
 
 ### 获取 HLS 切片
 
-- **方法 / 路径**：`GET /api/play/hls/:id/1080p_segment_001.ts`
+- **方法 / 路径**：`GET /api/play/hls/:id/:quality_segment_001.ts`
+  - `:quality` 为码率档位：`1080p` / `720p` / `480p`
 - **响应**（200）：`Content-Type: video/mp2t`
 
 ### 获取 ABR Master Playlist
@@ -254,6 +255,24 @@
 - **响应**（200）：`Content-Type: text/vtt; charset=utf-8`
 - **说明**：返回指定字幕轨道的 WebVTT 转换内容，SUP 格式返回空 WebVTT 占位
 - **错误**：`400` 索引格式无效，`404` 索引超出范围
+
+### 保存 SMB 凭据
+
+- **方法 / 路径**：`POST /api/smb/credentials`
+- **请求**：
+  ```json
+  {
+    "host": "192.168.1.100",
+    "username": "user",
+    "password": "pass",
+    "share": "ShareName",
+    "domain": "WORKGROUP",
+    "master_password": "your-master-password"
+  }
+  ```
+- **响应**（204）：空
+- **说明**：SMB 凭据使用 AES-256-GCM 加密后存储在本地文件（`data/smb_credentials.enc`），主密码通过 `SMB_MASTER_PASSWORD` 环境变量配置
+- **错误**：`400` 请求参数错误，`500` 加密/存储失败
 
 ### 获取系统配置
 
