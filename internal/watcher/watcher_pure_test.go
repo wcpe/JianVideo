@@ -33,8 +33,8 @@ func buildBreadcrumbs(path string) []models.BreadcrumbItem {
 	return items
 }
 
-// TestIsVideoFile 表驱动测试：验证各种文件路径是否为视频文件。
-func TestIsVideoFile(t *testing.T) {
+// TestIsMediaFile 表驱动测试：验证各种文件路径是否为媒体文件。
+func TestIsMediaFile(t *testing.T) {
 	tests := []struct {
 		path   string
 		expect bool
@@ -50,24 +50,26 @@ func TestIsVideoFile(t *testing.T) {
 		{"test.flv", true},
 		{"test.wmv", true},
 		{"test.m4v", true},
+		{"test.jpg", true},
+		{"test.PNG", true},
+		{"test.webp", true},
 		{"test.txt", false},
-		{"test.jpg", false},
 		{"test", false},
 		{"", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			assert.Equal(t, tt.expect, isVideoFile(tt.path))
+			assert.Equal(t, tt.expect, isMediaFile(tt.path))
 		})
 	}
 }
 
-// TestIsVideoFile_ExtCaseInsensitive 验证大写扩展名均返回 true。
-func TestIsVideoFile_ExtCaseInsensitive(t *testing.T) {
-	exts := []string{".MP4", ".MKV", ".AVI"}
+// TestIsMediaFile_ExtCaseInsensitive 验证大写扩展名均返回 true。
+func TestIsMediaFile_ExtCaseInsensitive(t *testing.T) {
+	exts := []string{".MP4", ".MKV", ".AVI", ".JPG", ".PNG"}
 	for _, ext := range exts {
 		t.Run(ext, func(t *testing.T) {
-			assert.True(t, isVideoFile("video"+ext))
+			assert.True(t, isMediaFile("media"+ext))
 		})
 	}
 }
@@ -76,9 +78,9 @@ func TestIsVideoFile_ExtCaseInsensitive(t *testing.T) {
 func TestFindLibraryID(t *testing.T) {
 	w := &Watcher{
 		pathToLib: map[string]int64{
-			sep + "movies":             1,
+			sep + "movies":                  1,
 			sep + "movies" + sep + "action": 2,
-			sep + "tv":                 3,
+			sep + "tv":                      3,
 		},
 	}
 
@@ -177,5 +179,3 @@ func TestNewWatcher(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, w)
 }
-
-

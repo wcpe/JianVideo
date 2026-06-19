@@ -20,9 +20,25 @@ import (
 
 // Service 媒体库业务逻辑。
 type Service struct {
-	db       *gorm.DB
-	smbCreds *smb.CredentialStore
+	db         *gorm.DB
+	smbCreds   *smb.CredentialStore
 	smbCredsMu sync.RWMutex
+}
+
+// 媒体类型常量。
+const (
+	MediaTypeVideo = "video"
+	MediaTypeImage = "image"
+)
+
+var builtInMediaExtensions = map[string]string{
+	"mp4": MediaTypeVideo, "mkv": MediaTypeVideo, "avi": MediaTypeVideo, "mov": MediaTypeVideo,
+	"webm": MediaTypeVideo, "flv": MediaTypeVideo, "wmv": MediaTypeVideo, "ts": MediaTypeVideo,
+	"m4v": MediaTypeVideo, "mpg": MediaTypeVideo, "mpeg": MediaTypeVideo, "3gp": MediaTypeVideo,
+	"rmvb": MediaTypeVideo, "rm": MediaTypeVideo,
+	"jpg": MediaTypeImage, "jpeg": MediaTypeImage, "png": MediaTypeImage, "gif": MediaTypeImage,
+	"webp": MediaTypeImage, "bmp": MediaTypeImage, "tif": MediaTypeImage, "tiff": MediaTypeImage,
+	"heic": MediaTypeImage, "heif": MediaTypeImage,
 }
 
 // NewService 创建媒体库服务。
@@ -43,16 +59,33 @@ func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.Librar
 		return nil, fmt.Errorf("路径不能为空")
 	}
 
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
+	if dirType == "" {
+		dirType = "local"
+	}
+	if dirType != "local" && dirType != "smb" {
+		return nil, fmt.Errorf("目录类型不支持")
 	}
 
-	// 统一存储为正斜杠，保证跨平台 LIKE 查询一致
-	absPath = filepath.ToSlash(absPath)
+	storedPath := path
+	if dirType == "local" {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("本地路径不可访问: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("本地路径不是目录")
+		}
+		storedPath, err = filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		storedPath = filepath.ToSlash(storedPath)
+	} else {
+		storedPath = normalizeSMBLibraryPath(path)
+	}
 
 	lp := &models.LibraryPath{
-		Path:    absPath,
+		Path:    storedPath,
 		Type:    dirType,
 		Label:   label,
 		Enabled: 1,
@@ -85,6 +118,9 @@ func (s *Service) GetLibraryPathByID(id int64) (*models.LibraryPath, error) {
 func (s *Service) DeleteLibraryPath(id int64) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("library_id = ?", id).Delete(&models.MediaFile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("library_id = ?", id).Delete(&models.MediaExtension{}).Error; err != nil {
 			return err
 		}
 		result := tx.Delete(&models.LibraryPath{}, id)
@@ -198,10 +234,26 @@ func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error)
 	return &mf, nil
 }
 
+// GetMediaFileByLibraryAndPath 根据媒体库和文件路径查询媒体文件。
+func (s *Service) GetMediaFileByLibraryAndPath(libraryID int64, filePath string) (*models.MediaFile, error) {
+	filePath = filepath.ToSlash(filePath)
+	var mf models.MediaFile
+	if err := s.db.Where("library_id = ? AND file_path = ?", libraryID, filePath).First(&mf).Error; err != nil {
+		return nil, err
+	}
+	return &mf, nil
+}
+
 // DeleteMediaFileByPath 根据文件路径删除媒体文件记录。
 func (s *Service) DeleteMediaFileByPath(filePath string) error {
 	filePath = filepath.ToSlash(filePath)
 	return s.db.Where("file_path = ?", filePath).Delete(&models.MediaFile{}).Error
+}
+
+// DeleteMediaFileByLibraryAndPath 根据媒体库和文件路径删除媒体文件记录。
+func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath string) error {
+	filePath = filepath.ToSlash(filePath)
+	return s.db.Where("library_id = ? AND file_path = ?", libraryID, filePath).Delete(&models.MediaFile{}).Error
 }
 
 // BrowseDirectory 浏览指定目录下的子目录和媒体文件。
@@ -233,8 +285,11 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 	files := make([]models.MediaFile, 0)
 
 	for _, f := range allFiles {
-		// 去掉 parentPath 前缀，得到相对路径
-		rel := strings.TrimPrefix(f.FilePath, prefix)
+		// 去掉 parentPath 前缀，得到相对路径；Windows 路径需要兼容盘符大小写差异
+		rel, ok := trimPathPrefix(f.FilePath, prefix)
+		if !ok {
+			continue
+		}
 		// 如果包含 / 说明在子目录中
 		if idx := strings.Index(rel, "/"); idx != -1 {
 			dirName := rel[:idx]
@@ -250,7 +305,7 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 	for name := range dirSet {
 		dirs = append(dirs, models.DirInfo{
 			Name: name,
-			Path: prefix + name,
+			Path: joinSlashPath(trimmedPath, name),
 		})
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
@@ -273,7 +328,11 @@ func buildBreadcrumbs(path string) []models.BreadcrumbItem {
 		if p == "" {
 			continue
 		}
-		current += "/" + p
+		if isWindowsDrivePart(p) && current == "" {
+			current = p
+		} else {
+			current = strings.TrimRight(current, "/") + "/" + p
+		}
 		items = append(items, models.BreadcrumbItem{
 			Name: p,
 			Path: current,
@@ -285,13 +344,46 @@ func buildBreadcrumbs(path string) []models.BreadcrumbItem {
 	return items
 }
 
-// ScanLibrary 扫描指定目录，索引所有视频文件。
+func joinSlashPath(parent, name string) string {
+	if parent == "" || parent == "/" {
+		return "/" + name
+	}
+	return strings.TrimRight(parent, "/") + "/" + name
+}
+
+func trimPathPrefix(path, prefix string) (string, bool) {
+	if strings.HasPrefix(path, prefix) {
+		return strings.TrimPrefix(path, prefix), true
+	}
+	if strings.HasPrefix(strings.ToLower(path), strings.ToLower(prefix)) {
+		return path[len(prefix):], true
+	}
+	return "", false
+}
+
+func isWindowsDrivePart(part string) bool {
+	if len(part) != 2 || part[1] != ':' {
+		return false
+	}
+	ch := part[0]
+	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func normalizeSMBLibraryPath(path string) string {
+	p := strings.TrimSpace(path)
+	p = strings.TrimPrefix(p, "smb://")
+	p = strings.TrimLeft(p, `\\`)
+	p = strings.ReplaceAll(p, `\`, "/")
+	return strings.Trim(p, "/")
+}
+
+// ScanLibrary 扫描指定目录，索引所有媒体文件。
 // 根据 dirType 分发到本地扫描或 SMB 扫描。
 func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
 	return s.ScanLibraryWithType(libraryID, dirPath, "local")
 }
 
-// ScanLibraryWithType 按类型扫描指定目录，索引所有视频文件。
+// ScanLibraryWithType 按类型扫描指定目录，索引所有媒体文件。
 func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) (int, error) {
 	switch dirType {
 	case "smb":
@@ -303,36 +395,35 @@ func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) 
 
 // scanLocalLibrary 扫描本地目录。
 func (s *Service) scanLocalLibrary(libraryID int64, dirPath string) (int, error) {
-	entries, err := os.ReadDir(dirPath)
+	policy, err := s.mediaExtensionPolicy(libraryID)
 	if err != nil {
 		return 0, err
 	}
 
-	videoExts := map[string]bool{
-		"mp4": true, "mkv": true, "avi": true, "mov": true,
-		"webm": true, "flv": true, "wmv": true, "ts": true,
-		"m4v": true, "mpg": true, "mpeg": true, "3gp": true,
-		"rmvb": true, "rm": true,
-	}
-
 	// 收集所有待检查路径
 	var paths []string
-	for _, entry := range entries {
+	err = filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
 		if entry.IsDir() {
-			continue
+			return nil
 		}
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(entry.Name()), "."))
-		if !videoExts[ext] {
-			continue
+		if !policy.IsMediaFile(path) {
+			return nil
 		}
-		paths = append(paths, filepath.Join(dirPath, entry.Name()))
+		paths = append(paths, path)
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
 
 	if len(paths) == 0 {
 		return 0, nil
 	}
 
-	return s.indexVideoFiles(libraryID, paths)
+	return s.indexMediaFiles(libraryID, paths)
 }
 
 // scanSMBLibrary 扫描 SMB 共享目录。
@@ -350,10 +441,19 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 		remotePath = parts[2]
 	}
 
+	policy, err := s.mediaExtensionPolicy(libraryID)
+	if err != nil {
+		return 0, err
+	}
+
 	// 从凭据存储加载凭据
 	s.smbCredsMu.RLock()
-	creds, err := s.smbCreds.Load("")
+	store := s.smbCreds
 	s.smbCredsMu.RUnlock()
+	if store == nil {
+		return 0, fmt.Errorf("未配置 SMB 凭据")
+	}
+	creds, err := store.Load("")
 	if err != nil {
 		return 0, fmt.Errorf("加载 SMB 凭据失败: %w", err)
 	}
@@ -378,8 +478,7 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 		if d.IsDir() {
 			return nil
 		}
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(d.Name()), "."))
-		if !isVideoExt(ext) {
+		if !policy.IsMediaFile(d.Name()) {
 			return nil
 		}
 		// 使用 smb://host/share/path 格式作为唯一标识
@@ -397,8 +496,8 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 	return s.indexSMBMediaFiles(libraryID, paths, smbFS)
 }
 
-// indexVideoFiles 将本地视频文件路径批量入库。
-func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) {
+// indexMediaFiles 将本地媒体文件路径批量入库。
+func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) {
 	// 统一所有路径为正斜杠，保证跨平台查询和去重一致
 	normalizedPaths := make([]string, len(paths))
 	for i, p := range paths {
@@ -407,7 +506,7 @@ func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) 
 
 	// 批量查询已有记录，避免 N+1 查询
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("file_path IN ?", normalizedPaths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("library_id = ? AND file_path IN ?", libraryID, normalizedPaths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -436,10 +535,10 @@ func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) 
 	return count, nil
 }
 
-// indexSMBMediaFiles 将 SMB 视频文件路径批量入库。
+// indexSMBMediaFiles 将 SMB 媒体文件路径批量入库。
 func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb.FS) (int, error) {
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("file_path IN ?", paths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("library_id = ? AND file_path IN ?", libraryID, paths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -476,12 +575,160 @@ func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb
 	return count, nil
 }
 
-// isVideoExt 判断扩展名是否为视频格式。
-func isVideoExt(ext string) bool {
-	switch ext {
-	case "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "ts",
-		"m4v", "mpg", "mpeg", "3gp", "rmvb", "rm":
-		return true
+// ListMediaExtensions 查询指定媒体库的媒体后缀。
+func (s *Service) ListMediaExtensions(libraryID int64) ([]models.MediaExtension, error) {
+	custom, err := s.listCustomMediaExtensions(libraryID)
+	if err != nil {
+		return nil, err
 	}
-	return false
+
+	items := make([]models.MediaExtension, 0, len(builtInMediaExtensions)+len(custom))
+	for ext, mediaType := range builtInMediaExtensions {
+		items = append(items, models.MediaExtension{LibraryID: libraryID, Extension: ext, Type: mediaType, IsBuiltIn: 1})
+	}
+	items = append(items, custom...)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Extension == items[j].Extension {
+			return items[i].IsBuiltIn > items[j].IsBuiltIn
+		}
+		return items[i].Extension < items[j].Extension
+	})
+	return items, nil
+}
+
+// AddMediaExtension 添加媒体库自定义后缀。
+func (s *Service) AddMediaExtension(libraryID int64, extension, mediaType string) error {
+	ext := normalizeExtension(extension)
+	if libraryID <= 0 {
+		return fmt.Errorf("媒体库 ID 无效")
+	}
+	if !isAllowedCustomExtension(ext) {
+		return fmt.Errorf("后缀格式不支持")
+	}
+	if mediaType != MediaTypeVideo && mediaType != MediaTypeImage {
+		return fmt.Errorf("媒体类型不支持")
+	}
+	if err := s.ensureLibraryPathExists(libraryID); err != nil {
+		return err
+	}
+	if _, ok := builtInMediaExtensions[ext]; ok {
+		return nil
+	}
+
+	item := models.MediaExtension{LibraryID: libraryID, Extension: ext, Type: mediaType, IsBuiltIn: 0}
+	return s.db.Where(models.MediaExtension{LibraryID: libraryID, Extension: ext}).Attrs(item).FirstOrCreate(&item).Error
+}
+
+// IsMediaFile 判断文件是否为内置支持的媒体文件。
+func (s *Service) IsMediaFile(path string) bool {
+	_, ok := mediaTypeByExtension(normalizeExtension(filepath.Ext(path)))
+	return ok
+}
+
+// IsMediaFileForLibrary 判断文件是否为指定媒体库支持的媒体文件。
+func (s *Service) IsMediaFileForLibrary(libraryID int64, path string) bool {
+	_, ok := s.MediaTypeByPathForLibrary(libraryID, path)
+	return ok
+}
+
+// IsImageFile 判断文件是否为支持的图片文件。
+func (s *Service) IsImageFile(path string) bool {
+	mediaType, ok := mediaTypeByExtension(normalizeExtension(filepath.Ext(path)))
+	return ok && mediaType == MediaTypeImage
+}
+
+// MediaTypeByPathForLibrary 根据媒体库与路径后缀获取媒体类型。
+func (s *Service) MediaTypeByPathForLibrary(libraryID int64, path string) (string, bool) {
+	policy, err := s.mediaExtensionPolicy(libraryID)
+	if err != nil {
+		return "", false
+	}
+	return policy.MediaTypeByPath(path)
+}
+
+type mediaExtensionPolicy map[string]string
+
+func (p mediaExtensionPolicy) IsMediaFile(path string) bool {
+	_, ok := p.MediaTypeByPath(path)
+	return ok
+}
+
+func (p mediaExtensionPolicy) MediaTypeByPath(path string) (string, bool) {
+	ext := normalizeExtension(filepath.Ext(path))
+	if ext == "" {
+		return "", false
+	}
+	mediaType, ok := p[ext]
+	return mediaType, ok
+}
+
+func mediaTypeByExtension(ext string) (string, bool) {
+	if ext == "" {
+		return "", false
+	}
+	mediaType, ok := builtInMediaExtensions[ext]
+	return mediaType, ok
+}
+
+func (s *Service) mediaExtensionPolicy(libraryID int64) (mediaExtensionPolicy, error) {
+	policy := make(mediaExtensionPolicy, len(builtInMediaExtensions))
+	for ext, mediaType := range builtInMediaExtensions {
+		policy[ext] = mediaType
+	}
+	if s.db == nil || libraryID <= 0 {
+		return policy, nil
+	}
+	custom, err := s.listCustomMediaExtensions(libraryID)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range custom {
+		policy[item.Extension] = item.Type
+	}
+	return policy, nil
+}
+
+func (s *Service) listCustomMediaExtensions(libraryID int64) ([]models.MediaExtension, error) {
+	var custom []models.MediaExtension
+	query := s.db.Order("extension ASC")
+	if libraryID > 0 {
+		query = query.Where("library_id = ?", libraryID)
+	}
+	if err := query.Find(&custom).Error; err != nil {
+		return nil, err
+	}
+	return custom, nil
+}
+
+func (s *Service) ensureLibraryPathExists(libraryID int64) error {
+	var count int64
+	if err := s.db.Model(&models.LibraryPath{}).Where("id = ?", libraryID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("媒体库目录不存在")
+	}
+	return nil
+}
+
+func normalizeExtension(extension string) string {
+	ext := strings.TrimSpace(strings.ToLower(extension))
+	ext = strings.TrimPrefix(ext, ".")
+	return ext
+}
+
+func isAllowedCustomExtension(ext string) bool {
+	if ext == "" || len(ext) > 16 {
+		return false
+	}
+	for _, ch := range ext {
+		if ch >= 'a' && ch <= 'z' {
+			continue
+		}
+		if ch >= '0' && ch <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }

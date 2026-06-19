@@ -46,6 +46,19 @@ export interface ScanResponse {
   scanned: number
 }
 
+/** 媒体库后缀类型 */
+export type MediaExtensionType = 'video' | 'image'
+
+/** 媒体库后缀配置 */
+export interface MediaExtension {
+  id?: number
+  library_id: number
+  extension: string
+  type: MediaExtensionType
+  is_builtin: number
+  created_at?: string
+}
+
 /** 面包屑路径段 */
 export interface BreadcrumbItem {
   name: string

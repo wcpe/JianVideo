@@ -19,6 +19,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	db.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
+		&models.MediaExtension{},
 		&models.User{},
 		&models.PlaybackSession{},
 	)

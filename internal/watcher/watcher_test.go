@@ -17,11 +17,17 @@ import (
 // newTestWatcher 创建带内存数据库的测试监听器。
 func newTestWatcher(t *testing.T) (*Watcher, *library.Service, *gorm.DB, func()) {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	gdb, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}); err != nil {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	// SQLite 内存库按连接隔离，watcher 异步写入必须复用同一连接
+	sqlDB.SetMaxOpenConns(1)
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
@@ -33,6 +39,7 @@ func newTestWatcher(t *testing.T) (*Watcher, *library.Service, *gorm.DB, func())
 
 	cleanup := func() {
 		w.Stop()
+		_ = sqlDB.Close()
 	}
 
 	return w, svc, gdb, cleanup
@@ -104,7 +111,67 @@ func TestWatcher_CreatesMediaFile(t *testing.T) {
 	_ = gdb
 }
 
-func TestWatcher_IgnoresNonVideoFiles(t *testing.T) {
+func TestWatcher_CreatesImageFile(t *testing.T) {
+	w, svc, _, cleanup := newTestWatcher(t)
+	defer cleanup()
+
+	libID, dir := createTestLibrary(t, svc)
+
+	if err := w.Start(); err != nil {
+		t.Fatalf("启动监听器失败: %v", err)
+	}
+
+	imagePath := filepath.Join(dir, "cover.jpg")
+	if err := os.WriteFile(imagePath, []byte("fake image data"), 0o644); err != nil {
+		t.Fatalf("写入文件失败: %v", err)
+	}
+
+	if !waitForCondition(t, "图片文件入库", func() bool {
+		mf, err := svc.GetMediaFileByPath(imagePath)
+		return err == nil && mf != nil && mf.FileName == "cover.jpg"
+	}) {
+		t.Fatal("等待图片文件入库超时")
+	}
+
+	mf, err := svc.GetMediaFileByPath(imagePath)
+	if err != nil {
+		t.Fatalf("查询媒体文件失败: %v", err)
+	}
+	if mf.LibraryID != libID {
+		t.Fatalf("library_id 期望 %d, 实际 %d", libID, mf.LibraryID)
+	}
+	if mf.Format != "jpg" {
+		t.Fatalf("format 期望 jpg, 实际 %s", mf.Format)
+	}
+}
+
+func TestWatcher_CreatesCustomExtensionFile(t *testing.T) {
+	w, svc, _, cleanup := newTestWatcher(t)
+	defer cleanup()
+
+	libID, dir := createTestLibrary(t, svc)
+	if err := svc.AddMediaExtension(libID, ".foo", library.MediaTypeImage); err != nil {
+		t.Fatalf("添加自定义后缀失败: %v", err)
+	}
+
+	if err := w.Start(); err != nil {
+		t.Fatalf("启动监听器失败: %v", err)
+	}
+
+	customPath := filepath.Join(dir, "cover.foo")
+	if err := os.WriteFile(customPath, []byte("fake image data"), 0o644); err != nil {
+		t.Fatalf("写入文件失败: %v", err)
+	}
+
+	if !waitForCondition(t, "自定义后缀文件入库", func() bool {
+		mf, err := svc.GetMediaFileByPath(customPath)
+		return err == nil && mf != nil && mf.FileName == "cover.foo"
+	}) {
+		t.Fatal("等待自定义后缀文件入库超时")
+	}
+}
+
+func TestWatcher_IgnoresNonMediaFiles(t *testing.T) {
 	w, svc, _, cleanup := newTestWatcher(t)
 	defer cleanup()
 
@@ -114,7 +181,7 @@ func TestWatcher_IgnoresNonVideoFiles(t *testing.T) {
 		t.Fatalf("启动监听器失败: %v", err)
 	}
 
-	// 创建非视频文件
+	// 创建非媒体文件
 	txtPath := filepath.Join(dir, "readme.txt")
 	if err := os.WriteFile(txtPath, []byte("not a video"), 0o644); err != nil {
 		t.Fatalf("写入文件失败: %v", err)
@@ -125,7 +192,7 @@ func TestWatcher_IgnoresNonVideoFiles(t *testing.T) {
 
 	_, err := svc.GetMediaFileByPath(txtPath)
 	if err == nil {
-		t.Fatal("非视频文件不应被入库")
+		t.Fatal("非媒体文件不应被入库")
 	}
 }
 
@@ -204,5 +271,3 @@ func TestWatcher_Debounce(t *testing.T) {
 		t.Fatalf("去抖后期望 1 条记录, 实际 %d", count)
 	}
 }
-
-

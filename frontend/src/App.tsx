@@ -17,6 +17,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<AppLayout><LibraryPage /></AppLayout>} />
           <Route path="/library" element={<AppLayout><LibraryPage /></AppLayout>} />
+          <Route path="/timeline" element={<AppLayout><LibraryPage initialTab="timeline" /></AppLayout>} />
           <Route path="/play/:id" element={<AppLayout><PlayPage /></AppLayout>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

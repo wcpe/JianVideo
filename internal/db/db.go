@@ -60,6 +60,15 @@ func InitSchema(d *sql.DB) error {
     modified_at DATETIME
 );`,
 		`CREATE INDEX IF NOT EXISTS idx_media_files_file_path ON media_files(file_path);`,
+		`CREATE TABLE IF NOT EXISTS media_extensions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    extension TEXT NOT NULL,
+    type TEXT NOT NULL,
+    is_built_in INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_extensions_library_extension ON media_extensions(library_id, extension);`,
 	}
 	for _, q := range queries {
 		if _, err := d.Exec(q); err != nil {

@@ -19,8 +19,8 @@ import (
 	"jianvideo/internal/api"
 	"jianvideo/internal/db/models"
 	"jianvideo/internal/library"
-	"jianvideo/internal/player"
 	"jianvideo/internal/playback"
+	"jianvideo/internal/player"
 	"jianvideo/internal/web"
 )
 
@@ -41,6 +41,7 @@ func newPlaybackTestServer(t *testing.T) (*httptest.Server, *gorm.DB, *playback.
 	if err := gormDB.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
+		&models.MediaExtension{},
 		&models.User{},
 		&models.PlaybackSession{},
 	); err != nil {
@@ -93,10 +94,10 @@ func TestE2E_GetProgress_NoSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "不存在的会话应返回 200 空进度")
 
 	var result struct {
-		CurrentPosition float64           `json:"current_position"`
-		Duration       float64           `json:"duration"`
-		FileSize        int64             `json:"file_size"`
-		BufferedRanges  [][2]int64        `json:"buffered_ranges"`
+		CurrentPosition float64    `json:"current_position"`
+		Duration        float64    `json:"duration"`
+		FileSize        int64      `json:"file_size"`
+		BufferedRanges  [][2]int64 `json:"buffered_ranges"`
 	}
 	doJSONRequest(t, resp, &result)
 	assert.Equal(t, float64(0), result.CurrentPosition, "空会话进度应为 0")
@@ -217,4 +218,3 @@ func TestE2E_PlaySubtitles(t *testing.T) {
 	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound,
 		"字幕路由应返回 200 或 404，实际 %d", resp.StatusCode)
 }
-

@@ -13,6 +13,7 @@ import (
 
 	"jianvideo/config"
 	"jianvideo/internal/db"
+	"jianvideo/internal/db/models"
 	"jianvideo/internal/player"
 	"jianvideo/internal/web"
 )
@@ -33,6 +34,9 @@ func main() {
 	sqlDB, _ := gormDB.DB()
 	if err := db.InitSchema(sqlDB); err != nil {
 		log.Fatalf("数据库建表失败: %v", err)
+	}
+	if err := gormDB.AutoMigrate(&models.MediaExtension{}); err != nil {
+		log.Fatalf("媒体后缀表迁移失败: %v", err)
 	}
 
 	// 创建 HLS 切片存储目录

@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/player"
 	"jianvideo/internal/playback"
+	"jianvideo/internal/player"
 )
 
 // parseMediaID 解析并校验路由中的 media ID 参数。
@@ -34,7 +34,11 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/media", h.ListMediaFiles)
 		lib.GET("/media/:id", h.GetMediaFile)
+		lib.GET("/media/:id/raw", h.GetRawImage)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
+
+		lib.GET("/extensions", h.ListMediaExtensions)
+		lib.POST("/extensions", h.AddMediaExtension)
 
 		lib.GET("/browse", h.BrowseDirectory)
 
@@ -168,4 +172,3 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
 		})
 	}
 }
-

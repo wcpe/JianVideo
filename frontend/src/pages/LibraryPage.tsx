@@ -2,30 +2,39 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   SimpleGrid, Card, Text, Button, TextInput, ActionIcon, Group,
-  Pagination, Stack, Title, Box, Badge, Skeleton, Alert, Tabs,
+  Pagination, Stack, Title, Box, Badge, Skeleton, Alert, Tabs, Modal, Loader,
 } from '@mantine/core'
-import { IconPlus, IconSearch, IconTrash, IconRefresh, IconFolder, IconAlertCircle, IconClock, IconFolderOpen } from '@tabler/icons-react'
+import { IconPlus, IconSearch, IconTrash, IconRefresh, IconFolder, IconAlertCircle, IconClock, IconFolderOpen, IconEye } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import { formatSize, formatDuration } from '@/utils/format'
-import type { LibraryPath, MediaFile, BreadcrumbItem, DirInfo } from '@/types'
+import type { LibraryPath, MediaFile, BreadcrumbItem, DirInfo, MediaExtension, MediaExtensionType } from '@/types'
 
-export default function LibraryPage() {
+interface LibraryPageProps {
+  initialTab?: 'timeline' | 'directory'
+}
+
+export default function LibraryPage({ initialTab = 'timeline' }: LibraryPageProps) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Tab 状态同步到 URL
-  const activeTab = searchParams.get('tab') || 'timeline'
+  const activeTab = searchParams.get('tab') || initialTab
   const setActiveTab = (tab: string) => setSearchParams({ tab })
 
   // 路径状态
   const [paths, setPaths] = useState<LibraryPath[]>([])
   const [newPath, setNewPath] = useState('')
   const [addingPath, setAddingPath] = useState(false)
+  const addingPathRef = useRef(false)
   const [pathsLoading, setPathsLoading] = useState(false)
   const [scanLoading, setScanLoading] = useState<Record<number, boolean>>({})
+  const [extensionInputs, setExtensionInputs] = useState<Record<number, string>>({})
+  const [extensionTypes, setExtensionTypes] = useState<Record<number, MediaExtensionType>>({})
+  const [extensionLoading, setExtensionLoading] = useState<Record<number, boolean>>({})
+  const [customImageExtensions, setCustomImageExtensions] = useState<Record<number, string[]>>({})
 
   // 媒体列表状态
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
@@ -47,20 +56,39 @@ export default function LibraryPage() {
   const [browseDirectories, setBrowseDirectories] = useState<DirInfo[]>([])
   const [browseFiles, setBrowseFiles] = useState<MediaFile[]>([])
   const [browseLoading, setBrowseLoading] = useState(false)
+  const [browseError, setBrowseError] = useState<string | null>(null)
+  const [previewFile, setPreviewFile] = useState<MediaFile | null>(null)
 
   const pageSize = 20
+
+  const loadExtensionPolicies = useCallback(async (items: LibraryPath[], replace = true) => {
+    const entries = await Promise.all(items.map(async (path) => {
+      try {
+        const extensions = await libApi.listMediaExtensions(path.id)
+        const imageExts = extensions
+          .filter((ext: MediaExtension) => ext.type === 'image')
+          .map(ext => ext.extension.toLowerCase().replace(/^\./, ''))
+        return [path.id, imageExts] as const
+      } catch {
+        return [path.id, []] as const
+      }
+    }))
+    const next = Object.fromEntries(entries)
+    setCustomImageExtensions(prev => (replace ? next : { ...prev, ...next }))
+  }, [])
 
   const loadPaths = useCallback(async () => {
     setPathsLoading(true)
     try {
       const items = await libApi.getLibraryPaths()
       setPaths(items)
+      await loadExtensionPolicies(items)
     } catch {
       setError('加载目录列表失败，请刷新页面重试')
     } finally {
       setPathsLoading(false)
     }
-  }, [])
+  }, [loadExtensionPolicies])
 
   const loadMedia = useCallback(async () => {
     setMediaLoading(true)
@@ -70,6 +98,7 @@ export default function LibraryPage() {
         page,
         page_size: pageSize,
         search: search || undefined,
+        sort: 'time_desc',
       })
       setMediaFiles(res.items)
       setTotal(res.total)
@@ -85,13 +114,15 @@ export default function LibraryPage() {
   const loadBrowse = useCallback(async () => {
     if (browseLibraryID === null) return
     setBrowseLoading(true)
+    setBrowseError(null)
     try {
       const res = await libApi.browseDirectory(browseLibraryID, browseParentPath)
       setBrowseBreadcrumbs(res.breadcrumbs)
       setBrowseDirectories(res.directories)
       setBrowseFiles(res.files)
-    } catch {
-      setError('加载目录内容失败，请重试')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '加载目录内容失败，请重试'
+      setBrowseError(message)
       setBrowseBreadcrumbs([])
       setBrowseDirectories([])
       setBrowseFiles([])
@@ -111,9 +142,7 @@ export default function LibraryPage() {
     if (!browseInitialized.current && activeTab === 'directory' && paths.length > 0) {
       const first = paths[0]
       setBrowseLibraryID(first.id)
-      // 从路径中提取根目录（取第一级）
-      const rootPath = first.path.startsWith('/') ? '/' + first.path.split('/').filter(Boolean)[0] || '' : first.path.split('\\')[0]
-      setBrowseParentPath(rootPath)
+      setBrowseParentPath(first.path)
       browseInitialized.current = true
     }
   }, [activeTab, paths, browseLibraryID])
@@ -129,6 +158,13 @@ export default function LibraryPage() {
     setBrowseParentPath(dirPath)
   }
 
+  const handleBrowsePath = (path: LibraryPath) => {
+    setBrowseLibraryID(path.id)
+    setBrowseParentPath(path.path)
+    browseInitialized.current = true
+    setActiveTab('directory')
+  }
+
   // 面包屑导航
   const handleBreadcrumbNavigate = (path: string) => {
     setBrowseParentPath(path)
@@ -136,7 +172,8 @@ export default function LibraryPage() {
 
   // 添加路径
   const handleAddPath = async () => {
-    if (!newPath.trim()) return
+    if (!newPath.trim() || addingPathRef.current) return
+    addingPathRef.current = true
     setAddingPath(true)
     try {
       const created = await libApi.createLibraryPath(newPath.trim())
@@ -144,9 +181,11 @@ export default function LibraryPage() {
       notifications.show({ title: '添加成功', message: `目录 "${created.label || created.path}" 已添加`, color: 'green', autoClose: 3000 })
       await loadPaths()
       await loadMedia()
-    } catch {
-      notifications.show({ title: '添加失败', message: '无法添加目录，请检查路径是否正确', color: 'red', autoClose: 3000 })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '无法添加目录，请检查路径是否正确'
+      notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 })
     } finally {
+      addingPathRef.current = false
       setAddingPath(false)
     }
   }
@@ -174,10 +213,31 @@ export default function LibraryPage() {
       const res = await libApi.scanLibrary(id)
       notifications.show({ title: '扫描完成', message: `发现 ${res.scanned} 个新文件`, color: 'green', autoClose: 3000 })
       await loadMedia()
+      if (activeTab === 'directory' && browseLibraryID === id) {
+        await loadBrowse()
+      }
     } catch {
       notifications.show({ title: '扫描失败', message: '扫描目录时出错', color: 'red', autoClose: 3000 })
     } finally {
       setScanLoading(prev => ({ ...prev, [id]: false }))
+    }
+  }
+
+  const handleAddExtension = async (path: LibraryPath) => {
+    const extension = (extensionInputs[path.id] || '').trim()
+    if (!extension) return
+    const mediaType = extensionTypes[path.id] || 'video'
+    setExtensionLoading(prev => ({ ...prev, [path.id]: true }))
+    try {
+      await libApi.addMediaExtension(path.id, extension, mediaType)
+      setExtensionInputs(prev => ({ ...prev, [path.id]: '' }))
+      await loadExtensionPolicies([path], false)
+      notifications.show({ title: '后缀已添加', message: `${extension} 已绑定到 "${path.label || path.path}"`, color: 'green', autoClose: 3000 })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '添加后缀失败，请检查格式'
+      notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 })
+    } finally {
+      setExtensionLoading(prev => ({ ...prev, [path.id]: false }))
     }
   }
 
@@ -203,6 +263,18 @@ export default function LibraryPage() {
   }, [searchInput])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const isImageFile = (file: MediaFile) => {
+    const format = file.format.toLowerCase().replace(/^\./, '')
+    const builtInImages = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+    return builtInImages.includes(format) || (customImageExtensions[file.library_id] || []).includes(format)
+  }
+  const handleOpenFile = (file: MediaFile) => {
+    if (isImageFile(file)) {
+      setPreviewFile(file)
+      return
+    }
+    navigate(`/play/${file.id}`)
+  }
 
   return (
     <Stack gap="md">
@@ -232,6 +304,14 @@ export default function LibraryPage() {
           </Button>
         </Group>
 
+        {Object.values(scanLoading).some(Boolean) && (
+          <Box role="status" mb="sm">
+            <Alert color="purple" icon={<Loader size={16} />}>
+              正在扫描目录，请稍候…
+            </Alert>
+          </Box>
+        )}
+
         {pathsLoading ? (
           <Skeleton height={40} />
         ) : paths.length === 0 ? (
@@ -252,6 +332,15 @@ export default function LibraryPage() {
                     <Button
                       size="xs"
                       variant="subtle"
+                      color="blue"
+                      leftSection={<IconEye size={12} />}
+                      onClick={() => handleBrowsePath(p)}
+                    >
+                      浏览
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="subtle"
                       color="purple"
                       leftSection={<IconRefresh size={12} />}
                       onClick={() => handleScan(p.id)}
@@ -268,6 +357,30 @@ export default function LibraryPage() {
                       <IconTrash size={14} />
                     </ActionIcon>
                   </Group>
+                </Group>
+                <Group gap={4} mt="xs" wrap="nowrap">
+                  <TextInput
+                    aria-label={`${p.label || p.path} 自定义后缀`}
+                    placeholder="自定义后缀，如 .foo"
+                    size="xs"
+                    value={extensionInputs[p.id] || ''}
+                    onChange={(e) => setExtensionInputs(prev => ({ ...prev, [p.id]: e.target.value }))}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddExtension(p)}
+                    style={{ flex: 1 }}
+                  />
+                  <Button.Group>
+                    <Button size="xs" variant={(extensionTypes[p.id] || 'video') === 'video' ? 'filled' : 'light'} onClick={() => setExtensionTypes(prev => ({ ...prev, [p.id]: 'video' }))}>视频</Button>
+                    <Button size="xs" variant={extensionTypes[p.id] === 'image' ? 'filled' : 'light'} onClick={() => setExtensionTypes(prev => ({ ...prev, [p.id]: 'image' }))}>图片</Button>
+                  </Button.Group>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    onClick={() => handleAddExtension(p)}
+                    loading={extensionLoading[p.id]}
+                    disabled={extensionLoading[p.id] || !(extensionInputs[p.id] || '').trim()}
+                  >
+                    添加后缀
+                  </Button>
                 </Group>
               </Card>
             ))}
@@ -323,14 +436,14 @@ export default function LibraryPage() {
                     key={file.id}
                     withBorder p="md" radius="md" bg="dark.7"
                     style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/play/${file.id}`)}
+                    onClick={() => handleOpenFile(file)}
                     className="hover-card"
                   >
                     <Text fw={500} truncate mb="xs">{file.file_name}</Text>
                     <Group gap="xs" wrap="nowrap">
                       <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
                       <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
-                      <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>
+                      {!isImageFile(file) && <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>}
                       {file.width > 0 && file.height > 0 && (
                         <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
                       )}
@@ -357,6 +470,12 @@ export default function LibraryPage() {
         </Tabs.Panel>
 
         <Tabs.Panel value="directory" pt="sm">
+          {browseError && (
+            <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={() => setBrowseError(null)} mb="sm">
+              {browseError}
+            </Alert>
+          )}
+
           {/* 面包屑导航 */}
           {browseBreadcrumbs.length > 0 && (
             <Box mb="sm">
@@ -395,14 +514,14 @@ export default function LibraryPage() {
                   key={file.id}
                   withBorder p="md" radius="md" bg="dark.7"
                   style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/play/${file.id}`)}
+                  onClick={() => handleOpenFile(file)}
                   className="hover-card"
                 >
                   <Text fw={500} truncate mb="xs">{file.file_name}</Text>
                   <Group gap="xs" wrap="nowrap">
                     <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
                     <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
-                    <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>
+                    {!isImageFile(file) && <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>}
                     {file.width > 0 && file.height > 0 && (
                       <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
                     )}
@@ -457,6 +576,12 @@ export default function LibraryPage() {
         onConfirm={handleDeleteMedia}
         onCancel={() => setDeleteMediaModal({ opened: false, file: null, loading: false })}
       />
+
+      <Modal opened={!!previewFile} onClose={() => setPreviewFile(null)} title={previewFile?.file_name} centered size="xl">
+        {previewFile && (
+          <Box component="img" src={`/api/library/media/${previewFile.id}/raw`} alt={previewFile.file_name} style={{ width: '100%', height: 'auto' }} />
+        )}
+      </Modal>
     </Stack>
   )
 }

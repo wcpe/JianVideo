@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconBooks } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconBooks, IconClock } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 
 /** 全局布局 — Mantine AppShell */
@@ -79,6 +79,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       >
         <Stack gap="xs">
           <Link
+            to="/timeline"
+            onClick={() => handleNavigate('/timeline')}
+            style={{ textDecoration: 'none' }}
+          >
+            <Group gap={8} p="xs" style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}>
+              <IconClock size={16} />
+              <Text size="sm">时间轴</Text>
+            </Group>
+          </Link>
+          <Link
             to="/library"
             onClick={() => handleNavigate('/library')}
             style={{ textDecoration: 'none' }}
@@ -92,12 +102,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Drawer>
 
       <AppShell.Navbar p="xs" visibleFrom="sm">
-        <Link to="/library" style={{ textDecoration: 'none' }}>
-          <Group gap={8} p="xs" style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}>
-            <IconBooks size={16} />
-            <Text size="sm">媒体库</Text>
-          </Group>
-        </Link>
+        <Stack gap="xs">
+          <Link to="/timeline" style={{ textDecoration: 'none' }}>
+            <Group gap={8} p="xs" style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}>
+              <IconClock size={16} />
+              <Text size="sm">时间轴</Text>
+            </Group>
+          </Link>
+          <Link to="/library" style={{ textDecoration: 'none' }}>
+            <Group gap={8} p="xs" style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}>
+              <IconBooks size={16} />
+              <Text size="sm">媒体库</Text>
+            </Group>
+          </Link>
+        </Stack>
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>

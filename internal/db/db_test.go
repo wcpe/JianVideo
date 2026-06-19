@@ -3,7 +3,7 @@ package db
 import (
 	"testing"
 
-	_ "github.com/glebarez/go-sqlite"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +46,7 @@ func TestInitSchema(t *testing.T) {
 
 	assert.True(t, tables["users"], "users 表应存在")
 	assert.True(t, tables["media_files"], "media_files 表应存在")
+	assert.True(t, tables["media_extensions"], "media_extensions 表应存在")
 }
 
 func TestInitSchema_Idempotent(t *testing.T) {
@@ -71,4 +72,3 @@ func TestOpen_WALMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "wal", journalMode)
 }
-

@@ -28,6 +28,7 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 	if err := gormDB.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
+		&models.MediaExtension{},
 		&models.User{},
 		&models.PlaybackSession{},
 	); err != nil {

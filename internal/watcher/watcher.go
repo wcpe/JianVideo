@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,26 +13,19 @@ import (
 	"jianvideo/internal/library"
 )
 
-// 视频文件后缀名白名单。
-var videoExts = map[string]bool{
-	"mp4": true, "mkv": true, "avi": true, "mov": true,
-	"webm": true, "rmvb": true, "ts": true, "flv": true,
-	"wmv": true, "m4v": true,
-}
-
 const debounceInterval = 500 * time.Millisecond
 
 const smbPollInterval = 5 * time.Minute
 
 // Watcher 文件系统事件监听器。
 type Watcher struct {
-	watcher    *fsnotify.Watcher
-	library    *library.Service
-	debounce   map[string]*time.Timer
-	mu         sync.RWMutex
-	done       chan struct{}
-	pathToLib  map[string]int64 // 目录路径 → library_id
-	smbLibs    []models.LibraryPath // SMB 路径列表，用于轮询
+	watcher   *fsnotify.Watcher
+	library   *library.Service
+	debounce  map[string]*time.Timer
+	mu        sync.RWMutex
+	done      chan struct{}
+	pathToLib map[string]int64     // 目录路径 → library_id
+	smbLibs   []models.LibraryPath // SMB 路径列表，用于轮询
 }
 
 // New 创建文件监听器。
@@ -43,12 +35,12 @@ func New(lib *library.Service) (*Watcher, error) {
 		return nil, err
 	}
 	return &Watcher{
-		watcher:    fw,
-		library:    lib,
-		debounce:   make(map[string]*time.Timer),
-		done:       make(chan struct{}),
-		pathToLib:  make(map[string]int64),
-		smbLibs:    make([]models.LibraryPath, 0),
+		watcher:   fw,
+		library:   lib,
+		debounce:  make(map[string]*time.Timer),
+		done:      make(chan struct{}),
+		pathToLib: make(map[string]int64),
+		smbLibs:   make([]models.LibraryPath, 0),
 	}, nil
 }
 
@@ -116,10 +108,9 @@ func (w *Watcher) addDir(libraryID int64, dir string) error {
 	return nil
 }
 
-// isVideoFile 判断文件是否为视频文件（基于后缀名白名单）。
-func isVideoFile(path string) bool {
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
-	return videoExts[ext]
+// isMediaFile 判断文件是否为内置媒体文件。
+func isMediaFile(path string) bool {
+	return library.NewService(nil).IsMediaFile(path)
 }
 
 // loop 事件循环。
@@ -158,12 +149,12 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			}
 			return
 		}
-		if isVideoFile(path) {
+		if w.isWatchedMediaFile(path) {
 			w.scheduleInsert(path)
 		}
 
 	case event.Op&fsnotify.Write == fsnotify.Write:
-		if isVideoFile(path) {
+		if w.isWatchedMediaFile(path) {
 			w.scheduleInsert(path)
 		}
 
@@ -171,6 +162,15 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		w.cancelDebounce(path)
 		w.removeRecord(path)
 	}
+}
+
+// isWatchedMediaFile 判断文件是否属于已监听媒体库支持的媒体文件。
+func (w *Watcher) isWatchedMediaFile(path string) bool {
+	libID := w.findLibraryID(path)
+	if libID == 0 {
+		return false
+	}
+	return w.library.IsMediaFileForLibrary(libID, path)
 }
 
 // scheduleInsert 调度去抖插入。
@@ -213,8 +213,8 @@ func (w *Watcher) insertRecord(path string) {
 		return
 	}
 
-	// 检查是否已存在，避免重复入库
-	existing, err := w.library.GetMediaFileByPath(path)
+	// 检查当前媒体库内是否已存在，避免重复入库
+	existing, err := w.library.GetMediaFileByLibraryAndPath(libID, path)
 	if err == nil && existing != nil {
 		return
 	}
@@ -222,13 +222,17 @@ func (w *Watcher) insertRecord(path string) {
 	if _, err := w.library.CreateMediaFile(libID, path, info.Size()); err != nil {
 		log.Printf("[WARN] 媒体文件入库失败: %s, 错误: %v", path, err)
 	} else {
-		log.Printf("[INFO] 新视频文件已入库: %s", path)
+		log.Printf("[INFO] 新媒体文件已入库: %s", path)
 	}
 }
 
 // removeRecord 移除数据库记录。
 func (w *Watcher) removeRecord(path string) {
-	if err := w.library.DeleteMediaFileByPath(path); err != nil {
+	libID := w.findLibraryID(path)
+	if libID == 0 {
+		return
+	}
+	if err := w.library.DeleteMediaFileByLibraryAndPath(libID, path); err != nil {
 		log.Printf("[WARN] 删除媒体文件记录失败: %s, 错误: %v", path, err)
 	} else {
 		log.Printf("[INFO] 媒体文件记录已移除: %s", path)

@@ -42,6 +42,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 	if err := gormDB.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
+		&models.MediaExtension{},
 		&models.User{},
 		&models.PlaybackSession{},
 	); err != nil {

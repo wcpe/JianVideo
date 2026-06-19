@@ -4,7 +4,7 @@
 
 ## 1. 定位与边界
 
-一款单用户私有视频媒体服务器，将分散在多个硬盘或 NAS 中的视频汇聚到一个 Web 媒体库，通过浏览器直接播放所有格式的视频（不兼容格式自动转码为 HLS/TS 流），支持硬件加速转码降低 CPU 负载。
+一款单用户私有视频媒体服务器，将分散在多个硬盘或 NAS 中的视频和图片汇聚到一个 Web 媒体库，通过浏览器直接播放所有格式的视频（不兼容格式自动转码为 HLS/TS 流），并支持图片预览和硬件加速转码降低 CPU 负载。
 
 **边界**：
 - 系统仅服务单用户，无多租户、权限管理。
@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、文件索引、媒体文件 CRUD、目录浏览 | → `db` |
+| `library` | 媒体库管理、目录注册、递归扫描、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览 | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
@@ -93,6 +93,19 @@
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
 
+**媒体后缀配置（media_extensions）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| library_id | INTEGER FK | 所属媒体库目录 |
+| extension | TEXT | 不带点的小写后缀 |
+| type | TEXT | 媒体类型：`video` 或 `image` |
+| is_builtin | INTEGER | 是否内置后缀（0/1；内置后缀运行时返回，不持久化） |
+| created_at | DATETIME | 添加时间 |
+
+唯一键为 `(library_id, extension)`。删除 `library_paths` 时，服务层在同一事务中删除该目录关联的 `media_files` 与自定义 `media_extensions`。
+
 **转码会话（transcode_sessions）**
 
 | 字段 | 类型 | 说明 |
@@ -123,7 +136,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、目录浏览 |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、递归扫描、目录浏览、图片 raw 预览、后缀配置 |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |
@@ -132,21 +145,29 @@
 
 - `GET /api/library/browse`：按 `library_id` + `parent_path` 浏览目录内容
 - 一次 SQL 查询（`file_path LIKE prefix%`）+ Go 层 map 分组聚合子目录
-- 面包屑由后端按路径分隔符拆分构建
+- 面包屑由后端按路径分隔符拆分构建；Windows 盘符路径保持 `D:/...` 形式，不额外加 `/D:`
 - `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
-- 前端 Tab 切换（时间轴 | 文件目录），面包屑导航 + 文件列表复用现有卡片样式
+- 前端 Tab 切换（时间轴 | 文件目录），媒体库目录卡片提供“浏览”入口，面包屑导航 + 文件列表复用现有卡片样式
 
 ## 5. 关键机制
 
-### 5.1 文件监听与增量更新
+### 5.1 媒体库扫描与后缀策略
 
-- 使用 `fsnotify` 对已注册目录进行递归监听。
-- 本地目录：直接使用 `fsnotify` 监听文件系统事件。
-- SMB 目录：使用定时轮询（5 分钟间隔），不支持 fsnotify 事件通知。轮询时重新建立 SMB 连接并执行目录扫描。
-- 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发元数据提取，避免读取不完整文件。
-- 元数据提取：通过 `ffprobe` 获取视频流信息，写入 SQLite。
+- 本地目录注册时必须校验路径存在且为目录，入库前转为绝对路径并统一为正斜杠。
+- `ScanLibraryWithType` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
+- 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
+- 扫描入库按 `library_id + file_path` 去重，重复扫描不会重复写入。
+- 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。
 
-### 5.2 CGO 转码管道与流式输出
+### 5.2 文件监听与增量更新
+
+- 使用 `fsnotify` 对已注册本地目录进行递归监听，SMB 目录使用 5 分钟轮询扫描。
+- watcher 只调用 `library.Service` 上报新增/删除事件，不直接操作 DB，保持 `watcher → library → db` 单向依赖。
+- Create/Write 事件先根据所属 `library_id` 调用统一媒体后缀策略判断，支持图片、视频和该目录自定义后缀。
+- 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发入库，避免读取不完整文件。
+- Remove/Rename 事件按路径委托 library 删除对应索引。
+
+### 5.3 CGO 转码管道与流式输出
 
 - 使用 csnewman/ffmpeg-go（CGO 绑定）直接调用 libavcodec/libavformat/libavutil/libswscale C API。
 - 转码管道：`avformat_open_input` → `avcodec_open2`(解码) → 硬件帧上下文 → `avcodec_open2`(编码) → `av_write_frame`(mpegts 输出)。
@@ -169,7 +190,7 @@
 - 硬件检测优先级：CUDA → QSV → VAAPI → D3D11VA → DXVA2 → VideoToolbox → Vulkan → 软件。
 - 硬件加速失败时自动降级，不中断播放。
 
-### 5.3 HLS 切片与追播
+### 5.4 HLS 切片与追播
 
 - 转码输出同时写入 HLS 切片文件（`.ts`）和内存管道。
 - mpegts.js 通过 HTTP Range 请求获取最新切片数据。
@@ -186,7 +207,7 @@
 - 前端 hls.js 动态 import，自动选择最佳码率；不支持 hls.js 时回退 mpegts.js。
 - 详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
 
-### 5.4 硬件加速管理
+### 5.6 硬件加速管理
 
 - 启动时检测可用硬件加速能力（通过 `ffmpeg -hwaccels` 和 `ffmpeg -encoders`）。
 - 按优先级尝试：Intel QSV → NVIDIA NVENC/NVDEC → VAAPI → 软件。

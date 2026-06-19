@@ -8,9 +8,9 @@
 ## 2. 需求（要什么）
 - 后端新增 `GET /api/library/browse` 接口，支持按 `library_id` + `parent_path` 浏览该目录下的文件和子目录
 - 目录树通过 `file_path` 前缀聚合（一次 SQL 查询 + Go 层 map 分组）
-- 面包屑导航（从根目录到当前目录的路径分段）
-- 前端 LibraryPage 添加 Tab 切换：「时间轴」|「文件目录」
-- 文件目录视图：面包屑导航 + 当前目录文件列表（复用现有卡片样式）
+- 面包屑导航（从根目录到当前目录的路径分段），Windows 盘符路径不生成 `/D:` 这类错误路径
+- 前端 LibraryPage 添加 Tab 切换：「时间轴」|「文件目录」，媒体库目录卡片提供「浏览」入口直接进入该目录
+- 文件目录视图：面包屑导航 + 当前目录文件列表（复用现有卡片样式），图片点击打开预览，视频点击跳转播放页
 - 为 `media_files` 表添加 `file_path` 索引以加速前缀查询
 
 范围内：后端目录浏览 API、前端 Tab 切换 + 面包屑 + 文件列表
@@ -22,7 +22,7 @@
 - `internal/library/service.go`：新增 `BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error)`
   - SQL: `SELECT * FROM media_files WHERE file_path LIKE ? AND library_id = ? ORDER BY file_path`
   - Go 层聚合：遍历结果，按第一级子目录分组，区分文件和目录
-  - 面包屑：按 `string(filepath.Separator)` 拆分 parentPath，逐段累加
+  - 面包屑：统一按 `/` 拆分正斜杠路径，Windows 盘符段（如 `D:`）作为首段直接累加，避免生成 `/D:`
 - `internal/db/models/browse_response.go`：新增 `BrowseResponse`、`DirInfo`、`BreadcrumbItem` 数据模型
 - `internal/api/handler.go`：新增 `BrowseDirectory` handler
   - 参数：`library_id`（必填，int64），`parent_path`（必填，string）
@@ -69,9 +69,10 @@
 - 目录浏览：一次 SQL 查询获取所有 `file_path` 以 `parentPath` 为前缀的媒体文件，Go 层按第一级子目录聚合分组
 - 面包屑：后端按路径分隔符拆分 `parentPath`，逐段累加构建
 - 前端 Tab 切换：Mantine Tabs 组件，时间轴视图和文件目录视图共存于 LibraryPage
+- 点击媒体库目录卡片的「浏览」：切换到文件目录 Tab，并以该 `LibraryPath.path` 作为当前目录
 - 点击目录：更新 `parentPath` 状态，重新请求 browse API
 - 点击面包屑：跳转到对应路径
-- 点击文件：跳转 `/play/:id`
+- 点击文件：图片打开预览弹窗并请求 `/api/library/media/:id/raw`，视频跳转 `/play/:id`
 
 ## 4. 任务拆分
 - [ ] 后端：BrowseResponse 数据模型
@@ -85,11 +86,12 @@
 
 ## 5. 验收标准
 - `GET /api/library/browse?library_id=1&parent_path=/media` 返回该目录下的子目录列表和已索引的媒体文件列表
-- 返回的面包屑数组正确反映从根到当前目录的路径层级
+- 返回的面包屑数组正确反映从根到当前目录的路径层级，Windows 路径下不会出现 `/D:`
 - 不存在的目录返回空列表，不返回 500 错误
 - 前端 LibraryPage 支持 Tab 切换时间轴/文件目录视图
+- 媒体库目录卡片「浏览」按钮可切换到目录 Tab 并浏览完整路径
 - 面包屑支持点击跳转到任意上级目录
-- 点击子目录进入该目录，点击文件跳转播放页
+- 点击子目录进入该目录，点击图片打开预览，点击视频跳转播放页
 - 所有新增测试用例通过
 
 ## 6. 风险 / 待定

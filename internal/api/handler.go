@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,10 +48,10 @@ func (h *Handler) ListLibraryPaths(c *gin.Context) {
 // CreateLibraryPath POST /api/library/paths
 func (h *Handler) CreateLibraryPath(c *gin.Context) {
 	var req struct {
-		Path      string `json:"path" binding:"required"`
-		Type      string `json:"type" binding:"required"`
-		Label     string `json:"label"`
-		SMBHost   string `json:"smb_host"`
+		Path        string `json:"path" binding:"required"`
+		Type        string `json:"type" binding:"required"`
+		Label       string `json:"label"`
+		SMBHost     string `json:"smb_host"`
 		SMBUsername string `json:"smb_username"`
 		SMBPassword string `json:"smb_password"`
 	}
@@ -61,6 +62,10 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 
 	lp, err := h.library.CreateLibraryPath(req.Path, req.Type, req.Label)
 	if err != nil {
+		if req.Type == "local" || req.Type == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "本地路径不可访问或不是目录"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CREATE_FAILED", "message": "添加失败"})
 		return
 	}
@@ -254,12 +259,82 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	count, err := h.library.ScanLibrary(id, lp.Path)
+	count, err := h.library.ScanLibraryWithType(id, lp.Path, lp.Type)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "SCAN_FAILED", "message": "扫描失败"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"scanned": count})
+}
+
+// GetRawImage GET /api/library/media/:id/raw
+func (h *Handler) GetRawImage(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	mf, err := h.library.GetMediaFileByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return
+	}
+	mediaType, ok := h.library.MediaTypeByPathForLibrary(mf.LibraryID, mf.FilePath)
+	if !ok || mediaType != library.MediaTypeImage {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "NOT_IMAGE", "message": "仅支持图片 raw 访问"})
+		return
+	}
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "UNSUPPORTED_PATH", "message": "暂不支持 SMB 图片 raw 访问"})
+		return
+	}
+
+	data, err := os.ReadFile(mf.FilePath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "FILE_NOT_FOUND", "message": "图片文件不可访问"})
+		return
+	}
+
+	contentType := mime.TypeByExtension(filepath.Ext(mf.FilePath))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	c.Data(http.StatusOK, contentType, data)
+}
+
+// ListMediaExtensions GET /api/library/extensions
+func (h *Handler) ListMediaExtensions(c *gin.Context) {
+	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
+	if err != nil || libraryID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
+		return
+	}
+
+	items, err := h.library.ListMediaExtensions(libraryID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// AddMediaExtension POST /api/library/extensions
+func (h *Handler) AddMediaExtension(c *gin.Context) {
+	var req struct {
+		LibraryID int64  `json:"library_id" binding:"required"`
+		Extension string `json:"extension" binding:"required"`
+		Type      string `json:"type" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+		return
+	}
+	if err := h.library.AddMediaExtension(req.LibraryID, req.Extension, req.Type); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_EXTENSION", "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusCreated)
 }
 
 // GetSubtitles 返回媒体文件的外挂字幕轨道列表。

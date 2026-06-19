@@ -2,6 +2,7 @@ package library
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jianvideo/internal/db/models"
@@ -137,6 +138,54 @@ func TestBrowseDirectory_BreadcrumbPaths(t *testing.T) {
 		if actual != expected {
 			t.Errorf("面包屑[%d] 路径期望 '%s', 实际 '%s'", i, expected, actual)
 		}
+	}
+}
+
+func TestBrowseDirectory_WindowsBreadcrumbAndDirPaths(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, _ = svc.CreateMediaFile(1, `D:\媒体\电影\动作\封面.jpg`, 1024)
+	_, _ = svc.CreateMediaFile(1, `D:\媒体\电影\预告.mp4`, 2048)
+
+	resp, err := svc.BrowseDirectory(1, `D:\媒体\电影`)
+	if err != nil {
+		t.Fatalf("浏览 Windows 路径失败: %v", err)
+	}
+	if len(resp.Breadcrumbs) != 3 {
+		t.Fatalf("期望 3 段面包屑, 实际 %d", len(resp.Breadcrumbs))
+	}
+	expectedBreadcrumbs := []models.BreadcrumbItem{
+		{Name: "D:", Path: "D:"},
+		{Name: "媒体", Path: "D:/媒体"},
+		{Name: "电影", Path: "D:/媒体/电影"},
+	}
+	for i, expected := range expectedBreadcrumbs {
+		if resp.Breadcrumbs[i] != expected {
+			t.Fatalf("面包屑[%d] 期望 %+v, 实际 %+v", i, expected, resp.Breadcrumbs[i])
+		}
+		if strings.HasPrefix(resp.Breadcrumbs[i].Path, "/D:") {
+			t.Fatalf("Windows 面包屑路径不应生成 /D:，实际 %s", resp.Breadcrumbs[i].Path)
+		}
+	}
+	if len(resp.Directories) != 1 || resp.Directories[0].Path != "D:/媒体/电影/动作" {
+		t.Fatalf("Windows 子目录路径不正确: %+v", resp.Directories)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].FileName != "预告.mp4" {
+		t.Fatalf("Windows 当前目录文件不正确: %+v", resp.Files)
+	}
+}
+
+func TestBrowseDirectory_WindowsCaseInsensitivePrefix(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, _ = svc.CreateMediaFile(1, `d:\媒体\电影\预告.mp4`, 2048)
+
+	resp, err := svc.BrowseDirectory(1, `D:\媒体\电影`)
+	if err != nil {
+		t.Fatalf("浏览 Windows 大小写不同路径失败: %v", err)
+	}
+	if len(resp.Files) != 1 || resp.Files[0].FileName != "预告.mp4" {
+		t.Fatalf("Windows 路径大小写不同也应列出当前目录文件: %+v", resp.Files)
 	}
 }
 

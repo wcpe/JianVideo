@@ -23,6 +23,7 @@ func TestE2E_CreateLibraryPath(t *testing.T) {
 
 	// 创建测试目录
 	dirPath := filepath.Join(tmpDir, "test_lib")
+	require.NoError(t, os.MkdirAll(dirPath, 0o755))
 	escapedPath := strings.ReplaceAll(dirPath, `\`, `\\`)
 	body := fmt.Sprintf(`{"path":"%s","type":"local","label":"测试库"}`, escapedPath)
 
@@ -46,6 +47,7 @@ func TestE2E_ListLibraryPaths(t *testing.T) {
 
 	// 先创建一个路径
 	dirPath := filepath.Join(tmpDir, "movies_list")
+	require.NoError(t, os.MkdirAll(dirPath, 0o755))
 	escapedPath := strings.ReplaceAll(dirPath, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影库"}`, escapedPath)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
@@ -83,6 +85,7 @@ func TestE2E_DeleteLibraryPath(t *testing.T) {
 
 	// 创建路径
 	dirPath := filepath.Join(tmpDir, "to_delete")
+	require.NoError(t, os.MkdirAll(dirPath, 0o755))
 	escapedPath := strings.ReplaceAll(dirPath, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"待删除"}`, escapedPath)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,

@@ -53,11 +53,14 @@ export async function getMediaFiles(params: {
   search?: string
 } = {}): Promise<MediaListResponse> {
   await delay(200)
-  const { page = 1, page_size = 20, search } = params
+  const { page = 1, page_size = 20, search, sort } = params
 
   let items = [...mediaFiles]
   if (search) {
     items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+  }
+  if (sort === 'time_desc') {
+    items.sort((a, b) => b.added_at.localeCompare(a.added_at))
   }
 
   const total = items.length
@@ -79,16 +82,19 @@ export async function deleteMediaFile(id: number): Promise<void> {
 
 export async function scanLibrary(id: number): Promise<ScanResponse> {
   await delay(400)
+  const libraryPath = paths.find(p => p.id === id)?.path || 'D:\\Videos'
   const count = Math.floor(Math.random() * 3) + 1
   const fmts = ['mp4', 'mkv', 'avi', 'mov']
   for (let i = 0; i < count; i++) {
+    const fileId = nextId++
+    const format = fmts[i % fmts.length]
     mediaFiles.push({
-      id: nextId++,
+      id: fileId,
       library_id: id,
-      file_path: `D:\\Videos\\scan-${nextId}.${fmts[i % fmts.length]}`,
-      file_name: `scan-result-${nextId}.${fmts[i % fmts.length]}`,
+      file_path: `${libraryPath}\\scan-${fileId}.${format}`,
+      file_name: `scan-result-${fileId}.${format}`,
       file_size: Math.floor(Math.random() * 5_000_000_000) + 500_000_000,
-      format: fmts[i % fmts.length],
+      format,
       video_codec: 'h264',
       audio_codec: 'aac',
       duration: Math.floor(Math.random() * 7200) + 600,

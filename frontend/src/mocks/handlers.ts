@@ -1,17 +1,19 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockPaths, mockMediaFiles } from './data'
-import type { LibraryPath, MediaFile } from '@/types'
+import type { LibraryPath, MediaFile, MediaExtension } from '@/types'
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths]
 let mediaFiles = [...mockMediaFiles]
+let mediaExtensions: MediaExtension[] = []
 let nextPathId = Math.max(...paths.map(p => p.id)) + 1
 let nextMediaId = Math.max(...mediaFiles.map(m => m.id)) + 1
+let nextExtensionId = 1
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
 
-  http.post('/api/auth/login', async ({ request }) => {
+  http.post('*/api/auth/login', async ({ request }) => {
     await delay(300)
     const body = await request.json() as { username: string; password: string }
     if (body.username === 'admin' && body.password === 'admin') {
@@ -28,26 +30,26 @@ export const handlers = [
     )
   }),
 
-  http.post('/api/auth/logout', async () => {
+  http.post('*/api/auth/logout', async () => {
     await delay(100)
     return new HttpResponse(null, {
       headers: { 'Set-Cookie': 'auth_token=; Path=/; Max-Age=0' },
     })
   }),
 
-  http.get('/api/me', async () => {
+  http.get('*/api/me', async () => {
     await delay(100)
     return HttpResponse.json({ username: 'admin' })
   }),
 
   // ─── 媒体库目录 ─────────────────────────────────────
 
-  http.get('/api/library/paths', async () => {
+  http.get('*/api/library/paths', async () => {
     await delay(200)
     return HttpResponse.json({ items: [...paths] })
   }),
 
-  http.post('/api/library/paths', async ({ request }) => {
+  http.post('*/api/library/paths', async ({ request }) => {
     await delay(300)
     const body = await request.json() as { path: string; type: string; label: string }
     const newPath: LibraryPath = {
@@ -62,27 +64,32 @@ export const handlers = [
     return HttpResponse.json(newPath, { status: 201 })
   }),
 
-  http.delete('/api/library/paths/:id', async ({ params }) => {
+  http.delete('*/api/library/paths/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)
     paths = paths.filter(p => p.id !== id)
-    // 同时删除关联的媒体文件
+    // 同时删除关联的媒体文件与自定义后缀
     mediaFiles = mediaFiles.filter(m => m.library_id !== id)
+    mediaExtensions = mediaExtensions.filter(ext => ext.library_id !== id)
     return new HttpResponse(null, { status: 204 })
   }),
 
   // ─── 媒体文件 ───────────────────────────────────────
 
-  http.get('/api/library/media', async ({ request }) => {
+  http.get('*/api/library/media', async ({ request }) => {
     await delay(300)
     const url = new URL(request.url)
     const page = Number(url.searchParams.get('page') || '1')
     const pageSize = Number(url.searchParams.get('page_size') || '20')
     const search = url.searchParams.get('search') || ''
+    const sort = url.searchParams.get('sort') || ''
 
     let items = [...mediaFiles]
     if (search) {
       items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+    }
+    if (sort === 'time_desc') {
+      items.sort((a, b) => b.added_at.localeCompare(a.added_at))
     }
 
     const total = items.length
@@ -92,7 +99,17 @@ export const handlers = [
     return HttpResponse.json({ items: paged, total, page, page_size: pageSize })
   }),
 
-  http.get('/api/library/media/:id', async ({ params }) => {
+  http.get('*/api/library/media/:id/raw', async ({ params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    return new HttpResponse('', { headers: { 'Content-Type': `image/${file.format}` } })
+  }),
+
+  http.get('*/api/library/media/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)
     const file = mediaFiles.find(m => m.id === id)
@@ -102,7 +119,33 @@ export const handlers = [
     return HttpResponse.json(file)
   }),
 
-  http.delete('/api/library/media/:id', async ({ params }) => {
+  http.get('*/api/library/extensions', async ({ request }) => {
+    await delay(100)
+    const libraryID = Number(new URL(request.url).searchParams.get('library_id') || '0')
+    return HttpResponse.json({ items: mediaExtensions.filter(ext => ext.library_id === libraryID) })
+  }),
+
+  http.post('*/api/library/extensions', async ({ request }) => {
+    await delay(100)
+    const body = await request.json() as { library_id: number; extension: string; type: 'image' | 'video' }
+    const extension = body.extension.trim().toLowerCase().replace(/^\./, '')
+    if (!extension) {
+      return HttpResponse.json({ code: 'INVALID_EXTENSION', message: '后缀格式不支持' }, { status: 400 })
+    }
+    if (!mediaExtensions.some(ext => ext.library_id === body.library_id && ext.extension === extension)) {
+      mediaExtensions.push({
+        id: nextExtensionId++,
+        library_id: body.library_id,
+        extension,
+        type: body.type,
+        is_builtin: 0,
+        created_at: new Date().toISOString(),
+      })
+    }
+    return new HttpResponse(null, { status: 201 })
+  }),
+
+  http.delete('*/api/library/media/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)
     mediaFiles = mediaFiles.filter(m => m.id !== id)
@@ -111,7 +154,7 @@ export const handlers = [
 
   // ─── 目录浏览 ─────────────────────────────────────────
 
-  http.get('/api/library/browse', async ({ request }) => {
+  http.get('*/api/library/browse', async ({ request }) => {
     await delay(200)
     const url = new URL(request.url)
     const libraryID = Number(url.searchParams.get('library_id') || '0')
@@ -140,7 +183,7 @@ export const handlers = [
     const breadcrumbs: { name: string; path: string }[] = []
     let current = ''
     for (const p of parts) {
-      current += '/' + p
+      current = /^[A-Za-z]:$/.test(p) && current === '' ? p : `${current.replace(/\/$/, '')}/${p}`
       breadcrumbs.push({ name: p, path: current })
     }
     if (breadcrumbs.length === 0) {
@@ -156,7 +199,7 @@ export const handlers = [
 
   // ─── 字幕 ─────────────────────────────────────────────
 
-  http.get('/api/play/:id/subtitles', async () => {
+  http.get('*/api/play/:id/subtitles', async () => {
     await delay(150)
     return HttpResponse.json({
       tracks: [
@@ -166,7 +209,7 @@ export const handlers = [
     })
   }),
 
-  http.get('/api/play/:id/subtitles/:index', async () => {
+  http.get('*/api/play/:id/subtitles/:index', async () => {
     await delay(100)
     return new HttpResponse(
       'WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n这是第一条测试字幕\n\n2\n00:00:04.000 --> 00:00:06.000\n这是第二条测试字幕\n',
@@ -176,27 +219,30 @@ export const handlers = [
 
   // ─── SMB 凭据 ──────────────────────────────────────────
 
-  http.post('/api/smb/credentials', async () => {
+  http.post('*/api/smb/credentials', async () => {
     await delay(200)
     return new HttpResponse(null, { status: 204 })
   }),
 
   // ─── 扫描 ──────────────────────────────────────────────
 
-  http.post('/api/library/scan/:id', async ({ params }) => {
+  http.post('*/api/library/scan/:id', async ({ params }) => {
     await delay(500)
     const id = Number(params.id)
+    const libraryPath = paths.find(p => p.id === id)?.path || 'D:\\Videos'
     // 模拟扫描：随机添加 1-3 个新文件
     const count = Math.floor(Math.random() * 3) + 1
     const formats = ['mp4', 'mkv', 'avi', 'mov']
     for (let i = 0; i < count; i++) {
+      const fileId = nextMediaId++
+      const format = formats[i % formats.length]
       const newFile: MediaFile = {
-        id: nextMediaId++,
+        id: fileId,
         library_id: id,
-        file_path: `D:\\Videos\\scan_result-${nextMediaId}.${formats[i % formats.length]}`,
-        file_name: `scan-result-${nextMediaId}.${formats[i % formats.length]}`,
+        file_path: `${libraryPath}\\scan_result-${fileId}.${format}`,
+        file_name: `scan-result-${fileId}.${format}`,
         file_size: Math.floor(Math.random() * 5_000_000_000) + 500_000_000,
-        format: formats[i % formats.length],
+        format,
         video_codec: 'h264',
         audio_codec: 'aac',
         duration: Math.floor(Math.random() * 7200) + 600,

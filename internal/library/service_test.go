@@ -29,7 +29,7 @@ func newTestService(t *testing.T) (*Service, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	return NewService(gdb), gdb
@@ -37,8 +37,9 @@ func newTestService(t *testing.T) (*Service, *gorm.DB) {
 
 func TestCreateLibraryPath(t *testing.T) {
 	svc, _ := newTestService(t)
+	dir := t.TempDir()
 
-	lp, err := svc.CreateLibraryPath("/tmp/test_media", "local", "测试目录")
+	lp, err := svc.CreateLibraryPath(dir, "local", "测试目录")
 	if err != nil {
 		t.Fatalf("创建目录失败: %v", err)
 	}
@@ -63,8 +64,8 @@ func TestListLibraryPaths(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	// 创建两条记录
-	_, _ = svc.CreateLibraryPath("/tmp/dir1", "local", "目录1")
-	_, _ = svc.CreateLibraryPath("/tmp/dir2", "local", "目录2")
+	_, _ = svc.CreateLibraryPath(t.TempDir(), "local", "目录1")
+	_, _ = svc.CreateLibraryPath(t.TempDir(), "local", "目录2")
 
 	items, err := svc.ListLibraryPaths()
 	if err != nil {
@@ -77,10 +78,12 @@ func TestListLibraryPaths(t *testing.T) {
 
 func TestDeleteLibraryPath(t *testing.T) {
 	svc, db := newTestService(t)
+	dir := t.TempDir()
 
-	lp, _ := svc.CreateLibraryPath("/tmp/to_delete", "local", "待删除")
-	// 添加关联媒体文件
-	_, _ = svc.CreateMediaFile(lp.ID, "/tmp/to_delete/video.mp4", 1024)
+	lp, _ := svc.CreateLibraryPath(dir, "local", "待删除")
+	// 添加关联媒体文件和自定义后缀
+	_, _ = svc.CreateMediaFile(lp.ID, filepath.Join(dir, "video.mp4"), 1024)
+	_ = svc.AddMediaExtension(lp.ID, ".foo", "video")
 
 	if err := svc.DeleteLibraryPath(lp.ID); err != nil {
 		t.Fatalf("删除失败: %v", err)
@@ -97,6 +100,11 @@ func TestDeleteLibraryPath(t *testing.T) {
 	db.Model(&models.MediaFile{}).Where("library_id = ?", lp.ID).Count(&count)
 	if count != 0 {
 		t.Fatalf("关联媒体文件应已删除, 仍有 %d 条", count)
+	}
+
+	db.Model(&models.MediaExtension{}).Where("library_id = ?", lp.ID).Count(&count)
+	if count != 0 {
+		t.Fatalf("关联自定义后缀应已删除, 仍有 %d 条", count)
 	}
 }
 
@@ -253,7 +261,33 @@ func TestDeleteLibraryPath_NotFound(t *testing.T) {
 	}
 }
 
+func TestCreateLibraryPath_LocalPathMustExistAndBeDirectory(t *testing.T) {
+	svc, _ := newTestService(t)
+	missing := filepath.Join(t.TempDir(), "missing")
+	if _, err := svc.CreateLibraryPath(missing, "local", "不存在"); err == nil {
+		t.Fatal("不存在的本地路径应返回错误")
+	}
+
+	file := filepath.Join(t.TempDir(), "file.txt")
+	_ = os.WriteFile(file, []byte("x"), 0o644)
+	if _, err := svc.CreateLibraryPath(file, "local", "文件"); err == nil {
+		t.Fatal("本地文件路径应返回错误")
+	}
+}
+
+func TestCreateLibraryPath_NormalizesSMBPath(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, err := svc.CreateLibraryPath(`\\192.168.1.10\Share\Movies`, "smb", "NAS")
+	if err != nil {
+		t.Fatalf("创建 SMB 路径失败: %v", err)
+	}
+	if lp.Path != "192.168.1.10/Share/Movies" {
+		t.Fatalf("SMB 路径期望规范化为 host/share/path，实际 %s", lp.Path)
+	}
+}
+
 func TestListMediaFiles_EmptyResult(t *testing.T) {
+
 	svc, _ := newTestService(t)
 
 	items, total, err := svc.ListMediaFiles(1, "time_desc", "nonexistent", 1, 20)
@@ -275,14 +309,18 @@ func TestScanLibrary(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "movie1.mp4"), []byte("fake"), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "movie2.mkv"), []byte("fake"), 0o644)
-	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not video"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "poster.jpg"), []byte("fake"), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "nested"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "nested", "clip.mov"), []byte("fake"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "nested", "cover.png"), []byte("fake"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not media"), 0o644)
 
 	count, err := svc.ScanLibrary(1, dir)
 	if err != nil {
 		t.Fatalf("扫描失败: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("期望扫描到 2 个视频文件, 实际 %d", count)
+	if count != 5 {
+		t.Fatalf("期望递归扫描到 5 个媒体文件, 实际 %d", count)
 	}
 
 	// 验证数据库
@@ -290,8 +328,8 @@ func TestScanLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询失败: %v", err)
 	}
-	if total != 2 {
-		t.Fatalf("期望 2 条记录, 实际 %d", total)
+	if total != 5 {
+		t.Fatalf("期望 5 条记录, 实际 %d", total)
 	}
 	_ = items
 
@@ -302,5 +340,106 @@ func TestScanLibrary(t *testing.T) {
 	}
 	if count2 != 0 {
 		t.Fatalf("重复扫描期望 0, 实际 %d", count2)
+	}
+}
+
+func TestScanLibrary_AllowsSamePathInDifferentLibraries(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "shared.mp4"), []byte("fake"), 0o644)
+
+	if count, err := svc.ScanLibrary(1, dir); err != nil || count != 1 {
+		t.Fatalf("首次扫描期望 1, 实际 %d, err=%v", count, err)
+	}
+	if count, err := svc.ScanLibrary(2, dir); err != nil || count != 1 {
+		t.Fatalf("不同媒体库扫描同一路径期望 1, 实际 %d, err=%v", count, err)
+	}
+}
+
+func TestDeleteMediaFileByLibraryAndPath_OnlyDeletesCurrentLibrary(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shared.mp4")
+	if _, err := svc.CreateMediaFile(1, path, 1024); err != nil {
+		t.Fatalf("创建媒体文件失败: %v", err)
+	}
+	if _, err := svc.CreateMediaFile(2, path, 1024); err != nil {
+		t.Fatalf("创建第二个媒体库媒体文件失败: %v", err)
+	}
+
+	if err := svc.DeleteMediaFileByLibraryAndPath(1, path); err != nil {
+		t.Fatalf("删除当前媒体库文件失败: %v", err)
+	}
+	if _, err := svc.GetMediaFileByLibraryAndPath(1, path); err == nil {
+		t.Fatal("当前媒体库记录应已删除")
+	}
+	if _, err := svc.GetMediaFileByLibraryAndPath(2, path); err != nil {
+		t.Fatalf("其他媒体库同路径记录不应被删除: %v", err)
+	}
+}
+
+func TestBuiltInMediaExtensions(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	for _, ext := range []string{"mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "ts", "m4v", "mpg", "mpeg", "3gp", "rmvb", "rm", "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif"} {
+		if !svc.IsMediaFile("file." + ext) {
+			t.Fatalf("内置后缀 %s 应被识别为媒体文件", ext)
+		}
+	}
+	if svc.IsMediaFile("file.txt") {
+		t.Fatal("txt 不应被识别为媒体文件")
+	}
+}
+
+func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPath(dir, "local", "自定义后缀")
+	if err != nil {
+		t.Fatalf("创建媒体库目录失败: %v", err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "custom.foo"), []byte("fake"), 0o644)
+
+	if _, err := svc.ScanLibrary(lp.ID, dir); err != nil {
+		t.Fatalf("首次扫描失败: %v", err)
+	}
+	_, total, err := svc.ListMediaFiles(lp.ID, "time_desc", "", 1, 20)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("添加自定义后缀前不应入库, 实际 %d", total)
+	}
+
+	if err := svc.AddMediaExtension(lp.ID, ".foo", "video"); err != nil {
+		t.Fatalf("添加自定义后缀失败: %v", err)
+	}
+	if svc.IsMediaFile("custom.FOO") {
+		t.Fatal("未绑定媒体库时自定义后缀不应被全局识别")
+	}
+	if !svc.IsMediaFileForLibrary(lp.ID, "custom.FOO") {
+		t.Fatal("自定义后缀应按媒体库绑定且大小写不敏感")
+	}
+
+	items, err := svc.ListMediaExtensions(lp.ID)
+	if err != nil {
+		t.Fatalf("查询后缀失败: %v", err)
+	}
+	found := false
+	for _, item := range items {
+		if item.LibraryID == lp.ID && item.Extension == "foo" && item.Type == "video" && item.IsBuiltIn == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("自定义后缀应绑定媒体库持久化")
+	}
+
+	count, err := svc.ScanLibrary(lp.ID, dir)
+	if err != nil {
+		t.Fatalf("添加自定义后缀后扫描失败: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("添加自定义后缀后期望扫描 1 个文件, 实际 %d", count)
 	}
 }
