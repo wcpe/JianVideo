@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -21,6 +22,7 @@ import (
 type Service struct {
 	db       *gorm.DB
 	smbCreds *smb.CredentialStore
+	smbCredsMu sync.RWMutex
 }
 
 // NewService 创建媒体库服务。
@@ -30,6 +32,8 @@ func NewService(db *gorm.DB) *Service {
 
 // SetSMBCredentialStore 设置 SMB 凭据存储器。
 func (s *Service) SetSMBCredentialStore(store *smb.CredentialStore) {
+	s.smbCredsMu.Lock()
+	defer s.smbCredsMu.Unlock()
 	s.smbCreds = store
 }
 
@@ -172,6 +176,12 @@ func (s *Service) DeleteMediaFileByPath(filePath string) error {
 // BrowseDirectory 浏览指定目录下的子目录和媒体文件。
 // 通过 file_path 前缀匹配一次查询所有文件，Go 层按第一级子目录分组。
 func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error) {
+	// 规范化路径，防止路径遍历
+	parentPath = filepath.Clean(parentPath)
+	if strings.Contains(parentPath, "..") {
+		return nil, fmt.Errorf("非法路径: parentPath 不能包含 ..")
+	}
+
 	// 规范化路径：确保以 / 结尾，用于前缀匹配
 	trimmedPath := strings.TrimRight(parentPath, "/")
 	prefix := trimmedPath + "/"
@@ -308,7 +318,9 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 	}
 
 	// 从凭据存储加载凭据
+	s.smbCredsMu.RLock()
 	creds, err := s.smbCreds.Load("")
+	s.smbCredsMu.RUnlock()
 	if err != nil {
 		return 0, fmt.Errorf("加载 SMB 凭据失败: %w", err)
 	}

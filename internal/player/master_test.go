@@ -1,6 +1,7 @@
 package player
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -22,8 +23,8 @@ func TestGenerateMasterM3U8(t *testing.T) {
 
 	// 验证每个码率都有 EXT-X-STREAM-INF
 	for _, q := range qualities {
-		expected := "#EXT-X-STREAM-INF:BANDWIDTH=" + itoa(q.Bandwidth) +
-			",RESOLUTION=" + itoa(q.Width) + "x" + itoa(q.Height)
+		expected := "#EXT-X-STREAM-INF:BANDWIDTH=" + strconv.Itoa(q.Bandwidth) +
+			",RESOLUTION=" + strconv.Itoa(q.Width) + "x" + strconv.Itoa(q.Height)
 		if !strings.Contains(content, expected) {
 			t.Fatalf("应包含 %s, 实际:\n%s", expected, content)
 		}
@@ -59,26 +60,4 @@ func TestGenerateMasterM3U8_SingleQuality(t *testing.T) {
 	}
 }
 
-// itoa 将整数转为字符串（避免 strconv 导入）。
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := false
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
+

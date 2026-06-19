@@ -18,6 +18,7 @@ type HLSSegmentWriter struct {
 	quality  string
 	seq      int
 	f       *os.File
+	closed   bool
 }
 
 // NewHLSSegmentWriter 创建 HLS 切片写入器，自动创建目录和 m3u8 文件。
@@ -67,10 +68,6 @@ func (w *HLSSegmentWriter) WriteSegment(data []byte) error {
 	if _, err := w.f.WriteString(line); err != nil {
 		return fmt.Errorf("追加 m3u8 记录失败: %w", err)
 	}
-	if err := w.f.Sync(); err != nil {
-		return fmt.Errorf("同步 m3u8 失败: %w", err)
-	}
-
 	w.seq++
 	return nil
 }
@@ -80,7 +77,16 @@ func (w *HLSSegmentWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.closed {
+		return nil
+	}
+	w.closed = true
+
 	// 写入 ENDLIST 标记，即使失败也继续关闭文件句柄以防泄露
 	_, _ = w.f.WriteString("#EXT-X-ENDLIST\n")
+	if err := w.f.Sync(); err != nil {
+		_ = w.f.Close()
+		return fmt.Errorf("同步 m3u8 失败: %w", err)
+	}
 	return w.f.Close()
 }

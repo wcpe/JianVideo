@@ -6,14 +6,7 @@ import VideoPlayer from '@/components/VideoPlayer'
 import { parseWebVTT } from '@/components/VideoPlayer'
 import * as libApi from '@/api/library'
 import * as subtitleApi from '@/api/subtitle'
-import type { MediaFile, SubtitleTrack } from '@/types'
-
-/** 一条解析后的字幕条目 */
-interface SubtitleEntry {
-  start: number
-  end: number
-  text: string
-}
+import type { MediaFile, SubtitleTrack, SubtitleEntry } from '@/types'
 
 /** 视频播放页 — Mantine + VideoPlayer */
 export default function PlayPage() {

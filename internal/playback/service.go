@@ -153,6 +153,9 @@ func openSMBFile(smbPath string) (*smbReadSeeker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("加载 SMB 凭据失败: %w", err)
 	}
+	if creds == nil {
+		return nil, fmt.Errorf("未找到 SMB 凭据，请先通过 POST /api/smb/credentials 配置凭据")
+	}
 	creds.Host = host
 	creds.Share = share
 
@@ -183,15 +186,13 @@ type smbReadSeeker struct {
 	client *smb.Client
 }
 
+// Close 只关闭底层文件读取器，不断开 SMB 会话。
+// SMB 连接的生命周期由 openSMBFile 中的 client 变量管理。
 func (s *smbReadSeeker) Close() error {
-	var err error
 	if closer, ok := s.ReadSeeker.(io.Closer); ok {
-		err = closer.Close()
+		return closer.Close()
 	}
-	if e := s.client.Disconnect(); err == nil {
-		err = e
-	}
-	return err
+	return nil
 }
 
 // 确保 smbReadSeeker 实现 io.ReadSeeker 和 io.Closer。
@@ -255,16 +256,16 @@ func (s *Service) HandleBufferReport(mediaID int64, report BufferReport) {
 func (s *Service) GetProgress(mediaID int64) (*ProgressInfo, error) {
 	s.mu.RLock()
 	sess, exists := s.sessions[mediaID]
+	if !exists {
+		s.mu.RUnlock()
+		return &ProgressInfo{}, nil
+	}
 	// 在锁内复制所需字段，避免解锁后并发读写
 	bufferedRanges := sess.BufferedRanges
 	currentPosition := sess.CurrentPosition
 	duration := sess.Duration
 	fileSize := sess.FileSize
 	s.mu.RUnlock()
-
-	if !exists {
-		return &ProgressInfo{}, nil
-	}
 
 	var ranges [][2]int64
 	if bufferedRanges != "" {

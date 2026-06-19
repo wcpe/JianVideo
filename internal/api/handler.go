@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -87,8 +88,13 @@ func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string)
 		Password: password,
 	}
 
-	// 使用默认主密码（生产环境应要求用户设置）
-	if err := store.Save("default-master-password", creds); err != nil {
+	// 从环境变量读取主密码，未设置时使用默认值
+	masterPwd := os.Getenv("SMB_MASTER_PASSWORD")
+	if masterPwd == "" {
+		masterPwd = "default-master-password"
+		log.Printf("[WARN] SMB_MASTER_PASSWORD 未设置，使用默认主密码，请在生产环境中设置环境变量")
+	}
+	if err := store.Save(masterPwd, creds); err != nil {
 		log.Printf("[WARN] 保存 SMB 凭据失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "SMB_CONFIG_FAILED", "message": "SMB 凭据保存失败"})
 		return
@@ -271,6 +277,12 @@ func (h *Handler) GetSubtitles(c *gin.Context) {
 		return
 	}
 
+	// SMB 路径暂不支持字幕查找
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		c.JSON(http.StatusOK, gin.H{"tracks": []SubtitleTrack{}})
+		return
+	}
+
 	files, err := transcoder.FindSubtitleFiles(mf.FilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "字幕查找失败"})
@@ -325,6 +337,11 @@ func (h *Handler) GetSubtitleContent(c *gin.Context) {
 	vtt, err := transcoder.ConvertSubtitleFile(files[index].Path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CONVERT_FAILED", "message": "字幕转换失败"})
+		return
+	}
+
+	if vtt == "" {
+		c.Status(http.StatusNoContent)
 		return
 	}
 

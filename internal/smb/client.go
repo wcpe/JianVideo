@@ -21,12 +21,13 @@ const (
 
 // Client 封装 SMB 会话，提供连接池和重连能力。
 type Client struct {
-	creds    Credentials
-	dialer   *smb2.Dialer
-	mu       sync.Mutex
-	session  *smb2.Session
-	share    *smb2.Share
-	lastUsed time.Time
+	creds      Credentials
+	dialer     *smb2.Dialer
+	mu         sync.Mutex
+	connectOnce sync.Once
+	session    *smb2.Session
+	share      *smb2.Share
+	lastUsed   time.Time
 }
 
 // NewClient 创建 SMB 客户端。
@@ -35,6 +36,7 @@ func NewClient(creds Credentials) *Client {
 		Initiator: &smb2.NTLMInitiator{
 			User:     creds.Username,
 			Password: creds.Password,
+			Domain:   creds.Domain,
 		},
 	}
 	return &Client{
@@ -119,16 +121,14 @@ func (c *Client) Disconnect() error {
 	return err
 }
 
-// EnsureConnected 确保连接可用，必要时重新连接。
+// EnsureConnected 确保连接可用，使用 sync.Once 避免竞态窗口。
 func (c *Client) EnsureConnected(ctx context.Context) (*smb2.Share, error) {
-	c.mu.Lock()
-	needsConnect := c.share == nil
-	c.mu.Unlock()
-
-	if needsConnect {
-		if err := c.Connect(ctx); err != nil {
-			return nil, err
-		}
+	var connectErr error
+	c.connectOnce.Do(func() {
+		connectErr = c.Connect(ctx)
+	})
+	if connectErr != nil {
+		return nil, connectErr
 	}
 	return c.Share()
 }

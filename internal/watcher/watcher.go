@@ -30,7 +30,7 @@ type Watcher struct {
 	watcher    *fsnotify.Watcher
 	library    *library.Service
 	debounce   map[string]*time.Timer
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	done       chan struct{}
 	pathToLib  map[string]int64 // 目录路径 → library_id
 	smbLibs    []models.LibraryPath // SMB 路径列表，用于轮询
@@ -84,8 +84,8 @@ func (w *Watcher) Start() error {
 
 // Stop 停止监听。
 func (w *Watcher) Stop() {
-	close(w.done)
 	w.watcher.Close()
+	close(w.done)
 }
 
 // addDir 递归添加目录及其子目录到监听列表。
@@ -269,7 +269,10 @@ func (w *Watcher) findLibraryID(filePath string) int64 {
 	// 从文件路径向上匹配已知的库目录
 	dir := filepath.Dir(filePath)
 	for dir != "/" && dir != "." {
-		if id, ok := w.pathToLib[dir]; ok {
+		w.mu.RLock()
+		id, ok := w.pathToLib[dir]
+		w.mu.RUnlock()
+		if ok {
 			return id
 		}
 		dir = filepath.Dir(dir)

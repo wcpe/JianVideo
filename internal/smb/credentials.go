@@ -18,8 +18,9 @@ import (
 type Credentials struct {
 	Host     string `json:"host"`
 	Username string `json:"username"`
-	Password string `json:"password"`
+	Password string `json:"-"`
 	Share    string `json:"share"`
+	Domain   string `json:"domain"`
 }
 
 // CredentialStore 加密存储 SMB 凭据到本地文件。
@@ -83,10 +84,16 @@ func deriveKey(password []byte, salt []byte) []byte {
 	return pbkdf2.Key(password, salt, 100_000, 32, sha256.New)
 }
 
+// 加密参数常量。
+const (
+	saltLen  = 16
+	nonceLen = 12 // GCM 标准 nonce 长度
+)
+
 // encrypt 使用 AES-256-GCM 加密明文。
-// 输出格式: nonce(12) || ciphertext+tag。
+// 输出格式: salt(16) || nonce(12) || ciphertext+tag。
 func encrypt(password, plaintext []byte) ([]byte, error) {
-	salt := make([]byte, 16)
+	salt := make([]byte, saltLen)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, err
 	}
@@ -103,7 +110,7 @@ func encrypt(password, plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	nonce := make([]byte, gcm.NonceSize())
+	nonce := make([]byte, nonceLen)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
 	}
@@ -115,12 +122,12 @@ func encrypt(password, plaintext []byte) ([]byte, error) {
 
 // decrypt 使用 AES-256-GCM 解密密文。
 func decrypt(password, data []byte) ([]byte, error) {
-	if len(data) < 16 {
+	if len(data) < saltLen {
 		return nil, fmt.Errorf("密文太短")
 	}
 
-	salt := data[:16]
-	remaining := data[16:]
+	salt := data[:saltLen]
+	remaining := data[saltLen:]
 
 	key := deriveKey(password, salt)
 
@@ -134,13 +141,12 @@ func decrypt(password, data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	nonceSize := gcm.NonceSize()
-	if len(remaining) < nonceSize {
+	if len(remaining) < nonceLen {
 		return nil, fmt.Errorf("密文格式错误")
 	}
 
-	nonce := remaining[:nonceSize]
-	ciphertext := remaining[nonceSize:]
+	nonce := remaining[:nonceLen]
+	ciphertext := remaining[nonceLen:]
 
 	return gcm.Open(nil, nonce, ciphertext, nil)
 }

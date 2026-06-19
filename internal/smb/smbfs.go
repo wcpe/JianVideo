@@ -93,6 +93,8 @@ func normalize(name string) string {
 	}
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = strings.TrimPrefix(name, "/")
+	// 防止路径遍历
+	name = strings.ReplaceAll(name, "..", "")
 	return name
 }
 

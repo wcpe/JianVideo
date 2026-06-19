@@ -1,13 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import mpegts from 'mpegts.js'
-import { Progress } from '@mantine/core'
-
-/** 一条解析后的字幕条目 */
-interface SubtitleEntry {
-  start: number
-  end: number
-  text: string
-}
+import { Progress, Text } from '@mantine/core'
+import type Hls from 'hls.js'
+import type { SubtitleEntry } from '@/types'
 
 interface VideoPlayerProps {
   /** 流 URL（支持 master.m3u8 触发 ABR 模式） */
@@ -73,8 +68,9 @@ export default function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const mpegtsPlayerRef = useRef<mpegts.Player | null>(null)
-  const hlsRef = useRef<unknown>(null)
+  const hlsRef = useRef<Hls | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [autoPlayBlocked, setAutoPlayBlocked] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(1)
@@ -136,7 +132,7 @@ export default function VideoPlayer({
       player.on('loadeddata', () => {
         if (autoPlay) {
           void (player.play() as Promise<void>)?.catch?.(() => {
-            // 自动播放可能被浏览器策略阻止
+            setAutoPlayBlocked(true)
           })
         }
       })
@@ -181,7 +177,7 @@ export default function VideoPlayer({
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (autoPlay) {
             void videoRef.current?.play()?.catch?.(() => {
-              // 自动播放可能被浏览器策略阻止
+              setAutoPlayBlocked(true)
             })
           }
         })
@@ -273,6 +269,7 @@ export default function VideoPlayer({
     if (isPlaying) {
       video.pause()
     } else {
+      setAutoPlayBlocked(false)
       void video.play()?.catch?.(() => {})
     }
   }
@@ -319,6 +316,14 @@ export default function VideoPlayer({
           className="w-full h-full bg-black"
           playsInline
         />
+
+        {/* 自动播放被阻止提示 */}
+        {autoPlayBlocked && !isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 cursor-pointer"
+               onClick={togglePlay}>
+            <Text color="white" size="lg">点击播放</Text>
+          </div>
+        )}
 
         {/* 字幕 overlay */}
         {subtitleVisible && subtitleText && (

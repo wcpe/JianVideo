@@ -11,6 +11,17 @@ import (
 	"jianvideo/internal/playback"
 )
 
+// parseMediaID 解析并校验路由中的 media ID 参数。
+// 返回 (id, ok)；解析失败时已写入 400 响应，调用方直接返回即可。
+func parseMediaID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return 0, false
+	}
+	return id, true
+}
+
 // RegisterRoutes 注册 API 路由。
 // pbSvc 可选：传入时注册播放相关路由。
 // hlsMgr 可选：传入时注册 HLS 切片路由。
@@ -49,11 +60,17 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		play := r.Group("/api/play")
 		{
 			play.GET("/:id/stream", func(c *gin.Context) {
-				id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+				id, ok := parseMediaID(c)
+				if !ok {
+					return
+				}
 				svc.StreamFile(c.Writer, c.Request, id, "", 0, 0)
 			})
 			play.POST("/:id/seek", func(c *gin.Context) {
-				id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+				id, ok := parseMediaID(c)
+				if !ok {
+					return
+				}
 				var req struct {
 					Position float64 `json:"position"`
 				}
@@ -69,7 +86,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 				c.JSON(http.StatusOK, resp)
 			})
 			play.GET("/:id/progress", func(c *gin.Context) {
-				id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+				id, ok := parseMediaID(c)
+				if !ok {
+					return
+				}
 				progress, err := svc.GetProgress(id)
 				if err != nil {
 					c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
@@ -78,7 +98,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 				c.JSON(http.StatusOK, progress)
 			})
 			play.POST("/:id/buffer", func(c *gin.Context) {
-				id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+				id, ok := parseMediaID(c)
+				if !ok {
+					return
+				}
 				var report playback.BufferReport
 				if err := c.ShouldBindJSON(&report); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})

@@ -77,3 +77,10 @@ export interface SubtitleTrack {
   format: string
   url: string
 }
+
+/** 一条解析后的字幕条目 */
+export interface SubtitleEntry {
+  start: number
+  end: number
+  text: string
+}

@@ -56,6 +56,9 @@ func NewMultiPipeline(p *Pipeline) *MultiPipeline {
 // qualities 为码率档位名列表（如 ["1080p","720p","480p"]）。
 // dsts 为每个码率对应的 io.Writer，与 qualities 一一对应。
 func (mp *MultiPipeline) RunMulti(ctx context.Context, inputPath string, qualities []string, dsts []io.Writer) error {
+	if len(dsts) > 0 {
+		log.Printf("[WARN] MultiPipeline.RunMulti: dsts 参数被忽略，多码率输出直接写入文件系统")
+	}
 	if len(qualities) != len(dsts) {
 		return fmt.Errorf("码率数量(%d)与写入器数量(%d)不匹配", len(qualities), len(dsts))
 	}
