@@ -109,6 +109,80 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // ─── 目录浏览 ─────────────────────────────────────────
+
+  http.get('/api/library/browse', async ({ request }) => {
+    await delay(200)
+    const url = new URL(request.url)
+    const libraryID = Number(url.searchParams.get('library_id') || '0')
+    const parentPath = url.searchParams.get('parent_path') || '/'
+
+    const prefix = parentPath.replace(/\\/g, '/') + '/'
+    const allFiles = mediaFiles.filter(m => {
+      const fp = m.file_path.replace(/\\/g, '/')
+      return fp.startsWith(prefix) && m.library_id === libraryID
+    })
+
+    const dirSet = new Set<string>()
+    const files: typeof allFiles = []
+    for (const f of allFiles) {
+      const rel = f.file_path.replace(/\\/g, '/').replace(prefix, '')
+      const slashIdx = rel.indexOf('/')
+      if (slashIdx !== -1) {
+        dirSet.add(rel.substring(0, slashIdx))
+      } else {
+        files.push(f)
+      }
+    }
+
+    const cleanPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    const parts = cleanPath.split('/').filter(Boolean)
+    const breadcrumbs: { name: string; path: string }[] = []
+    let current = ''
+    for (const p of parts) {
+      current += '/' + p
+      breadcrumbs.push({ name: p, path: current })
+    }
+    if (breadcrumbs.length === 0) {
+      breadcrumbs.push({ name: '/', path: '/' })
+    }
+
+    return HttpResponse.json({
+      breadcrumbs,
+      directories: Array.from(dirSet).sort().map(name => ({ name, path: prefix + name })),
+      files,
+    })
+  }),
+
+  // ─── 字幕 ─────────────────────────────────────────────
+
+  http.get('/api/play/:id/subtitles', async () => {
+    await delay(150)
+    return HttpResponse.json({
+      tracks: [
+        { index: 0, file_name: '电影名.srt', format: 'srt', url: '/api/play/1/subtitles/0' },
+        { index: 1, file_name: '电影名.ass', format: 'ass', url: '/api/play/1/subtitles/1' },
+      ],
+    })
+  }),
+
+  http.get('/api/play/:id/subtitles/:index', async () => {
+    await delay(100)
+    return new HttpResponse(
+      'WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n这是第一条测试字幕\n\n2\n00:00:04.000 --> 00:00:06.000\n这是第二条测试字幕\n',
+      { headers: { 'Content-Type': 'text/vtt' } },
+    )
+  }),
+
+  // ─── SMB 凭据 ──────────────────────────────────────────
+
+  http.post('/api/smb/credentials', async () => {
+    await delay(200)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // ─── 扫描 ──────────────────────────────────────────────
+
   http.post('/api/library/scan/:id', async ({ params }) => {
     await delay(500)
     const id = Number(params.id)

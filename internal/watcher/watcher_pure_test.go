@@ -1,7 +1,6 @@
 package watcher
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,8 +9,8 @@ import (
 	"jianvideo/internal/db/models"
 )
 
-// sep 使用当前操作系统的路径分隔符。
-const sep = string(filepath.Separator)
+// 路径统一使用正斜杠，与数据库存储和 pathToLib 的 key 格式一致
+const sep = "/"
 
 // buildBreadcrumbs 将路径拆分为面包屑段（与 library.Service 中相同的逻辑，供 watcher 包测试使用）。
 func buildBreadcrumbs(path string) []models.BreadcrumbItem {

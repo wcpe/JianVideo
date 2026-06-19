@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -189,10 +190,15 @@ func TestWatcher_Debounce(t *testing.T) {
 	// 等待去抖完成 + 入库
 	time.Sleep(1 * time.Second)
 
-	// 验证只有一条记录
+	// 验证只有一条记录（统一为正斜杠查询）
 	var count int64
-	if err := gdb.Model(&models.MediaFile{}).Where("file_path = ?", videoPath).Count(&count).Error; err != nil {
-		t.Fatalf("查询记录数失败: %v", err)
+	normalizedPath := filepath.ToSlash(videoPath)
+	gdb.Model(&models.MediaFile{}).Where("file_path = ?", normalizedPath).Count(&count)
+	if gdb.Error != nil && !errors.Is(gdb.Error, gorm.ErrRecordNotFound) {
+		t.Fatalf("查询记录数失败: %v", gdb.Error)
+	}
+	if count != 1 {
+		t.Fatalf("去抖后期望 1 条记录, 实际 %d", count)
 	}
 	if count != 1 {
 		t.Fatalf("去抖后期望 1 条记录, 实际 %d", count)

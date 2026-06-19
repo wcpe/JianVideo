@@ -266,8 +266,8 @@ func (w *Watcher) pollAllSMB() {
 
 // findLibraryID 根据文件路径查找所属的 library_id。
 func (w *Watcher) findLibraryID(filePath string) int64 {
-	// 从文件路径向上匹配已知的库目录
-	dir := filepath.Dir(filePath)
+	// 统一为正斜杠，与 pathToLib 的 key 格式一致
+	dir := filepath.ToSlash(filepath.Dir(filePath))
 	for dir != "/" && dir != "." {
 		w.mu.RLock()
 		id, ok := w.pathToLib[dir]
@@ -275,7 +275,7 @@ func (w *Watcher) findLibraryID(filePath string) int64 {
 		if ok {
 			return id
 		}
-		parent := filepath.Dir(dir)
+		parent := filepath.ToSlash(filepath.Dir(dir))
 		if parent == dir {
 			break // 已到达根目录，避免 Windows 上无限循环
 		}

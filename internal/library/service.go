@@ -39,10 +39,17 @@ func (s *Service) SetSMBCredentialStore(store *smb.CredentialStore) {
 
 // CreateLibraryPath 添加媒体库目录。
 func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.LibraryPath, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("路径不能为空")
+	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
+
+	// 统一存储为正斜杠，保证跨平台 LIKE 查询一致
+	absPath = filepath.ToSlash(absPath)
 
 	lp := &models.LibraryPath{
 		Path:    absPath,
@@ -80,12 +87,26 @@ func (s *Service) DeleteLibraryPath(id int64) error {
 		if err := tx.Where("library_id = ?", id).Delete(&models.MediaFile{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&models.LibraryPath{}, id).Error
+		result := tx.Delete(&models.LibraryPath{}, id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("目录不存在")
+		}
+		return nil
 	})
 }
 
 // CreateMediaFile 添加媒体文件记录。
 func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int64) (*models.MediaFile, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return nil, fmt.Errorf("文件路径不能为空")
+	}
+
+	// 统一存储为正斜杠，保证跨平台 LIKE 查询一致
+	filePath = filepath.ToSlash(filePath)
+
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 
 	mf := &models.MediaFile{
@@ -156,11 +177,20 @@ func (s *Service) GetMediaFileByID(id int64) (*models.MediaFile, error) {
 
 // DeleteMediaFile 删除单条媒体文件记录。
 func (s *Service) DeleteMediaFile(id int64) error {
-	return s.db.Delete(&models.MediaFile{}, id).Error
+	result := s.db.Delete(&models.MediaFile{}, id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("媒体文件不存在")
+	}
+	return nil
 }
 
 // GetMediaFileByPath 根据文件路径查询媒体文件。
 func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error) {
+	// 统一为正斜杠，与存储格式一致
+	filePath = filepath.ToSlash(filePath)
 	var mf models.MediaFile
 	if err := s.db.Where("file_path = ?", filePath).First(&mf).Error; err != nil {
 		return nil, err
@@ -170,14 +200,16 @@ func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error)
 
 // DeleteMediaFileByPath 根据文件路径删除媒体文件记录。
 func (s *Service) DeleteMediaFileByPath(filePath string) error {
+	filePath = filepath.ToSlash(filePath)
 	return s.db.Where("file_path = ?", filePath).Delete(&models.MediaFile{}).Error
 }
 
 // BrowseDirectory 浏览指定目录下的子目录和媒体文件。
 // 通过 file_path 前缀匹配一次查询所有文件，Go 层按第一级子目录分组。
 func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error) {
+	// 统一路径分隔符为 /，防止 Windows filepath.Clean 把 / 转成 \
+	parentPath = strings.ReplaceAll(parentPath, `\`, `/`)
 	// 规范化路径，防止路径遍历
-	parentPath = filepath.Clean(parentPath)
 	if strings.Contains(parentPath, "..") {
 		return nil, fmt.Errorf("非法路径: parentPath 不能包含 ..")
 	}
@@ -232,8 +264,9 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 
 // buildBreadcrumbs 将路径拆分为面包屑段。
 func buildBreadcrumbs(path string) []models.BreadcrumbItem {
-	// 拆分路径
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	// 统一路径分隔符为 /，再拆分
+	normalized := strings.ReplaceAll(path, `\`, `/`)
+	parts := strings.Split(strings.Trim(normalized, "/"), "/")
 	var items []models.BreadcrumbItem
 	var current string
 	for _, p := range parts {
@@ -366,9 +399,15 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 
 // indexVideoFiles 将本地视频文件路径批量入库。
 func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) {
+	// 统一所有路径为正斜杠，保证跨平台查询和去重一致
+	normalizedPaths := make([]string, len(paths))
+	for i, p := range paths {
+		normalizedPaths[i] = filepath.ToSlash(p)
+	}
+
 	// 批量查询已有记录，避免 N+1 查询
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("file_path IN ?", paths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("file_path IN ?", normalizedPaths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -377,8 +416,9 @@ func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) 
 	}
 
 	count := 0
-	for _, fullPath := range paths {
-		if existingSet[fullPath] {
+	for i, fullPath := range paths {
+		normalized := normalizedPaths[i]
+		if existingSet[normalized] {
 			continue
 		}
 
@@ -387,8 +427,8 @@ func (s *Service) indexVideoFiles(libraryID int64, paths []string) (int, error) 
 			continue
 		}
 
-		if _, err := s.CreateMediaFile(libraryID, fullPath, info.Size()); err != nil {
-			log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", fullPath, err)
+		if _, err := s.CreateMediaFile(libraryID, normalized, info.Size()); err != nil {
+			log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", normalized, err)
 			continue
 		}
 		count++
