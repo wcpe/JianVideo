@@ -1,20 +1,17 @@
-import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack } from '@mantine/core'
+import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconSun, IconMoon } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 
 /** 全局布局 — Mantine AppShell */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { username, logout, init } = useAuthStore()
+  const { username, logout } = useAuthStore()
   const navigate = useNavigate()
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false)
-
-  // 应用挂载时恢复认证状态
-  useEffect(() => {
-    init()
-  }, [init])
+  // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
+  const { toggleColorScheme } = useMantineColorScheme()
+  const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
 
   const handleLogout = async () => {
     await logout()
@@ -72,6 +69,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           <Group gap="sm">
             <Text size="sm" c="dimmed">{username}</Text>
+            {/* 主题切换：暗色显示太阳（点击切浅色），浅色显示月亮（点击切暗色） */}
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={toggleColorScheme}
+              title="切换主题"
+              aria-label="切换主题"
+            >
+              {computedColorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+            </ActionIcon>
             <ActionIcon
               variant="subtle"
               color="gray"

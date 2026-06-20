@@ -137,4 +137,10 @@ describe('auth store', () => {
     expect(state.isAuthenticated).toBe(false)
     expect(mockGetMe).not.toHaveBeenCalled()
   })
+
+  it('init 执行后标记 initialized 为 true', async () => {
+    await useAuthStore.getState().init()
+
+    expect(useAuthStore.getState().initialized).toBe(true)
+  })
 })

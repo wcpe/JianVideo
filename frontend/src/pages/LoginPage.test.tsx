@@ -116,7 +116,7 @@ describe('LoginPage', () => {
       )
     })
 
-    expect(mockNavigate).toHaveBeenCalledWith('/library')
+    expect(mockNavigate).toHaveBeenCalledWith('/')
   })
 
   it('登录失败显示错误提示', async () => {

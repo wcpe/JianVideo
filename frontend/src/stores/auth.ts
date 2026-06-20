@@ -8,6 +8,8 @@ interface AuthState {
   isAuthenticated: boolean
   loading: boolean
   error: string | null
+  /** 是否已完成首次认证初始化（init 执行完毕后置 true） */
+  initialized: boolean
   /** JWT token（可选，用于 Authorization header） */
   token?: string
   /** 登录 */
@@ -27,6 +29,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   loading: false,
   error: null,
+  initialized: false,
 
   login: async (username, password) => {
     set({ loading: true, error: null })
@@ -51,15 +54,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   init: async () => {
     const authed = localStorage.getItem(AUTH_KEY) === '1'
     if (!authed) {
-      set({ isAuthenticated: false })
+      // 未认证分支：初始化完成
+      set({ isAuthenticated: false, initialized: true })
       return
     }
     try {
       const user = await authApi.getMe()
-      set({ username: user.username, isAuthenticated: true })
+      // getMe 成功：恢复登录态并标记初始化完成
+      set({ username: user.username, isAuthenticated: true, initialized: true })
     } catch {
+      // getMe 失败：清除本地凭据并标记初始化完成
       localStorage.removeItem(AUTH_KEY)
-      set({ username: null, isAuthenticated: false })
+      set({ username: null, isAuthenticated: false, initialized: true })
     }
   },
 

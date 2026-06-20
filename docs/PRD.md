@@ -66,7 +66,7 @@
 | FR-A | 页面流程重设计：拆为存储库管理页、时间轴视图页、目录浏览页，Tab 切换导航 | P1 | 开发中 |
 | FR-B | 时间轴视图重做：左侧日期轴 + 右侧缩略图网格，按日期分组展示 | P1 | 开发中 |
 | FR-E | 虚拟列表 + 懒加载：react-virtual 虚拟滚动，图片 loading="lazy"，千条列表流畅滚动 | P1 | 开发中 |
-| FR-G | 暗色模式 + 路由守卫 + 全局错误处理：Mantine ColorScheme 切换，ProtectedRoute，统一错误 toast | P2 | 计划 |
+| FR-G | 暗色模式 + 路由守卫 + 全局错误处理：Mantine ColorScheme 切换，ProtectedRoute，统一错误 toast | P2 | 开发中 |
 | FR-H | 测试同步更新：parseWebVTT 提取为公共工具，重构后全量测试绿 | P1 | 计划 |
 
 > 状态取值：计划 / 开发中 / 已交付@vX.Y.Z。优先级：P1(MVP) / P2 / P3。

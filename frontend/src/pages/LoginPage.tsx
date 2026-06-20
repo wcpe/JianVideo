@@ -27,7 +27,7 @@ export default function LoginPage() {
         color: 'green',
         autoClose: 2000,
       })
-      navigate('/library')
+      navigate('/')
     } catch {
       // 错误已在 store 中设置
     }
