@@ -96,6 +96,13 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 
 // saveSMBConfig 保存 SMB 凭据到加密配置文件。
 func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string) {
+	// 统一使用 smb.MasterPassword() 作为主密码来源；未配置则拒绝以弱默认密钥保存，仅记录 ERROR
+	masterPwd, err := smb.MasterPassword()
+	if err != nil {
+		log.Printf("[ERROR] 无法保存 SMB 凭据: %v", err)
+		return
+	}
+
 	dataDir := filepath.Join("data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Printf("[WARN] 创建数据目录失败: %v", err)
@@ -109,8 +116,7 @@ func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string)
 		Password: password,
 	}
 
-	// 统一使用 smb.MasterPassword() 作为主密码来源，确保与各加载点一致
-	if err := store.Save(smb.MasterPassword(), creds); err != nil {
+	if err := store.Save(masterPwd, creds); err != nil {
 		log.Printf("[WARN] 保存 SMB 凭据失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "SMB_CONFIG_FAILED", "message": "SMB 凭据保存失败"})
 		return
@@ -266,6 +272,13 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 		return
 	}
 
+	// 统一使用 smb.MasterPassword() 作为主密码来源；未配置则拒绝以弱默认密钥保存，快速失败
+	masterPwd, err := smb.MasterPassword()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SMB_MASTER_PASSWORD_UNSET", "message": "未配置 SMB_MASTER_PASSWORD 环境变量，无法保存 SMB 凭据"})
+		return
+	}
+
 	dataDir := filepath.Join("data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "创建数据目录失败"})
@@ -280,8 +293,7 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 		Share:    req.Share,
 	}
 
-	// 统一使用 smb.MasterPassword() 作为主密码来源，确保与各加载点一致
-	if err := store.Save(smb.MasterPassword(), creds); err != nil {
+	if err := store.Save(masterPwd, creds); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "SAVE_FAILED", "message": "保存凭据失败"})
 		return
 	}

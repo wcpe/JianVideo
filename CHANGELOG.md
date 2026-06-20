@@ -6,7 +6,8 @@
 
 ## 未发布版本
 
-（无）
+### 安全
+- **SMB 主密码强制显式配置（FR-02）**：`smb.MasterPassword()` 不再在 `SMB_MASTER_PASSWORD` 未设置时回退公开弱默认值，改为返回错误；显式空串同样视为未配置。未配置时全部 Save/Load 调用点拒绝以弱密钥加解密——`POST /api/smb/credentials` 返回 `503`，添加 SMB 库路径仅记录 ERROR 不落弱密钥，SMB 扫描/播放返回明确错误。消除「拿到 `smb_credentials.enc` 即可用公开常量离线解出明文密码」的风险。同步更新 `docs/API.md`、`docs/OPERATIONS.md`。
 
 ## 0.3.0（2026-06-21）
 

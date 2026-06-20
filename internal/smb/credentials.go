@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,9 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 )
+
+// ErrMasterPasswordNotSet 表示未配置 SMB 主密码环境变量，SMB 凭据功能不可用。
+var ErrMasterPasswordNotSet = errors.New("未配置 SMB_MASTER_PASSWORD 环境变量，SMB 凭据功能不可用（拒绝使用弱默认主密码）")
 
 // Credentials 存储 SMB 连接凭据。
 // Password 需随凭据一起持久化到加密文件（AES-256-GCM + 0600 权限），故参与序列化；
@@ -35,14 +39,15 @@ func NewCredentialStore(dataDir string) *CredentialStore {
 	return &CredentialStore{dataDir: dataDir}
 }
 
-// MasterPassword 返回加解密 SMB 凭据用的主密码：优先环境变量 SMB_MASTER_PASSWORD，
-// 未设置时回退默认值（仅开发用，生产应设置环境变量）。
-// 所有 Save/Load 调用点必须使用此同一来源——否则加密与解密主密码不一致，凭据无法读回。
-func MasterPassword() string {
-	if p := os.Getenv("SMB_MASTER_PASSWORD"); p != "" {
-		return p
+// MasterPassword 返回加解密 SMB 凭据用的主密码，取自环境变量 SMB_MASTER_PASSWORD。
+// 环境变量未设置或为空串时返回 ErrMasterPasswordNotSet——拒绝以公开弱默认密钥静默加解密凭据，
+// 必须由运维显式配置。所有 Save/Load 调用点必须使用此同一来源，确保主密码一致。
+func MasterPassword() (string, error) {
+	p := os.Getenv("SMB_MASTER_PASSWORD")
+	if p == "" {
+		return "", ErrMasterPasswordNotSet
 	}
-	return "default-master-password"
+	return p, nil
 }
 
 // Save 使用 AES-GCM 加密并保存凭据。
