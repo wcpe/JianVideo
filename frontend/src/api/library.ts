@@ -35,7 +35,7 @@ async function realCreateLibraryPath(path: string, type = 'local', label = ''): 
     const res = await client.post<LibraryPath>('/api/library/paths', { path, type, label })
     return res.data
   } catch (err) {
-    throw new Error(getApiErrorMessage(err, '无法添加目录，请检查路径是否正确'))
+    throw new Error(getApiErrorMessage(err, '无法添加目录，请检查路径是否正确'), { cause: err })
   }
 }
 
@@ -76,7 +76,7 @@ async function realBrowseDirectory(libraryID: number, parentPath: string): Promi
     })
     return res.data
   } catch (err) {
-    throw new Error(getApiErrorMessage(err, '加载目录内容失败，请重试'))
+    throw new Error(getApiErrorMessage(err, '加载目录内容失败，请重试'), { cause: err })
   }
 }
 
@@ -84,7 +84,7 @@ async function realAddMediaExtension(libraryID: number, extension: string, type:
   try {
     await client.post('/api/library/extensions', { library_id: libraryID, extension, type })
   } catch (err) {
-    throw new Error(getApiErrorMessage(err, '添加后缀失败，请检查格式'))
+    throw new Error(getApiErrorMessage(err, '添加后缀失败，请检查格式'), { cause: err })
   }
 }
 

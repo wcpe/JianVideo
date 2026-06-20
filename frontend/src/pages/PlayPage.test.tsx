@@ -8,7 +8,7 @@ import PlayPage from './PlayPage'
 
 // mock VideoPlayer 组件，避免依赖 mpegts.js
 vi.mock('@/components/VideoPlayer', () => ({
-  default: (props: any) => <div data-testid="video-player" data-url={props.url} data-is-abr={String(!!props.isABR)} data-stream-type={props.streamType || ''} />,
+  default: (props: { url?: string; isABR?: boolean; streamType?: string }) => <div data-testid="video-player" data-url={props.url} data-is-abr={String(!!props.isABR)} data-stream-type={props.streamType || ''} />,
 }))
 
 function renderPlayPage(route: string) {

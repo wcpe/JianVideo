@@ -68,10 +68,8 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
   }, [searchInput])
 
   // search 变化时重置：回到第一页重新累积（append=false 会替换 items）。
-  // 此处需在 search 变化时主动发起首屏请求（与外部数据源同步），属于必要的副作用；
-  // 与既有 useMediaList 一致，fetchPage 内部会同步置 loading，故定点豁免该规则。
+  // 在 search 变化时主动发起首屏请求，属于与外部数据源同步的必要副作用。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPage(1, search, false)
   }, [search, fetchPage])
 
