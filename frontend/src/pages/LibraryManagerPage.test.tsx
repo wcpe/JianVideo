@@ -54,6 +54,54 @@ describe('LibraryManagerPage', () => {
     })
   })
 
+  it('卡片展示该库已索引媒体数量', async () => {
+    server.use(
+      http.get('*/api/library/paths', () => HttpResponse.json({
+        items: [
+          { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z', media_count: 42 },
+        ],
+      })),
+    )
+
+    renderPage()
+
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+    await waitFor(() => {
+      expect(within(card).getByText(/42/)).toBeVisible()
+    })
+  })
+
+  it('不再渲染页内媒体文件列表', async () => {
+    renderPage()
+
+    // 等待卡片加载完成
+    await screen.findByText('电影')
+    // 媒体文件搜索框与文件名仅属于已移除的媒体列表，不应出现
+    expect(screen.queryByPlaceholderText('搜索文件名...')).toBeNull()
+    expect(screen.queryByText('星际穿越.mkv')).toBeNull()
+  })
+
+  it('点击卡片跳转到对应库的目录视图', async () => {
+    server.use(
+      http.get('*/api/library/paths', () => HttpResponse.json({
+        items: [
+          { id: 7, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z', media_count: 3 },
+        ],
+      })),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByText('电影'))
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/browse?library_id=7&path=${encodeURIComponent('D:\\Videos\\Movies')}`,
+      )
+    })
+  })
+
   it('为指定目录追加自定义后缀时带上 library_id', async () => {
     let payload: { library_id?: number; extension?: string; type?: string } | null = null
     server.use(
@@ -122,68 +170,5 @@ describe('LibraryManagerPage', () => {
     await user.click(scanButton)
 
     expect(screen.getByRole('status')).toHaveTextContent('正在扫描')
-  })
-
-  it('重命名媒体文件成功并提交新文件名', async () => {
-    let payload: { new_name?: string } | null = null
-    server.use(
-      http.get('*/api/library/media', () => HttpResponse.json({
-        items: [{
-          id: 77,
-          library_id: 1,
-          file_path: 'D:\\Videos\\Movies\\旧名字.mkv',
-          file_name: '旧名字.mkv',
-          file_size: 5_000_000_000,
-          format: 'mkv',
-          video_codec: 'h264',
-          audio_codec: 'aac',
-          duration: 3600,
-          width: 1920,
-          height: 1080,
-          bitrate: 5000000,
-          subtitle_tracks: '',
-          added_at: '2025-01-09T12:00:00Z',
-          modified_at: '2025-01-09T12:00:00Z',
-        }],
-        total: 1,
-        page: 1,
-        page_size: 20,
-      })),
-      http.put('*/api/library/media/:id/rename', async ({ request, params }) => {
-        payload = await request.json() as { new_name: string }
-        return HttpResponse.json({
-          id: Number(params.id),
-          library_id: 1,
-          file_path: 'D:\\Videos\\Movies\\新名字.mkv',
-          file_name: payload.new_name,
-          file_size: 5_000_000_000,
-          format: 'mkv',
-          video_codec: 'h264',
-          audio_codec: 'aac',
-          duration: 3600,
-          width: 1920,
-          height: 1080,
-          bitrate: 5000000,
-          subtitle_tracks: '',
-          added_at: '2025-01-09T12:00:00Z',
-          modified_at: '2025-01-09T12:00:00Z',
-        })
-      }),
-    )
-
-    const user = userEvent.setup()
-    renderPage()
-
-    const card = (await screen.findByText('旧名字.mkv')).closest('.mantine-Card-root') as HTMLElement
-    await user.click(within(card).getByRole('button', { name: '重命名' }))
-
-    const input = await screen.findByLabelText('新文件名')
-    await user.clear(input)
-    await user.type(input, '新名字.mkv')
-    await user.click(screen.getByRole('button', { name: '确认' }))
-
-    await waitFor(() => {
-      expect(payload).toEqual({ new_name: '新名字.mkv' })
-    })
   })
 })

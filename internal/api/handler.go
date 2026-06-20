@@ -67,8 +67,9 @@ func (h *Handler) WithHLSPreSlice(hlsDir string, hlsMgr *player.HLSManager) *Han
 }
 
 // ListLibraryPaths GET /api/library/paths
+// 每项附带 media_count（该库已索引、未软删的媒体文件数量），供存储库卡片展示。
 func (h *Handler) ListLibraryPaths(c *gin.Context) {
-	items, err := h.library.ListLibraryPaths()
+	items, err := h.library.ListLibraryPathViews()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return

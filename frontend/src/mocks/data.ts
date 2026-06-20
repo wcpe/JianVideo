@@ -2,9 +2,9 @@ import type { LibraryPath, MediaFile } from '@/types'
 
 /** 模拟媒体库目录数据 */
 export const mockPaths: LibraryPath[] = [
-  { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z' },
-  { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T12:00:00Z' },
-  { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-03T12:00:00Z' },
+  { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z', media_count: 5 },
+  { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T12:00:00Z', media_count: 2 },
+  { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-03T12:00:00Z', media_count: 2 },
 ]
 
 /** 模拟媒体文件数据 */

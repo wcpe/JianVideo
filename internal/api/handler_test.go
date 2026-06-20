@@ -82,6 +82,37 @@ func TestListLibraryPaths_API(t *testing.T) {
 	}
 }
 
+func TestListLibraryPaths_API_IncludesMediaCount(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "库")
+	_, _ = svc.CreateMediaFile(lp.ID, "/tmp/x/a.mp4", 1)
+	_, _ = svc.CreateMediaFile(lp.ID, "/tmp/x/b.mp4", 1)
+
+	req := httptest.NewRequest("GET", "/api/library/paths", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d", w.Code)
+	}
+
+	var resp struct {
+		Items []struct {
+			ID         int64 `json:"id"`
+			MediaCount int64 `json:"media_count"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v, body: %s", err, w.Body.String())
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("期望 1 条记录, 实际响应: %s", w.Body.String())
+	}
+	if resp.Items[0].MediaCount != 2 {
+		t.Fatalf("期望 media_count=2, 实际 %d", resp.Items[0].MediaCount)
+	}
+}
+
 func TestDeleteLibraryPath_API(t *testing.T) {
 	router, svc := setupTestRouter(t)
 	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "")

@@ -6,6 +6,8 @@ export interface LibraryPath {
   label: string
   enabled: boolean
   created_at: string
+  /** 该库已索引（未软删）的媒体数量，由 GET /api/library/paths 返回 */
+  media_count?: number
 }
 
 /** 媒体文件 */

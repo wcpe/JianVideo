@@ -1,4 +1,4 @@
-import { Stack, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box } from '@mantine/core'
+import { Stack, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge } from '@mantine/core'
 import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader } from '@tabler/icons-react'
 import type { LibraryPath, MediaExtensionType } from '@/types'
 
@@ -51,10 +51,16 @@ export default function LibraryPathManager({
           {paths.map((p) => (
             <Card key={p.id} withBorder p="xs" radius="sm" bg="dark.7">
               <Group justify="space-between" wrap="nowrap">
-                <Box style={{ flex: 1, minWidth: 0 }}>
+                <Box
+                  style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                  onClick={() => onBrowsePath(p)}
+                  role="button"
+                  aria-label={`打开 ${p.label || p.path} 目录`}
+                >
                   <Group gap={6} wrap="nowrap">
                     <IconFolder size={14} color="var(--mantine-color-purple-4)" />
                     <Text size="sm" truncate>{p.label || p.path}</Text>
+                    <Badge size="xs" variant="light" color="purple">{p.media_count ?? 0} 个媒体</Badge>
                   </Group>
                   <Text size="xs" c="dimmed" truncate>{p.path}</Text>
                 </Box>

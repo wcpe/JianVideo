@@ -99,7 +99,11 @@ async function realListMediaExtensions(libraryID: number): Promise<MediaExtensio
 
 async function mockGetLibraryPaths(): Promise<LibraryPath[]> {
   await mockDelay(150)
-  return [...mockPaths]
+  // 附带各库已索引媒体数量，与真实接口字段一致
+  return mockPaths.map(p => ({
+    ...p,
+    media_count: mockMediaFiles.filter(m => m.library_id === p.id).length,
+  }))
 }
 
 async function mockCreateLibraryPath(path: string, type = 'local', label = ''): Promise<LibraryPath> {

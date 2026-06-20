@@ -46,7 +46,12 @@ export const handlers = [
 
   http.get('*/api/library/paths', async () => {
     await delay(200)
-    return HttpResponse.json({ items: [...paths] })
+    // 为每个库附带已索引媒体数量，与真实接口字段一致
+    const items = paths.map(p => ({
+      ...p,
+      media_count: mediaFiles.filter(m => m.library_id === p.id).length,
+    }))
+    return HttpResponse.json({ items })
   }),
 
   http.post('*/api/library/paths', async ({ request }) => {

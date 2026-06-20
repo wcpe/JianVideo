@@ -9,8 +9,8 @@ interface UseInfiniteMediaOptions {
 
 /**
  * 累积分页加载媒体文件（用于时间轴滚动加载）。
- * 与 useMediaList 不同：每页结果是“追加”到 items，而非替换，
- * 以支持无限滚动；search 变化时重置并从第一页重新累积。
+ * 每页结果“追加”到 items 而非替换，以支持无限滚动；
+ * search 变化时重置并从第一页重新累积。
  */
 export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
   const { pageSize = 60, sort = 'time_desc' } = options
@@ -64,7 +64,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
     }
   }, [pageSize, sort])
 
-  // 搜索防抖 400ms，与 useMediaList 保持一致
+  // 搜索防抖 400ms
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput), 400)
     return () => clearTimeout(timer)

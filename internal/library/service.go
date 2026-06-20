@@ -116,6 +116,48 @@ func (s *Service) ListLibraryPaths() ([]models.LibraryPath, error) {
 	return items, nil
 }
 
+// LibraryPathView 媒体库目录视图：在目录记录基础上附带已索引媒体数量。
+// 供 FR-23 存储库卡片展示，不改动 LibraryPath 数据模型。
+type LibraryPathView struct {
+	models.LibraryPath
+	// MediaCount 该库已索引（未软删）的媒体文件数量
+	MediaCount int64 `json:"media_count"`
+}
+
+// ListLibraryPathViews 查询所有媒体库目录并附带各库的已索引媒体数量。
+// 媒体数量按 library_id 分组一次查询统计，排除已软删（deleted_at 非空）记录，
+// 与回收站（FR-25）口径一致，避免按库 N+1 计数。
+func (s *Service) ListLibraryPathViews() ([]LibraryPathView, error) {
+	paths, err := s.ListLibraryPaths()
+	if err != nil {
+		return nil, err
+	}
+
+	// 一次 GROUP BY 查询各库未软删媒体数量
+	type countRow struct {
+		LibraryID int64
+		Count     int64
+	}
+	var rows []countRow
+	if err := s.db.Model(&models.MediaFile{}).
+		Select("library_id, COUNT(*) AS count").
+		Where("deleted_at IS NULL").
+		Group("library_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	countByLibrary := make(map[int64]int64, len(rows))
+	for _, r := range rows {
+		countByLibrary[r.LibraryID] = r.Count
+	}
+
+	views := make([]LibraryPathView, len(paths))
+	for i, p := range paths {
+		views[i] = LibraryPathView{LibraryPath: p, MediaCount: countByLibrary[p.ID]}
+	}
+	return views, nil
+}
+
 // GetLibraryPathByID 根据 ID 获取媒体库目录。
 func (s *Service) GetLibraryPathByID(id int64) (*models.LibraryPath, error) {
 	var lp models.LibraryPath

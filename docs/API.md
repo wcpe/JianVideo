@@ -58,7 +58,7 @@
 ### 获取媒体库目录列表
 
 - **方法 / 路径**：`GET /api/library/paths`
-- **响应**（200）：
+- **响应**（200）：每项含 `media_count`，即该库已索引（未软删）的媒体文件数量，供存储库卡片展示。
   ```json
   {
     "items": [
@@ -67,7 +67,8 @@
         "path": "/media/movies",
         "type": "local",
         "label": "电影",
-        "enabled": true
+        "enabled": true,
+        "media_count": 42
       }
     ]
   }

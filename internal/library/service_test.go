@@ -572,3 +572,57 @@ func TestRenameMediaFile_NotFound(t *testing.T) {
 		t.Fatal("不存在的记录应返回错误")
 	}
 }
+
+func TestListLibraryPathViews(t *testing.T) {
+	svc, db := newTestService(t)
+
+	lp1, _ := svc.CreateLibraryPath(t.TempDir(), "local", "库1")
+	lp2, _ := svc.CreateLibraryPath(t.TempDir(), "local", "库2")
+
+	// 库1：2 个媒体文件，其中 1 个软删；库2：1 个媒体文件；空库不计
+	_, _ = svc.CreateMediaFile(lp1.ID, "/tmp/lib1/a.mp4", 1)
+	soft, _ := svc.CreateMediaFile(lp1.ID, "/tmp/lib1/b.mp4", 1)
+	_, _ = svc.CreateMediaFile(lp2.ID, "/tmp/lib2/c.mp4", 1)
+
+	// 直接标记软删（FR-25 口径），计数应排除
+	now := time.Now()
+	if err := db.Model(&models.MediaFile{}).Where("id = ?", soft.ID).
+		Update("deleted_at", now).Error; err != nil {
+		t.Fatalf("标记软删失败: %v", err)
+	}
+
+	views, err := svc.ListLibraryPathViews()
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("期望 2 条记录, 实际 %d", len(views))
+	}
+
+	counts := map[int64]int64{}
+	for _, v := range views {
+		counts[v.ID] = v.MediaCount
+	}
+	if counts[lp1.ID] != 1 {
+		t.Fatalf("库1 媒体数量应为 1（软删排除）, 实际 %d", counts[lp1.ID])
+	}
+	if counts[lp2.ID] != 1 {
+		t.Fatalf("库2 媒体数量应为 1, 实际 %d", counts[lp2.ID])
+	}
+}
+
+func TestListLibraryPathViews_EmptyLibraryCountsZero(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "空库")
+
+	views, err := svc.ListLibraryPathViews()
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if len(views) != 1 || views[0].ID != lp.ID {
+		t.Fatalf("期望返回该空库, 实际 %+v", views)
+	}
+	if views[0].MediaCount != 0 {
+		t.Fatalf("空库媒体数量应为 0, 实际 %d", views[0].MediaCount)
+	}
+}

@@ -22,10 +22,10 @@ vi.mock('@mantine/notifications', () => ({
   },
 }))
 
-function renderPage() {
+function renderPage(initialEntry = '/browse') {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={['/browse']}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <BrowsePage />
       </MemoryRouter>
     </MantineProvider>,
@@ -55,6 +55,30 @@ describe('BrowsePage', () => {
 
     await waitFor(() => {
       expect(requestedParentPath).toBe('D:\\Videos\\Movies')
+    })
+  })
+
+  it('带库定位查询参数时使用指定库与路径初始化', async () => {
+    let requestedLibraryID: string | null = null
+    let requestedParentPath: string | null = null
+    server.use(
+      http.get('*/api/library/browse', ({ request }) => {
+        const url = new URL(request.url)
+        requestedLibraryID = url.searchParams.get('library_id')
+        requestedParentPath = url.searchParams.get('parent_path')
+        return HttpResponse.json({
+          breadcrumbs: [{ name: '动漫', path: 'D:\\Videos\\Anime' }],
+          directories: [],
+          files: [],
+        })
+      }),
+    )
+
+    renderPage(`/browse?library_id=3&path=${encodeURIComponent('D:\\Videos\\Anime')}`)
+
+    await waitFor(() => {
+      expect(requestedLibraryID).toBe('3')
+      expect(requestedParentPath).toBe('D:\\Videos\\Anime')
     })
   })
 
