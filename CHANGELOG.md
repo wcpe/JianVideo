@@ -18,9 +18,12 @@
 - 新增文件目录浏览 API（FR-15）：`GET /api/library/browse` 按目录层级浏览媒体文件，支持面包屑导航、子目录列表、媒体文件列表，前端 Tab 切换（时间轴 | 文件目录）
 - 完善视频播放页（FR-16）：VideoPlayer 接入 HLS 流
 - 路由改造：修复 catch-all 通配符冲突，统一 BrowserRouter 模式
+- 后端异步扫描 + SSE 进度推送（FR-C）：扫描改为后台 goroutine 异步执行，新增 `GET /api/library/scan/progress` SSE 端点实时推送已扫描数/总数/状态，前端展示扫描进度条并在完成后自动刷新
+- 缩略图系统（FR-D）：后端扫描时通过 ffmpeg 异步生成 320px 缩略图（视频取第 2 秒帧、图片缩放），新增 `GET /api/library/thumbnail/:id` 端点，前端媒体卡片改用缩略图加载（图片预览弹窗仍用原图）
 
 ### 变更
-（无）
+- 前端代码结构拆分（FR-F）：LibraryPage 拆分为 LibraryPathManager / MediaTimeline / DirectoryBrowser 等子组件与 useLibraryPaths / useMediaList / useDirectoryBrowse hooks，VideoPlayer 改用 Tabler Icons 与 Mantine 样式，删除 App.css 模板代码
+- 扫描接口改为异步（FR-C）：`POST /api/library/scan/:id` 不再等待扫描完成，立即返回 `{"status":"scanning"}`，实际进度经扫描进度 SSE 端点获取
 
 ### 修复
 - **媒体库**：修复本地扫描只读取第一层目录的问题，改为递归扫描并按目录类型分发 local/SMB。
