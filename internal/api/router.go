@@ -11,6 +11,7 @@ import (
 
 	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
+	"jianvideo/internal/transcoder"
 )
 
 // parseMediaID 解析并校验路由中的 media ID 参数。
@@ -63,6 +64,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		smbGroup.POST("/credentials", h.SaveSMBCredentials)
 	}
+
+	// 硬件加速能力查询：启动时检测、经此接口暴露（见 ARCHITECTURE §1/§4）
+	r.GET("/api/transcode/hwaccel", gin.WrapF(transcoder.HWAccelHandler))
 
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {

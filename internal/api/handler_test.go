@@ -473,3 +473,29 @@ func TestScanProgressSSE_StaysOpenAfterCompleted(t *testing.T) {
 		t.Fatal("SSE 在 completed 后被服务端提前关闭，应保持连接打开以接收后续扫描进度")
 	}
 }
+
+// 复现 G1：硬件加速能力端点 GET /api/transcode/hwaccel 必须已挂载并返回 JSON。
+// 修复前路由未注册 → 测试路由得 404；真实部署中会被前端 SPA catch-all 接住返回 HTML。
+func TestHWAccelEndpoint_ReturnsJSON(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/transcode/hwaccel", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200，实际 %d（路由未挂载会得 404）", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("期望 application/json，实际 Content-Type=%q", ct)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatalf("响应非 JSON: %v, body=%s", err, w.Body.String())
+	}
+	for _, k := range []string{"available", "preferred", "software_fallback", "h264_supported", "h265_supported"} {
+		if _, ok := info[k]; !ok {
+			t.Fatalf("硬件能力响应缺字段 %q，body=%s", k, w.Body.String())
+		}
+	}
+}

@@ -6,7 +6,8 @@
 
 ## 未发布版本
 
-（无）
+### 修复
+- **转码（FR-10/11/12）**：挂载硬件加速能力查询端点 `GET /api/transcode/hwaccel`。此前 HWAccelHandler 已实现但未注册路由，请求被前端 SPA 回退（NoRoute）接管返回 HTML 而非硬件能力 JSON，与 ARCHITECTURE §1/§4 不符；现已注册并返回 available/preferred/h264_supported 等字段。
 
 ## 0.1.0（2026-06-20）
 
