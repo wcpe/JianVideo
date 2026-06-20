@@ -44,6 +44,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/browse", h.BrowseDirectory)
 
+		lib.GET("/thumbnail/:id", h.GetThumbnail)
+
 		lib.POST("/scan/:id", h.ScanLibrary)
 		lib.GET("/scan/progress", h.ScanProgressSSE)
 	}

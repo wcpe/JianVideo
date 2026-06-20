@@ -234,7 +234,7 @@ describe('LibraryPage', () => {
     expect(screen.queryByText('0:00')).not.toBeInTheDocument()
   })
 
-  it('图片卡片渲染缩略图指向 /raw，视频卡片不渲染缩略图', async () => {
+  it('图片卡片渲染缩略图指向缩略图 URL，视频卡片不渲染缩略图', async () => {
     server.use(
       http.get('*/api/library/media', () => HttpResponse.json({
         items: [
@@ -266,7 +266,7 @@ describe('LibraryPage', () => {
     await screen.findByText('星际穿越.mkv')
 
     const pngThumb = screen.getByRole('img', { name: '海报.png' })
-    expect(pngThumb).toHaveAttribute('src', '/api/library/media/200/raw')
+    expect(pngThumb).toHaveAttribute('src', '/api/library/thumbnail/200')
 
     // 视频卡片不应有缩略图（避免范围扩散到 Bug B）
     expect(screen.queryByRole('img', { name: '星际穿越.mkv' })).not.toBeInTheDocument()

@@ -335,6 +335,31 @@ func (h *Handler) preSliceAllVideos(ctx context.Context) {
 	}
 }
 
+// GetThumbnail GET /api/library/thumbnail/:id
+func (h *Handler) GetThumbnail(c *gin.Context) {
+	id, ok := parseMediaID(c)
+	if !ok {
+		return
+	}
+
+	mf, err := h.library.GetMediaFileByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return
+	}
+
+	// 查找缩略图文件
+	thumbnailPath := library.FindThumbnailPath(mf.FilePath)
+	if _, err := os.Stat(thumbnailPath); err != nil {
+		// 缩略图不存在，异步生成后返回 202
+		go library.GenerateThumbnail(mf.FilePath)
+		c.JSON(http.StatusAccepted, gin.H{"code": "GENERATING", "message": "缩略图生成中"})
+		return
+	}
+
+	c.File(thumbnailPath)
+}
+
 // GetRawImage GET /api/library/media/:id/raw
 func (h *Handler) GetRawImage(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

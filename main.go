@@ -62,6 +62,9 @@ func main() {
 	}
 	hlsMgr := player.NewHLSManager(hlsDir)
 
+	// 初始化缩略图存储目录（与数据库、HLS 同处数据目录下）
+	library.InitThumbnailDir(filepath.Dir(cfg.DBPath))
+
 	// 播放服务：用于在 HLS 不可用时提供 /api/play/:id/stream 降级路径
 	pbSvc := playback.NewService()
 	defer pbSvc.Stop()

@@ -574,8 +574,8 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 		}
 		count++
 
-		// 异步触发缩略图生成，不阻塞入库
-		go generateThumbnail(fullPath)
+		// 异步生成缩略图，不阻塞入库
+		go GenerateThumbnail(fullPath)
 
 		// 每处理 10 个文件更新一次进度
 		if count%10 == 0 {

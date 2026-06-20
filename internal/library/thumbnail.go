@@ -1,39 +1,71 @@
 package library
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
-const thumbnailDir = "./thumbnails"
-const thumbnailWidth = 320
+var (
+	thumbnailDirMu sync.Once
+	thumbnailDir   string
+)
 
-// generateThumbnail 根据文件类型分发到对应的缩略图生成函数。
-// 异步调用，不阻塞入库流程。
-func generateThumbnail(filePath string) {
+// InitThumbnailDir 初始化缩略图存储目录（只需调用一次）。
+func InitThumbnailDir(baseDir string) {
+	thumbnailDirMu.Do(func() {
+		thumbnailDir = filepath.Join(baseDir, "thumbnails")
+		os.MkdirAll(thumbnailDir, 0755)
+	})
+}
+
+// GetThumbnailDir 返回缩略图存储目录路径。
+func GetThumbnailDir() string {
+	return thumbnailDir
+}
+
+// GenerateThumbnail 根据文件类型异步生成缩略图。
+func GenerateThumbnail(filePath string) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
-		generateImageThumbnail(filePath)
-	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts":
-		generateVideoThumbnail(filePath)
+		go generateImageThumbnail(filePath)
+	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".m4v", ".flv":
+		go generateVideoThumbnail(filePath)
 	}
 }
 
-// generateImageThumbnail 生成图片缩略图（待实现）。
 func generateImageThumbnail(filePath string) {
-	// TODO: 使用 imaging 库或 ffmpeg 生成缩略图
-	log.Printf("[Thumbnail] 图片缩略图待实现: %s", filePath)
+	outputPath := getThumbnailPath(filePath)
+	// 使用 ffmpeg 缩放图片（比引入 imaging 库更轻量，项目已依赖 ffmpeg）
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-vf", "scale=320:-1", "-vframes", "1", "-y", outputPath)
+	if err := cmd.Run(); err != nil {
+		log.Printf("[Thumbnail] 图片缩略图生成失败: %s, err=%v", filePath, err)
+	}
 }
 
-// generateVideoThumbnail 使用 ffmpeg 提取第 1 秒帧作为视频缩略图。
 func generateVideoThumbnail(filePath string) {
-	// ffmpeg -i input.mp4 -ss 00:00:01 -vframes 1 -vf "scale=320:-1" -y thumb.jpg
-	outputPath := filepath.Join(thumbnailDir, filepath.Base(filePath)+".jpg")
-	cmd := exec.Command("ffmpeg", "-i", filePath, "-ss", "00:00:01", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath)
+	outputPath := getThumbnailPath(filePath)
+	// 提取第 2 秒帧（第 1 秒常是黑屏）
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-ss", "00:00:02", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath)
 	if err := cmd.Run(); err != nil {
 		log.Printf("[Thumbnail] 视频缩略图生成失败: %s, err=%v", filePath, err)
 	}
+}
+
+func getThumbnailPath(filePath string) string {
+	// 用文件路径的 hash 作为缩略图名，避免特殊字符
+	hash := sha256.Sum256([]byte(filePath))
+	name := hex.EncodeToString(hash[:16])
+	return filepath.Join(thumbnailDir, name+".jpg")
+}
+
+// FindThumbnailPath 根据原始文件路径查找对应的缩略图路径。
+func FindThumbnailPath(filePath string) string {
+	return getThumbnailPath(filePath)
 }

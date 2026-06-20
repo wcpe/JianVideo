@@ -3,6 +3,7 @@ import { IconFolder, IconTrash, IconAlertCircle } from '@tabler/icons-react'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
+import MediaThumbnail from '@/components/MediaThumbnail'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
 interface DirectoryBrowserProps {
@@ -83,21 +84,8 @@ export default function DirectoryBrowser({
               className="hover-card"
             >
               {isImageFile(file, customImageExtensions) && (
-                <Box
-                  mb="xs"
-                  style={{
-                    aspectRatio: '16 / 9',
-                    background: 'var(--mantine-color-dark-6)',
-                    overflow: 'hidden',
-                    borderRadius: 4,
-                  }}
-                >
-                  <img
-                    src={`/api/library/media/${file.id}/raw`}
-                    alt={file.file_name}
-                    loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
+                <Box mb="xs">
+                  <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
                 </Box>
               )}
               <Text fw={500} truncate mb="xs">{file.file_name}</Text>
