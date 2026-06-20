@@ -199,7 +199,9 @@ func TestE2E_Library_CreatePath(t *testing.T) {
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 创建媒体库目录（Windows 路径需要转义 JSON 中的反斜杠）
+	// 后端会校验路径必须真实存在且为目录，故先创建
 	dirPath := filepath.Join(tmpDir, "movies")
+	os.MkdirAll(dirPath, 0o755)
 	body := fmt.Sprintf(`{"path":"%s","type":"local","label":"测试目录"}`, strings.ReplaceAll(dirPath, `\`, `\\`))
 	headers := map[string]string{"Cookie": cookie}
 
@@ -228,8 +230,9 @@ func TestE2E_Library_ListPaths(t *testing.T) {
 		`{"username":"admin","password":"admin"}`, nil)
 	cookie := loginResp.Header.Get("Set-Cookie")
 
-	// 先创建一个目录
+	// 先创建一个目录（后端校验路径需真实存在）
 	dirPath := filepath.Join(tmpDir, "movies")
+	os.MkdirAll(dirPath, 0o755)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影"}`, strings.ReplaceAll(dirPath, `\`, `\\`))
 	doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
@@ -479,17 +482,23 @@ func TestE2E_FullWorkflow(t *testing.T) {
 	}
 
 	// 5. 查询媒体文件列表
-	listResp := doRequest(t, "GET", server.URL+"/api/library/media?sort=time_desc", nil,
-		map[string]string{"Cookie": cookie})
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("查询失败: %d", listResp.StatusCode)
-	}
-
+	// 扫描已改为异步执行，POST 立即返回，故轮询媒体列表直到入库完成或超时
 	var listResult struct {
 		Items []models.MediaFile `json:"items"`
 		Total int64              `json:"total"`
 	}
-	parseJSON(t, listResp, &listResult)
+	for i := 0; i < 50; i++ {
+		listResp := doRequest(t, "GET", server.URL+"/api/library/media?sort=time_desc", nil,
+			map[string]string{"Cookie": cookie})
+		if listResp.StatusCode != http.StatusOK {
+			t.Fatalf("查询失败: %d", listResp.StatusCode)
+		}
+		parseJSON(t, listResp, &listResult)
+		if listResult.Total == int64(len(videoFiles)) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if listResult.Total != int64(len(videoFiles)) {
 		t.Errorf("期望 %d 个媒体文件, 实际 %d", len(videoFiles), listResult.Total)

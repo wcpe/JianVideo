@@ -1,6 +1,7 @@
 package db
 
 import (
+	"path/filepath"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -19,7 +20,10 @@ func TestOpen_MemoryDB(t *testing.T) {
 }
 
 func TestOpen_InvalidDSN(t *testing.T) {
-	d, err := Open("\x00invalid")
+	// 指向不存在的子目录，SQLite 无法创建该文件，Open 应在 Exec/Ping 阶段返回错误。
+	// （不用 "\x00invalid" 之类字面量：不同平台/驱动对其处理不一致，可能被当作合法文件名创建。）
+	badPath := filepath.Join(t.TempDir(), "no_such_dir", "test.db")
+	d, err := Open(badPath)
 	assert.Error(t, err)
 	assert.Nil(t, d)
 }
@@ -63,7 +67,10 @@ func TestInitSchema_Idempotent(t *testing.T) {
 }
 
 func TestOpen_WALMode(t *testing.T) {
-	d, err := Open("file::memory:?cache=shared")
+	// WAL 仅适用于文件型数据库；内存库的 journal_mode 恒为 "memory"，
+	// 因此用临时文件路径验证生产路径下 Open 是否真正启用了 WAL。
+	dbPath := filepath.Join(t.TempDir(), "wal_test.db")
+	d, err := Open(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { d.Close() })
 
