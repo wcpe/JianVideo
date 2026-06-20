@@ -11,7 +11,8 @@
 ## 2. 需求（要什么）
 
 - 前端播放器组件使用 `mpegts.js` 库创建 TS 播放器实例，通过 MSE API 播放 TS 流
-- 禁止原生 `<video>` 标签直接处理 TS 流（HLS 在 Safari 原生播放也不作为主路径）
+- 禁止原生 `<video>` 标签**直接处理 TS 流**（HLS 在 Safari 原生播放也不作为主路径）。
+  注：对**不需要转码、不走 TS**的直出场景（如 H.264+AAC 的 MP4 经 `/api/play/:id/stream` 输出，FR-05 兜底路径），允许使用原生 `<video>` 直出（VideoPlayer 通过 `streamType='mp4'` 切换）；mpegts.js 仅约束 TS/HLS 转码流。
 - 播放器配置：
   - `enableWorker: true`（在 Web Worker 中解析 TS，避免阻塞主线程）
   - `enableStashBuffer: true`（启用内部缓冲，应对网络抖动）
