@@ -13,6 +13,7 @@
 - **设置子系统（FR-24）**：新增 `internal/settings` 服务（按 key 读/写、批量 upsert）与 `GET /api/settings`、`PUT /api/settings` 端点，运行期设置以 SQLite `settings` 表为唯一真源、重启后保留；前端新增 `/settings` 设置页（Mantine）与导航项，支持配置「每盘符回收站路径」「扫描周期」等键值，为后续回收站清理（FR-26）、定时扫描（FR-28）提供配置真源。设置持久化决策见 ADR-0029。
 
 ### 变更
+- **用户相册/合集（FR-40）**：新增相册服务与 `GET/POST /api/albums`、`DELETE /api/albums/:id`、`GET/POST /api/albums/:id/items`、`DELETE /api/albums/:id/items/:mediaId` 端点，支持跨目录把任意媒体手动归入相册、浏览相册成员、移出成员；删除相册仅清理 `albums` 与 `album_items`，不删除源文件与 `media_files` 记录。前端新增 `/albums` 相册页（列相册、建相册、删相册、看相册内容、从媒体库加入/移出媒体）与导航入口。
 - **文档对齐**：修正 `README.md`、`docs/ARCHITECTURE.md` 中「CGO 绑定 ffmpeg-go 直接调用 libav C API」的过时表述——转码实为外部 ffmpeg 进程调用，CGO 仅用于 SQLite 与可选硬件编码器检测。
 - **存储库管理页精简（FR-23）**：`/library-manager` 移除页内媒体文件列表，仅保留存储库卡片（扫描进度 + 已索引媒体数量）；点击卡片携 `library_id` 与起始路径跳转 `/browse` 定位到该库根目录。`GET /api/library/paths` 响应每项新增 `media_count`（该库未软删媒体数量，按 `library_id` 一次 `GROUP BY` 统计，向后兼容）。
 

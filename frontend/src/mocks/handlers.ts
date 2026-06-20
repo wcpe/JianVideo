@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockPaths, mockMediaFiles } from './data'
-import type { LibraryPath, MediaFile, MediaExtension } from '@/types'
+import type { LibraryPath, MediaFile, MediaExtension, Album } from '@/types'
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths]
@@ -14,6 +14,11 @@ const settingsStore: Record<string, string> = {
   scan_interval: '3600',
   recycle_bin_paths: '{"D":"D:/.recycle"}',
 }
+
+// 相册（FR-40）内存数据
+let albums: Album[] = []
+let albumItems: { album_id: number; media_id: number }[] = []
+let nextAlbumId = 1
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -339,5 +344,78 @@ export const handlers = [
       mediaFiles.push(newFile)
     }
     return HttpResponse.json({ scanned: count })
+  }),
+
+  // ─── 相册（FR-40）──────────────────────────────────────
+
+  http.get('*/api/albums', async () => {
+    await delay(120)
+    const items = albums.map(a => ({
+      ...a,
+      item_count: albumItems.filter(it => it.album_id === a.id).length,
+    }))
+    return HttpResponse.json({ items })
+  }),
+
+  http.post('*/api/albums', async ({ request }) => {
+    await delay(150)
+    const body = await request.json() as { name: string; description?: string }
+    const name = (body.name || '').trim()
+    if (!name) {
+      return HttpResponse.json({ code: 'INVALID_INPUT', message: '相册名称不能为空' }, { status: 400 })
+    }
+    const now = new Date().toISOString()
+    const album: Album = {
+      id: nextAlbumId++,
+      name,
+      description: (body.description || '').trim(),
+      cover_media_id: 0,
+      created_at: now,
+      updated_at: now,
+    }
+    albums.unshift(album)
+    return HttpResponse.json(album, { status: 201 })
+  }),
+
+  http.delete('*/api/albums/:id', async ({ params }) => {
+    await delay(120)
+    const id = Number(params.id)
+    if (!albums.some(a => a.id === id)) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册不存在' }, { status: 404 })
+    }
+    albums = albums.filter(a => a.id !== id)
+    albumItems = albumItems.filter(it => it.album_id !== id)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.get('*/api/albums/:id/items', async ({ params }) => {
+    await delay(120)
+    const id = Number(params.id)
+    const items = albumItems
+      .filter(it => it.album_id === id)
+      .map(it => mediaFiles.find(m => m.id === it.media_id))
+      .filter((m): m is MediaFile => m !== undefined)
+    return HttpResponse.json({ items })
+  }),
+
+  http.post('*/api/albums/:id/items', async ({ params, request }) => {
+    await delay(120)
+    const id = Number(params.id)
+    const body = await request.json() as { media_id: number }
+    if (!albums.some(a => a.id === id) || !mediaFiles.some(m => m.id === body.media_id)) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册或媒体不存在' }, { status: 404 })
+    }
+    if (!albumItems.some(it => it.album_id === id && it.media_id === body.media_id)) {
+      albumItems.push({ album_id: id, media_id: body.media_id })
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.delete('*/api/albums/:id/items/:mediaId', async ({ params }) => {
+    await delay(120)
+    const id = Number(params.id)
+    const mediaId = Number(params.mediaId)
+    albumItems = albumItems.filter(it => !(it.album_id === id && it.media_id === mediaId))
+    return new HttpResponse(null, { status: 204 })
   }),
 ]

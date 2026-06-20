@@ -136,6 +136,28 @@
 | value | TEXT | 设置值，统一字符串存储；结构化值（如每盘符回收站路径）以 JSON 字符串存于单 key |
 | updated_at | DATETIME | 最后更新时间 |
 
+**相册（albums）** — FR-40
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| name | TEXT | 相册名称（必填） |
+| description | TEXT | 描述（可选） |
+| cover_media_id | INTEGER | 封面媒体 ID（可选，本期不强制设置） |
+| created_at | DATETIME | 创建时间 |
+| updated_at | DATETIME | 更新时间 |
+
+**相册成员（album_items）** — FR-40
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| album_id | INTEGER FK | 所属相册 |
+| media_id | INTEGER FK | 关联媒体文件（可跨多个媒体库目录） |
+| added_at | DATETIME | 加入时间 |
+
+相册是物理目录之外的逻辑集合，支持跨目录手动归类媒体。唯一索引 `(album_id, media_id)` 保证同一媒体在同一相册内不重复，重复加入做幂等处理。删除相册时，服务层在同一事务中删除该相册的 `album_items`，但**不删除源文件与 `media_files` 记录**（真源不变量见 `.claude/rules`）。
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -146,6 +168,7 @@
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
 | 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置 |
+| 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |

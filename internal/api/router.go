@@ -52,6 +52,18 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/scan/progress", h.ScanProgressSSE)
 	}
 
+	// 相册（FR-40）：相册增删、成员增删与浏览
+	albums := r.Group("/api/albums")
+	{
+		albums.GET("", h.ListAlbums)
+		albums.POST("", h.CreateAlbum)
+		albums.DELETE("/:id", h.DeleteAlbum)
+
+		albums.GET("/:id/items", h.ListAlbumItems)
+		albums.POST("/:id/items", h.AddAlbumItem)
+		albums.DELETE("/:id/items/:mediaId", h.RemoveAlbumItem)
+	}
+
 	// 字幕路由（不需要 playback 服务）
 	sub := r.Group("/api/play")
 	{

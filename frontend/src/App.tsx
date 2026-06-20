@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage'
 import LibraryManagerPage from './pages/LibraryManagerPage'
 import TimelinePage from './pages/TimelinePage'
 import BrowsePage from './pages/BrowsePage'
+import AlbumsPage from './pages/AlbumsPage'
 import PlayPage from './pages/PlayPage'
 import SystemPage from './pages/SystemPage'
 import SettingsPage from './pages/SettingsPage'
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/library-manager" element={<ProtectedRoute><AppLayout><LibraryManagerPage /></AppLayout></ProtectedRoute>} />
           <Route path="/" element={<ProtectedRoute><AppLayout><TimelinePage /></AppLayout></ProtectedRoute>} />
           <Route path="/browse" element={<ProtectedRoute><AppLayout><BrowsePage /></AppLayout></ProtectedRoute>} />
+          <Route path="/albums" element={<ProtectedRoute><AppLayout><AlbumsPage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           <Route path="/system" element={<ProtectedRoute><AppLayout><SystemPage /></AppLayout></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />

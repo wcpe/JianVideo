@@ -37,6 +37,18 @@ export interface MediaListResponse {
   page_size: number
 }
 
+/** 相册（FR-40）：跨目录手动归类媒体的集合 */
+export interface Album {
+  id: number
+  name: string
+  description: string
+  cover_media_id: number
+  created_at: string
+  updated_at: string
+  /** 成员数量（列表接口附带，详情接口可能缺省） */
+  item_count?: number
+}
+
 /** 登录请求 */
 export interface LoginRequest {
   username: string
