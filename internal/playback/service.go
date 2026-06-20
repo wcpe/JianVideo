@@ -149,7 +149,7 @@ func openSMBFile(smbPath string) (*smbReadSeeker, error) {
 
 	// 加载凭据
 	store := smb.NewCredentialStore("data")
-	creds, err := store.Load("")
+	creds, err := store.Load(smb.MasterPassword())
 	if err != nil {
 		return nil, fmt.Errorf("加载 SMB 凭据失败: %w", err)
 	}

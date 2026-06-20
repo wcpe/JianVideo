@@ -28,13 +28,17 @@
 
 ### SMB 凭据管理
 
-SMB 凭据通过 API 管理，加密存储在 `data/smb_credentials.enc`：
+SMB 凭据通过 API 管理，加密存储在 `data/smb_credentials.enc`。
+加解密主密码由服务端通过 `SMB_MASTER_PASSWORD` 环境变量统一配置（生产务必设置，未设置时回退默认值仅供开发），请求体不再包含主密码：
 
 ```bash
+# 先设置主密码环境变量后启动服务（生产环境必须）
+export SMB_MASTER_PASSWORD="请替换为强随机主密码"
+
 # 保存 SMB 凭据
 curl -X POST http://localhost:8080/api/smb/credentials \
   -H "Content-Type: application/json" \
-  -d '{"host":"192.168.1.100","username":"user","password":"pass","share":"ShareName","domain":"WORKGROUP","master_password":"your-master-password"}'
+  -d '{"host":"192.168.1.100","username":"user","password":"pass","share":"ShareName","domain":"WORKGROUP"}'
 ```
 
 ### 启动

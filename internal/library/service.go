@@ -574,7 +574,7 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 	if store == nil {
 		return 0, fmt.Errorf("未配置 SMB 凭据")
 	}
-	creds, err := store.Load("")
+	creds, err := store.Load(smb.MasterPassword())
 	if err != nil {
 		return 0, fmt.Errorf("加载 SMB 凭据失败: %w", err)
 	}

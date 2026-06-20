@@ -350,12 +350,11 @@
     "username": "user",
     "password": "pass",
     "share": "ShareName",
-    "domain": "WORKGROUP",
-    "master_password": "your-master-password"
+    "domain": "WORKGROUP"
   }
   ```
 - **响应**（204）：空
-- **说明**：SMB 凭据使用 AES-256-GCM 加密后存储在本地文件（`data/smb_credentials.enc`），主密码通过 `SMB_MASTER_PASSWORD` 环境变量配置
+- **说明**：SMB 凭据使用 AES-256-GCM 加密后存储在本地文件（`data/smb_credentials.enc`）。加解密主密码由服务端通过 `SMB_MASTER_PASSWORD` 环境变量统一配置（未设置时回退默认值，仅供开发），请求体无需也不应包含主密码
 - **错误**：`400` 请求参数错误，`500` 加密/存储失败
 
 ### 获取系统配置

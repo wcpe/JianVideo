@@ -15,10 +15,12 @@ import (
 )
 
 // Credentials 存储 SMB 连接凭据。
+// Password 需随凭据一起持久化到加密文件（AES-256-GCM + 0600 权限），故参与序列化；
+// 本结构仅在 smb 包内加解密使用，从不直接返回给 HTTP 响应，不存在明文泄露风险。
 type Credentials struct {
 	Host     string `json:"host"`
 	Username string `json:"username"`
-	Password string `json:"-"`
+	Password string `json:"password"`
 	Share    string `json:"share"`
 	Domain   string `json:"domain"`
 }
@@ -31,6 +33,16 @@ type CredentialStore struct {
 // NewCredentialStore 创建凭据存储器。
 func NewCredentialStore(dataDir string) *CredentialStore {
 	return &CredentialStore{dataDir: dataDir}
+}
+
+// MasterPassword 返回加解密 SMB 凭据用的主密码：优先环境变量 SMB_MASTER_PASSWORD，
+// 未设置时回退默认值（仅开发用，生产应设置环境变量）。
+// 所有 Save/Load 调用点必须使用此同一来源——否则加密与解密主密码不一致，凭据无法读回。
+func MasterPassword() string {
+	if p := os.Getenv("SMB_MASTER_PASSWORD"); p != "" {
+		return p
+	}
+	return "default-master-password"
 }
 
 // Save 使用 AES-GCM 加密并保存凭据。
