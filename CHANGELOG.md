@@ -8,6 +8,16 @@
 
 （无）
 
+## 0.3.0（2026-06-21）
+
+### 修复
+- **SMB 凭据（FR-02）主密码一致性与密码持久化**：修复保存时用 `SMB_MASTER_PASSWORD`/默认主密码、加载时却用空串，导致加密与解密主密码不一致、凭据永远无法读回的缺陷；同时修复 `Credentials.Password` 因 `json:"-"` 未写入加密文件、SMB 连接始终使用空密码的问题。新增 `smb.MasterPassword()` 作为加解密主密码唯一来源，统一全部 Save/Load 调用点（`saveSMBConfig`/`SaveSMBCredentials`/`library`/`playback`）。
+
+### 变更
+- **ABR 自适应码率（FR-07）真机验收交付**：多码率 master.m3u8 + hls.js ABR 链路（代码自 v0.1.0 已落地、未变更）经真机验证（`blob:` MSE 播放、多码率清单生效），状态由开发中转为已交付。
+- **双进度条（FR-20）真机验收交付**：VideoPlayer 缓冲进度 + 播放进度双滑块（代码自 v0.2.0 已落地、未变更）经真机验证，状态由开发中转为已交付。
+- **接口契约（FR-02）**：`POST /api/smb/credentials` 请求体移除 `master_password` 字段，加解密主密码改由服务端 `SMB_MASTER_PASSWORD` 环境变量统一管理；同步更新 `docs/API.md`、`docs/OPERATIONS.md`。
+
 ## 0.2.0（2026-06-21）
 
 ### 新增
