@@ -55,7 +55,7 @@ describe('TimelinePage', () => {
     })
   })
 
-  it('图片卡片渲染缩略图指向缩略图 URL，视频卡片不渲染缩略图', async () => {
+  it('按日期分组渲染日期文本，图片与视频卡片均渲染缩略图', async () => {
     server.use(
       http.get('*/api/library/media', () => HttpResponse.json({
         items: [
@@ -85,11 +85,18 @@ describe('TimelinePage', () => {
     await screen.findByText('海报.png')
     await screen.findByText('星际穿越.mkv')
 
+    // 两个不同日期分别渲染日期轴文本：年份 2025 与月日 01-09 / 01-01
+    expect(screen.getAllByText('2025').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('01-09')).toBeInTheDocument()
+    expect(screen.getByText('01-01')).toBeInTheDocument()
+
+    // 图片卡片渲染缩略图指向缩略图 URL
     const pngThumb = screen.getByRole('img', { name: '海报.png' })
     expect(pngThumb).toHaveAttribute('src', '/api/library/thumbnail/200')
 
-    // 视频卡片不应有缩略图
-    expect(screen.queryByRole('img', { name: '星际穿越.mkv' })).not.toBeInTheDocument()
+    // 视频卡片现在同样渲染缩略图
+    const mkvThumb = screen.getByRole('img', { name: '星际穿越.mkv' })
+    expect(mkvThumb).toHaveAttribute('src', '/api/library/thumbnail/201')
   })
 
   it('图片点击打开预览弹窗且不跳转播放页', async () => {
