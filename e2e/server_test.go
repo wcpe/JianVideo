@@ -57,7 +57,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 	}
 
 	hlsMgr := player.NewHLSManager(hlsDir)
-	srv := web.NewRouter(cfg, gormDB, hlsMgr, nil)
+	srv := web.NewRouter(cfg, gormDB, hlsMgr, nil, nil)
 
 	// 使用 httptest 启动真实 HTTP 服务器
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

@@ -57,7 +57,7 @@ func newPlaybackTestServer(t *testing.T) (*httptest.Server, *gorm.DB, *playback.
 	hlsMgr := player.NewHLSManager(hlsDir)
 
 	// 使用标准 NewRouter（包含认证和库路由）
-	r := web.NewRouter(cfg, gormDB, hlsMgr, nil)
+	r := web.NewRouter(cfg, gormDB, hlsMgr, nil, nil)
 
 	// 仅补挂播放路由，避免重复注册 /api/library/* 触发 panic
 	pbSvc := playback.NewService()

@@ -44,7 +44,7 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 
 	hlsMgr := player.NewHLSManager(t.TempDir())
 
-	return NewRouter(cfg, gormDB, hlsMgr, nil)
+	return NewRouter(cfg, gormDB, hlsMgr, nil, nil)
 }
 
 func TestLogin_Success(t *testing.T) {

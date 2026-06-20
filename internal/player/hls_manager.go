@@ -46,6 +46,7 @@ func (m *HLSManager) GetOrCreateWriter(mediaID int64, quality string) (*HLSSegme
 }
 
 // RemoveWriter 移除并关闭指定媒体文件和码率的切片写入器。
+// 同时清理该码率下的 m3u8 + 切片文件，让追播会话彻底结束。
 func (m *HLSManager) RemoveWriter(mediaID int64, quality string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -55,9 +56,11 @@ func (m *HLSManager) RemoveWriter(mediaID int64, quality string) {
 			_ = w.Close()
 			delete(mediaWriters, quality)
 		}
-		// 如果该媒体的所有 writer 都移除了，清理 map
+		// 如果该媒体的所有 writer 都移除了，清理 map 并删掉 m3u8 + 切片
 		if len(mediaWriters) == 0 {
 			delete(m.writers, mediaID)
+			mediaDir := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID))
+			_ = os.RemoveAll(mediaDir)
 		}
 	}
 }
@@ -76,47 +79,66 @@ func (m *HLSManager) RemoveAllWriters(mediaID int64) {
 }
 
 // GetM3U8 读取指定媒体文件和码率的 m3u8 索引内容。
+// 优先从内存 writer 读取（追播模式），否则直接从文件系统读取（预切片模式）。
+// 追播模式下若 writer 已被移除（RemoveWriter），即便文件还在也返回错误，
+// 避免前端拿到过期的 ENDLIST 索引。
 func (m *HLSManager) GetM3U8(mediaID int64, quality string) (string, error) {
 	m.mu.Lock()
-	mediaWriters, ok := m.writers[mediaID]
-	if !ok {
-		m.mu.Unlock()
-		return "", fmt.Errorf("媒体 %d 没有活跃的 HLS 会话", mediaID)
-	}
-	if _, ok := mediaWriters[quality]; !ok {
-		m.mu.Unlock()
-		return "", fmt.Errorf("媒体 %d 没有码率 %s 的 HLS 会话", mediaID, quality)
-	}
-	m3u8Path := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), quality+".m3u8")
+	mediaWriters, hasMedia := m.writers[mediaID]
+	_, hasQuality := mediaWriters[quality]
 	m.mu.Unlock()
 
-	data, err := os.ReadFile(m3u8Path)
-	if err != nil {
-		return "", fmt.Errorf("读取 m3u8 失败: %w", err)
+	// 追播模式：内存里有 writer 就走 in-memory 路径（writer 维护 m3u8 文本）
+	if hasMedia && hasQuality {
+		m3u8Path := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), quality+".m3u8")
+		data, err := os.ReadFile(m3u8Path)
+		if err != nil {
+			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
+		}
+		return string(data), nil
 	}
-	return string(data), nil
+
+	// 预切片模式：直接读文件系统（ffmpeg 写出的 m3u8）
+	m3u8Path := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), quality+".m3u8")
+	if _, err := os.Stat(m3u8Path); err == nil {
+		data, err := os.ReadFile(m3u8Path)
+		if err != nil {
+			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
+		}
+		return string(data), nil
+	}
+
+	if hasMedia {
+		return "", fmt.Errorf("媒体 %d 没有码率 %s 的 HLS 会话", mediaID, quality)
+	}
+	return "", fmt.Errorf("媒体 %d 没有码率 %s 的 HLS 产物", mediaID, quality)
 }
 
 // GetSegment 读取指定媒体文件和码率的切片内容。
+// 追播模式走内存 writer；预切片模式直接读文件系统。
+// 追播模式下若 writer 已被移除（RemoveWriter），即便文件还在也返回错误。
 func (m *HLSManager) GetSegment(mediaID int64, quality string, name string) ([]byte, error) {
 	m.mu.Lock()
-	mediaWriters, ok := m.writers[mediaID]
-	if !ok {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("媒体 %d 没有活跃的 HLS 会话", mediaID)
-	}
-	if _, ok := mediaWriters[quality]; !ok {
-		m.mu.Unlock()
-		return nil, fmt.Errorf("媒体 %d 没有码率 %s 的 HLS 会话", mediaID, quality)
-	}
-	segPath := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), name)
+	mediaWriters, hasMedia := m.writers[mediaID]
+	_, hasQuality := mediaWriters[quality]
 	m.mu.Unlock()
 
-	data, err := os.ReadFile(segPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取切片 %s 失败: %w", name, err)
+	segPath := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), name)
+
+	// 追播模式：必须内存里还有对应 writer 才允许读
+	if hasMedia && hasQuality {
+		return os.ReadFile(segPath)
 	}
-	return data, nil
+
+	// 预切片模式：直接从文件系统读
+	if _, err := os.Stat(segPath); err == nil {
+		return os.ReadFile(segPath)
+	}
+
+	if hasMedia {
+		return nil, fmt.Errorf("媒体 %d 没有码率 %s 的活跃 HLS 会话", mediaID, quality)
+	}
+	return nil, fmt.Errorf("切片 %s 不存在", name)
 }
 
 // GetMasterM3U8 读取指定媒体文件的 master.m3u8 索引内容。

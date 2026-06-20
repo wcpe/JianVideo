@@ -3,6 +3,7 @@ package web
 import (
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,8 @@ import (
 // NewRouter 创建并配置路由
 // frontendDist 为嵌入的前端静态资源（由 main 通过 go:embed 传入）
 // 可选参数 pbSvc 用于挂载 /api/play/:id/stream 等播放路由（HLS 不可用时回退）。
-func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, frontendDist fs.FS, pbSvc ...*playback.Service) *gin.Engine {
+// 可选参数 overrideHandler 用于注入预配置（已挂 HLS 预切片依赖）的 Handler；传 nil 则新建默认 handler。
+func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, frontendDist fs.FS, overrideHandler *api.Handler, pbSvc ...*playback.Service) *gin.Engine {
 	r := gin.Default()
 
 	// 静态文件服务（前端嵌入）
@@ -47,16 +49,22 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		gin.DefaultErrorWriter.Write([]byte("创建默认用户失败: " + err.Error() + "\n"))
 	}
 
-	// 创建 API Handler
+	// 创建 API Handler：优先使用调用方注入的（可能已挂 HLS 预切片依赖），否则新建默认。
 	libSvc := library.NewService(db)
-	apiHandler := api.NewHandler(libSvc)
+	var apiHandler *api.Handler
+	if overrideHandler != nil {
+		apiHandler = overrideHandler
+	} else {
+		apiHandler = api.NewHandler(libSvc)
+	}
 
 	// 注册 API 路由（库路由）
 	api.RegisterRoutes(r, apiHandler)
 
-	// HLS 路由
+	// HLS 路由：master 动态读取 + 其余静态文件服务挂载 hlsDir
+	hlsDir := filepath.Join(filepath.Dir(cfg.DBPath), "hls")
 	if hlsMgr != nil {
-		api.RegisterHLSRoutes(r, hlsMgr)
+		api.RegisterHLSRoutes(r, hlsMgr, hlsDir)
 	}
 
 	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，

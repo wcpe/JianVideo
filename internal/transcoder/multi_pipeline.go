@@ -5,10 +5,41 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// FFmpegPath 全局可执行文件路径，可由 SetFFmpegPath 注入。
+// 默认通过 exec.LookPath("ffmpeg") 解析；找不到则 RunMulti 系列会返回错误。
+var ffmpegPath = "ffmpeg"
+
+// SetFFmpegPath 显式设置 ffmpeg 可执行文件路径（绝对或相对路径均可）。
+// 通常由 main.go 从环境变量 JIANVIDEO_FFMPEG_PATH 注入。
+func SetFFmpegPath(path string) {
+	if path != "" {
+		ffmpegPath = path
+	}
+}
+
+// GetFFmpegPath 返回当前 ffmpeg 可执行文件路径。
+func GetFFmpegPath() string {
+	return ffmpegPath
+}
+
+// IsFFmpegAvailable 检查当前配置的 ffmpeg 是否可执行。
+func IsFFmpegAvailable() bool {
+	if ffmpegPath == "" {
+		return false
+	}
+	if _, err := os.Stat(ffmpegPath); err == nil {
+		return true
+	}
+	// 退化到 PATH 查找
+	_, err := exec.LookPath(ffmpegPath)
+	return err == nil
+}
 
 // QualityDefinition 定义一个码率档位。
 type QualityDefinition struct {
@@ -55,15 +86,18 @@ func NewMultiPipeline(p *Pipeline) *MultiPipeline {
 // RunMulti 启动多码率转码，将 ffmpeg stdout 写入对应 dst 写入器。
 // qualities 为码率档位名列表（如 ["1080p","720p","480p"]）。
 // dsts 为每个码率对应的 io.Writer，与 qualities 一一对应。
+// 多码率模式下 ffmpeg 直接写文件到 cwd，dsts 参数被忽略。
 func (mp *MultiPipeline) RunMulti(ctx context.Context, inputPath string, qualities []string, dsts []io.Writer) error {
 	if len(dsts) > 0 {
 		log.Printf("[WARN] MultiPipeline.RunMulti: dsts 参数被忽略，多码率输出直接写入文件系统")
 	}
-	if len(qualities) != len(dsts) {
-		return fmt.Errorf("码率数量(%d)与写入器数量(%d)不匹配", len(qualities), len(dsts))
-	}
+	return mp.RunMultiToDir(ctx, inputPath, qualities, "")
+}
 
-	// 构建码率定义映射
+// RunMultiToDir 启动多码率转码，将切片与 m3u8 输出到指定目录。
+// 目录不存在会自动创建；outputDir 为空时使用 ffmpeg 默认 cwd。
+// qualities 为码率档位名列表（如 ["1080p","720p","480p"]）。
+func (mp *MultiPipeline) RunMultiToDir(ctx context.Context, inputPath string, qualities []string, outputDir string) error {
 	qualityDefs := make([]QualityDefinition, 0, len(qualities))
 	for _, name := range qualities {
 		found := false
@@ -79,12 +113,30 @@ func (mp *MultiPipeline) RunMulti(ctx context.Context, inputPath string, qualiti
 		}
 	}
 
-	args := mp.buildMultiArgs(inputPath, qualityDefs)
+	if outputDir != "" {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return fmt.Errorf("创建输出目录失败: %w", err)
+		}
+	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stdout = io.Discard // 多码率模式不输出到 stdout
+	args := mp.buildMultiArgs(inputPath, qualityDefs)
+	return mp.runFFmpeg(ctx, args, outputDir)
+}
+
+// runFFmpeg 用指定 ffmpeg 路径执行参数化命令。
+// dir 为 ffmpeg 的工作目录（影响相对路径输出文件位置）。
+func (mp *MultiPipeline) runFFmpeg(ctx context.Context, args []string, dir string) error {
+	if !IsFFmpegAvailable() {
+		return fmt.Errorf("ffmpeg 不可用（路径: %s）", ffmpegPath)
+	}
+
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd.Stdout = io.Discard
 	cmd.Stderr = &logWriter{prefix: "[ffmpeg-multi]"}
 	cmd.WaitDelay = 5 * time.Second
+	if dir != "" {
+		cmd.Dir = dir
+	}
 
 	setProcessGroup(cmd)
 
@@ -104,7 +156,7 @@ func (mp *MultiPipeline) RunMulti(ctx context.Context, inputPath string, qualiti
 		return fmt.Errorf("多码率 ffmpeg 转码失败: %w", err)
 	}
 
-	log.Printf("[INFO] 多码率转码完成: %s", inputPath)
+	log.Printf("[INFO] 多码率转码完成: %s", dir)
 	return nil
 }
 
@@ -158,6 +210,8 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 	outputParts := make([]string, 0, n*6)
 	for i, q := range qualities {
 		outLabel := fmt.Sprintf("[v%dout]", i+1)
+		// 切片与 m3u8 同目录，hls.js 相对路径拼出的 URL = playlist/{quality}.m3u8 的 base + {quality}_segment_NNN.ts
+		// 即 /api/play/hls/:id/playlist/{quality}_segment_NNN.ts
 		segFilename := fmt.Sprintf("%s_%%03d.ts", q.Name)
 		m3u8Filename := fmt.Sprintf("%s.m3u8", q.Name)
 

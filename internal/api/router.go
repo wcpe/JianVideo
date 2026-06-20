@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -64,6 +66,31 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	}
 }
 
+// serveHLSSegment 统一处理 HLS 切片请求（兼容 /:id/segment/:segment 与 /:id/:name.ts 两种路径）。
+func serveHLSSegment(c *gin.Context, hlsMgr *player.HLSManager) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	// 优先取 segment 参数；若为空则从 name 参数取（去掉 .ts 后缀）
+	segment := c.Param("segment")
+	if segment == "" {
+		segment = strings.TrimSuffix(c.Param("name"), ".ts")
+	}
+	if segment == "" || strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "无效的切片名称"})
+		return
+	}
+	quality := player.ExtractQualityFromSegment(segment)
+	data, err := hlsMgr.GetSegment(id, quality, segment)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+		return
+	}
+	c.Data(http.StatusOK, "video/mp2t", data)
+}
+
 // RegisterPlaybackRoutes 仅注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // 拆分出来便于在已经走过 RegisterRoutes 的引擎上单独补挂，避免重复注册。
 func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
@@ -124,56 +151,70 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 }
 
 // RegisterHLSRoutes 注册 HLS 切片和 m3u8 路由。
-func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager) {
-	hls := r.Group("/api/play/hls")
-	{
-		// master.m3u8 — ABR 多码率索引
-		hls.GET("/:id/master.m3u8", func(c *gin.Context) {
-			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-				return
-			}
-			content, err := hlsMgr.GetMasterM3U8(id)
+//
+// 采用单条通配路由 + handler 内部分发的方式，避免 gin 路由树冲突。
+// master 走动态读取（HLSManager），其余路径（m3u8、ts）走 hlsDir 静态文件。
+//
+// URL 格式：
+//   /api/play/hls/{mediaID}/master            → master playlist（动态）
+//   /api/play/hls/{mediaID}/{quality}.m3u8    → 单码率 m3u8（静态文件）
+//   /api/play/hls/{mediaID}/{quality}_segment_NNN.ts → TS 切片（静态文件）
+//
+// master 内容里的 playlist 路径写 "{quality}.m3u8"（与 master 同目录），
+// hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。
+func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) {
+	r.GET("/api/play/hls/*path", func(c *gin.Context) {
+		relPath := c.Param("path")
+		// 去掉前导 /
+		if strings.HasPrefix(relPath, "/") {
+			relPath = relPath[1:]
+		}
+
+		// 提取 mediaID（第一段）
+		parts := strings.SplitN(relPath, "/", 2)
+		if len(parts) == 0 || parts[0] == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的路径"})
+			return
+		}
+		mediaID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+			return
+		}
+		rest := ""
+		if len(parts) > 1 {
+			rest = parts[1]
+		}
+
+		// master playlist 走动态读取
+		if rest == "master" || rest == "master.m3u8" {
+			content, err := hlsMgr.GetMasterM3U8(mediaID)
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
 				return
 			}
 			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
-		})
-		hls.GET("/:id/:quality.m3u8", func(c *gin.Context) {
-			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-				return
-			}
-			quality := c.Param("quality")
-			content, err := hlsMgr.GetM3U8(id, quality)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
-				return
-			}
-			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
-		})
-		hls.GET("/:id/segment/:segment", func(c *gin.Context) {
-			id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-				return
-			}
-			segment := c.Param("segment")
-			if !strings.HasSuffix(segment, ".ts") || strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
-				c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "无效的切片名称"})
-				return
-			}
-			// 从切片文件名解析码率档位（格式: {quality}_segment_xxx.ts）
-			quality := player.ExtractQualityFromSegment(segment)
-			data, err := hlsMgr.GetSegment(id, quality, segment)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
-				return
-			}
-			c.Data(http.StatusOK, "video/mp2t", data)
-		})
+			return
+		}
+
+		// 其余路径走静态文件服务
+		fullPath := filepath.Join(hlsDir, relPath)
+		if _, err := os.Stat(fullPath); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
+			return
+		}
+		c.Header("Content-Type", detectHLSMimeType(relPath))
+		c.File(fullPath)
+	})
+}
+
+// detectHLSMimeType 根据 HLS 文件路径返回对应的 Content-Type。
+func detectHLSMimeType(path string) string {
+	if strings.HasSuffix(path, ".m3u8") {
+		return "application/vnd.apple.mpegurl"
 	}
+	if strings.HasSuffix(path, ".ts") {
+		return "video/mp2t"
+	}
+	return "application/octet-stream"
 }

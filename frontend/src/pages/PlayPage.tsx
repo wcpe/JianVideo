@@ -48,7 +48,7 @@ export default function PlayPage() {
 
     // 解析为绝对 URL，避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
     const toAbsolute = (path: string) => new URL(path, window.location.href).toString()
-    const hlsUrl = toAbsolute(`/api/play/hls/${mediaId}/master.m3u8`)
+    const hlsUrl = toAbsolute(`/api/play/hls/${mediaId}/master`)
     const streamUrl = toAbsolute(`/api/play/${mediaId}/stream`)
     fetch(hlsUrl, { method: 'GET' }).then((resp) => {
       // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用

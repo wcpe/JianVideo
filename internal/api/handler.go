@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"mime"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"jianvideo/internal/library"
+	"jianvideo/internal/player"
 	"jianvideo/internal/smb"
 	"jianvideo/internal/transcoder"
 )
@@ -28,11 +30,21 @@ type SubtitleTrack struct {
 // Handler API 请求处理器。
 type Handler struct {
 	library *library.Service
+	hlsDir  string             // HLS 切片输出根目录
+	hlsMgr  *player.HLSManager // 用于写入 master.m3u8
 }
 
 // NewHandler 创建处理器。
 func NewHandler(lib *library.Service) *Handler {
 	return &Handler{library: lib}
+}
+
+// WithHLSPreSlice 注入 HLS 预切片所需的目录与 HLSManager。
+// 任一参数为空则禁用预切片（用于测试或无 ffmpeg 环境）。
+func (h *Handler) WithHLSPreSlice(hlsDir string, hlsMgr *player.HLSManager) *Handler {
+	h.hlsDir = hlsDir
+	h.hlsMgr = hlsMgr
+	return h
 }
 
 // ListLibraryPaths GET /api/library/paths
@@ -264,7 +276,35 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "SCAN_FAILED", "message": "扫描失败"})
 		return
 	}
+
+	// 扫描成功后，对新入库的视频文件触发 HLS 预切片（如果启用了）。
+	// 预切片失败不阻塞扫描响应（仅记日志）。
+	// 用 context.Background() 而非 request ctx，避免 HTTP 响应返回后 ctx 被取消。
+	if transcoder.IsFFmpegAvailable() && h.hlsDir != "" && h.hlsMgr != nil {
+		go h.preSliceAllVideos(context.Background())
+	}
+
 	c.JSON(http.StatusOK, gin.H{"scanned": count})
+}
+
+// preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。
+func (h *Handler) preSliceAllVideos(ctx context.Context) {
+	files, _, err := h.library.ListMediaFiles(0, "", "", 1, 10000)
+	if err != nil {
+		log.Printf("[WARN] 预切片：获取媒体列表失败: %v", err)
+		return
+	}
+	for _, mf := range files {
+		if strings.HasPrefix(mf.FilePath, "smb://") {
+			continue
+		}
+		if _, err := os.Stat(mf.FilePath); err != nil {
+			continue
+		}
+		if _, err := transcoder.PreSlice(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hlsMgr, h.hlsDir); err != nil {
+			log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
+		}
+	}
 }
 
 // GetRawImage GET /api/library/media/:id/raw
