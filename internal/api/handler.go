@@ -36,11 +36,26 @@ type Handler struct {
 	library *library.Service
 	hlsDir  string             // HLS 切片输出根目录
 	hlsMgr  *player.HLSManager // 用于写入 master.m3u8
+	version string             // 应用版本号，由 main 经 ldflags 注入
 }
 
 // NewHandler 创建处理器。
 func NewHandler(lib *library.Service) *Handler {
 	return &Handler{library: lib}
+}
+
+// WithVersion 注入应用版本号，供系统诊断接口展示。
+func (h *Handler) WithVersion(v string) *Handler {
+	h.version = v
+	return h
+}
+
+// versionOrDefault 返回版本号，未注入时回退 "dev"。
+func (h *Handler) versionOrDefault() string {
+	if h.version == "" {
+		return "dev"
+	}
+	return h.version
 }
 
 // WithHLSPreSlice 注入 HLS 预切片所需的目录与 HLSManager。

@@ -68,6 +68,13 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	// 硬件加速能力查询：启动时检测、经此接口暴露（见 ARCHITECTURE §1/§4）
 	r.GET("/api/transcode/hwaccel", gin.WrapF(transcoder.HWAccelHandler))
 
+	// 系统诊断（FR-21）：系统信息查询与编解码器实测
+	sys := r.Group("/api/system")
+	{
+		sys.GET("/info", h.SystemInfo)
+		sys.POST("/codec-test", h.CodecTest)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		RegisterPlaybackRoutes(r, pbSvc[0])

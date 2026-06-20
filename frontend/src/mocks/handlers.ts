@@ -224,6 +224,62 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // ─── 系统诊断 ──────────────────────────────────────────
+
+  http.get('*/api/system/info', async () => {
+    await delay(150)
+    return HttpResponse.json({
+      app_version: '0.3.0',
+      os: 'linux',
+      arch: 'amd64',
+      num_cpu: 8,
+      hostname: 'nas01',
+      go_version: 'go1.22.5',
+      ffmpeg: {
+        available: true,
+        path: '/opt/jianvideo/ffmpeg',
+        version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
+      },
+      hwaccel: {
+        available: [
+          {
+            name: 'NVIDIA NVENC',
+            device_type: 'cuda',
+            h264_encoder: 'h264_nvenc',
+            h265_encoder: 'hevc_nvenc',
+            available: true,
+          },
+        ],
+        preferred: 'h264_nvenc',
+        intel_gpu: false,
+        intel_gpu_detail: '',
+        h264_supported: true,
+        h265_supported: true,
+        software_fallback: false,
+      },
+    })
+  }),
+
+  http.post('*/api/system/codec-test', async () => {
+    await delay(200)
+    return HttpResponse.json({
+      ffmpeg_available: true,
+      results: [
+        { encoder: 'libx264', family: 'software', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
+        { encoder: 'libx265', family: 'software', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
+        { encoder: 'h264_nvenc', family: 'nvenc', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
+        {
+          encoder: 'h264_qsv',
+          family: 'qsv',
+          codec: 'h264',
+          compiled: true,
+          tested_ok: false,
+          detail: '[h264_qsv @ 0x55] Error initializing an internal MFX session: unsupported (-3)',
+        },
+      ],
+    })
+  }),
+
   // ─── 扫描 ──────────────────────────────────────────────
 
   http.post('*/api/library/scan/:id', async ({ params }) => {

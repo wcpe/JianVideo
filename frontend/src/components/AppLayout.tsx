@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconSun, IconMoon } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconSun, IconMoon, IconDeviceDesktopAnalytics } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 
 /** 全局布局 — Mantine AppShell */
@@ -28,6 +28,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/library-manager', label: '管理', icon: IconSettings },
     { path: '/', label: '时间轴', icon: IconClock },
     { path: '/browse', label: '目录', icon: IconFolderOpen },
+    { path: '/system', label: '系统信息', icon: IconDeviceDesktopAnalytics },
   ]
 
   // 单个导航链接，onNavigate 用于移动端点击后关闭抽屉

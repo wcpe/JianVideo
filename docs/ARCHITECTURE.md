@@ -174,13 +174,13 @@
 - 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发入库，避免读取不完整文件。
 - Remove/Rename 事件按路径委托 library 删除对应索引。
 
-### 5.3 CGO 转码管道与流式输出
+### 5.3 转码管道与流式输出
 
-- 使用 csnewman/ffmpeg-go（CGO 绑定）直接调用 libavcodec/libavformat/libavutil/libswscale C API。
-- 转码管道：`avformat_open_input` → `avcodec_open2`(解码) → 硬件帧上下文 → `avcodec_open2`(编码) → `av_write_frame`(mpegts 输出)。
-- 编码输出通过自定义 AVIO 上下文写入 HTTP ResponseWriter，实时流式传输。
+- FFmpeg 作为**外部进程**调用（`os/exec` 启动 `ffmpeg`/`ffprobe`），转码本身不经 CGO；CGO 仅用于 SQLite 驱动与可选的硬件编码器检测（见 §5.6）。转码引擎不内嵌编解码逻辑（架构不变量）。
+- 转码管道：以参数化命令行启动外部 `ffmpeg`，由其完成解码→缩放→编码→（mpegts/HLS）输出。
+- 编码输出经 ffmpeg stdout 与 HLS 切片文件提供，实时流式传输给客户端。
 - 每个转码会话运行在独立 goroutine，通过 context.Context 管理生命周期。
-- Seek 时 cancel 旧 context，启动新 goroutine，使用 `av_seek_frame` 定位到目标位置。
+- Seek 时 cancel 旧 context（终止旧 ffmpeg 进程），启动新进程定位到目标位置。
 - 硬件加速编码器完整清单（必须同时支持 H.264 和 H.265）：
 
 | 平台 | H.264 编码器 | H.265 编码器 | 设备类型 |
@@ -216,18 +216,25 @@
 
 ### 5.6 硬件加速管理
 
-- 启动时检测可用硬件加速能力（通过 `ffmpeg -hwaccels` 和 `ffmpeg -encoders`）。
-- 按优先级尝试：Intel QSV → NVIDIA NVENC/NVDEC → VAAPI → 软件。
-- 硬件加速失败时自动降级，不中断播放。
+- 硬件编码器检测：`-tags ffmpeg` 构建下经 CGO 调用 libav `avcodec_find_encoder_by_name` 判断编码器是否编入，辅以 Intel sysfs 识别核显；非该构建走纯 Go 存根（按软件编码降级）。
+- 实际编码仍由外部 ffmpeg 进程以对应编码器名完成。
+- 按优先级尝试：NVIDIA NVENC → Intel QSV → VAAPI → 软件；失败自动降级，不中断播放。
+
+### 5.7 系统诊断与编解码器实测（FR-21）
+
+- `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速检测结果。
+- `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox 的 H.264/H.265）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。独立于 §5.6 的 CGO 检测，普通构建即可用，专供真机验收。
+- 前端 `/system` 页展示并支持一键复制纯文本报告。
 
 ## 6. 部署
 
 - **运行形态**：单个可执行文件，内嵌前端静态资源。
-- **依赖**：FFmpeg（需用户安装或通过配置指定路径）。
+- **依赖**：FFmpeg/ffprobe 外部进程；发布包随包附带，启动时按「环境变量 → 可执行文件同目录捆绑版 → PATH」自动发现（见 [ADR-0027](adr/0027-cross-platform-packaging.md)）。
 - **数据库**：SQLite WAL 模式，数据库文件位于配置目录。
 - **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
 - **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。
-- **跨平台**：Go 编译目标为 Windows/Linux/macOS。
+- **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
+- **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。
 
 ## 7. 关键裁决与不做项
 

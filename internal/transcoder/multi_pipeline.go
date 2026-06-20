@@ -28,6 +28,23 @@ func GetFFmpegPath() string {
 	return ffmpegPath
 }
 
+// ffprobePath 全局 ffprobe 可执行文件路径，可由 SetFFprobePath 注入。
+// 默认 "ffprobe"（PATH 查找）；随包附带时由 main.go 解析为同目录捆绑版。
+var ffprobePath = "ffprobe"
+
+// SetFFprobePath 显式设置 ffprobe 可执行文件路径。
+// 通常由 main.go 从环境变量 JIANVIDEO_FFPROBE_PATH 或同目录捆绑版注入。
+func SetFFprobePath(path string) {
+	if path != "" {
+		ffprobePath = path
+	}
+}
+
+// GetFFprobePath 返回当前 ffprobe 可执行文件路径。
+func GetFFprobePath() string {
+	return ffprobePath
+}
+
 // IsFFmpegAvailable 检查当前配置的 ffmpeg 是否可执行。
 func IsFFmpegAvailable() bool {
 	if ffmpegPath == "" {

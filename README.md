@@ -8,7 +8,7 @@
 
 ## 架构一览
 
-Go 后端通过 CGO 绑定 ffmpeg-go 直接调用 FFmpeg C API，提供 RESTful API 和 HLS/TS 视频流服务。React + TypeScript 前端通过 `go:embed` 内嵌于单个可执行文件中。元数据使用 SQLite（WAL 模式）本地存储，支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan），必须同时支持 H.264 和 H.265，启动时自动检测并在 `GET /api/transcode/hwaccel` 接口暴露。
+Go 后端以**外部进程**方式调用 FFmpeg（`ffmpeg`/`ffprobe`），提供 RESTful API 和 HLS/TS 视频流服务；CGO 仅用于 SQLite 驱动与可选的硬件编码器检测。React + TypeScript 前端通过 `go:embed` 内嵌于单个可执行文件中。元数据使用 SQLite（WAL 模式）本地存储，支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan），必须同时支持 H.264 和 H.265，启动时自动检测并在 `GET /api/transcode/hwaccel` 接口暴露。
 
 ```
 ┌──────────────┐     HTTP/HLS      ┌──────────────────┐

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -26,6 +27,28 @@ import (
 //go:embed frontend/dist
 var frontendDist embed.FS
 
+// version 应用版本号，构建时经 -ldflags "-X main.version=..." 注入，默认 dev。
+var version = "dev"
+
+// resolveTool 按「环境变量 → 可执行文件同目录捆绑版 → PATH 名」解析外部工具路径。
+// 用于让随包附带的 ffmpeg/ffprobe（与主二进制同目录）开箱即用。
+func resolveTool(envVar, name string) string {
+	if p := os.Getenv(envVar); p != "" {
+		return p
+	}
+	exeName := name
+	if runtime.GOOS == "windows" {
+		exeName = name + ".exe"
+	}
+	if exe, err := os.Executable(); err == nil {
+		bundled := filepath.Join(filepath.Dir(exe), exeName)
+		if _, err := os.Stat(bundled); err == nil {
+			return bundled
+		}
+	}
+	return name
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -44,16 +67,13 @@ func main() {
 		log.Fatalf("媒体后缀表迁移失败: %v", err)
 	}
 
-	// ffmpeg 路径注入：JIANVIDEO_FFMPEG_PATH 优先；找不到则尝试 PATH 中的 ffmpeg。
-	ffmpegPath := os.Getenv("JIANVIDEO_FFMPEG_PATH")
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
-	transcoder.SetFFmpegPath(ffmpegPath)
+	// ffmpeg/ffprobe 路径注入：环境变量 → 同目录捆绑版 → PATH（见 ADR-0027）。
+	transcoder.SetFFmpegPath(resolveTool("JIANVIDEO_FFMPEG_PATH", "ffmpeg"))
+	transcoder.SetFFprobePath(resolveTool("JIANVIDEO_FFPROBE_PATH", "ffprobe"))
 	if transcoder.IsFFmpegAvailable() {
 		log.Printf("[INFO] ffmpeg 可用: %s", transcoder.GetFFmpegPath())
 	} else {
-		log.Printf("[WARN] ffmpeg 不可用（%s），HLS 切片将不会生成", ffmpegPath)
+		log.Printf("[WARN] ffmpeg 不可用（%s），HLS 切片将不会生成", transcoder.GetFFmpegPath())
 	}
 
 	// 创建 HLS 切片存储目录
@@ -72,7 +92,7 @@ func main() {
 
 	// 创建 API Handler 并注入 HLS 预切片依赖
 	libSvc := library.NewService(gormDB)
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

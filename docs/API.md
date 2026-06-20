@@ -315,6 +315,36 @@
   }
   ```
 
+### 系统信息
+
+- **方法 / 路径**：`GET /api/system/info`
+- **响应**（200）：
+  ```json
+  {
+    "app_version": "0.3.0",
+    "os": "linux", "arch": "amd64", "num_cpu": 8, "hostname": "nas01",
+    "go_version": "go1.22.5",
+    "ffmpeg": { "available": true, "path": "/opt/jianvideo/ffmpeg", "version": "ffmpeg version 6.1.1 ..." },
+    "hwaccel": { "available": [], "preferred": "libx264", "intel_gpu": false, "h264_supported": true, "h265_supported": true, "software_fallback": true }
+  }
+  ```
+- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的结构；`app_version` 由构建期 `-ldflags -X main.version` 注入。
+
+### 编解码器实测
+
+- **方法 / 路径**：`POST /api/system/codec-test`
+- **响应**（200）：
+  ```json
+  {
+    "ffmpeg_available": true,
+    "results": [
+      { "encoder": "libx264", "family": "software", "codec": "h264", "compiled": true, "tested_ok": true, "detail": "" },
+      { "encoder": "h264_qsv", "family": "qsv", "codec": "h264", "compiled": true, "tested_ok": false, "detail": "<stderr 尾部>" }
+    ]
+  }
+  ```
+- **说明**：对候选编码器用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。逐个试编码，响应可能耗时数秒。
+
 ### 获取字幕轨道列表
 
 - **方法 / 路径**：`GET /api/play/:id/subtitles`
