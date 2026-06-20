@@ -19,4 +19,29 @@ type MediaFile struct {
 	SubtitleTracks string    `json:"subtitle_tracks"`
 	AddedAt        time.Time `json:"added_at"`
 	ModifiedAt     time.Time `json:"modified_at"`
+
+	// 显示名（FR-30）：仅库内展示用，空则回退 FileName，不影响磁盘真实文件名
+	DisplayName string `json:"display_name"`
+
+	// 软删除/回收站（FR-25）：非空表示已软删（进回收站），源文件不动
+	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+
+	// 媒体时间与 EXIF（FR-31）
+	MediaTime       *time.Time `gorm:"index" json:"media_time,omitempty"` // 多层降级解析出的媒体时间，供时间轴排序
+	MediaTimeSource string     `json:"media_time_source"`                 // exif / filename / created / modified
+	Camera          string     `json:"camera"`
+	Lens            string     `json:"lens"`
+	Aperture        string     `json:"aperture"`
+	Shutter         string     `json:"shutter"`
+	ISO             int        `gorm:"default:0" json:"iso"`
+	GPSLat          float64    `gorm:"default:0" json:"gps_lat"`
+	GPSLon          float64    `gorm:"default:0" json:"gps_lon"`
+
+	// 收藏（FR-41）
+	Favorite bool `gorm:"default:false" json:"favorite"`
+
+	// 观看状态/续播（FR-44）
+	LastPosition  float64    `gorm:"default:0" json:"last_position"` // 上次播放位置（秒）
+	Watched       bool       `gorm:"default:false" json:"watched"`
+	LastWatchedAt *time.Time `json:"last_watched_at,omitempty"`
 }

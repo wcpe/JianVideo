@@ -63,8 +63,17 @@ func main() {
 	if err := db.InitSchema(sqlDB); err != nil {
 		log.Fatalf("数据库建表失败: %v", err)
 	}
-	if err := gormDB.AutoMigrate(&models.MediaExtension{}); err != nil {
-		log.Fatalf("媒体后缀表迁移失败: %v", err)
+	// 统一迁移：媒体后缀、媒体文件新增列（软删/显示名/EXIF/收藏/观看状态），及相册/标签/设置新表
+	if err := gormDB.AutoMigrate(
+		&models.MediaExtension{},
+		&models.MediaFile{},
+		&models.Album{},
+		&models.AlbumItem{},
+		&models.Tag{},
+		&models.TagMapping{},
+		&models.Setting{},
+	); err != nil {
+		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
 	// ffmpeg/ffprobe 路径注入：环境变量 → 同目录捆绑版 → PATH（见 ADR-0027）。
