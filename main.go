@@ -19,6 +19,7 @@ import (
 	"jianvideo/internal/library"
 	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
+	"jianvideo/internal/settings"
 	"jianvideo/internal/transcoder"
 	"jianvideo/internal/watcher"
 	"jianvideo/internal/web"
@@ -99,9 +100,10 @@ func main() {
 	pbSvc := playback.NewService()
 	defer pbSvc.Stop()
 
-	// 创建 API Handler 并注入 HLS 预切片依赖
+	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
 	libSvc := library.NewService(gormDB)
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version)
+	settingsSvc := settings.NewService(gormDB)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

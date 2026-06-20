@@ -75,6 +75,13 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sys.POST("/codec-test", h.CodecTest)
 	}
 
+	// 运行期设置（FR-24）：键值读写
+	settingsGroup := r.Group("/api/settings")
+	{
+		settingsGroup.GET("", h.GetSettings)
+		settingsGroup.PUT("", h.UpdateSettings)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		RegisterPlaybackRoutes(r, pbSvc[0])

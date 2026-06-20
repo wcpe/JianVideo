@@ -10,6 +10,7 @@ import TimelinePage from './pages/TimelinePage'
 import BrowsePage from './pages/BrowsePage'
 import PlayPage from './pages/PlayPage'
 import SystemPage from './pages/SystemPage'
+import SettingsPage from './pages/SettingsPage'
 import '@mantine/core/styles.css'
 import './index.css'
 
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/browse" element={<ProtectedRoute><AppLayout><BrowsePage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           <Route path="/system" element={<ProtectedRoute><AppLayout><SystemPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

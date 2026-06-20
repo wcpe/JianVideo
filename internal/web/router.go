@@ -15,6 +15,7 @@ import (
 	"jianvideo/internal/library"
 	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
+	"jianvideo/internal/settings"
 )
 
 // NewRouter 创建并配置路由
@@ -55,7 +56,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	if overrideHandler != nil {
 		apiHandler = overrideHandler
 	} else {
-		apiHandler = api.NewHandler(libSvc)
+		apiHandler = api.NewHandler(libSvc).WithSettings(settings.NewService(db))
 	}
 
 	// 注册 API 路由（库路由）

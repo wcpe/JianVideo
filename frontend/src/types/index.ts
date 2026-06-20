@@ -153,6 +153,9 @@ export interface CodecTestResult {
   results: EncoderProbeResult[]
 }
 
+/** 运行期设置键值映射（key → value，值统一为字符串） */
+export type SettingsMap = Record<string, string>
+
 /** 外挂字幕轨道 */
 export interface SubtitleTrack {
   index: number

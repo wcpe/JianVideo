@@ -9,6 +9,11 @@ let mediaExtensions: MediaExtension[] = []
 let nextPathId = Math.max(...paths.map(p => p.id)) + 1
 let nextMediaId = Math.max(...mediaFiles.map(m => m.id)) + 1
 let nextExtensionId = 1
+// 运行期设置内存存储（支持读写往返）
+const settingsStore: Record<string, string> = {
+  scan_interval: '3600',
+  recycle_bin_paths: '{"D":"D:/.recycle"}',
+}
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -283,6 +288,23 @@ export const handlers = [
         },
       ],
     })
+  }),
+
+  // ─── 运行期设置 ────────────────────────────────────────
+
+  http.get('*/api/settings', async () => {
+    await delay(100)
+    return HttpResponse.json({ settings: { ...settingsStore } })
+  }),
+
+  http.put('*/api/settings', async ({ request }) => {
+    await delay(100)
+    const body = await request.json() as { settings: Record<string, string> }
+    if (!body.settings || Object.keys(body.settings).length === 0) {
+      return HttpResponse.json({ code: 'EMPTY_SETTINGS', message: 'settings 不能为空' }, { status: 400 })
+    }
+    Object.assign(settingsStore, body.settings)
+    return HttpResponse.json({ settings: { ...settingsStore } })
   }),
 
   // ─── 扫描 ──────────────────────────────────────────────

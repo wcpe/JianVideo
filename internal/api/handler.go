@@ -19,6 +19,7 @@ import (
 
 	"jianvideo/internal/library"
 	"jianvideo/internal/player"
+	"jianvideo/internal/settings"
 	"jianvideo/internal/smb"
 	"jianvideo/internal/transcoder"
 )
@@ -33,10 +34,11 @@ type SubtitleTrack struct {
 
 // Handler API 请求处理器。
 type Handler struct {
-	library *library.Service
-	hlsDir  string             // HLS 切片输出根目录
-	hlsMgr  *player.HLSManager // 用于写入 master.m3u8
-	version string             // 应用版本号，由 main 经 ldflags 注入
+	library  *library.Service
+	settings *settings.Service  // 运行期设置读写（FR-24）
+	hlsDir   string             // HLS 切片输出根目录
+	hlsMgr   *player.HLSManager // 用于写入 master.m3u8
+	version  string             // 应用版本号，由 main 经 ldflags 注入
 }
 
 // NewHandler 创建处理器。
@@ -47,6 +49,12 @@ func NewHandler(lib *library.Service) *Handler {
 // WithVersion 注入应用版本号，供系统诊断接口展示。
 func (h *Handler) WithVersion(v string) *Handler {
 	h.version = v
+	return h
+}
+
+// WithSettings 注入运行期设置服务，启用 /api/settings 端点。
+func (h *Handler) WithSettings(svc *settings.Service) *Handler {
+	h.settings = svc
 	return h
 }
 

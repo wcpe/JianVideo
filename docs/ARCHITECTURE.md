@@ -53,6 +53,7 @@
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
+| `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 
@@ -127,6 +128,14 @@
 | password_hash | TEXT | 密码哈希（bcrypt） |
 | created_at | DATETIME | 创建时间 |
 
+**运行期设置（settings）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| key | TEXT PK | 设置键（如 `scan_interval`、`recycle_bin_paths`） |
+| value | TEXT | 设置值，统一字符串存储；结构化值（如每盘符回收站路径）以 JSON 字符串存于单 key |
+| updated_at | DATETIME | 最后更新时间 |
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -140,6 +149,7 @@
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |
+| 设置 | `/api/settings` | 运行期键值设置读取与批量写入 |
 
 ### 5.0 目录浏览
 
@@ -226,6 +236,13 @@
 - `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速检测结果。
 - `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox 的 H.264/H.265）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。独立于 §5.6 的 CGO 检测，普通构建即可用，专供真机验收。
 - 前端 `/system` 页展示并支持一键复制纯文本报告。
+
+### 5.8 运行期设置（FR-24）
+
+- 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-XXXX）。
+- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端 `/settings` 页读写「每盘符回收站路径」「扫描周期」等键值。
+- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`），结构化值以 JSON 字符串存于单 key，由消费方（回收站清理、定时扫描）按需解析。
+- 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。
 
 ## 6. 部署
 

@@ -401,3 +401,34 @@
     "media_files_count": 1500
   }
   ```
+
+### 读取运行期设置
+
+- **方法 / 路径**：`GET /api/settings`
+- **响应**（200）：
+  ```json
+  {
+    "settings": {
+      "scan_interval": "3600",
+      "recycle_bin_paths": "{\"D\":\"D:/.recycle\"}"
+    }
+  }
+  ```
+- **说明**：返回全部运行期设置（key → value，值统一为字符串；结构化值如每盘符回收站路径以 JSON 字符串存于单 key）。设置以 SQLite `settings` 表为真源，为回收站清理、定时扫描等能力提供配置真源（FR-24）。
+- **错误**：`503` 设置服务未启用
+
+### 写入运行期设置
+
+- **方法 / 路径**：`PUT /api/settings`
+- **请求**：
+  ```json
+  {
+    "settings": {
+      "scan_interval": "7200",
+      "recycle_bin_paths": "{\"D\":\"D:/.recycle\"}"
+    }
+  }
+  ```
+- **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
+- **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。
+- **错误**：`400` 请求参数错误或 `settings` 为空，`503` 设置服务未启用，`500` 保存失败
