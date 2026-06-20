@@ -233,6 +233,7 @@
 - **数据库**：SQLite WAL 模式，数据库文件位于配置目录。
 - **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
 - **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。
+- **PWA**：经 `vite-plugin-pwa` 产出 `manifest.webmanifest` + Service Worker，支持「添加到主屏」与离线应用壳；Service Worker 仅预缓存壳静态资源，`/api`/媒体流运行时走网络（见 [ADR-0028](adr/0028-mobile-pwa.md)）。
 - **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
 - **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。
 
@@ -246,6 +247,7 @@
 | mpegts.js 作为播放内核 | 唯一可靠支持 TS 实时追加的浏览器方案 | [0004](adr/0004-mpegts-js-player.md) |
 | 原生 SMB 支持 | 避免用户手动挂载 NAS 共享 | [0005](adr/0005-native-smb-support.md) |
 | FFmpeg filter_complex split 单进程多输出 | 确保多码率 GOP 对齐，减少资源开销 | [0026](adr/0026-abr-adaptive-bitrate.md) |
+| 移动端 PWA（仅缓存应用壳） | 可添加到主屏 + 离线壳，媒体流不离线缓存 | [0028](adr/0028-mobile-pwa.md) |
 
 **不做项**：
 - 不做多用户/权限管理（单用户模式）
