@@ -2,7 +2,10 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -407,5 +410,66 @@ func TestRenameMediaFile_API(t *testing.T) {
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("不存在记录期望 404, 实际 %d", w.Code)
+	}
+}
+
+// 复现 Bug B：扫描完成后扫描状态恒为 completed，SSE 端点不应在 completed 后
+// 立即关闭连接（否则浏览器 EventSource 会每 ~3s 重连成风暴）。连接应保持打开，
+// 仅在客户端断开时关闭。
+func TestScanProgressSSE_StaysOpenAfterCompleted(t *testing.T) {
+	router, svc := setupTestRouter(t)
+
+	// 触发一次扫描并等待完成，使全局扫描状态变为 completed
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("写测试文件失败: %v", err)
+	}
+	lp, err := svc.CreateLibraryPath(dir, "local", "t")
+	if err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+	svc.ScanLibrary(lp.ID, dir)
+	for i := 0; i < 60; i++ {
+		if s := library.GetScanStatus(); s.Status == "completed" || s.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if s := library.GetScanStatus(); s.Status != "completed" {
+		t.Fatalf("扫描未完成，状态=%s", s.Status)
+	}
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/library/scan/progress", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("连接 SSE 失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	buf := make([]byte, 4096)
+	gotProgress := false
+	var readErr error
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 && strings.Contains(string(buf[:n]), "progress") {
+			gotProgress = true
+		}
+		if rerr != nil {
+			readErr = rerr
+			break
+		}
+	}
+	if !gotProgress {
+		t.Fatal("未收到 progress 事件")
+	}
+	// 修复前：completed 后服务端立即 return 关闭连接 → 客户端读到 io.EOF。
+	// 修复后：连接保持打开，直到客户端 ctx 超时取消（非 EOF）。
+	if errors.Is(readErr, io.EOF) {
+		t.Fatal("SSE 在 completed 后被服务端提前关闭，应保持连接打开以接收后续扫描进度")
 	}
 }

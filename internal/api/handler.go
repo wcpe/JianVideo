@@ -323,8 +323,9 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 }
 
 // ScanProgressSSE GET /api/library/scan/progress
-// 以 SSE 流推送当前扫描进度，每 500ms 推送一次。
-// 扫描完成或出错后关闭连接。
+// 以 SSE 流推送当前扫描进度，每 500ms 轮询一次、仅在状态变化时推送。
+// 连接持续保持打开（不在 completed/error 后主动关闭），以便接收后续扫描进度；
+// 仅在客户端断开（ctx.Done）时结束。避免浏览器 EventSource 在终态后反复重连成风暴。
 func (h *Handler) ScanProgressSSE(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -333,18 +334,19 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	var lastSent string // 上次推送的状态快照，仅在变化时推送，避免空转刷屏
 	for {
 		select {
 		case <-ticker.C:
 			status := library.GetScanStatus()
 			data, _ := json.Marshal(status)
-			c.SSEvent("progress", string(data))
-			c.Writer.Flush()
-
-			// 扫描完成或出错后关闭连接
-			if status.Status == "completed" || status.Status == "error" {
-				return
+			payload := string(data)
+			if payload == lastSent {
+				continue
 			}
+			c.SSEvent("progress", payload)
+			c.Writer.Flush()
+			lastSent = payload
 		case <-c.Request.Context().Done():
 			return
 		}
