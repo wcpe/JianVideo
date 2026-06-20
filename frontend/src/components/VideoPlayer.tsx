@@ -1,7 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { Text, Box, ActionIcon, Slider } from '@mantine/core'
+import { IconPlayerPlay, IconPlayerPause, IconVolume, IconVolumeOff } from '@tabler/icons-react'
 import mpegts from 'mpegts.js'
-import { Progress, Text } from '@mantine/core'
 import type Hls from 'hls.js'
+import { parseWebVTT } from '@/utils/subtitle'
 import type { SubtitleEntry } from '@/types'
 
 interface VideoPlayerProps {
@@ -16,53 +18,12 @@ interface VideoPlayerProps {
   /**
    * 显式指定是否走 ABR（hls.js）模式。
    * 缺省时按 URL 是否以 master.m3u8 结尾推断。
-   * 用于 HLS master.m3u8 不可用、回退到 /api/play/:id/stream 时显式关闭 ABR。
    */
   isABR?: boolean
   /**
    * 显式声明流类型为 mp4 时使用浏览器原生 video 标签直接加载。
-   * 后端 stream 端点支持 Range，可被原生 video 直接消费，无需 mpegts.js / hls.js。
    */
   streamType?: 'mpegts' | 'mp4'
-}
-
-/**
- * 轻量 WebVTT 解析器。
- * 将 WebVTT 文本解析为按时间排序的字幕条目数组。
- */
-function parseWebVTT(vttText: string): SubtitleEntry[] {
-  const entries: SubtitleEntry[] = []
-  const blocks = vttText.split(/\n\n+/)
-
-  for (const block of blocks) {
-    const lines = block.trim().split('\n')
-    const timingIdx = lines.findIndex(l => l.includes('-->'))
-    if (timingIdx < 0) continue
-
-    const timeLine = lines[timingIdx]
-    const parts = timeLine.split('-->')
-    if (parts.length !== 2) continue
-
-    const start = parseVTTTime(parts[0].trim())
-    const end = parseVTTTime(parts[1].trim())
-    if (start < 0 || end < 0) continue
-
-    const text = lines.slice(timingIdx + 1).join('\n').trim()
-    if (text) entries.push({ start, end, text })
-  }
-
-  return entries
-}
-
-/**
- * 解析 WebVTT 时间戳 (HH:MM:SS.mmm 或 MM:SS.mmm) 为秒数。
- */
-function parseVTTTime(ts: string): number {
-  const parts = ts.split(':').map(s => parseFloat(s.trim()))
-  if (parts.some(isNaN)) return -1
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  if (parts.length === 2) return parts[0] * 60 + parts[1]
-  return -1
 }
 
 /**
@@ -91,10 +52,9 @@ export default function VideoPlayer({
   const [bufferedProgress, setBufferedProgress] = useState(0)
   const [subtitleText, setSubtitleText] = useState('')
 
-  // 判断是否为 ABR 模式：显式 prop 优先，否则按 URL 是否以 master.m3u8 结尾推断
+  // 判断是否为 ABR 模式
   const isABR = isABRProp ?? url.endsWith('master.m3u8')
 
-  // 销毁 mpegts.js 播放器
   const destroyMpegtsPlayer = useCallback(() => {
     const player = mpegtsPlayerRef.current
     if (player) {
@@ -108,330 +68,131 @@ export default function VideoPlayer({
     }
   }, [])
 
-  // 销毁 hls.js 播放器
   const destroyHlsPlayer = useCallback(async () => {
     const hls = hlsRef.current as { destroy: () => void } | null
-    if (hls) {
-      hls.destroy()
-      hlsRef.current = null
-    }
+    if (hls) { hls.destroy(); hlsRef.current = null }
   }, [])
 
-  // 初始化 mpegts.js 播放器
   const initMpegtsPlayer = useCallback(
     (streamUrl: string) => {
       if (!videoRef.current) return
-
       destroyMpegtsPlayer()
-
       const player = mpegts.createPlayer(
-        {
-          type: 'mpegts',
-          url: streamUrl,
-          isLive: true,
-        },
-        {
-          enableWorker: true,
-          enableStashBuffer: true,
-          stashInitialSize: 1024 * 1024, // 1MB，约 3-5 秒追播延迟
-          accurateSeek: true,
-          seekType: 'range',
-        }
+        { type: 'mpegts', url: streamUrl, isLive: true },
+        { enableWorker: true, enableStashBuffer: true, stashInitialSize: 1024 * 1024, accurateSeek: true, seekType: 'range' }
       )
-
       player.attachMediaElement(videoRef.current)
       player.load()
-
-      player.on('loadeddata', () => {
-        if (autoPlay) {
-          void (player.play() as Promise<void>)?.catch?.(() => {
-            setAutoPlayBlocked(true)
-          })
-        }
-      })
-
-      player.on('playing', () => {
-        setIsPlaying(true)
-      })
-
-      player.on('pause', () => {
-        setIsPlaying(false)
-      })
-
+      player.on('loadeddata', () => { if (autoPlay) void (player.play() as Promise<void>)?.catch?.(() => setAutoPlayBlocked(true)) })
+      player.on('playing', () => setIsPlaying(true))
+      player.on('pause', () => setIsPlaying(false))
       mpegtsPlayerRef.current = player
     },
     [autoPlay, destroyMpegtsPlayer]
   )
 
-  // 初始化 hls.js 播放器（动态 import）
   const initHlsPlayer = useCallback(
     async (masterUrl: string) => {
       if (!videoRef.current) return
-
       destroyHlsPlayer()
-
       try {
         const Hls = (await import('hls.js')).default
-
-        if (!Hls.isSupported()) {
-          console.warn('[VideoPlayer] hls.js 不支持当前浏览器，回退到 mpegts.js')
-          initMpegtsPlayer(masterUrl)
-          return
-        }
-
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-        })
-
+        if (!Hls.isSupported()) { console.warn('[VideoPlayer] hls.js 不支持当前浏览器'); initMpegtsPlayer(masterUrl); return }
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
         hls.loadSource(masterUrl)
         hls.attachMedia(videoRef.current)
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (autoPlay) {
-            void videoRef.current?.play()?.catch?.(() => {
-              setAutoPlayBlocked(true)
-            })
-          }
-        })
-
-        hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-          const level = hls.levels[data.level]
-          if (level) {
-            console.info(`[VideoPlayer] ABR 切换到: ${level.width}x${level.height}, ${level.bitrate}`)
-          }
-        })
-
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal) {
-            console.error('[VideoPlayer] hls.js 致命错误，回退到 mpegts.js', data)
-            hls.destroy()
-            hlsRef.current = null
-            initMpegtsPlayer(masterUrl)
-          }
-        })
-
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { if (autoPlay) void videoRef.current?.play()?.catch?.(() => setAutoPlayBlocked(true)) })
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_e, d) => { const l = hls.levels[d.level]; if (l) console.info(`[VideoPlayer] ABR: ${l.width}x${l.height}`) })
+        hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) { hls.destroy(); hlsRef.current = null; initMpegtsPlayer(masterUrl) } })
         hlsRef.current = hls
-      } catch (err) {
-        console.error('[VideoPlayer] 加载 hls.js 失败，回退到 mpegts.js', err)
-        initMpegtsPlayer(masterUrl)
-      }
+      } catch { initMpegtsPlayer(masterUrl) }
     },
     [autoPlay, destroyHlsPlayer, initMpegtsPlayer]
   )
 
-  // 挂载 / URL 变化时初始化
+  // 挂载 / URL 变化
   useEffect(() => {
-    // mp4 streamType：让浏览器原生 video 标签直接加载（后端 stream 端点支持 Range）
     if (streamType === 'mp4' && videoRef.current) {
-      destroyMpegtsPlayer()
-      void destroyHlsPlayer()
+      destroyMpegtsPlayer(); void destroyHlsPlayer()
       videoRef.current.src = url
-      if (autoPlay) {
-        void videoRef.current.play()?.catch?.(() => {
-          setAutoPlayBlocked(true)
-        })
-      }
-      return () => {
-        if (videoRef.current) videoRef.current.removeAttribute('src')
-      }
+      if (autoPlay) void videoRef.current.play()?.catch?.(() => setAutoPlayBlocked(true))
+      return () => { if (videoRef.current) videoRef.current.removeAttribute('src') }
     }
-
-    if (isABR) {
-      void initHlsPlayer(url)
-    } else {
-      initMpegtsPlayer(url)
-    }
-
-    return () => {
-      void destroyHlsPlayer()
-      destroyMpegtsPlayer()
-    }
+    if (isABR) void initHlsPlayer(url); else initMpegtsPlayer(url)
+    return () => { void destroyHlsPlayer(); destroyMpegtsPlayer() }
   }, [url, isABR, streamType, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
-  // 监听时间更新
+  // 监听时间/音量/缓冲
   useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-
-    const onTimeUpdate = () => setCurrentTime(video.currentTime)
-    const onDurationChange = () => setDuration(video.duration)
-    const onVolumeChange = () => {
-      setVolume(video.volume)
-      setIsMuted(video.muted)
-    }
-    const onProgress = () => {
-      // 计算缓冲区进度：取最后一个缓冲段的结束位置
-      if (video.buffered.length > 0 && video.duration > 0) {
-        const lastBuffered = video.buffered.end(video.buffered.length - 1)
-        setBufferedProgress((lastBuffered / video.duration) * 100)
-      }
-    }
-
-    video.addEventListener('timeupdate', onTimeUpdate)
-    video.addEventListener('durationchange', onDurationChange)
-    video.addEventListener('volumechange', onVolumeChange)
-    video.addEventListener('progress', onProgress)
-
-    return () => {
-      video.removeEventListener('timeupdate', onTimeUpdate)
-      video.removeEventListener('durationchange', onDurationChange)
-      video.removeEventListener('volumechange', onVolumeChange)
-      video.removeEventListener('progress', onProgress)
-    }
+    const v = videoRef.current; if (!v) return
+    const onTime = () => setCurrentTime(v.currentTime)
+    const onDur = () => setDuration(v.duration)
+    const onVol = () => { setVolume(v.volume); setIsMuted(v.muted) }
+    const onBuf = () => { if (v.buffered.length > 0 && v.duration > 0) setBufferedProgress((v.buffered.end(v.buffered.length - 1) / v.duration) * 100) }
+    v.addEventListener('timeupdate', onTime); v.addEventListener('durationchange', onDur)
+    v.addEventListener('volumechange', onVol); v.addEventListener('progress', onBuf)
+    return () => { v.removeEventListener('timeupdate', onTime); v.removeEventListener('durationchange', onDur); v.removeEventListener('volumechange', onVol); v.removeEventListener('progress', onBuf) }
   }, [])
 
-  // 字幕同步：根据当前播放时间匹配字幕文本
+  // 字幕同步
   useEffect(() => {
-    if (!subtitleVisible || !subtitleEntries || subtitleEntries.length === 0) {
-      setSubtitleText('')
-      return
-    }
+    if (!subtitleVisible || !subtitleEntries?.length) { setSubtitleText(''); return }
     const entry = subtitleEntries.find(e => currentTime >= e.start && currentTime < e.end)
     setSubtitleText(entry?.text ?? '')
   }, [currentTime, subtitleEntries, subtitleVisible])
 
   const togglePlay = () => {
-    const video = videoRef.current
-    if (!video) return
-    if (isPlaying) {
-      video.pause()
-    } else {
-      setAutoPlayBlocked(false)
-      void video.play()?.catch?.(() => {})
-    }
+    const v = videoRef.current; if (!v) return
+    if (isPlaying) v.pause(); else { setAutoPlayBlocked(false); void v.play()?.catch?.(() => {}) }
   }
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const vol = parseFloat(e.target.value)
-    const video = videoRef.current
-    if (!video) return
-    video.volume = vol
-    video.muted = vol === 0
-    setVolume(vol)
-    setIsMuted(vol === 0)
-  }
+  const handleSeek = (val: number) => { const v = videoRef.current; if (v && duration) v.currentTime = (val / 100) * duration }
+  const handleVolume = (val: number) => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0; setVolume(val); setIsMuted(val === 0) }
+  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !isMuted; setIsMuted(!isMuted) }
 
-  const toggleMute = () => {
-    const video = videoRef.current
-    if (!video) return
-    video.muted = !isMuted
-    setIsMuted(!isMuted)
-  }
-
-  const formatTime = (seconds: number) => {
-    if (!isFinite(seconds) || isNaN(seconds)) return '0:00'
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+  const fmt = (s: number) => { if (!isFinite(s) || isNaN(s)) return '0:00'; const m = Math.floor(s / 60); return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}` }
+  const playPct = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
-    <div className="flex flex-col w-full bg-black rounded-lg overflow-hidden">
-      {/* video 容器 — 包含 video 元素和字幕 overlay */}
-      <div className="relative w-full aspect-video bg-black">
-        {/* video 元素 — 仅作为 mpegts.js 渲染目标，不设置 src */}
-        <video
-          ref={videoRef}
-          className="w-full h-full bg-black"
-          playsInline
-        />
-
-        {/* 自动播放被阻止提示 */}
+    <Box style={{ display: 'flex', flexDirection: 'column', width: '100%', backgroundColor: 'black', borderRadius: 'var(--mantine-radius-lg)', overflow: 'hidden' }}>
+      <Box style={{ position: 'relative', width: '100%', aspectRatio: '16/9', backgroundColor: 'black' }}>
+        <video ref={videoRef} style={{ width: '100%', height: '100%', backgroundColor: 'black' }} playsInline />
         {autoPlayBlocked && !isPlaying && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 cursor-pointer"
-               onClick={togglePlay}>
-            <Text color="white" size="lg">点击播放</Text>
-          </div>
+          <Box style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} onClick={togglePlay}>
+            <Text c="white" size="lg">点击播放</Text>
+          </Box>
         )}
-
-        {/* 字幕 overlay */}
         {subtitleVisible && subtitleText && (
-          <div className="absolute inset-x-0 bottom-[8%] flex justify-center pointer-events-none px-4">
-            <span
-              className="inline-block px-3 py-1 rounded text-white text-center text-sm sm:text-base leading-relaxed max-w-[80%]"
-              style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-            >
-              {subtitleText}
-            </span>
-          </div>
+          <Box style={{ position: 'absolute', insetInline: 0, bottom: '8%', display: 'flex', justifyContent: 'center', pointerEvents: 'none', padding: '0 1rem' }}>
+            <Text component="span" c="white" size="sm" ta="center" style={{ display: 'inline-block', padding: '0.25rem 0.75rem', borderRadius: 'var(--mantine-radius-sm)', backgroundColor: 'rgba(0,0,0,0.6)', maxWidth: '80%' }}>{subtitleText}</Text>
+          </Box>
         )}
-      </div>
+      </Box>
 
-      {/* 播放控制栏 */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-slate-900">
-        {/* 播放/暂停 */}
-        <button
-          onClick={togglePlay}
-          className="text-white hover:text-blue-400 transition-colors"
-          aria-label={isPlaying ? '暂停' : '播放'}
-        >
-          {isPlaying ? (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="4" width="4" height="16" />
-              <rect x="14" y="4" width="4" height="16" />
-            </svg>
-          ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="5,3 19,12 5,21" />
-            </svg>
-          )}
-        </button>
+      <Box style={{ display: 'flex', alignItems: 'center', gap: 'var(--mantine-spacing-sm)', padding: '0.5rem 1rem', backgroundColor: 'var(--mantine-color-dark-8, #1a1b1e)' }}>
+        <ActionIcon variant="subtle" color="white" onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'}>
+          {isPlaying ? <IconPlayerPause size={22} /> : <IconPlayerPlay size={22} />}
+        </ActionIcon>
 
-        {/* 双进度条：播放进度 + 缓冲区进度 */}
-        <div className="flex-1 flex items-center gap-2">
-          <span className="text-xs text-slate-400 tabular-nums">
-            {formatTime(currentTime)}
-          </span>
-          <Progress
-            className="flex-1"
-            size={4}
-            radius="xl"
-            animated
-            value={duration > 0 ? (currentTime / duration) * 100 : 0}
-          >
-            <Progress.Section value={duration > 0 ? (currentTime / duration) * 100 : 0} color="blue" />
-            <Progress.Section value={Math.max(0, bufferedProgress - (duration > 0 ? (currentTime / duration) * 100 : 0))} color="cyan" />
-          </Progress>
-          <span className="text-xs text-slate-400 tabular-nums">
-            {formatTime(duration)}
-          </span>
-        </div>
+        <Box style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 'var(--mantine-spacing-xs)' }}>
+          <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(currentTime)}</Text>
+          <Box style={{ flex: 1, position: 'relative', height: 4 }}>
+            <Slider value={Math.min(bufferedProgress, 100)} size={4} color="cyan" radius="xl" thumbSize={0} style={{ position: 'absolute', width: '100%', top: 0, pointerEvents: 'none' }} />
+            <Slider value={playPct} onChange={handleSeek} size={4} color="blue" radius="xl" />
+          </Box>
+          <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(duration)}</Text>
+        </Box>
 
-        {/* 音量控制 */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={toggleMute}
-            className="text-white hover:text-blue-400 transition-colors"
-            aria-label={isMuted ? '取消静音' : '静音'}
-          >
-            {isMuted || volume === 0 ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-              </svg>
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-              </svg>
-            )}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={isMuted ? 0 : volume}
-            onChange={handleVolumeChange}
-            className="w-20 h-1 accent-blue-500 cursor-pointer"
-          />
-        </div>
+        <Box style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <ActionIcon variant="subtle" color="white" onClick={toggleMute} aria-label={isMuted ? '取消静音' : '静音'}>
+            {isMuted || volume === 0 ? <IconVolumeOff size={18} /> : <IconVolume size={18} />}
+          </ActionIcon>
+          <Slider value={isMuted ? 0 : volume} onChange={handleVolume} size={4} color="blue" radius="xl" showLabelOnHover={false} style={{ width: '5rem' }} />
+        </Box>
 
-        {/* ABR 模式标识 */}
-        {isABR && (
-          <span className="text-xs text-green-400 font-medium">ABR</span>
-        )}
-      </div>
-    </div>
+        {isABR && <Text size="xs" c="green" fw={500}>ABR</Text>}
+      </Box>
+    </Box>
   )
 }
 
