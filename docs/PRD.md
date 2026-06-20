@@ -63,7 +63,7 @@
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 开发中 |
 | FR-C | 后端异步扫描 + SSE 进度推送：扫描改为 goroutine 异步，新增 SSE 进度端点，前端展示扫描进度条 | P1 | 开发中 |
 | FR-D | 缩略图系统：后端 ffmpeg 生成视频/图片缩略图，前端加载缩略图替代原图 | P1 | 开发中 |
-| FR-A | 页面流程重设计：拆为存储库管理页、时间轴视图页、目录浏览页，Tab 切换导航 | P1 | 计划 |
+| FR-A | 页面流程重设计：拆为存储库管理页、时间轴视图页、目录浏览页，Tab 切换导航 | P1 | 开发中 |
 | FR-B | 时间轴视图重做：左侧日期轴 + 右侧缩略图网格，按日期分组展示 | P1 | 计划 |
 | FR-E | 虚拟列表 + 懒加载：react-virtual 虚拟滚动，图片 loading="lazy"，千条列表流畅滚动 | P1 | 计划 |
 | FR-G | 暗色模式 + 路由守卫 + 全局错误处理：Mantine ColorScheme 切换，ProtectedRoute，统一错误 toast | P2 | 计划 |

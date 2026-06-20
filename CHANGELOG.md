@@ -20,6 +20,7 @@
 - 路由改造：修复 catch-all 通配符冲突，统一 BrowserRouter 模式
 - 后端异步扫描 + SSE 进度推送（FR-C）：扫描改为后台 goroutine 异步执行，新增 `GET /api/library/scan/progress` SSE 端点实时推送已扫描数/总数/状态，前端展示扫描进度条并在完成后自动刷新
 - 缩略图系统（FR-D）：后端扫描时通过 ffmpeg 异步生成 320px 缩略图（视频取第 2 秒帧、图片缩放），新增 `GET /api/library/thumbnail/:id` 端点，前端媒体卡片改用缩略图加载（图片预览弹窗仍用原图）
+- 页面流程重设计（FR-A）：原综合媒体库页拆分为存储库管理 `/library-manager`、时间轴 `/`、目录浏览 `/browse` 三个独立页面，AppLayout 导航在三者间切换；管理页支持媒体文件删除与重命名（新增 `PUT /api/library/media/:id/rename` 磁盘改名端点）
 
 ### 变更
 - 前端代码结构拆分（FR-F）：LibraryPage 拆分为 LibraryPathManager / MediaTimeline / DirectoryBrowser 等子组件与 useLibraryPaths / useMediaList / useDirectoryBrowse hooks，VideoPlayer 改用 Tabler Icons 与 Mantine 样式，删除 App.css 模板代码

@@ -17,7 +17,7 @@ interface DirectoryBrowserProps {
   onBreadcrumbNavigate: (path: string) => void
   onErrorClose: () => void
   onOpenFile: (file: MediaFile) => void
-  onDeleteFile: (file: MediaFile) => void
+  onDeleteFile?: (file: MediaFile) => void
 }
 
 /** 目录浏览 UI 组件：面包屑导航 + 子目录列表 + 文件列表 */
@@ -97,14 +97,17 @@ export default function DirectoryBrowser({
                   <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
                 )}
               </Group>
-              <Group justify="flex-end" mt="xs">
-                <ActionIcon
-                  size="sm" variant="subtle" color="red"
-                  onClick={(e) => { e.stopPropagation(); onDeleteFile(file) }}
-                >
-                  <IconTrash size={14} />
-                </ActionIcon>
-              </Group>
+              {onDeleteFile && (
+                <Group justify="flex-end" mt="xs">
+                  <ActionIcon
+                    size="sm" variant="subtle" color="red"
+                    aria-label="删除"
+                    onClick={(e) => { e.stopPropagation(); onDeleteFile(file) }}
+                  >
+                    <IconTrash size={14} />
+                  </ActionIcon>
+                </Group>
+              )}
             </Card>
           ))}
 

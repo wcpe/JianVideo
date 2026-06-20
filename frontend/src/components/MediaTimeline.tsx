@@ -1,5 +1,5 @@
 import { SimpleGrid, Card, Text, TextInput, ActionIcon, Group, Pagination, Box, Badge, Skeleton, Alert } from '@mantine/core'
-import { IconSearch, IconTrash, IconFolder, IconAlertCircle } from '@tabler/icons-react'
+import { IconSearch, IconTrash, IconPencil, IconFolder, IconAlertCircle } from '@tabler/icons-react'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile } from '@/utils/media'
 import MediaThumbnail from '@/components/MediaThumbnail'
@@ -18,7 +18,8 @@ interface MediaTimelineProps {
   onPageChange: (page: number) => void
   onErrorClose: () => void
   onOpenFile: (file: MediaFile) => void
-  onDeleteFile: (file: MediaFile) => void
+  onDeleteFile?: (file: MediaFile) => void
+  onRenameFile?: (file: MediaFile) => void
 }
 
 /** 时间轴视图 UI 组件：搜索框 + 媒体卡片网格 + 分页 */
@@ -36,6 +37,7 @@ export default function MediaTimeline({
   onErrorClose,
   onOpenFile,
   onDeleteFile,
+  onRenameFile,
 }: MediaTimelineProps) {
   return (
     <>
@@ -96,14 +98,28 @@ export default function MediaTimeline({
                     <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
                   )}
                 </Group>
-                <Group justify="flex-end" mt="xs">
-                  <ActionIcon
-                    size="sm" variant="subtle" color="red"
-                    onClick={(e) => { e.stopPropagation(); onDeleteFile(file) }}
-                  >
-                    <IconTrash size={14} />
-                  </ActionIcon>
-                </Group>
+                {(onRenameFile || onDeleteFile) && (
+                  <Group justify="flex-end" mt="xs">
+                    {onRenameFile && (
+                      <ActionIcon
+                        size="sm" variant="subtle" color="gray"
+                        aria-label="重命名"
+                        onClick={(e) => { e.stopPropagation(); onRenameFile(file) }}
+                      >
+                        <IconPencil size={14} />
+                      </ActionIcon>
+                    )}
+                    {onDeleteFile && (
+                      <ActionIcon
+                        size="sm" variant="subtle" color="red"
+                        aria-label="删除"
+                        onClick={(e) => { e.stopPropagation(); onDeleteFile(file) }}
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
+                )}
               </Card>
             ))}
           </SimpleGrid>
