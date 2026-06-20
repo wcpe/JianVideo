@@ -19,6 +19,7 @@ import (
 	"jianvideo/internal/playback"
 	"jianvideo/internal/player"
 	"jianvideo/internal/transcoder"
+	"jianvideo/internal/watcher"
 	"jianvideo/internal/web"
 )
 
@@ -72,6 +73,17 @@ func main() {
 	// 创建 API Handler 并注入 HLS 预切片依赖
 	libSvc := library.NewService(gormDB)
 	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr)
+
+	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
+	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。
+	if w, err := watcher.New(libSvc); err != nil {
+		log.Printf("[WARN] 文件监听初始化失败: %v", err)
+	} else if err := w.Start(); err != nil {
+		log.Printf("[WARN] 文件监听启动失败: %v", err)
+	} else {
+		defer w.Stop()
+		log.Printf("[INFO] 文件监听已启动 (fsnotify)")
+	}
 
 	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist, apiHandler, pbSvc)
 
