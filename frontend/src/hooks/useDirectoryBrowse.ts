@@ -72,6 +72,7 @@ export function useDirectoryBrowse() {
     error,
     setError,
     setBrowseParentPath,
+    loadBrowse,
     initIfNeeded,
     handleEnterDir,
     handleBreadcrumbNavigate,

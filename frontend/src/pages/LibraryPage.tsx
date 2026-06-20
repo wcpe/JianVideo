@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Stack, Title, Tabs } from '@mantine/core'
 import { IconClock, IconFolderOpen } from '@tabler/icons-react'
@@ -30,16 +30,15 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
   const paths = useLibraryPaths(undefined)
   const exts = paths.customImageExtensions
 
-  const handleOpen = useCallback((f: MediaFile) => { isImageFile(f, exts) ? setPreview(f) : navigate(`/play/${f.id}`) }, [navigate, exts])
-
-  const handleBrowse = useCallback((p: LibraryPath) => { browse.handleBrowsePath(p.id, p.path); setActiveTab('directory') }, [browse, setActiveTab])
-
-  const handleTab = useCallback((tab: string | null) => {
-    if (!tab) return
-    setActiveTab(tab)
-    if (tab === 'directory' && !browse.browseLibraryID && paths.paths.length > 0)
+  // 初始化目录浏览
+  useEffect(() => {
+    if (activeTab === 'directory' && !browse.browseLibraryID && paths.paths.length > 0)
       browse.initIfNeeded(paths.paths[0].id, paths.paths[0].path)
-  }, [browse, paths.paths, setActiveTab])
+  }, [activeTab, paths.paths, browse.browseLibraryID])
+
+  const handleOpen = useCallback((f: MediaFile) => { isImageFile(f, exts) ? setPreview(f) : navigate(`/play/${f.id}`) }, [navigate, exts])
+  const handleBrowse = useCallback((p: LibraryPath) => { browse.handleBrowsePath(p.id, p.path); setActiveTab('directory') }, [browse, setActiveTab])
+  const handleTab = useCallback((tab: string | null) => { if (!tab) return; setActiveTab(tab) }, [setActiveTab])
 
   const handleDelPath = useCallback(async () => {
     if (!delPath.path) return
@@ -54,6 +53,7 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
     try { await libApi.deleteMediaFile(delMedia.file.id) } catch {}
     setDelMedia(initDelMedia); await media.loadMedia(media.page, media.search)
   }, [delMedia.file, media])
+
   return (
     <Stack gap="md">
       <Title order={2}>媒体库</Title>
@@ -62,7 +62,7 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
         extensionTypes={paths.extensionTypes} extensionLoading={paths.extensionLoading}
         onNewPathChange={paths.setNewPath} onAddPath={paths.handleAddPath}
         onDeletePath={(p) => setDelPath({ opened: true, path: p, loading: false })}
-        onScan={paths.handleScan} onBrowsePath={handleBrowse}
+        onScan={(id) => paths.handleScan(id, async () => { if (browse.browseLibraryID === id) browse.loadBrowse(browse.browseLibraryID, browse.browseParentPath) })} onBrowsePath={handleBrowse}
         onExtensionInputChange={(id, v) => paths.setExtensionInputs(p => ({ ...p, [id]: v }))}
         onExtensionTypeChange={(id, t) => paths.setExtensionTypes(p => ({ ...p, [id]: t }))}
         onAddExtension={paths.handleAddExtension} />

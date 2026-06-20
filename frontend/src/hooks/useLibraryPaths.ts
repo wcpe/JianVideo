@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { notifications } from '@mantine/notifications'
 import * as libApi from '@/api/library'
 import type { LibraryPath, MediaExtensionType } from '@/types'
@@ -45,6 +45,9 @@ export function useLibraryPaths(
       setLoading(false)
     }
   }, [loadExtensionPolicies])
+
+  // 挂载时自动加载路径列表
+  useEffect(() => { loadPaths() }, [loadPaths])
 
   const handleAddPath = useCallback(async () => {
     if (!newPath.trim() || addingPathRef.current) return
