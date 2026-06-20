@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
@@ -165,8 +166,15 @@ func TestScanLibrary_API(t *testing.T) {
 
 	var resp map[string]interface{}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["scanned"].(float64) != 1 {
-		t.Fatalf("期望 scanned=1, 实际 %v", resp["scanned"])
+	if resp["status"] != "scanning" {
+		t.Fatalf("期望 status=scanning, 实际 %v", resp["status"])
+	}
+
+	// 等待异步扫描完成
+	time.Sleep(500 * time.Millisecond)
+	status := library.GetScanStatus()
+	if status.Status != "completed" {
+		t.Fatalf("期望扫描完成后 status=completed, 实际 %s", status.Status)
 	}
 }
 
@@ -342,11 +350,17 @@ func TestMediaExtensionsAPI(t *testing.T) {
 		t.Fatalf("后缀列表应包含 foo, body: %s", w.Body.String())
 	}
 
-	count, err := svc.ScanLibrary(lp.ID, dir)
-	if err != nil {
-		t.Fatalf("扫描失败: %v", err)
+	svc.ScanLibrary(lp.ID, dir)
+	// 等待异步扫描完成
+	var status library.ScanStatus
+	for i := 0; i < 50; i++ {
+		status = library.GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if count != 1 {
-		t.Fatalf("自定义后缀扫描期望 1, 实际 %d", count)
+	if status.ScannedFiles != 1 {
+		t.Fatalf("自定义后缀扫描期望 1, 实际 %d", status.ScannedFiles)
 	}
 }

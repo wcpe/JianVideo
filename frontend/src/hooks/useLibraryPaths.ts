@@ -82,8 +82,9 @@ export function useLibraryPaths(
   const handleScan = useCallback(async (id: number, onScanDone?: () => Promise<void>) => {
     setScanLoading(prev => ({ ...prev, [id]: true }))
     try {
-      const res = await libApi.scanLibrary(id)
-      notifications.show({ title: '扫描完成', message: `发现 ${res.scanned} 个新文件`, color: 'green', autoClose: 3000 })
+      // 扫描已改为后端异步执行，立即返回；实际进度由扫描进度 SSE 推送
+      await libApi.scanLibrary(id)
+      notifications.show({ title: '扫描已开始', message: '正在后台扫描，完成后将自动刷新', color: 'blue', autoClose: 3000 })
       await onPathsChanged?.()
       await onScanDone?.()
     } catch {

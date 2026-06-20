@@ -45,6 +45,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/browse", h.BrowseDirectory)
 
 		lib.POST("/scan/:id", h.ScanLibrary)
+		lib.GET("/scan/progress", h.ScanProgressSSE)
 	}
 
 	// 字幕路由（不需要 playback 服务）

@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Stack, Title, Tabs } from '@mantine/core'
+import { Stack, Title, Tabs, Box, Text, Progress } from '@mantine/core'
 import { IconClock, IconFolderOpen } from '@tabler/icons-react'
 import { useLibraryPaths } from '@/hooks/useLibraryPaths'
 import { useMediaList } from '@/hooks/useMediaList'
@@ -12,7 +12,7 @@ import ImagePreviewModal from '@/components/ImagePreviewModal'
 import ConfirmModal from '@/components/ConfirmModal'
 import * as libApi from '@/api/library'
 import { isImageFile } from '@/utils/media'
-import type { LibraryPath, MediaFile } from '@/types'
+import type { LibraryPath, MediaFile, ScanStatus } from '@/types'
 
 const initDelPath = { opened: false, path: null as LibraryPath | null, loading: false }
 const initDelMedia = { opened: false, file: null as MediaFile | null, loading: false }
@@ -25,6 +25,7 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
   const [delPath, setDelPath] = useState<typeof initDelPath>(initDelPath)
   const [delMedia, setDelMedia] = useState<typeof initDelMedia>(initDelMedia)
   const [preview, setPreview] = useState<MediaFile | null>(null)
+  const [scanProgress, setScanProgress] = useState<ScanStatus | null>(null)
   const media = useMediaList()
   const browse = useDirectoryBrowse()
   const paths = useLibraryPaths(undefined)
@@ -35,6 +36,18 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
     if (activeTab === 'directory' && !browse.browseLibraryID && paths.paths.length > 0)
       browse.initIfNeeded(paths.paths[0].id, paths.paths[0].path)
   }, [activeTab, paths.paths, browse.browseLibraryID])
+
+  // 用 ref 持有最新的刷新逻辑，避免 SSE 订阅因依赖变化反复重建
+  const reloadRef = useRef<() => void>(() => {})
+  reloadRef.current = () => { media.loadMedia(media.page, media.search); paths.loadPaths() }
+
+  // 订阅扫描进度 SSE：扫描中展示进度条，完成后自动刷新列表
+  useEffect(() => {
+    return libApi.createScanProgressSSE((status) => {
+      setScanProgress(status)
+      if (status.status === 'completed') reloadRef.current()
+    })
+  }, [])
 
   const handleOpen = useCallback((f: MediaFile) => { isImageFile(f, exts) ? setPreview(f) : navigate(`/play/${f.id}`) }, [navigate, exts])
   const handleBrowse = useCallback((p: LibraryPath) => { browse.handleBrowsePath(p.id, p.path); setActiveTab('directory') }, [browse, setActiveTab])
@@ -66,6 +79,16 @@ export default function LibraryPage({ initialTab = 'timeline' }: { initialTab?: 
         onExtensionInputChange={(id, v) => paths.setExtensionInputs(p => ({ ...p, [id]: v }))}
         onExtensionTypeChange={(id, t) => paths.setExtensionTypes(p => ({ ...p, [id]: t }))}
         onAddExtension={paths.handleAddExtension} />
+      {scanProgress?.status === 'scanning' && (
+        <Box>
+          <Text size="sm" c="dimmed" mb={4}>
+            正在扫描… 已扫描 {scanProgress.scanned_files} / {scanProgress.total_files} 个文件
+          </Text>
+          <Progress
+            value={scanProgress.total_files > 0 ? (scanProgress.scanned_files / scanProgress.total_files) * 100 : 0}
+            color="purple" animated size="sm" />
+        </Box>
+      )}
       <Tabs value={activeTab} onChange={handleTab} color="purple">
         <Tabs.List>
           <Tabs.Tab value="timeline" leftSection={<IconClock size={14} />}>时间轴</Tabs.Tab>

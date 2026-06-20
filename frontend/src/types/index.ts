@@ -43,7 +43,20 @@ export interface LoginRequest {
 
 /** 扫描响应 */
 export interface ScanResponse {
-  scanned: number
+  scanned?: number
+  status?: string
+}
+
+/** 扫描进度状态 */
+export interface ScanStatus {
+  status: string        // "idle", "scanning", "completed", "error"
+  library_id: number
+  current_path: string
+  total_files: number
+  scanned_files: number
+  error: string
+  started_at: string
+  completed_at: string
 }
 
 /** 媒体库后缀类型 */

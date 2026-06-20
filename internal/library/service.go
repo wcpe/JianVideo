@@ -377,13 +377,14 @@ func normalizeSMBLibraryPath(path string) string {
 	return strings.Trim(p, "/")
 }
 
-// ScanLibrary 扫描指定目录，索引所有媒体文件。
+// ScanLibrary 异步扫描指定目录，立即返回。
 // 根据 dirType 分发到本地扫描或 SMB 扫描。
-func (s *Service) ScanLibrary(libraryID int64, dirPath string) (int, error) {
-	return s.ScanLibraryWithType(libraryID, dirPath, "local")
+func (s *Service) ScanLibrary(libraryID int64, dirPath string) {
+	s.StartAsyncScan(libraryID, dirPath, "local")
 }
 
-// ScanLibraryWithType 按类型扫描指定目录，索引所有媒体文件。
+// ScanLibraryWithType 按类型同步扫描指定目录，索引所有媒体文件。
+// 供 watcher 轮询等内部同步调用使用。
 func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) (int, error) {
 	switch dirType {
 	case "smb":
@@ -391,6 +392,42 @@ func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) 
 	default:
 		return s.scanLocalLibrary(libraryID, dirPath)
 	}
+}
+
+// StartAsyncScan 按类型启动异步扫描，立即返回。
+// 实际扫描在后台 goroutine 中执行，进度通过 GetScanStatus 查询。
+func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType string) {
+	updateScanStatus(func(ss *ScanStatus) {
+		*ss = ScanStatus{
+			Status:       "scanning",
+			LibraryID:    libraryID,
+			CurrentPath:  "",
+			TotalFiles:   0,
+			ScannedFiles: 0,
+			StartedAt:    time.Now(),
+		}
+	})
+
+	go func() {
+		count, err := s.ScanLibraryWithType(libraryID, dirPath, dirType)
+
+		if err != nil {
+			updateScanStatus(func(ss *ScanStatus) {
+				ss.Status = "error"
+				ss.Error = err.Error()
+				ss.CompletedAt = time.Now()
+			})
+			log.Printf("[ERROR] 异步扫描失败: libraryID=%d, err=%v", libraryID, err)
+			return
+		}
+
+		updateScanStatus(func(ss *ScanStatus) {
+			ss.Status = "completed"
+			ss.ScannedFiles = count
+			ss.CompletedAt = time.Now()
+		})
+		log.Printf("[INFO] 异步扫描完成: libraryID=%d, count=%d", libraryID, count)
+	}()
 }
 
 // scanLocalLibrary 扫描本地目录。
@@ -422,6 +459,11 @@ func (s *Service) scanLocalLibrary(libraryID int64, dirPath string) (int, error)
 	if len(paths) == 0 {
 		return 0, nil
 	}
+
+	// 记录待扫描文件总数
+	updateScanStatus(func(ss *ScanStatus) {
+		ss.TotalFiles = len(paths)
+	})
 
 	return s.indexMediaFiles(libraryID, paths)
 }
@@ -531,7 +573,23 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 			continue
 		}
 		count++
+
+		// 异步触发缩略图生成，不阻塞入库
+		go generateThumbnail(fullPath)
+
+		// 每处理 10 个文件更新一次进度
+		if count%10 == 0 {
+			updateScanStatus(func(ss *ScanStatus) {
+				ss.ScannedFiles = count
+				ss.CurrentPath = normalized
+			})
+		}
 	}
+
+	// 最终进度更新
+	updateScanStatus(func(ss *ScanStatus) {
+		ss.ScannedFiles = count
+	})
 	return count, nil
 }
 

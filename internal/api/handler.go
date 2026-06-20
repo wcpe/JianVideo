@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"mime"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -258,6 +260,8 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 }
 
 // ScanLibrary POST /api/library/scan/:id
+// 启动异步扫描，立即返回 {"status": "scanning"}。
+// 扫描进度通过 GET /api/library/scan/progress SSE 端点获取。
 func (h *Handler) ScanLibrary(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -271,20 +275,44 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	count, err := h.library.ScanLibraryWithType(id, lp.Path, lp.Type)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "SCAN_FAILED", "message": "扫描失败"})
-		return
-	}
+	h.library.StartAsyncScan(id, lp.Path, lp.Type)
 
-	// 扫描成功后，对新入库的视频文件触发 HLS 预切片（如果启用了）。
+	// 扫描启动后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
 	// 预切片失败不阻塞扫描响应（仅记日志）。
-	// 用 context.Background() 而非 request ctx，避免 HTTP 响应返回后 ctx 被取消。
 	if transcoder.IsFFmpegAvailable() && h.hlsDir != "" && h.hlsMgr != nil {
 		go h.preSliceAllVideos(context.Background())
 	}
 
-	c.JSON(http.StatusOK, gin.H{"scanned": count})
+	c.JSON(http.StatusOK, gin.H{"status": "scanning"})
+}
+
+// ScanProgressSSE GET /api/library/scan/progress
+// 以 SSE 流推送当前扫描进度，每 500ms 推送一次。
+// 扫描完成或出错后关闭连接。
+func (h *Handler) ScanProgressSSE(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			status := library.GetScanStatus()
+			data, _ := json.Marshal(status)
+			c.SSEvent("progress", string(data))
+			c.Writer.Flush()
+
+			// 扫描完成或出错后关闭连接
+			if status.Status == "completed" || status.Status == "error" {
+				return
+			}
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
 }
 
 // preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。

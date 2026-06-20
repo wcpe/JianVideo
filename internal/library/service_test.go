@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -315,12 +316,22 @@ func TestScanLibrary(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "nested", "cover.png"), []byte("fake"), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not media"), 0o644)
 
-	count, err := svc.ScanLibrary(1, dir)
-	if err != nil {
-		t.Fatalf("扫描失败: %v", err)
+	svc.ScanLibrary(1, dir)
+
+	// 等待异步扫描完成
+	var status ScanStatus
+	for i := 0; i < 50; i++ {
+		status = GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if count != 5 {
-		t.Fatalf("期望递归扫描到 5 个媒体文件, 实际 %d", count)
+	if status.Status != "completed" {
+		t.Fatalf("扫描未完成, 当前状态: %s, err=%s", status.Status, status.Error)
+	}
+	if status.ScannedFiles != 5 {
+		t.Fatalf("期望递归扫描到 5 个媒体文件, 实际 %d", status.ScannedFiles)
 	}
 
 	// 验证数据库
@@ -334,12 +345,16 @@ func TestScanLibrary(t *testing.T) {
 	_ = items
 
 	// 重复扫描不应重复入库
-	count2, err := svc.ScanLibrary(1, dir)
-	if err != nil {
-		t.Fatalf("重复扫描失败: %v", err)
+	svc.ScanLibrary(1, dir)
+	for i := 0; i < 50; i++ {
+		status = GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if count2 != 0 {
-		t.Fatalf("重复扫描期望 0, 实际 %d", count2)
+	if status.ScannedFiles != 0 {
+		t.Fatalf("重复扫描期望 0, 实际 %d", status.ScannedFiles)
 	}
 }
 
@@ -348,11 +363,31 @@ func TestScanLibrary_AllowsSamePathInDifferentLibraries(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "shared.mp4"), []byte("fake"), 0o644)
 
-	if count, err := svc.ScanLibrary(1, dir); err != nil || count != 1 {
-		t.Fatalf("首次扫描期望 1, 实际 %d, err=%v", count, err)
+	// 第一次扫描
+	svc.ScanLibrary(1, dir)
+	var status ScanStatus
+	for i := 0; i < 50; i++ {
+		status = GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if count, err := svc.ScanLibrary(2, dir); err != nil || count != 1 {
-		t.Fatalf("不同媒体库扫描同一路径期望 1, 实际 %d, err=%v", count, err)
+	if status.ScannedFiles != 1 {
+		t.Fatalf("首次扫描期望 1, 实际 %d", status.ScannedFiles)
+	}
+
+	// 第二次扫描（不同媒体库）
+	svc.ScanLibrary(2, dir)
+	for i := 0; i < 50; i++ {
+		status = GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if status.ScannedFiles != 1 {
+		t.Fatalf("不同媒体库扫描同一路径期望 1, 实际 %d", status.ScannedFiles)
 	}
 }
 
@@ -400,8 +435,14 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(dir, "custom.foo"), []byte("fake"), 0o644)
 
-	if _, err := svc.ScanLibrary(lp.ID, dir); err != nil {
-		t.Fatalf("首次扫描失败: %v", err)
+	svc.ScanLibrary(lp.ID, dir)
+	// 等待异步扫描完成
+	for i := 0; i < 50; i++ {
+		st := GetScanStatus()
+		if st.Status == "completed" || st.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	_, total, err := svc.ListMediaFiles(lp.ID, "time_desc", "", 1, 20)
 	if err != nil {
@@ -435,11 +476,17 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 		t.Fatal("自定义后缀应绑定媒体库持久化")
 	}
 
-	count, err := svc.ScanLibrary(lp.ID, dir)
-	if err != nil {
-		t.Fatalf("添加自定义后缀后扫描失败: %v", err)
+	svc.ScanLibrary(lp.ID, dir)
+	// 等待异步扫描完成
+	var status ScanStatus
+	for i := 0; i < 50; i++ {
+		status = GetScanStatus()
+		if status.Status == "completed" || status.Status == "error" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if count != 1 {
-		t.Fatalf("添加自定义后缀后期望扫描 1 个文件, 实际 %d", count)
+	if status.ScannedFiles != 1 {
+		t.Fatalf("添加自定义后缀后期望扫描 1 个文件, 实际 %d", status.ScannedFiles)
 	}
 }

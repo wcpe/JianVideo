@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -236,6 +236,21 @@ export function getMediaFiles(params?: { library_id?: number; sort?: string; pag
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
+
+/**
+ * 创建扫描进度 SSE 连接，返回关闭函数。
+ * mock 模式或运行环境无 EventSource（如测试 jsdom）时立即返回空关闭函数。
+ */
+export function createScanProgressSSE(onProgress: (status: ScanStatus) => void): () => void {
+  if (useMock || typeof EventSource === 'undefined') {
+    return () => {}
+  }
+  const eventSource = new EventSource('/api/library/scan/progress')
+  eventSource.addEventListener('progress', (e) => {
+    onProgress(JSON.parse(e.data) as ScanStatus)
+  })
+  return () => eventSource.close()
+}
 export function browseDirectory(libraryID: number, parentPath: string) { return useMock ? mockBrowseDirectory(libraryID, parentPath) : realBrowseDirectory(libraryID, parentPath) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }
