@@ -27,15 +27,17 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
   // 当前页用 ref 维护而非 state，避免在重置 effect 中同步 setState。
   const itemsLenRef = useRef(0)
   const totalRef = useRef(0)
-  const loadingRef = useRef(false)
+  // 同步的“拉取中”标记：在 fetchPage 起始处立即置位，供 loadMore 立刻判重，
+  // 避免用滞后于 render 的 loading state 导致滚动哨兵快速触发时重复拉取。
+  const fetchingRef = useRef(false)
   const pageRef = useRef(1)
   useEffect(() => { itemsLenRef.current = items.length }, [items])
   useEffect(() => { totalRef.current = total }, [total])
-  useEffect(() => { loadingRef.current = loading }, [loading])
 
   // 拉取指定页：append=true 追加并按 id 去重，否则替换并视为新一轮累积。
   // 内部更新 pageRef，调用方无需关心页码状态。
   const fetchPage = useCallback(async (p: number, s: string, append: boolean) => {
+    fetchingRef.current = true
     pageRef.current = p
     setLoading(true)
     setError(null)
@@ -58,6 +60,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
       setError(err instanceof Error ? err.message : '加载失败')
     } finally {
       setLoading(false)
+      fetchingRef.current = false
     }
   }, [pageSize, sort])
 
@@ -73,9 +76,9 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
     fetchPage(1, search, false)
   }, [search, fetchPage])
 
-  // 加载下一页并追加；仅在仍有更多且非加载中时触发
+  // 加载下一页并追加；仅在仍有更多且无拉取进行中时触发
   const loadMore = useCallback(() => {
-    if (loadingRef.current || itemsLenRef.current >= totalRef.current) return
+    if (fetchingRef.current || itemsLenRef.current >= totalRef.current) return
     fetchPage(pageRef.current + 1, search, true)
   }, [search, fetchPage])
 

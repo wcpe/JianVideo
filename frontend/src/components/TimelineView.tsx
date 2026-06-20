@@ -127,14 +127,25 @@ export default function TimelineView({
 
   const virtualItems = virtualizer.getVirtualItems()
 
-  // 当虚拟渲染抵达最后一个日期组且仍有更多数据时触发加载更多。
-  // 放在 effect 中以避免渲染期调用 setState。
-  const lastIndex = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : -1
+  // 滚动加载更多：底部哨兵进入视口时触发 onLoadMore。
+  // 用 IntersectionObserver 而非依赖虚拟化 lastIndex 变化——group 级虚拟化下，已加载日期组
+  // 全部渲染后 lastIndex 不再变化，会导致 loadMore 不再触发（无限滚动失效）。
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<() => void>(() => {})
   useEffect(() => {
-    if (hasMore && !loadingMore && lastIndex >= groups.length - 1 && groups.length > 0) {
-      onLoadMore?.()
-    }
-  }, [lastIndex, hasMore, loadingMore, groups.length, onLoadMore])
+    loadMoreRef.current = () => { if (hasMore && !loadingMore) onLoadMore?.() }
+  }, [hasMore, loadingMore, onLoadMore])
+  useEffect(() => {
+    const el = sentinelRef.current
+    // 无布局/无 IntersectionObserver 的环境（如测试 jsdom）降级为不挂载，避免崩溃
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) loadMoreRef.current()
+    }, { rootMargin: '400px' })
+    observer.observe(el)
+    return () => observer.disconnect()
+    // 列表在 loading/空 状态下不渲染哨兵，故依赖这些状态变化以在列表出现后重新挂载观察
+  }, [loading, error, mediaFiles.length])
 
   if (error) {
     return (
@@ -194,6 +205,9 @@ export default function TimelineView({
           )
         })}
       </Box>
+
+      {/* 底部哨兵：进入视口（含 400px 提前量）即加载下一页 */}
+      <div ref={sentinelRef} style={{ height: 1 }} />
 
       {/* 加载更多提示 */}
       {loadingMore && (
