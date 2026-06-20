@@ -22,6 +22,7 @@
 - 缩略图系统（FR-D）：后端扫描时通过 ffmpeg 异步生成 320px 缩略图（视频取第 2 秒帧、图片缩放），新增 `GET /api/library/thumbnail/:id` 端点，前端媒体卡片改用缩略图加载（图片预览弹窗仍用原图）
 - 页面流程重设计（FR-A）：原综合媒体库页拆分为存储库管理 `/library-manager`、时间轴 `/`、目录浏览 `/browse` 三个独立页面，AppLayout 导航在三者间切换；管理页支持媒体文件删除与重命名（新增 `PUT /api/library/media/:id/rename` 磁盘改名端点）
 - 时间轴视图重做（FR-B）：按 `added_at` 日期分组，左侧竖向日期轴 + 右侧缩略图网格，视频与图片均展示缩略图
+- 虚拟列表 + 懒加载（FR-E）：时间轴与目录浏览改用 `@tanstack/react-virtual` 窗口虚拟滚动，只渲染可见区 + overscan；时间轴改为滚动到底自动加载更多（替代分页），缩略图 `loading="lazy"`
 
 ### 变更
 - 前端代码结构拆分（FR-F）：LibraryPage 拆分为 LibraryPathManager / MediaTimeline / DirectoryBrowser 等子组件与 useLibraryPaths / useMediaList / useDirectoryBrowse hooks，VideoPlayer 改用 Tabler Icons 与 Mantine 样式，删除 App.css 模板代码
