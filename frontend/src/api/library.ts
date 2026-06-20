@@ -59,6 +59,11 @@ async function realDeleteMediaFile(id: number): Promise<void> {
   await client.delete(`/api/library/media/${id}`)
 }
 
+async function realRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
+  const res = await client.put<MediaFile>(`/api/library/media/${id}/rename`, { new_name: newName })
+  return res.data
+}
+
 async function realScanLibrary(id: number): Promise<ScanResponse> {
   const res = await client.post<ScanResponse>(`/api/library/scan/${id}`)
   return res.data
@@ -141,6 +146,14 @@ async function mockDeleteMediaFile(id: number): Promise<void> {
   await mockDelay(150)
   const idx = mockMediaFiles.findIndex(m => m.id === id)
   if (idx !== -1) mockMediaFiles.splice(idx, 1)
+}
+
+async function mockRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
+  await mockDelay(150)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (!f) throw new Error('媒体文件不存在')
+  f.file_name = newName
+  return f
 }
 
 async function mockScanLibrary(id: number): Promise<ScanResponse> {
@@ -235,6 +248,7 @@ export function deleteLibraryPath(id: number) { return useMock ? mockDeleteLibra
 export function getMediaFiles(params?: { library_id?: number; sort?: string; page?: number; page_size?: number; search?: string }) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
+export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
 
 /**

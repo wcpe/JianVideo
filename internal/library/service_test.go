@@ -1,6 +1,7 @@
 package library
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -488,5 +489,86 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 	}
 	if status.ScannedFiles != 1 {
 		t.Fatalf("添加自定义后缀后期望扫描 1 个文件, 实际 %d", status.ScannedFiles)
+	}
+}
+
+func TestRenameMediaFile(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.mp4")
+	if err := os.WriteFile(oldPath, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	mf, err := svc.CreateMediaFile(1, oldPath, 4)
+	if err != nil {
+		t.Fatalf("创建媒体记录失败: %v", err)
+	}
+
+	renamed, err := svc.RenameMediaFile(mf.ID, "new.mkv")
+	if err != nil {
+		t.Fatalf("重命名失败: %v", err)
+	}
+
+	// 磁盘：旧文件不存在、新文件存在
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatal("旧磁盘文件应已不存在")
+	}
+	newPath := filepath.Join(dir, "new.mkv")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("新磁盘文件应存在: %v", err)
+	}
+
+	// 返回值与数据库均更新
+	if renamed.FileName != "new.mkv" || renamed.Format != "mkv" {
+		t.Fatalf("返回值未更新: file_name=%s format=%s", renamed.FileName, renamed.Format)
+	}
+	if renamed.FilePath != filepath.ToSlash(newPath) {
+		t.Fatalf("返回值 file_path 未更新: %s", renamed.FilePath)
+	}
+	got, err := svc.GetMediaFileByID(mf.ID)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if got.FileName != "new.mkv" || got.FilePath != filepath.ToSlash(newPath) {
+		t.Fatalf("数据库记录未更新: %+v", got)
+	}
+}
+
+func TestRenameMediaFile_TargetExists(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "a.mp4")
+	occupied := filepath.Join(dir, "b.mp4")
+	_ = os.WriteFile(oldPath, []byte("fake"), 0o644)
+	_ = os.WriteFile(occupied, []byte("fake"), 0o644)
+	mf, _ := svc.CreateMediaFile(1, oldPath, 4)
+
+	if _, err := svc.RenameMediaFile(mf.ID, "b.mp4"); !errors.Is(err, ErrRenameTargetExists) {
+		t.Fatalf("期望 ErrRenameTargetExists, 实际 %v", err)
+	}
+	// 失败时磁盘旧文件应保持不变
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatal("失败后旧文件不应被改名")
+	}
+}
+
+func TestRenameMediaFile_InvalidName(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "a.mp4")
+	_ = os.WriteFile(oldPath, []byte("fake"), 0o644)
+	mf, _ := svc.CreateMediaFile(1, oldPath, 4)
+
+	for _, bad := range []string{"", "  ", "..", "sub/x.mp4", "sub\\x.mp4"} {
+		if _, err := svc.RenameMediaFile(mf.ID, bad); !errors.Is(err, ErrInvalidNewName) {
+			t.Fatalf("名称 %q 期望 ErrInvalidNewName, 实际 %v", bad, err)
+		}
+	}
+}
+
+func TestRenameMediaFile_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, err := svc.RenameMediaFile(9999, "x.mp4"); err == nil {
+		t.Fatal("不存在的记录应返回错误")
 	}
 }

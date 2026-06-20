@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -16,6 +17,16 @@ import (
 
 	"jianvideo/internal/db/models"
 	"jianvideo/internal/smb"
+)
+
+// 重命名相关业务错误（供上层映射为对应 HTTP 状态码）。
+var (
+	// ErrInvalidNewName 新文件名为空或包含非法字符。
+	ErrInvalidNewName = errors.New("新文件名不合法")
+	// ErrRenameTargetExists 目标文件名已存在。
+	ErrRenameTargetExists = errors.New("目标文件已存在")
+	// ErrRenameUnsupported 该媒体文件不支持重命名（如 SMB 远程文件）。
+	ErrRenameUnsupported = errors.New("该媒体文件暂不支持重命名")
 )
 
 // Service 媒体库业务逻辑。
@@ -221,6 +232,74 @@ func (s *Service) DeleteMediaFile(id int64) error {
 		return fmt.Errorf("媒体文件不存在")
 	}
 	return nil
+}
+
+// RenameMediaFile 重命名媒体文件：磁盘改名 + 更新数据库 + 失效旧缩略图。
+// newName 仅允许单层文件名（不含路径分隔符），目标已存在时拒绝。
+// 先磁盘原子改名，再更新数据库；数据库更新失败时尽力回滚磁盘改名。
+func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, error) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" || newName == "." || newName == ".." || strings.ContainsAny(newName, "/\\") {
+		return nil, ErrInvalidNewName
+	}
+
+	mf, err := s.GetMediaFileByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// SMB 远程文件不支持磁盘改名
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		return nil, ErrRenameUnsupported
+	}
+
+	oldDiskPath := filepath.FromSlash(mf.FilePath)
+	newDiskPath := filepath.Join(filepath.Dir(oldDiskPath), newName)
+	newPathSlash := filepath.ToSlash(newDiskPath)
+
+	// 名称未变化，直接返回
+	if newPathSlash == mf.FilePath {
+		return mf, nil
+	}
+
+	// 目标在磁盘或库内已存在则拒绝，避免覆盖
+	if _, statErr := os.Stat(newDiskPath); statErr == nil {
+		return nil, ErrRenameTargetExists
+	}
+	if _, dupErr := s.GetMediaFileByLibraryAndPath(mf.LibraryID, newPathSlash); dupErr == nil {
+		return nil, ErrRenameTargetExists
+	}
+
+	// 先磁盘原子改名
+	if err := os.Rename(oldDiskPath, newDiskPath); err != nil {
+		return nil, fmt.Errorf("重命名磁盘文件失败: %w", err)
+	}
+
+	// 再更新数据库，失败则尽力回滚磁盘改名
+	format := strings.TrimPrefix(filepath.Ext(newName), ".")
+	updates := map[string]any{
+		"file_path":   newPathSlash,
+		"file_name":   newName,
+		"format":      format,
+		"modified_at": time.Now(),
+	}
+	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		if rbErr := os.Rename(newDiskPath, oldDiskPath); rbErr != nil {
+			log.Printf("[ERROR] 重命名回滚磁盘文件失败: %s -> %s, err=%v", newDiskPath, oldDiskPath, rbErr)
+		}
+		return nil, fmt.Errorf("更新媒体文件记录失败: %w", err)
+	}
+
+	// 旧缩略图按旧路径 hash 命名，重命名后失效，尽力删除并为新文件重新生成
+	if rmErr := os.Remove(FindThumbnailPath(mf.FilePath)); rmErr != nil && !os.IsNotExist(rmErr) {
+		log.Printf("[WARN] 删除旧缩略图失败: %v", rmErr)
+	}
+	go GenerateThumbnail(newDiskPath)
+
+	mf.FilePath = newPathSlash
+	mf.FileName = newName
+	mf.Format = format
+	return mf, nil
 }
 
 // GetMediaFileByPath 根据文件路径查询媒体文件。

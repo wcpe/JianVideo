@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"mime"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"jianvideo/internal/library"
 	"jianvideo/internal/player"
@@ -197,6 +199,40 @@ func (h *Handler) DeleteMediaFile(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// RenameMediaFile PUT /api/library/media/:id/rename
+// 请求体：{"new_name": "新文件名.mp4"}，磁盘改名 + 更新数据库记录。
+func (h *Handler) RenameMediaFile(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	var req struct {
+		NewName string `json:"new_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
+		return
+	}
+
+	mf, err := h.library.RenameMediaFile(id, req.NewName)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		case errors.Is(err, library.ErrRenameTargetExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "TARGET_EXISTS", "message": err.Error()})
+		case errors.Is(err, library.ErrInvalidNewName), errors.Is(err, library.ErrRenameUnsupported):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "RENAME_REJECTED", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "RENAME_FAILED", "message": "重命名失败"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, mf)
 }
 
 // BrowseDirectory GET /api/library/browse

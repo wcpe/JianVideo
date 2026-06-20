@@ -364,3 +364,48 @@ func TestMediaExtensionsAPI(t *testing.T) {
 		t.Fatalf("自定义后缀扫描期望 1, 实际 %d", status.ScannedFiles)
 	}
 }
+
+func TestRenameMediaFile_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.mp4")
+	if err := os.WriteFile(oldPath, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	mf, _ := svc.CreateMediaFile(1, oldPath, 4)
+
+	// 正常重命名 → 200
+	req := httptest.NewRequest("PUT", "/api/library/media/"+strconv.FormatInt(mf.ID, 10)+"/rename",
+		bytes.NewBufferString(`{"new_name":"new.mkv"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["file_name"] != "new.mkv" {
+		t.Fatalf("响应 file_name 期望 new.mkv, 实际 %v", resp["file_name"])
+	}
+
+	// 非法新名 → 400
+	req = httptest.NewRequest("PUT", "/api/library/media/"+strconv.FormatInt(mf.ID, 10)+"/rename",
+		bytes.NewBufferString(`{"new_name":"sub/x.mp4"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法新名期望 400, 实际 %d", w.Code)
+	}
+
+	// 不存在的记录 → 404
+	req = httptest.NewRequest("PUT", "/api/library/media/9999/rename",
+		bytes.NewBufferString(`{"new_name":"x.mp4"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("不存在记录期望 404, 实际 %d", w.Code)
+	}
+}
