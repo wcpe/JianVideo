@@ -67,7 +67,7 @@
 | FR-B | 时间轴视图重做：左侧日期轴 + 右侧缩略图网格，按日期分组展示 | P1 | 开发中 |
 | FR-E | 虚拟列表 + 懒加载：react-virtual 虚拟滚动，图片 loading="lazy"，千条列表流畅滚动 | P1 | 开发中 |
 | FR-G | 暗色模式 + 路由守卫 + 全局错误处理：Mantine ColorScheme 切换，ProtectedRoute，统一错误 toast | P2 | 开发中 |
-| FR-H | 测试同步更新：parseWebVTT 提取为公共工具，重构后全量测试绿 | P1 | 计划 |
+| FR-H | 测试同步更新：parseWebVTT 提取为公共工具，重构后全量测试绿 | P1 | 开发中 |
 
 > 状态取值：计划 / 开发中 / 已交付@vX.Y.Z。优先级：P1(MVP) / P2 / P3。
 > 标 `已交付` 是有门的：只有该 FR 的 §6 / spec 验收标准全部满足、对应测试 / 实机验收通过后，才由 `sdd-release-version` 在发版时统一标 `已交付@vX.Y.Z`——开发 / 修复过程中不得自行预标。

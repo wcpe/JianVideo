@@ -3,7 +3,6 @@ import { Text, Box, ActionIcon, Slider } from '@mantine/core'
 import { IconPlayerPlay, IconPlayerPause, IconVolume, IconVolumeOff } from '@tabler/icons-react'
 import mpegts from 'mpegts.js'
 import type Hls from 'hls.js'
-import { parseWebVTT } from '@/utils/subtitle'
 import type { SubtitleEntry } from '@/types'
 
 interface VideoPlayerProps {
@@ -195,6 +194,3 @@ export default function VideoPlayer({
     </Box>
   )
 }
-
-// 导出工具函数供其他模块使用
-export { parseWebVTT }
