@@ -6,8 +6,12 @@
 
 ## 未发布版本
 
+### 新增
+- **播放器（FR-18）末端缓冲等待**：VideoPlayer 监听 mpegts.js `error` 事件 + 原生 `<video>` `waiting`/`stalled` 事件，进入等待态展示「等待新数据…」横幅；mpegts.js 报错后 1s 自动 `unload + load` 重载，新数据可用时 `canplay`/`playing` 自动复位。
+
 ### 修复
 - **转码（FR-10/11/12）**：挂载硬件加速能力查询端点 `GET /api/transcode/hwaccel`。此前 HWAccelHandler 已实现但未注册路由，请求被前端 SPA 回退（NoRoute）接管返回 HTML 而非硬件能力 JSON，与 ARCHITECTURE §1/§4 不符；现已注册并返回 available/preferred/h264_supported 等字段。
+- **监听器（FR-03）**：修复 main.go 未启动文件监听——watcher 包齐备且单测全绿，但程序入口从未实例化或 Start，导致新增/删除文件不自动入库（真机 35s 不入库）。修复后实测加文件 1s 入库（spec ≤30s）、删文件 1s 移除（spec ≤10s）。
 
 ## 0.1.0（2026-06-20）
 

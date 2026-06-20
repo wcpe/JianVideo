@@ -50,6 +50,8 @@ export default function VideoPlayer({
   const [isMuted, setIsMuted] = useState(false)
   const [bufferedProgress, setBufferedProgress] = useState(0)
   const [subtitleText, setSubtitleText] = useState('')
+  // 末端缓冲等待（FR-18）：mpegts.js ERROR 或 video stalled 时进入等待，1s 后自动重载
+  const [isWaiting, setIsWaiting] = useState(false)
 
   // 判断是否为 ABR 模式
   const isABR = isABRProp ?? url.endsWith('master.m3u8')
@@ -83,8 +85,17 @@ export default function VideoPlayer({
       player.attachMediaElement(videoRef.current)
       player.load()
       player.on('loadeddata', () => { if (autoPlay) void (player.play() as Promise<void>)?.catch?.(() => setAutoPlayBlocked(true)) })
-      player.on('playing', () => setIsPlaying(true))
+      player.on('playing', () => { setIsPlaying(true); setIsWaiting(false) })
       player.on('pause', () => setIsPlaying(false))
+      // FR-18：mpegts.js 报错（常见于追上文件写入末端、TS 流暂时断流）→ 标记等待，
+      // 1s 后重载播放器；新数据可用时 loadeddata/playing 会自动复位 isWaiting。
+      // 使用 'error' 字符串避免依赖 mpegts.Events 类型常量。
+      player.on('error', () => {
+        setIsWaiting(true)
+        setTimeout(() => {
+          if (mpegtsPlayerRef.current === player) { try { player.unload(); player.load() } catch { /* 静默 */ } }
+        }, 1000)
+      })
       mpegtsPlayerRef.current = player
     },
     [autoPlay, destroyMpegtsPlayer]
@@ -121,16 +132,26 @@ export default function VideoPlayer({
     return () => { void destroyHlsPlayer(); destroyMpegtsPlayer() }
   }, [url, isABR, streamType, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
-  // 监听时间/音量/缓冲
+  // 监听时间/音量/缓冲/等待
   useEffect(() => {
     const v = videoRef.current; if (!v) return
     const onTime = () => setCurrentTime(v.currentTime)
     const onDur = () => setDuration(v.duration)
     const onVol = () => { setVolume(v.volume); setIsMuted(v.muted) }
     const onBuf = () => { if (v.buffered.length > 0 && v.duration > 0) setBufferedProgress((v.buffered.end(v.buffered.length - 1) / v.duration) * 100) }
+    // FR-18：原生 video stalled/waiting → 进入末端缓冲等待；playing/canplay 自动复位
+    const onWaiting = () => setIsWaiting(true)
+    const onCanPlay = () => setIsWaiting(false)
     v.addEventListener('timeupdate', onTime); v.addEventListener('durationchange', onDur)
     v.addEventListener('volumechange', onVol); v.addEventListener('progress', onBuf)
-    return () => { v.removeEventListener('timeupdate', onTime); v.removeEventListener('durationchange', onDur); v.removeEventListener('volumechange', onVol); v.removeEventListener('progress', onBuf) }
+    v.addEventListener('waiting', onWaiting); v.addEventListener('stalled', onWaiting)
+    v.addEventListener('canplay', onCanPlay); v.addEventListener('playing', onCanPlay)
+    return () => {
+      v.removeEventListener('timeupdate', onTime); v.removeEventListener('durationchange', onDur)
+      v.removeEventListener('volumechange', onVol); v.removeEventListener('progress', onBuf)
+      v.removeEventListener('waiting', onWaiting); v.removeEventListener('stalled', onWaiting)
+      v.removeEventListener('canplay', onCanPlay); v.removeEventListener('playing', onCanPlay)
+    }
   }, [])
 
   // 字幕同步
@@ -159,6 +180,11 @@ export default function VideoPlayer({
         {autoPlayBlocked && !isPlaying && (
           <Box style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} onClick={togglePlay}>
             <Text c="white" size="lg">点击播放</Text>
+          </Box>
+        )}
+        {isWaiting && !autoPlayBlocked && (
+          <Box aria-label="缓冲等待" role="status" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.45)', pointerEvents: 'none' }}>
+            <Text c="white" size="sm">等待新数据…</Text>
           </Box>
         )}
         {subtitleVisible && subtitleText && (
