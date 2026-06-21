@@ -1,6 +1,4 @@
-# ADR-XXXX：HEIC/RAW 图片经外部 ImageMagick 转 JPEG 显示
-
-> 占位编号 XXXX：真实编号由主控统一分配，落地时改本文件名与标题，禁止自行算 max+1。
+# ADR-0030：HEIC/RAW 图片经外部 ImageMagick 转 JPEG 显示
 
 ## 状态
 已接受

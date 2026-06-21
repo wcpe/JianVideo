@@ -8,7 +8,7 @@ iPhone 默认拍摄 HEIC，相机出片多为 RAW（cr2/nef/arw/dng/rw2 等）�
 直接把原始字节返回给前端会显示为损坏图片。本功能在服务端把 HEIC/RAW 转成浏览器可显示的 JPEG，
 覆盖原图预览与缩略图两条链路，属 P2 阶段（图片体验完善）。
 
-转换走**外部 ImageMagick（`magick` 命令行）进程**，与项目既有 ffmpeg/ffprobe 外部进程范式一致（见 ADR-XXXX），
+转换走**外部 ImageMagick（`magick` 命令行）进程**，与项目既有 ffmpeg/ffprobe 外部进程范式一致（见 ADR-0030），
 不引入 CGO 绑定（libheif/libraw）。
 
 ## 2. 需求（要什么）
@@ -40,7 +40,7 @@ iPhone 默认拍摄 HEIC，相机出片多为 RAW（cr2/nef/arw/dng/rw2 等）�
 - `internal/api/handler.go`：`GetRawImage` 对需转换的扩展名调用 `ConvertToJPEG`，返回 JPEG；转换不可用/失败时降级（503/404 + 中文日志）。
 - `main.go`：启动期 `library.SetMagickPath(resolveTool("JIANVIDEO_MAGICK_PATH", "magick"))` + `library.InitConvertCacheDir(数据目录)`，并打印可用性日志。
 
-架构决策（外部 ImageMagick、不走 CGO）见 ADR-XXXX，此处不重复决策正文。
+架构决策（外部 ImageMagick、不走 CGO）见 ADR-0030，此处不重复决策正文。
 
 ## 4. 任务拆分
 

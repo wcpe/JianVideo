@@ -50,7 +50,7 @@ var builtInMediaExtensions = map[string]string{
 	"jpg": MediaTypeImage, "jpeg": MediaTypeImage, "png": MediaTypeImage, "gif": MediaTypeImage,
 	"webp": MediaTypeImage, "bmp": MediaTypeImage, "tif": MediaTypeImage, "tiff": MediaTypeImage,
 	"heic": MediaTypeImage, "heif": MediaTypeImage,
-	// 相机 RAW 系列（经外部 ImageMagick 转 JPEG 显示，见 FR-37 / ADR）
+	// 相机 RAW 系列（经外部 ImageMagick 转 JPEG 显示，见 FR-37 / ADR-0030）
 	"cr2": MediaTypeImage, "nef": MediaTypeImage, "arw": MediaTypeImage, "dng": MediaTypeImage,
 	"rw2": MediaTypeImage, "raf": MediaTypeImage, "orf": MediaTypeImage, "srw": MediaTypeImage,
 	"pef": MediaTypeImage,
