@@ -31,12 +31,26 @@ func GetThumbnailDir() string {
 
 // GenerateThumbnail 根据文件类型异步生成缩略图。
 func GenerateThumbnail(filePath string) {
+	// HEIC/RAW 浏览器无法直接渲染，经外部 magick 生成缩略图（FR-37）
+	if needsMagickConvert(filePath) {
+		go generateMagickThumbnail(filePath)
+		return
+	}
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
 		go generateImageThumbnail(filePath)
 	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".m4v", ".flv":
 		go generateVideoThumbnail(filePath)
+	}
+}
+
+// generateMagickThumbnail 用 ImageMagick 为 HEIC/RAW 生成缩略图。
+// magick 不可用或转换失败仅记日志，不阻塞入库（与 ffmpeg 缩略图一致）。
+func generateMagickThumbnail(filePath string) {
+	outputPath := getThumbnailPath(filePath)
+	if err := runMagick(buildMagickThumbnailArgs(filePath, outputPath, thumbnailWidth)); err != nil {
+		log.Printf("[WARN] HEIC/RAW 缩略图生成失败: %s, err=%v", filePath, err)
 	}
 }
 

@@ -508,6 +508,23 @@ func (h *Handler) GetRawImage(c *gin.Context) {
 		return
 	}
 
+	// HEIC/RAW 浏览器无法直接渲染，经外部 ImageMagick 转 JPEG 后返回（FR-37）
+	if library.NeedsImageConvert(mf.FilePath) {
+		if !library.IsMagickAvailable() {
+			log.Printf("[WARN] magick 不可用，无法转换 HEIC/RAW: %s", mf.FilePath)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "MAGICK_UNAVAILABLE", "message": "未安装 ImageMagick，无法显示 HEIC/RAW 图片"})
+			return
+		}
+		jpegPath, convErr := library.ConvertToJPEG(mf.FilePath)
+		if convErr != nil {
+			log.Printf("[ERROR] HEIC/RAW 转 JPEG 失败: %s, err=%v", mf.FilePath, convErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "CONVERT_FAILED", "message": "图片转换失败"})
+			return
+		}
+		c.File(jpegPath)
+		return
+	}
+
 	data, err := os.ReadFile(mf.FilePath)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "FILE_NOT_FOUND", "message": "图片文件不可访问"})

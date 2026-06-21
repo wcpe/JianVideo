@@ -229,12 +229,12 @@
 - `ScanLibraryWithType` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
 - 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
 - 扫描入库按 `library_id + file_path` 去重，重复扫描不会重复写入。
-- 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。
+- 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR）。
 - 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScan` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送，`completed`/`error` 后关闭连接。`ScanLibraryWithType` 仍保留同步签名供 watcher 等内部调用。
 
 ### 5.1.1 缩略图生成
 
-- `thumbnail.go` 提供缩略图能力：入库时对新文件异步调用 `GenerateThumbnail`，视频取第 2 秒帧、图片缩放为 320px 宽，统一经 ffmpeg 生成，失败仅记日志不阻塞入库。
+- `thumbnail.go` 提供缩略图能力：入库时对新文件异步调用 `GenerateThumbnail`，视频取第 2 秒帧、普通图片缩放为 320px 宽，统一经 ffmpeg 生成；HEIC/RAW 改经外部 ImageMagick（`magick`）缩放生成 320px 宽缩略图（FR-37）。生成失败仅记日志不阻塞入库。
 - 缩略图存于数据目录下 `thumbnails/`（启动时 `InitThumbnailDir` 初始化，按原始路径 SHA-256 hash 命名避免特殊字符冲突）。
 - `GET /api/library/thumbnail/:id` 返回缩略图；尚未生成时返回 `202` 并触发后台生成，前端可稍后重试。媒体卡片用缩略图，图片预览弹窗仍用原图。
 
@@ -308,7 +308,7 @@
 ## 6. 部署
 
 - **运行形态**：单个可执行文件，内嵌前端静态资源。
-- **依赖**：FFmpeg/ffprobe 外部进程；发布包随包附带，启动时按「环境变量 → 可执行文件同目录捆绑版 → PATH」自动发现（见 [ADR-0027](adr/0027-cross-platform-packaging.md)）。
+- **依赖**：FFmpeg/ffprobe 外部进程；发布包随包附带，启动时按「环境变量 → 可执行文件同目录捆绑版 → PATH」自动发现（见 [ADR-0027](adr/0027-cross-platform-packaging.md)）。ImageMagick（`magick`）为可选外部进程，用于 HEIC/RAW 转 JPEG（FR-37），同样按「`JIANVIDEO_MAGICK_PATH` → 同目录捆绑版 → PATH」解析；未安装时仅 HEIC/RAW 显示不可用，不影响其他功能。须使用带 HEIC + RAW delegate 的构建。
 - **数据库**：SQLite WAL 模式，数据库文件位于配置目录。
 - **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
 - **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。

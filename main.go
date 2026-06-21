@@ -100,6 +100,16 @@ func main() {
 	// 初始化缩略图存储目录（与数据库、HLS 同处数据目录下）
 	library.InitThumbnailDir(filepath.Dir(cfg.DBPath))
 
+	// magick 路径注入与 HEIC/RAW 转换缓存目录初始化（FR-37，见 ADR）：
+	// 解析顺序与 ffmpeg 一致：环境变量 → 同目录捆绑版 → PATH。
+	library.SetMagickPath(resolveTool("JIANVIDEO_MAGICK_PATH", "magick"))
+	library.InitConvertCacheDir(filepath.Dir(cfg.DBPath))
+	if library.IsMagickAvailable() {
+		log.Printf("[INFO] ImageMagick 可用: %s（HEIC/RAW 将转 JPEG 显示）", library.GetMagickPath())
+	} else {
+		log.Printf("[WARN] ImageMagick 不可用（%s），HEIC/RAW 图片将无法显示", library.GetMagickPath())
+	}
+
 	// 播放服务：用于在 HLS 不可用时提供 /api/play/:id/stream 降级路径
 	pbSvc := playback.NewService()
 	defer pbSvc.Stop()
