@@ -94,6 +94,23 @@ async function realRemoveMediaTag(mediaID: number, tagID: number): Promise<void>
   await client.delete(`/api/library/media/${mediaID}/tags/${tagID}`)
 }
 
+// ─── 续播与观看状态（FR-44）─────────────────────────
+
+async function realUpdateWatchPosition(id: number, position: number): Promise<MediaFile> {
+  const res = await client.put<MediaFile>(`/api/play/${id}/position`, { position })
+  return res.data
+}
+
+async function realMarkWatched(id: number): Promise<MediaFile> {
+  const res = await client.put<MediaFile>(`/api/play/${id}/watched`)
+  return res.data
+}
+
+async function realGetContinueWatching(limit = 12): Promise<MediaFile[]> {
+  const res = await client.get<{ items: MediaFile[] }>('/api/library/continue-watching', { params: { limit } })
+  return res.data.items
+}
+
 async function realGetMediaFile(id: number): Promise<MediaFile> {
   const res = await client.get(`/api/library/media/${id}`)
   return res.data
@@ -238,6 +255,35 @@ async function mockRemoveMediaTag(mediaID: number, tagID: number): Promise<void>
   if (idx !== -1) mockTagMappings.splice(idx, 1)
 }
 
+// ─── 续播与观看状态 mock（FR-44）────────────────────
+
+async function mockUpdateWatchPosition(id: number, position: number): Promise<MediaFile> {
+  await mockDelay(100)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (!f) throw new Error('媒体文件不存在')
+  f.last_position = position < 0 ? 0 : position
+  f.last_watched_at = new Date().toISOString()
+  return f
+}
+
+async function mockMarkWatched(id: number): Promise<MediaFile> {
+  await mockDelay(100)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (!f) throw new Error('媒体文件不存在')
+  f.watched = true
+  f.last_position = 0
+  f.last_watched_at = new Date().toISOString()
+  return f
+}
+
+async function mockGetContinueWatching(limit = 12): Promise<MediaFile[]> {
+  await mockDelay(100)
+  return mockMediaFiles
+    .filter(m => (m.last_position ?? 0) > 0 && !m.watched)
+    .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
+    .slice(0, limit)
+}
+
 async function mockGetMediaFile(id: number): Promise<MediaFile> {
   await mockDelay(100)
   const f = mockMediaFiles.find(m => m.id === id)
@@ -377,5 +423,10 @@ export function createTag(name: string) { return useMock ? mockCreateTag(name) :
 export function getMediaTags(mediaID: number) { return useMock ? mockGetMediaTags(mediaID) : realGetMediaTags(mediaID) }
 export function addMediaTag(mediaID: number, tag: { tag_id?: number; name?: string }) { return useMock ? mockAddMediaTag(mediaID, tag) : realAddMediaTag(mediaID, tag) }
 export function removeMediaTag(mediaID: number, tagID: number) { return useMock ? mockRemoveMediaTag(mediaID, tagID) : realRemoveMediaTag(mediaID, tagID) }
+
+// 续播与观看状态（FR-44）
+export function updateWatchPosition(id: number, position: number) { return useMock ? mockUpdateWatchPosition(id, position) : realUpdateWatchPosition(id, position) }
+export function markWatched(id: number) { return useMock ? mockMarkWatched(id) : realMarkWatched(id) }
+export function getContinueWatching(limit = 12) { return useMock ? mockGetContinueWatching(limit) : realGetContinueWatching(limit) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }

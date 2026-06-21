@@ -167,7 +167,22 @@
 ### 获取媒体文件详情
 
 - **方法 / 路径**：`GET /api/library/media/:id`
-- **响应**（200）：媒体文件详情对象（含字幕轨道信息）
+- **响应**（200）：媒体文件详情对象（含字幕轨道信息，以及 FR-44 的 `last_position`、`watched`、`last_watched_at`）
+
+### 继续观看列表（FR-44）
+
+- **方法 / 路径**：`GET /api/library/continue-watching`
+- **查询参数**：
+  - `limit`：返回条数上限，默认 `12`，超过 `50` 时收敛到 `50`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {"id": 1, "file_name": "电影名.mkv", "duration": 7200.0, "last_position": 1234.5, "watched": false, "last_watched_at": "2025-01-01T12:00:00Z"}
+    ]
+  }
+  ```
+- **说明**：返回「有进度（`last_position>0`）且未看完（`watched=false`）」的媒体，按 `last_watched_at` 倒序，排除已删除记录，供首页「继续观看」区块展示。
 
 ### 重命名媒体文件
 
@@ -392,6 +407,24 @@
 - **方法 / 路径**：`GET /api/play/hls/:id/master.m3u8`
 - **响应**（200）：`Content-Type: application/vnd.apple.mpegurl`
 - **说明**：返回包含多码率 `EXT-X-STREAM-INF` 标签的 master playlist，供 hls.js 自适应切换
+
+### 上报观看位置（FR-44）
+
+- **方法 / 路径**：`PUT /api/play/:id/position`
+- **请求**：
+  ```json
+  {"position": 123.4}
+  ```
+- **响应**（200）：更新后的媒体文件对象（含 `last_position`、`last_watched_at`）
+- **说明**：持久化「用户观看位置」（秒）到 `media_files.last_position` 并刷新 `last_watched_at`，供下次进入同一视频续播。`position` 为负时归零。此为用户观看位置，**区别于**下方「获取转码状态」中的转码/缓冲进度，二者互不复用。
+- **错误**：`400` 请求体无效，`404` 媒体记录不存在
+
+### 标记已看（FR-44）
+
+- **方法 / 路径**：`PUT /api/play/:id/watched`
+- **响应**（200）：更新后的媒体文件对象（`watched=true`、`last_position=0`）
+- **说明**：标记视频已看完，并清零续播位置（已看完不再续播），刷新 `last_watched_at`。
+- **错误**：`404` 媒体记录不存在
 
 ### 获取转码状态
 

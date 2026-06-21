@@ -29,6 +29,12 @@ export interface MediaFile {
   modified_at: string
   /** 收藏标记（FR-41），旧数据可能缺省 */
   favorite?: boolean
+  /** 上次播放位置（秒，FR-44），旧数据可能缺省 */
+  last_position?: number
+  /** 是否已看完（FR-44），旧数据可能缺省 */
+  watched?: boolean
+  /** 最近一次观看时间（FR-44），旧数据可能缺省 */
+  last_watched_at?: string | null
 }
 
 /** 标签（FR-41） */

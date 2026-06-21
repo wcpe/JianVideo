@@ -8,6 +8,7 @@ import { useInfiniteMedia } from '@/hooks/useInfiniteMedia'
 import { useScanProgress } from '@/hooks/useScanProgress'
 import TimelineView from '@/components/TimelineView'
 import MediaFilterBar from '@/components/MediaFilterBar'
+import ContinueWatching from '@/components/ContinueWatching'
 import ImagePreviewModal from '@/components/ImagePreviewModal'
 import { isImageFile } from '@/utils/media'
 import { extractErrorMessage } from '@/utils/error'
@@ -45,6 +46,9 @@ export default function TimelinePage() {
   return (
     <Stack gap="md">
       <Title order={2}>时间轴</Title>
+
+      {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
+      <ContinueWatching />
 
       {/* 搜索 */}
       <TextInput

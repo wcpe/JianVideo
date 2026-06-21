@@ -54,6 +54,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/browse", h.BrowseDirectory)
 
+		// 继续观看（FR-44）：有进度且未看完的媒体列表
+		lib.GET("/continue-watching", h.ContinueWatching)
+
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
 		lib.POST("/scan/:id", h.ScanLibrary)
@@ -72,11 +75,15 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		albums.DELETE("/:id/items/:mediaId", h.RemoveAlbumItem)
 	}
 
-	// 字幕路由（不需要 playback 服务）
+	// 字幕与观看状态路由（不需要 playback 服务，作用于 media_files）
 	sub := r.Group("/api/play")
 	{
 		sub.GET("/:id/subtitles", h.GetSubtitles)
 		sub.GET("/:id/subtitles/:index", h.GetSubtitleContent)
+
+		// 续播与观看状态（FR-44）：用户观看位置，区别于 playback 的转码/缓冲进度
+		sub.PUT("/:id/position", h.UpdateWatchPosition)
+		sub.PUT("/:id/watched", h.MarkWatched)
 	}
 
 	// SMB 凭据管理

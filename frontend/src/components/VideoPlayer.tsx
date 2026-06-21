@@ -23,7 +23,24 @@ interface VideoPlayerProps {
    * 显式声明流类型为 mp4 时使用浏览器原生 video 标签直接加载。
    */
   streamType?: 'mpegts' | 'mp4'
+  /**
+   * 续播起始位置（秒，FR-44）。大于 1 时在媒体可定位后 seek 到该位置一次。
+   */
+  initialPosition?: number
+  /**
+   * 定期上报当前播放位置（秒，FR-44）。约每 10s 触发一次，暂停时补报一次。
+   */
+  onPositionReport?: (position: number) => void
+  /**
+   * 播放接近结束时回调一次（FR-44），用于标记「已看」。
+   */
+  onEnded?: () => void
 }
+
+// 播放位置上报节流间隔（秒，FR-44）
+const POSITION_REPORT_INTERVAL = 10
+// 「看完」判定：剩余时长小于该秒数即视为已看完（FR-44）
+const WATCHED_REMAINING_THRESHOLD = 15
 
 /**
  * 视频播放组件
@@ -38,10 +55,23 @@ export default function VideoPlayer({
   subtitleVisible = false,
   isABR: isABRProp,
   streamType = 'mpegts',
+  initialPosition,
+  onPositionReport,
+  onEnded,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const mpegtsPlayerRef = useRef<mpegts.Player | null>(null)
   const hlsRef = useRef<Hls | null>(null)
+  // FR-44：续播 / 上报 / 看完状态。用 ref 持有最新回调与一次性标志，避免重建监听器。
+  const initialPositionRef = useRef(initialPosition)
+  const hasSeekedRef = useRef(false)
+  const onPositionReportRef = useRef(onPositionReport)
+  const onEndedRef = useRef(onEnded)
+  const lastReportRef = useRef(0)
+  const endedReportedRef = useRef(false)
+  initialPositionRef.current = initialPosition
+  onPositionReportRef.current = onPositionReport
+  onEndedRef.current = onEnded
   const [isPlaying, setIsPlaying] = useState(false)
   const [autoPlayBlocked, setAutoPlayBlocked] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -132,27 +162,76 @@ export default function VideoPlayer({
     return () => { void destroyHlsPlayer(); destroyMpegtsPlayer() }
   }, [url, isABR, streamType, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
+  // FR-44：URL 变化（切换媒体）时重置续播 / 上报 / 看完的一次性标志
+  useEffect(() => {
+    hasSeekedRef.current = false
+    lastReportRef.current = 0
+    endedReportedRef.current = false
+  }, [url])
+
+  // 续播定位（FR-44）：媒体可定位后 seek 到上次位置一次。
+  // 接近片尾的位置不回跳（剩余小于阈值时忽略），避免「看完」后又跳回末尾。
+  const seekToInitialOnce = useCallback(() => {
+    const v = videoRef.current; if (!v) return
+    if (hasSeekedRef.current) return
+    const pos = initialPositionRef.current
+    if (!pos || pos <= 1 || !isFinite(v.duration) || v.duration <= 0) return
+    if (v.duration - pos <= WATCHED_REMAINING_THRESHOLD) { hasSeekedRef.current = true; return }
+    try { v.currentTime = pos } catch { /* 静默：部分流尚不可定位 */ }
+    hasSeekedRef.current = true
+  }, [])
+
   // 监听时间/音量/缓冲/等待
   useEffect(() => {
     const v = videoRef.current; if (!v) return
-    const onTime = () => setCurrentTime(v.currentTime)
-    const onDur = () => setDuration(v.duration)
+    const onTime = () => {
+      setCurrentTime(v.currentTime)
+      // FR-44：约每 10s 上报一次播放位置
+      const report = onPositionReportRef.current
+      if (report && v.currentTime - lastReportRef.current >= POSITION_REPORT_INTERVAL) {
+        lastReportRef.current = v.currentTime
+        report(v.currentTime)
+      }
+      // FR-44：接近片尾（剩余小于阈值）视为看完，仅回调一次
+      const ended = onEndedRef.current
+      if (ended && !endedReportedRef.current && isFinite(v.duration) && v.duration > 0
+        && v.duration - v.currentTime <= WATCHED_REMAINING_THRESHOLD) {
+        endedReportedRef.current = true
+        ended()
+      }
+    }
+    const onDur = () => { setDuration(v.duration); seekToInitialOnce() }
+    const onLoadedMeta = () => seekToInitialOnce()
+    // FR-44：暂停时补报一次当前位置，避免离开页面丢失最新进度
+    const onPause = () => {
+      const report = onPositionReportRef.current
+      if (report && v.currentTime > 0) { lastReportRef.current = v.currentTime; report(v.currentTime) }
+    }
+    // FR-44：原生 ended 事件兜底标记看完
+    const onNativeEnded = () => {
+      const ended = onEndedRef.current
+      if (ended && !endedReportedRef.current) { endedReportedRef.current = true; ended() }
+    }
     const onVol = () => { setVolume(v.volume); setIsMuted(v.muted) }
     const onBuf = () => { if (v.buffered.length > 0 && v.duration > 0) setBufferedProgress((v.buffered.end(v.buffered.length - 1) / v.duration) * 100) }
     // FR-18：原生 video stalled/waiting → 进入末端缓冲等待；playing/canplay 自动复位
     const onWaiting = () => setIsWaiting(true)
     const onCanPlay = () => setIsWaiting(false)
     v.addEventListener('timeupdate', onTime); v.addEventListener('durationchange', onDur)
+    v.addEventListener('loadedmetadata', onLoadedMeta); v.addEventListener('pause', onPause)
+    v.addEventListener('ended', onNativeEnded)
     v.addEventListener('volumechange', onVol); v.addEventListener('progress', onBuf)
     v.addEventListener('waiting', onWaiting); v.addEventListener('stalled', onWaiting)
     v.addEventListener('canplay', onCanPlay); v.addEventListener('playing', onCanPlay)
     return () => {
       v.removeEventListener('timeupdate', onTime); v.removeEventListener('durationchange', onDur)
+      v.removeEventListener('loadedmetadata', onLoadedMeta); v.removeEventListener('pause', onPause)
+      v.removeEventListener('ended', onNativeEnded)
       v.removeEventListener('volumechange', onVol); v.removeEventListener('progress', onBuf)
       v.removeEventListener('waiting', onWaiting); v.removeEventListener('stalled', onWaiting)
       v.removeEventListener('canplay', onCanPlay); v.removeEventListener('playing', onCanPlay)
     }
-  }, [])
+  }, [seekToInitialOnce])
 
   // 字幕同步
   useEffect(() => {

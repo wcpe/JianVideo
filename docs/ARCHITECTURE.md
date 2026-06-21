@@ -94,8 +94,12 @@
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
 | favorite | INTEGER | 收藏标记（FR-41），0/1 |
+| last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
+| watched | INTEGER | 是否已看完（FR-44），0/1 |
+| last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
 
-> 注：`media_files` 还含软删/显示名/EXIF/观看状态等列（FR-25/30/31/44），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+> 注：`media_files` 还含软删/显示名/EXIF 等列（FR-25/30/31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+> 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 
 **媒体后缀配置（media_extensions）**
 
@@ -188,9 +192,9 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置 |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置、继续观看列表（FR-44） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
-| 播放 | `/api/play` | 视频流播放、Seek、转码控制 |
+| 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期键值设置读取与批量写入 |

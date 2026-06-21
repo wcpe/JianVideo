@@ -8,7 +8,7 @@ import PlayPage from './PlayPage'
 
 // mock VideoPlayer 组件，避免依赖 mpegts.js
 vi.mock('@/components/VideoPlayer', () => ({
-  default: (props: { url?: string; isABR?: boolean; streamType?: string }) => <div data-testid="video-player" data-url={props.url} data-is-abr={String(!!props.isABR)} data-stream-type={props.streamType || ''} />,
+  default: (props: { url?: string; isABR?: boolean; streamType?: string; initialPosition?: number }) => <div data-testid="video-player" data-url={props.url} data-is-abr={String(!!props.isABR)} data-stream-type={props.streamType || ''} data-initial-position={props.initialPosition ?? ''} />,
 }))
 
 function renderPlayPage(route: string) {
@@ -60,6 +60,30 @@ describe('PlayPage', () => {
       // 降级路径必须显式关闭 ABR 并切换到原生 mp4 模式
       expect(player.getAttribute('data-is-abr')).toBe('false')
       expect(player.getAttribute('data-stream-type')).toBe('mp4')
+    })
+  })
+
+  it('把媒体的 last_position 作为续播起点传给播放器（FR-44）', async () => {
+    server.use(
+      http.get('*/api/library/media/7', () =>
+        HttpResponse.json({
+          id: 7, library_id: 1, file_path: 'D:/Videos/a.mp4', file_name: 'a.mp4',
+          file_size: 1024, format: 'mp4', video_codec: 'h264', audio_codec: 'aac',
+          duration: 6600, width: 1920, height: 1080, bitrate: 7000000, subtitle_tracks: '',
+          added_at: '2025-01-01T12:00:00Z', modified_at: '2025-01-01T12:00:00Z',
+          last_position: 123.4, watched: false,
+        }),
+      ),
+      http.get('*/api/play/hls/7/master.m3u8', () =>
+        HttpResponse.json({ code: 'NOT_FOUND' }, { status: 404 }),
+      ),
+    )
+
+    renderPlayPage('/play/7')
+
+    const player = await screen.findByTestId('video-player')
+    await waitFor(() => {
+      expect(player.getAttribute('data-initial-position')).toBe('123.4')
     })
   })
 })

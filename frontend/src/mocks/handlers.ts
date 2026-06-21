@@ -200,6 +200,44 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // ─── 续播与观看状态（FR-44）─────────────────────────
+
+  http.get('*/api/library/continue-watching', async ({ request }) => {
+    await delay(100)
+    const limit = Number(new URL(request.url).searchParams.get('limit') || '12')
+    const items = mediaFiles
+      .filter(m => (m.last_position ?? 0) > 0 && !m.watched)
+      .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
+      .slice(0, limit)
+    return HttpResponse.json({ items })
+  }),
+
+  http.put('*/api/play/:id/position', async ({ request, params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    const body = await request.json() as { position: number }
+    file.last_position = body.position < 0 ? 0 : body.position
+    file.last_watched_at = new Date().toISOString()
+    return HttpResponse.json(file)
+  }),
+
+  http.put('*/api/play/:id/watched', async ({ params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    file.watched = true
+    file.last_position = 0
+    file.last_watched_at = new Date().toISOString()
+    return HttpResponse.json(file)
+  }),
+
   http.get('*/api/library/media/:id/raw', async ({ params }) => {
     await delay(100)
     const id = Number(params.id)

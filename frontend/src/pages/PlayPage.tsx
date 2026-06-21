@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { IconArrowLeft, IconAlertCircle, IconSubtitles } from '@tabler/icons-react'
@@ -88,6 +88,17 @@ export default function PlayPage() {
     setSubtitleMenuOpened(false)
   }
 
+  // 续播与观看状态（FR-44）：上报播放位置、看完标记。失败仅静默忽略，不打断播放。
+  const handlePositionReport = useCallback((position: number) => {
+    if (!media) return
+    void libApi.updateWatchPosition(media.id, position).catch(() => {})
+  }, [media])
+
+  const handleEnded = useCallback(() => {
+    if (!media) return
+    void libApi.markWatched(media.id).catch(() => {})
+  }, [media])
+
   if (loading) {
     return <Skeleton height={400} radius="md" />
   }
@@ -154,6 +165,9 @@ export default function PlayPage() {
           subtitleVisible={subtitleVisible}
           isABR={playerIsABR}
           streamType={playerIsABR ? 'mpegts' : 'mp4'}
+          initialPosition={media.last_position}
+          onPositionReport={handlePositionReport}
+          onEnded={handleEnded}
         />
       )}
 
