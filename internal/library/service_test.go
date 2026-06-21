@@ -205,16 +205,93 @@ func TestGetMediaFileByID(t *testing.T) {
 }
 
 func TestDeleteMediaFile(t *testing.T) {
-	svc, _ := newTestService(t)
+	svc, gdb := newTestService(t)
 
 	mf, _ := svc.CreateMediaFile(1, "/tmp/to_delete.mp4", 1024)
 	if err := svc.DeleteMediaFile(mf.ID); err != nil {
 		t.Fatalf("删除失败: %v", err)
 	}
 
-	_, err := svc.GetMediaFileByID(mf.ID)
+	// 软删除：数据库记录仍在，仅 deleted_at 被置上（源文件不动，由不调用文件删除保证）
+	var got models.MediaFile
+	if err := gdb.First(&got, mf.ID).Error; err != nil {
+		t.Fatalf("软删除后记录应仍存在: %v", err)
+	}
+	if got.DeletedAt == nil {
+		t.Fatal("软删除后 deleted_at 应被置上, 实际为空")
+	}
+}
+
+func TestDeleteMediaFile_ExcludedFromList(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 1024)
+	del, _ := svc.CreateMediaFile(1, "/tmp/gone.mp4", 1024)
+	if err := svc.DeleteMediaFile(del.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{LibraryID: 1}, 1, 20)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != keep.ID {
+		t.Fatalf("常规列表应仅含未软删项, 实得 total=%d items=%d", total, len(items))
+	}
+}
+
+func TestListDeletedMediaFiles(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 1024)
+	del, _ := svc.CreateMediaFile(1, "/tmp/gone.mp4", 1024)
+	if err := svc.DeleteMediaFile(del.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	deleted, err := svc.ListDeletedMediaFiles()
+	if err != nil {
+		t.Fatalf("查询回收站失败: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0].ID != del.ID {
+		t.Fatalf("回收站应仅含软删项 %d, 实得 %d 条", del.ID, len(deleted))
+	}
+	// 未软删项不应出现在回收站
+	for _, m := range deleted {
+		if m.ID == keep.ID {
+			t.Fatal("未软删项不应出现在回收站")
+		}
+	}
+}
+
+func TestRestoreMediaFile(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	mf, _ := svc.CreateMediaFile(1, "/tmp/restore.mp4", 1024)
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+	if err := svc.RestoreMediaFile(mf.ID); err != nil {
+		t.Fatalf("还原失败: %v", err)
+	}
+
+	// 还原后回到常规列表、且不在回收站
+	items, total, _ := svc.ListMediaFilesFiltered(MediaFilter{LibraryID: 1}, 1, 20)
+	if total != 1 || len(items) != 1 || items[0].ID != mf.ID {
+		t.Fatalf("还原后应回到常规列表, 实得 total=%d", total)
+	}
+	deleted, _ := svc.ListDeletedMediaFiles()
+	if len(deleted) != 0 {
+		t.Fatalf("还原后回收站应为空, 实得 %d 条", len(deleted))
+	}
+}
+
+func TestRestoreMediaFile_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	err := svc.RestoreMediaFile(99999)
 	if err == nil {
-		t.Fatal("媒体文件应已删除, 但查询仍返回结果")
+		t.Fatal("还原不存在的媒体应返回错误")
 	}
 }
 

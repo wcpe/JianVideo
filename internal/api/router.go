@@ -42,6 +42,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.PUT("/media/:id/display-name", h.UpdateDisplayName)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
 
+		// 软删除与回收站（FR-25）：列出已软删项、还原
+		lib.GET("/recycle", h.ListRecycleMediaFiles)
+		lib.POST("/media/:id/restore", h.RestoreMediaFile)
+
 		// 收藏与标签（FR-41）
 		lib.PUT("/media/:id/favorite", h.SetMediaFavorite)
 		lib.GET("/media/:id/tags", h.ListMediaTags)

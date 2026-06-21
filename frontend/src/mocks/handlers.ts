@@ -25,6 +25,9 @@ const tags: Tag[] = []
 let tagMappings: { tag_id: number; media_id: number }[] = []
 let nextTagId = 1
 
+// 软删除/回收站（FR-25）：被软删的媒体 ID 集合
+const deletedMediaIds = new Set<number>()
+
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
 
@@ -106,7 +109,8 @@ export const handlers = [
     const favorite = url.searchParams.get('favorite')
     const tagID = Number(url.searchParams.get('tag_id') || '0')
 
-    let items = [...mediaFiles]
+    // 常规列表排除已软删项（FR-25）
+    let items = mediaFiles.filter(m => !deletedMediaIds.has(m.id))
     if (search) {
       items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
     }
@@ -317,7 +321,26 @@ export const handlers = [
   http.delete('*/api/library/media/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)
-    mediaFiles = mediaFiles.filter(m => m.id !== id)
+    // 软删除（FR-25）：仅标记，不从内存数据移除
+    if (mediaFiles.some(m => m.id === id)) deletedMediaIds.add(id)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // ─── 软删除与回收站（FR-25）──────────────────────────
+
+  http.get('*/api/library/recycle', async () => {
+    await delay(200)
+    const items = mediaFiles.filter(m => deletedMediaIds.has(m.id))
+    return HttpResponse.json({ items })
+  }),
+
+  http.post('*/api/library/media/:id/restore', async ({ params }) => {
+    await delay(200)
+    const id = Number(params.id)
+    if (!deletedMediaIds.has(id)) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '回收站中不存在该媒体文件' }, { status: 404 })
+    }
+    deletedMediaIds.delete(id)
     return new HttpResponse(null, { status: 204 })
   }),
 

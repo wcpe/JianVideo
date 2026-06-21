@@ -182,6 +182,67 @@ func TestDeleteMediaFile_API(t *testing.T) {
 	}
 }
 
+func TestListRecycleMediaFiles_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 512)
+	del, _ := svc.CreateMediaFile(1, "/tmp/gone.mp4", 512)
+	if err := svc.DeleteMediaFile(del.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/library/recycle", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []models.MediaFile `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Items) != 1 || resp.Items[0].ID != del.ID {
+		t.Fatalf("回收站应仅含软删项 %d, 实得 %d 条", del.ID, len(resp.Items))
+	}
+	if resp.Items[0].ID == keep.ID {
+		t.Fatal("未软删项不应出现在回收站")
+	}
+}
+
+func TestRestoreMediaFile_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	mf, _ := svc.CreateMediaFile(1, "/tmp/restore.mp4", 512)
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/library/media/"+strconv.FormatInt(mf.ID, 10)+"/restore", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("期望 204, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// 还原后应回到常规列表
+	items, _, _ := svc.ListMediaFilesFiltered(library.MediaFilter{LibraryID: 1}, 1, 20)
+	if len(items) != 1 || items[0].ID != mf.ID {
+		t.Fatalf("还原后媒体应回到常规列表, 实得 %d 条", len(items))
+	}
+}
+
+func TestRestoreMediaFile_NotFound_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/library/media/99999/restore", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("期望 404, 实际 %d", w.Code)
+	}
+}
+
 func TestScanLibrary_API(t *testing.T) {
 	router, svc := setupTestRouter(t)
 

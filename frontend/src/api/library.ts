@@ -16,6 +16,9 @@ let nextMockTagId = 1
 const mockTags: Tag[] = []
 const mockTagMappings: { tag_id: number; media_id: number }[] = []
 
+// 软删除/回收站 mock 状态（FR-25）：被软删的媒体 ID 集合
+const mockDeletedIds = new Set<number>()
+
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
@@ -134,6 +137,17 @@ async function realUpdateDisplayName(id: number, displayName: string): Promise<M
   }
 }
 
+// ─── 软删除与回收站（FR-25）──────────────────────────
+
+async function realGetRecycleMediaFiles(): Promise<MediaFile[]> {
+  const res = await client.get<{ items: MediaFile[] }>('/api/library/recycle')
+  return res.data.items
+}
+
+async function realRestoreMediaFile(id: number): Promise<void> {
+  await client.post(`/api/library/media/${id}/restore`)
+}
+
 async function realScanLibrary(id: number): Promise<ScanResponse> {
   const res = await client.post<ScanResponse>(`/api/library/scan/${id}`)
   return res.data
@@ -201,7 +215,8 @@ async function mockGetMediaFiles(params: {
 } = {}): Promise<MediaListResponse> {
   await mockDelay(200)
   const { page = 1, page_size = 20, search, sort, favorite, tag_id } = params
-  let items = [...mockMediaFiles]
+  // 常规列表排除已软删项（FR-25）
+  let items = mockMediaFiles.filter(m => !mockDeletedIds.has(m.id))
   if (search) items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
   if (favorite) items = items.filter(m => m.favorite)
   if (tag_id) {
@@ -302,8 +317,19 @@ async function mockGetMediaFile(id: number): Promise<MediaFile> {
 
 async function mockDeleteMediaFile(id: number): Promise<void> {
   await mockDelay(150)
-  const idx = mockMediaFiles.findIndex(m => m.id === id)
-  if (idx !== -1) mockMediaFiles.splice(idx, 1)
+  // 软删除（FR-25）：仅标记，不从内存数据移除（源文件不动）
+  if (mockMediaFiles.some(m => m.id === id)) mockDeletedIds.add(id)
+}
+
+async function mockGetRecycleMediaFiles(): Promise<MediaFile[]> {
+  await mockDelay(150)
+  return mockMediaFiles.filter(m => mockDeletedIds.has(m.id))
+}
+
+async function mockRestoreMediaFile(id: number): Promise<void> {
+  await mockDelay(150)
+  if (!mockDeletedIds.has(id)) throw new Error('回收站中不存在该媒体文件')
+  mockDeletedIds.delete(id)
 }
 
 async function mockRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
@@ -416,6 +442,9 @@ export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id)
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
 export function updateDisplayName(id: number, displayName: string) { return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName) }
+// 软删除与回收站（FR-25）
+export function getRecycleMediaFiles() { return useMock ? mockGetRecycleMediaFiles() : realGetRecycleMediaFiles() }
+export function restoreMediaFile(id: number) { return useMock ? mockRestoreMediaFile(id) : realRestoreMediaFile(id) }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
 
 /**

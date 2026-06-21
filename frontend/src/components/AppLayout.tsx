@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconAdjustments } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconAdjustments, IconTrash } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 
 /** 全局布局 — Mantine AppShell */
@@ -29,6 +29,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/', label: '时间轴', icon: IconClock },
     { path: '/browse', label: '目录', icon: IconFolderOpen },
     { path: '/albums', label: '相册', icon: IconPhoto },
+    { path: '/recycle', label: '回收站', icon: IconTrash },
     { path: '/system', label: '系统信息', icon: IconDeviceDesktopAnalytics },
     { path: '/settings', label: '设置', icon: IconAdjustments },
   ]

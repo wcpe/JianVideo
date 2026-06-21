@@ -29,7 +29,8 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		pageSize = 20
 	}
 
-	query := s.db.Model(&models.MediaFile{})
+	// 常规列表排除已软删项（FR-25），与回收站口径互补
+	query := s.db.Model(&models.MediaFile{}).Where("deleted_at IS NULL")
 	if filter.LibraryID > 0 {
 		query = query.Where("library_id = ?", filter.LibraryID)
 	}

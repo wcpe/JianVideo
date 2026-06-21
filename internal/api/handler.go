@@ -228,6 +228,33 @@ func (h *Handler) DeleteMediaFile(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// ListRecycleMediaFiles GET /api/library/recycle
+// 列出回收站内全部已软删的媒体文件（FR-25）。
+func (h *Handler) ListRecycleMediaFiles(c *gin.Context) {
+	items, err := h.library.ListDeletedMediaFiles()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// RestoreMediaFile POST /api/library/media/:id/restore
+// 从回收站还原指定媒体，使其回到常规列表（FR-25）。
+func (h *Handler) RestoreMediaFile(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	if err := h.library.RestoreMediaFile(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "回收站中不存在该媒体文件"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // RenameMediaFile PUT /api/library/media/:id/rename
 // 请求体：{"new_name": "新文件名.mp4"}，磁盘改名 + 更新数据库记录。
 func (h *Handler) RenameMediaFile(c *gin.Context) {

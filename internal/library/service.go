@@ -227,14 +227,43 @@ func (s *Service) GetMediaFileByID(id int64) (*models.MediaFile, error) {
 	return &mf, nil
 }
 
-// DeleteMediaFile 删除单条媒体文件记录。
+// DeleteMediaFile 软删除单条媒体文件记录（FR-25）。
+// 仅置 deleted_at 标记进回收站，不物理删除数据库记录、不动磁盘源文件。
 func (s *Service) DeleteMediaFile(id int64) error {
-	result := s.db.Delete(&models.MediaFile{}, id)
+	now := time.Now()
+	result := s.db.Model(&models.MediaFile{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("deleted_at", now)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("媒体文件不存在")
+	}
+	return nil
+}
+
+// ListDeletedMediaFiles 列出全部已软删的媒体文件（回收站，FR-25），按软删时间倒序。
+func (s *Service) ListDeletedMediaFiles() ([]models.MediaFile, error) {
+	var items []models.MediaFile
+	if err := s.db.Where("deleted_at IS NOT NULL").
+		Order("deleted_at DESC").
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// RestoreMediaFile 从回收站还原媒体文件（FR-25）：清空 deleted_at 回到常规列表。
+func (s *Service) RestoreMediaFile(id int64) error {
+	result := s.db.Model(&models.MediaFile{}).
+		Where("id = ? AND deleted_at IS NOT NULL", id).
+		Update("deleted_at", nil)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("回收站中不存在该媒体文件")
 	}
 	return nil
 }

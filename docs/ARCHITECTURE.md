@@ -98,11 +98,14 @@
 | last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
 | watched | INTEGER | 是否已看完（FR-44），0/1 |
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
-
 | display_name | TEXT | 系统内显示名（FR-30），空则回退 `file_name` |
+| deleted_at | DATETIME, INDEX | 软删时间（FR-25）；非空表示已进回收站，源文件不动 |
 
-> 注：`media_files` 还含软删/EXIF 等列（FR-25/31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+> 注：`media_files` 还含 EXIF 等列（FR-31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+>
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
+>
+> 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。
 
 **媒体后缀配置（media_extensions）**
 
@@ -195,7 +198,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置、继续观看列表（FR-44） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置、继续观看列表（FR-44）、软删除/回收站与还原（FR-25） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
