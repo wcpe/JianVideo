@@ -291,19 +291,30 @@ func TestE2E_Media_List(t *testing.T) {
 		t.Fatalf("扫描失败: %d, body: %s", scanResp.StatusCode, string(b))
 	}
 
-	// 查询媒体文件列表
-	resp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
-		map[string]string{"Cookie": cookie})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("期望 200, 实际 %d", resp.StatusCode)
-	}
+	// 等待异步扫描入库（扫描为后台 goroutine，避免竞态）
+	waitForMediaItems(t, server.URL, cookie, 1)
+}
 
-	var result struct {
-		Items []models.MediaFile `json:"items"`
-	}
-	parseJSON(t, resp, &result)
-	if len(result.Items) == 0 {
-		t.Error("扫描后应至少有一个媒体文件")
+// waitForMediaItems 轮询媒体列表，直到至少 minCount 条或超时。
+// 扫描为异步后台 goroutine（FR-C），扫描后立刻查列表会与扫描协程竞态，
+// 故测试需轮询等待入库完成，而非假设扫描瞬时完成。
+func waitForMediaItems(t *testing.T, serverURL, cookie string, minCount int) []models.MediaFile {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp := doRequest(t, "GET", serverURL+"/api/library/media", nil,
+			map[string]string{"Cookie": cookie})
+		var result struct {
+			Items []models.MediaFile `json:"items"`
+		}
+		parseJSON(t, resp, &result)
+		if len(result.Items) >= minCount {
+			return result.Items
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等待媒体入库超时：期望 ≥%d，实际 %d", minCount, len(result.Items))
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -340,18 +351,9 @@ func TestE2E_Play_GetPlayInfo(t *testing.T) {
 	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
 
-	// 查询媒体文件
-	listResp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
-		map[string]string{"Cookie": cookie})
-	var listResult struct {
-		Items []models.MediaFile `json:"items"`
-	}
-	parseJSON(t, listResp, &listResult)
-	if len(listResult.Items) == 0 {
-		t.Fatal("应有至少一个媒体文件")
-	}
-
-	mediaID := listResult.Items[0].ID
+	// 等待异步扫描入库
+	items := waitForMediaItems(t, server.URL, cookie, 1)
+	mediaID := items[0].ID
 
 	// 获取播放信息
 	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/%d", server.URL, mediaID), nil,

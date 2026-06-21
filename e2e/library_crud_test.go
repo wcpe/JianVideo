@@ -145,21 +145,12 @@ func TestE2E_CreateMediaFile(t *testing.T) {
 		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, scanResp.StatusCode, "扫描应返回 200")
 
-	// 查询媒体文件列表
-	listResp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
-		map[string]string{"Cookie": cookie})
-	require.Equal(t, http.StatusOK, listResp.StatusCode)
-
-	var result struct {
-		Items []models.MediaFile `json:"items"`
-		Total int64              `json:"total"`
-	}
-	doJSONRequest(t, listResp, &result)
-	assert.GreaterOrEqual(t, result.Total, int64(1), "扫描后应至少有一个媒体文件")
+	// 等待异步扫描入库（扫描为后台 goroutine，避免竞态）
+	items := waitForMediaItems(t, server.URL, cookie, 1)
 
 	// 验证文件名
 	found := false
-	for _, item := range result.Items {
+	for _, item := range items {
 		if item.FileName == "sample.mp4" {
 			found = true
 			break
@@ -192,16 +183,9 @@ func TestE2E_DeleteMediaFile(t *testing.T) {
 	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
 
-	// 查询获取 ID
-	listResp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
-		map[string]string{"Cookie": cookie})
-	var listResult struct {
-		Items []models.MediaFile `json:"items"`
-	}
-	doJSONRequest(t, listResp, &listResult)
-	require.NotEmpty(t, listResult.Items, "应有媒体文件")
-
-	mediaID := listResult.Items[0].ID
+	// 等待异步扫描入库
+	items := waitForMediaItems(t, server.URL, cookie, 1)
+	mediaID := items[0].ID
 
 	// 删除
 	delResp := doRequest(t, "DELETE",
