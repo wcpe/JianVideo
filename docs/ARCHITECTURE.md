@@ -239,7 +239,7 @@
 
 ### 5.8 运行期设置（FR-24）
 
-- 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-XXXX）。
+- 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-0029）。
 - `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端 `/settings` 页读写「每盘符回收站路径」「扫描周期」等键值。
 - 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`），结构化值以 JSON 字符串存于单 key，由消费方（回收站清理、定时扫描）按需解析。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。

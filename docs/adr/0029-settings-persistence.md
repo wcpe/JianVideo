@@ -1,4 +1,4 @@
-# ADR-XXXX：运行期设置持久化采用 SQLite settings 表
+# ADR-0029：运行期设置持久化采用 SQLite settings 表
 
 ## 状态
 已接受

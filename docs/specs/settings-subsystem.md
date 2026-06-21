@@ -26,7 +26,7 @@
 - API：`internal/api/settings_handler.go` 新增 `GetSettings`/`UpdateSettings`，在 `RegisterRoutes` 注册 `GET/PUT /api/settings`；Handler 持有 settings 服务（经 `WithSettings` 注入，未注入时返回 503，保持既有链式注入风格）。`main.go` 与 `web.NewRouter` 注入 settings 服务实例。
 - 已知键以常量集中定义（`recycle_bin_paths`、`scan_interval`），避免魔法字符串散落。
 - 前端：`api/settings.ts` real+mock 双实现；`pages/SettingsPage.tsx` 表单读写；`App.tsx` 加受保护路由 `/settings`；`AppLayout.tsx` 导航加「设置」项；MSW handlers 加 `GET/PUT /api/settings`。
-- 架构决策：设置持久化选用 SQLite `settings` 表（而非新配置文件），写一条 ADR（见 `docs/adr/XXXX-settings-persistence.md`）。
+- 架构决策：设置持久化选用 SQLite `settings` 表（而非新配置文件），写一条 ADR（见 `docs/adr/0029-settings-persistence.md`）。
 
 ## 4. 任务拆分
 
