@@ -23,6 +23,9 @@
 - **文档对齐**：修正 `README.md`、`docs/ARCHITECTURE.md` 中「CGO 绑定 ffmpeg-go 直接调用 libav C API」的过时表述——转码实为外部 ffmpeg 进程调用，CGO 仅用于 SQLite 与可选硬件编码器检测。
 - **存储库管理页精简（FR-23）**：`/library-manager` 移除页内媒体文件列表，仅保留存储库卡片（扫描进度 + 已索引媒体数量）；点击卡片携 `library_id` 与起始路径跳转 `/browse` 定位到该库根目录。`GET /api/library/paths` 响应每项新增 `media_count`（该库未软删媒体数量，按 `library_id` 一次 `GROUP BY` 统计，向后兼容）。
 
+### 修复
+- **缩略图生成限并发并加 ffmpeg 超时**：修复扫描大目录时缩略图生成卡死整个页面的问题——此前每个文件直接 `go` 启动 ffmpeg/magick，无并发上限、ffmpeg 无超时，扫描大库会瞬间炸出成百上千并发进程导致资源耗尽。改为所有缩略图任务统一经固定容量信号量限并发（`min(4, CPU 核数)`），并为 ffmpeg 图片/视频缩略图命令加 30s 超时（`exec.CommandContext`，超时即终止并记中文 WARN 日志，不挂起）。保持异步生成、不阻塞扫描。
+
 ### 安全
 - **全 `/api` 路由强制鉴权（FR-13）**：修复未授权访问漏洞——此前仅 `/api/me` 挂了认证中间件，库、播放、HLS 切片、stream、raw、缩略图、设置、相册、SMB 凭据、系统诊断、转码等路由均注册在裸引擎上，未登录即可访问与修改全部数据和媒体。新增全局 `auth.APIGuard` 中间件，对路径前缀为 `/api/` 但不属于 `/api/auth/` 的请求强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer` 任一有效即放行，均无效返回 `401`）；`/api/auth/login`、`/api/auth/logout`、`/health`、静态资源 `/assets/*` 与 SPA 回退保持豁免，保证未登录也能加载前端壳与登录。
 - **SMB 主密码强制显式配置（FR-02）**：`smb.MasterPassword()` 不再在 `SMB_MASTER_PASSWORD` 未设置时回退公开弱默认值，改为返回错误；显式空串同样视为未配置。未配置时全部 Save/Load 调用点拒绝以弱密钥加解密——`POST /api/smb/credentials` 返回 `503`，添加 SMB 库路径仅记录 ERROR 不落弱密钥，SMB 扫描/播放返回明确错误。消除「拿到 `smb_credentials.enc` 即可用公开常量离线解出明文密码」的风险。同步更新 `docs/API.md`、`docs/OPERATIONS.md`。
