@@ -8,9 +8,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -213,7 +215,8 @@ func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int
 	}
 	// 填充媒体时间与 EXIF（FR-31）：图片提取 EXIF，视频读 creation_time，
 	// 再按 exif → 文件名 → 创建 → 修改时间降级链定 media_time。
-	enrichMediaMetadata(mf)
+	// 经可注入函数变量调用，便于测试观测扫描期富化并发。
+	enrichMediaMetadataFn(mf)
 	if err := s.db.Create(mf).Error; err != nil {
 		return nil, err
 	}
@@ -686,6 +689,22 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 	return s.indexSMBMediaFiles(libraryID, paths, smbFS)
 }
 
+// scanEnrichMaxConcurrency 扫描期单文件富化（含 ffprobe）并发上限硬顶，
+// 与缩略图并发上限一致，避免大库扫描瞬间炸出大量 ffprobe 子进程。
+const scanEnrichMaxConcurrency = 4
+
+// scanEnrichConcurrency 返回扫描期富化并发上限：min(scanEnrichMaxConcurrency, CPU 核数)。
+func scanEnrichConcurrency() int {
+	n := runtime.NumCPU()
+	if n > scanEnrichMaxConcurrency {
+		n = scanEnrichMaxConcurrency
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 // indexMediaFiles 将本地媒体文件路径批量入库。
 func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) {
 	// 统一所有路径为正斜杠，保证跨平台查询和去重一致
@@ -704,41 +723,63 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 		existingSet[f.FilePath] = true
 	}
 
-	count := 0
+	// 先确定待入库的新文件固定列表（去重后），再有界并发处理。
+	type pendingFile struct {
+		fullPath   string
+		normalized string
+	}
+	pending := make([]pendingFile, 0, len(paths))
 	for i, fullPath := range paths {
 		normalized := normalizedPaths[i]
 		if existingSet[normalized] {
 			continue
 		}
-
-		info, err := os.Stat(fullPath)
-		if err != nil {
-			continue
-		}
-
-		if _, err := s.CreateMediaFile(libraryID, normalized, info.Size()); err != nil {
-			log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", normalized, err)
-			continue
-		}
-		count++
-
-		// 异步生成缩略图，不阻塞入库
-		go GenerateThumbnail(fullPath)
-
-		// 每处理 10 个文件更新一次进度
-		if count%10 == 0 {
-			updateScanStatus(func(ss *ScanStatus) {
-				ss.ScannedFiles = count
-				ss.CurrentPath = normalized
-			})
-		}
+		pending = append(pending, pendingFile{fullPath: fullPath, normalized: normalized})
 	}
 
+	// 用固定容量信号量并发处理新文件：单文件内富化（含 ffprobe）仍同步，
+	// 总并发不超过 cap，避免大库扫描串行 ffprobe 过慢、又不致瞬间炸出大量子进程（FR-31）。
+	sem := make(chan struct{}, scanEnrichConcurrency())
+	var wg sync.WaitGroup
+	var count int64 // 入库成功计数，并发下用原子操作
+	for _, pf := range pending {
+		wg.Add(1)
+		sem <- struct{}{} // 获取令牌，超出上限时在此排队
+		go func(pf pendingFile) {
+			defer wg.Done()
+			defer func() { <-sem }() // 释放令牌
+
+			info, err := os.Stat(pf.fullPath)
+			if err != nil {
+				return
+			}
+			if _, err := s.CreateMediaFile(libraryID, pf.normalized, info.Size()); err != nil {
+				log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", pf.normalized, err)
+				return
+			}
+			// SQLite WAL 串行写、计数走原子，进度状态经 updateScanStatus 互斥更新，均并发安全
+			done := atomic.AddInt64(&count, 1)
+
+			// 异步生成缩略图，不阻塞入库
+			go GenerateThumbnail(pf.fullPath)
+
+			// 每处理 10 个文件更新一次进度
+			if done%10 == 0 {
+				updateScanStatus(func(ss *ScanStatus) {
+					ss.ScannedFiles = int(done)
+					ss.CurrentPath = pf.normalized
+				})
+			}
+		}(pf)
+	}
+	wg.Wait()
+
+	total := int(atomic.LoadInt64(&count))
 	// 最终进度更新
 	updateScanStatus(func(ss *ScanStatus) {
-		ss.ScannedFiles = count
+		ss.ScannedFiles = total
 	})
-	return count, nil
+	return total, nil
 }
 
 // indexSMBMediaFiles 将 SMB 媒体文件路径批量入库。

@@ -31,6 +31,13 @@ func newTestService(t *testing.T) (*Service, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
+	// 内存库每条连接是独立数据库，并发写会落到不同连接而互相不可见；
+	// 限单连接使内存库表现为共享，并与生产 WAL「写串行」语义一致（同 watcher 测试做法）。
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}

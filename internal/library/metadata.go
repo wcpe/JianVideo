@@ -99,6 +99,10 @@ func ResolveMediaTime(exifTime, filenameTime *time.Time, createdAt, modifiedAt t
 	return modifiedAt, MediaTimeSourceModified
 }
 
+// enrichMediaMetadataFn 富化媒体元数据的实际入口，抽成包级可注入函数变量，
+// 以便测试在不依赖真实 ffprobe 的前提下注入桩、观测扫描期富化的并发行为。
+var enrichMediaMetadataFn = enrichMediaMetadata
+
 // enrichMediaMetadata 为媒体记录填充媒体时间与 EXIF 明细。
 // 仅对本地文件生效：图片提取 EXIF，视频读 creation_time，再按降级链定媒体时间。
 // 远程（smb://）或文件不可访问时按修改时间兜底，不报错。
