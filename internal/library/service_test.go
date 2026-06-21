@@ -304,6 +304,41 @@ func TestGetMediaFileByID_NotFound(t *testing.T) {
 	}
 }
 
+// TestGetMediaFileByID_ExcludesSoftDeleted 软删项不应经详情/播放路径取到（FR-25 访问隔离）。
+func TestGetMediaFileByID_ExcludesSoftDeleted(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	mf, _ := svc.CreateMediaFile(1, "/tmp/soft_deleted.mp4", 1024)
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	if _, err := svc.GetMediaFileByID(mf.ID); err == nil {
+		t.Fatal("软删项应被 GetMediaFileByID 视为不存在, 实际仍可取到")
+	}
+}
+
+// TestRestoreMediaFile_AfterTightenedGet 收紧 GetMediaFileByID 排除软删后，还原仍须正常。
+func TestRestoreMediaFile_AfterTightenedGet(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	mf, _ := svc.CreateMediaFile(1, "/tmp/restore_flow.mp4", 1024)
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+	// 软删后详情不可达
+	if _, err := svc.GetMediaFileByID(mf.ID); err == nil {
+		t.Fatal("软删后详情应不可达")
+	}
+	// 还原后重新可达且回常规列表
+	if err := svc.RestoreMediaFile(mf.ID); err != nil {
+		t.Fatalf("还原失败: %v", err)
+	}
+	if _, err := svc.GetMediaFileByID(mf.ID); err != nil {
+		t.Fatalf("还原后详情应可达: %v", err)
+	}
+}
+
 func TestDeleteMediaFile_NotFound(t *testing.T) {
 	svc, _ := newTestService(t)
 

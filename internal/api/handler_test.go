@@ -169,6 +169,23 @@ func TestGetMediaFile_API(t *testing.T) {
 	}
 }
 
+// TestGetMediaFile_SoftDeleted_API 软删项经详情端点应返回 404（FR-25 访问隔离）。
+func TestGetMediaFile_SoftDeleted_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	mf, _ := svc.CreateMediaFile(1, "/tmp/soft_deleted.mp4", 2048)
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/library/media/"+strconv.FormatInt(mf.ID, 10), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("软删项详情应 404, 实际 %d", w.Code)
+	}
+}
+
 func TestDeleteMediaFile_API(t *testing.T) {
 	router, svc := setupTestRouter(t)
 	mf, _ := svc.CreateMediaFile(1, "/tmp/to_del.mp4", 512)

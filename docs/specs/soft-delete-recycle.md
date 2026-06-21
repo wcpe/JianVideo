@@ -43,4 +43,4 @@
 - 自动化：`internal/library` 与 `internal/api` 相关测试、前端 `RecyclePage` 测试全绿。
 
 ## 6. 风险 / 待定
-- `GetMediaFileByID` 不区分软删状态（回收站/还原需读取软删记录），故软删后仍可被详情/播放端点访问到——本次不拦截，留待 FR-26/后续按需收口。
+- ~~`GetMediaFileByID` 不区分软删状态（回收站/还原需读取软删记录），故软删后仍可被详情/播放端点访问到——本次不拦截，留待 FR-26/后续按需收口。~~ **已收口**：`GetMediaFileByID` 现加 `deleted_at IS NULL` 过滤，软删项经详情/播放/raw/缩略图等正常访问路径一律视为不存在（404）；还原走 `RestoreMediaFile` 自身查询（`deleted_at IS NOT NULL`），不受影响。

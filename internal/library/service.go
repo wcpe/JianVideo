@@ -226,9 +226,11 @@ func (s *Service) ListMediaFiles(libraryID int64, sort, search string, page, pag
 }
 
 // GetMediaFileByID 根据 ID 获取媒体文件。
+// 排除已软删项（deleted_at 非空），使详情/播放/raw/缩略图等正常访问路径对回收站中的媒体视为不存在（FR-25 访问隔离）。
+// 还原需读取软删记录，由 RestoreMediaFile 自身的查询完成，不经此方法。
 func (s *Service) GetMediaFileByID(id int64) (*models.MediaFile, error) {
 	var mf models.MediaFile
-	if err := s.db.First(&mf, id).Error; err != nil {
+	if err := s.db.Where("id = ? AND deleted_at IS NULL", id).First(&mf).Error; err != nil {
 		return nil, err
 	}
 	return &mf, nil
