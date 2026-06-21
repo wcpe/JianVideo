@@ -79,7 +79,11 @@ func main() {
 
 	// ffmpeg/ffprobe 路径注入：环境变量 → 同目录捆绑版 → PATH（见 ADR-0027）。
 	transcoder.SetFFmpegPath(resolveTool("JIANVIDEO_FFMPEG_PATH", "ffmpeg"))
-	transcoder.SetFFprobePath(resolveTool("JIANVIDEO_FFPROBE_PATH", "ffprobe"))
+	ffprobeBin := resolveTool("JIANVIDEO_FFPROBE_PATH", "ffprobe")
+	transcoder.SetFFprobePath(ffprobeBin)
+	// 媒体时间提取（FR-31）：library 包独立调用 ffprobe 读视频 creation_time，
+	// 与 transcoder 共用同一解析结果，避免跨包依赖。
+	library.SetFFprobePath(ffprobeBin)
 	if transcoder.IsFFmpegAvailable() {
 		log.Printf("[INFO] ffmpeg 可用: %s", transcoder.GetFFmpegPath())
 	} else {

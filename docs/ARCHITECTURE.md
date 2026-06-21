@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成 | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
@@ -100,12 +100,19 @@
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
 | display_name | TEXT | 系统内显示名（FR-30），空则回退 `file_name` |
 | deleted_at | DATETIME, INDEX | 软删时间（FR-25）；非空表示已进回收站，源文件不动 |
+| media_time | DATETIME, INDEX | 媒体时间（FR-31），多层降级解析，供时间轴排序 |
+| media_time_source | TEXT | 媒体时间来源（FR-31）：exif/filename/created/modified |
+| camera / lens / aperture / shutter | TEXT | EXIF 明细（FR-31）：相机/镜头/光圈/快门 |
+| iso | INTEGER | EXIF 感光度（FR-31） |
+| gps_lat / gps_lon | REAL | EXIF GPS 坐标（FR-31） |
 
-> 注：`media_files` 还含 EXIF 等列（FR-31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+> 注：本表列出 `media_files` 与当前已实现能力相关的字段。
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 >
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。
+>
+> 媒体时间与 EXIF（FR-31）：入库点 `CreateMediaFile` 统一富化元数据——图片用 `imagemeta`（纯 Go）提取拍摄时间与相机/镜头/光圈/快门/ISO/GPS，视频用 ffprobe 读 `creation_time`；再按 EXIF → 文件名日期 → 文件创建时间 → 修改时间的降级链定出 `media_time` 与 `media_time_source`。时间轴列表按 `COALESCE(media_time, added_at)` 排序。
 
 **媒体后缀配置（media_extensions）**
 

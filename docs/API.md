@@ -133,7 +133,7 @@
 - **方法 / 路径**：`GET /api/library/media`
 - **查询参数**：
   - `library_id`：按媒体库过滤（可选）
-  - `sort`：排序方式，`time_desc`（默认）/ `time_asc` / `name`
+  - `sort`：排序方式，`time_desc`（默认，按入库时间降序）/ `time_asc` / `name` / `media_time`（按媒体时间降序，缺失回退入库时间，FR-31）/ `media_time_asc`（按媒体时间升序）
   - `page`：页码
   - `page_size`：每页条数
   - `search`：搜索关键词（可选）
@@ -155,7 +155,16 @@
         "width": 1920,
         "height": 1080,
         "bitrate": 12000000,
-        "added_at": "2025-01-01T12:00:00Z"
+        "added_at": "2025-01-01T12:00:00Z",
+        "media_time": "2024-12-25T08:30:00Z",
+        "media_time_source": "exif",
+        "camera": "Canon EOS R5",
+        "lens": "RF24-70mm F2.8 L IS USM",
+        "aperture": "f/2.8",
+        "shutter": "1/200",
+        "iso": 400,
+        "gps_lat": 31.23,
+        "gps_lon": 121.47
       }
     ],
     "total": 100,

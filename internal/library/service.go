@@ -207,6 +207,9 @@ func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int
 		AddedAt:    time.Now(),
 		ModifiedAt: time.Now(),
 	}
+	// 填充媒体时间与 EXIF（FR-31）：图片提取 EXIF，视频读 creation_time，
+	// 再按 exif → 文件名 → 创建 → 修改时间降级链定 media_time。
+	enrichMediaMetadata(mf)
 	if err := s.db.Create(mf).Error; err != nil {
 		return nil, err
 	}

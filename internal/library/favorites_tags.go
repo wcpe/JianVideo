@@ -59,6 +59,12 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		query = query.Order("added_at ASC")
 	case "name":
 		query = query.Order("file_name ASC")
+	case "media_time":
+		// 时间轴（FR-31）：按媒体时间降序，缺失回退入库时间
+		query = query.Order("COALESCE(media_time, added_at) DESC")
+	case "media_time_asc":
+		// 按媒体时间升序，缺失回退入库时间
+		query = query.Order("COALESCE(media_time, added_at) ASC")
 	default:
 		query = query.Order("added_at DESC")
 	}
