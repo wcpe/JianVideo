@@ -60,8 +60,15 @@ func TestParseToken_Tampered(t *testing.T) {
 		t.Fatalf("生成令牌失败: %v", err)
 	}
 
-	// 篡改令牌
-	tampered := token[:len(token)-1] + "X"
+	// 篡改令牌：必须保证替换后的字符与原末位字符不同。
+	// 不能简单拼接固定字符（如 "X"），因为 JWT 签名段末位随 IssuedAt 变化，
+	// 约 1/64 概率原末位恰为该字符，拼接后令牌不变，解析会成功而导致误判。
+	last := token[len(token)-1]
+	var replacement byte = 'A'
+	if last == 'A' {
+		replacement = 'B'
+	}
+	tampered := token[:len(token)-1] + string(replacement)
 	_, err = ParseToken(tampered, "secret")
 	if err == nil {
 		t.Fatal("篡改令牌解析应失败")
