@@ -444,6 +444,48 @@ func TestRenameMediaFile_API(t *testing.T) {
 	}
 }
 
+func TestUpdateDisplayName_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	dir := t.TempDir()
+	diskPath := filepath.Join(dir, "real.mp4")
+	if err := os.WriteFile(diskPath, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	mf, _ := svc.CreateMediaFile(1, diskPath, 4)
+
+	// 设置显示名 → 200，仅 display_name 变更，磁盘文件名不动
+	req := httptest.NewRequest("PUT", "/api/library/media/"+strconv.FormatInt(mf.ID, 10)+"/display-name",
+		bytes.NewBufferString(`{"display_name":"我的影片"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["display_name"] != "我的影片" {
+		t.Fatalf("响应 display_name 期望 我的影片, 实际 %v", resp["display_name"])
+	}
+	if resp["file_name"] != "real.mp4" {
+		t.Fatalf("改显示名不应改动 file_name, 实际 %v", resp["file_name"])
+	}
+	// 磁盘文件应保持原名
+	if _, err := os.Stat(diskPath); err != nil {
+		t.Fatalf("磁盘文件应保持原名: %v", err)
+	}
+
+	// 不存在的记录 → 404
+	req = httptest.NewRequest("PUT", "/api/library/media/9999/display-name",
+		bytes.NewBufferString(`{"display_name":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("不存在记录期望 404, 实际 %d", w.Code)
+	}
+}
+
 // 复现 Bug B：扫描完成后扫描状态恒为 completed，SSE 端点不应在 completed 后
 // 立即关闭连接（否则浏览器 EventSource 会每 ~3s 重连成风暴）。连接应保持打开，
 // 仅在客户端断开时关闭。

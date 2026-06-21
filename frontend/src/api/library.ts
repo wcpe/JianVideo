@@ -125,6 +125,15 @@ async function realRenameMediaFile(id: number, newName: string): Promise<MediaFi
   return res.data
 }
 
+async function realUpdateDisplayName(id: number, displayName: string): Promise<MediaFile> {
+  try {
+    const res = await client.put<MediaFile>(`/api/library/media/${id}/display-name`, { display_name: displayName })
+    return res.data
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '修改显示名失败'), { cause: err })
+  }
+}
+
 async function realScanLibrary(id: number): Promise<ScanResponse> {
   const res = await client.post<ScanResponse>(`/api/library/scan/${id}`)
   return res.data
@@ -305,6 +314,14 @@ async function mockRenameMediaFile(id: number, newName: string): Promise<MediaFi
   return f
 }
 
+async function mockUpdateDisplayName(id: number, displayName: string): Promise<MediaFile> {
+  await mockDelay(120)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (!f) throw new Error('媒体文件不存在')
+  f.display_name = displayName.trim()
+  return f
+}
+
 async function mockScanLibrary(id: number): Promise<ScanResponse> {
   await mockDelay(400)
   const libraryPath = mockPaths.find(p => p.id === id)?.path || 'D:\\Videos'
@@ -398,6 +415,7 @@ export function getMediaFiles(params?: { library_id?: number; sort?: string; pag
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
+export function updateDisplayName(id: number, displayName: string) { return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName) }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
 
 /**

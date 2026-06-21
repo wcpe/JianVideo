@@ -307,6 +307,28 @@ func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, 
 	return mf, nil
 }
 
+// UpdateDisplayName 设置或清除媒体的库内显示名（FR-30）。
+// 仅更新数据库 display_name 列，不动磁盘文件名与路径；去首尾空白后落库，空串表示清除。
+// 记录不存在时返回 gorm.ErrRecordNotFound。
+func (s *Service) UpdateDisplayName(id int64, displayName string) (*models.MediaFile, error) {
+	displayName = strings.TrimSpace(displayName)
+	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Update("display_name", displayName)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		// 区分「媒体不存在」与「值未变化」：再查一次确认存在性
+		var count int64
+		if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Count(&count).Error; err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			return nil, gorm.ErrRecordNotFound
+		}
+	}
+	return s.GetMediaFileByID(id)
+}
+
 // GetMediaFileByPath 根据文件路径查询媒体文件。
 func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error) {
 	// 统一为正斜杠，与存储格式一致

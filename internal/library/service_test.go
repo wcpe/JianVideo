@@ -573,6 +573,56 @@ func TestRenameMediaFile_NotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateDisplayName(t *testing.T) {
+	svc, _ := newTestService(t)
+	dir := t.TempDir()
+	diskPath := filepath.Join(dir, "real.mp4")
+	if err := os.WriteFile(diskPath, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	mf, err := svc.CreateMediaFile(1, diskPath, 4)
+	if err != nil {
+		t.Fatalf("创建媒体记录失败: %v", err)
+	}
+
+	// 设置显示名：仅库内 display_name 变更，磁盘与 file_name/file_path 不变
+	updated, err := svc.UpdateDisplayName(mf.ID, "  我的影片  ")
+	if err != nil {
+		t.Fatalf("更新显示名失败: %v", err)
+	}
+	if updated.DisplayName != "我的影片" {
+		t.Fatalf("显示名应去首尾空白, 实际 %q", updated.DisplayName)
+	}
+	if updated.FileName != "real.mp4" || updated.FilePath != filepath.ToSlash(diskPath) {
+		t.Fatalf("显示名修改不应改动真实文件名/路径: %+v", updated)
+	}
+	// 磁盘文件保持原名
+	if _, err := os.Stat(diskPath); err != nil {
+		t.Fatalf("磁盘文件应保持原名: %v", err)
+	}
+	// 数据库已落库
+	got, _ := svc.GetMediaFileByID(mf.ID)
+	if got.DisplayName != "我的影片" || got.FileName != "real.mp4" {
+		t.Fatalf("数据库记录未按预期更新: %+v", got)
+	}
+
+	// 清空显示名：置空表示清除，回退展示交由前端处理
+	cleared, err := svc.UpdateDisplayName(mf.ID, "   ")
+	if err != nil {
+		t.Fatalf("清空显示名失败: %v", err)
+	}
+	if cleared.DisplayName != "" {
+		t.Fatalf("清空后显示名应为空, 实际 %q", cleared.DisplayName)
+	}
+}
+
+func TestUpdateDisplayName_NotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, err := svc.UpdateDisplayName(9999, "x"); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("不存在的记录期望 gorm.ErrRecordNotFound, 实际 %v", err)
+	}
+}
+
 func TestListLibraryPathViews(t *testing.T) {
 	svc, db := newTestService(t)
 

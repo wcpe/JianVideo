@@ -3,7 +3,7 @@ import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, Acti
 import { IconFolder, IconTrash, IconAlertCircle } from '@tabler/icons-react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { formatSize, formatDuration } from '@/utils/format'
-import { isImageFile } from '@/utils/media'
+import { isImageFile, mediaDisplayName } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
@@ -72,7 +72,7 @@ function FileCard({
           <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
         </Box>
       )}
-      <Text fw={500} truncate mb="xs">{file.file_name}</Text>
+      <Text fw={500} truncate mb="xs" title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
       <Group gap="xs" wrap="nowrap">
         <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
         <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>

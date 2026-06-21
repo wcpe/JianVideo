@@ -9,6 +9,7 @@ import * as albumApi from '@/api/albums'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import { mediaDisplayName } from '@/utils/media'
 import type { Album, MediaFile } from '@/types'
 
 const initCreate = { opened: false, name: '', description: '', loading: false }
@@ -191,7 +192,7 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
                 <MediaThumbnail mediaID={media.id} fileName={media.file_name} />
               </Card.Section>
               <Group justify="space-between" mt="xs" wrap="nowrap">
-                <Text size="sm" truncate title={media.file_name}>{media.file_name}</Text>
+                <Text size="sm" truncate title={mediaDisplayName(media)}>{mediaDisplayName(media)}</Text>
                 <Button size="compact-xs" variant="subtle" color="red" onClick={() => handleRemove(media)}>
                   移出
                 </Button>
@@ -263,10 +264,10 @@ function MediaPickerModal({
               <Group key={media.id} justify="space-between" wrap="nowrap"
                 px="xs" py={6} style={{ borderRadius: 'var(--mantine-radius-sm)' }}>
                 {already ? (
-                  <Text size="sm" truncate style={{ minWidth: 0 }} c="dimmed">{media.file_name}</Text>
+                  <Text size="sm" truncate style={{ minWidth: 0 }} c="dimmed">{mediaDisplayName(media)}</Text>
                 ) : (
                   <Anchor size="sm" truncate style={{ minWidth: 0 }} c="inherit"
-                    onClick={() => handleAdd(media)}>{media.file_name}</Anchor>
+                    onClick={() => handleAdd(media)}>{mediaDisplayName(media)}</Anchor>
                 )}
                 {already
                   ? <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>已在相册</Text>

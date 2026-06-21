@@ -39,6 +39,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/media/:id", h.GetMediaFile)
 		lib.GET("/media/:id/raw", h.GetRawImage)
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
+		lib.PUT("/media/:id/display-name", h.UpdateDisplayName)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
 
 		// 收藏与标签（FR-41）

@@ -1,12 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles } from '@tabler/icons-react'
+import { notifications } from '@mantine/notifications'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
+import NameEditModal from '@/components/NameEditModal'
 import { parseWebVTT } from '@/utils/subtitle'
+import { mediaDisplayName } from '@/utils/media'
 import * as libApi from '@/api/library'
 import * as subtitleApi from '@/api/subtitle'
 import type { MediaFile, SubtitleTrack, SubtitleEntry } from '@/types'
+
+// 双模式改名弹窗类型：显示名（仅库内）/ 真实文件名（磁盘改名）
+type NameEditKind = 'display' | 'real'
 
 /** 视频播放页 — Mantine + VideoPlayer */
 export default function PlayPage() {
@@ -26,6 +32,10 @@ export default function PlayPage() {
   // 播放器 URL / ABR 模式：探测 master.m3u8 是否可用；不可用时降级到 /api/play/:id/stream
   const [playerUrl, setPlayerUrl] = useState<string | null>(null)
   const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null)
+
+  // 双模式改名（FR-30）：null 表示弹窗关闭
+  const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null)
+  const [nameEditSaving, setNameEditSaving] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -99,6 +109,34 @@ export default function PlayPage() {
     void libApi.markWatched(media.id).catch(() => {})
   }, [media])
 
+  // 确认改名（FR-30）：display 仅改库内显示名，real 走磁盘改名
+  const confirmNameEdit = async (value: string) => {
+    if (!media || !nameEditKind) return
+    setNameEditSaving(true)
+    try {
+      const updated = nameEditKind === 'display'
+        ? await libApi.updateDisplayName(media.id, value)
+        : await libApi.renameMediaFile(media.id, value)
+      setMedia(updated)
+      setNameEditKind(null)
+      notifications.show({
+        title: '修改成功',
+        message: nameEditKind === 'display' ? '已更新显示名' : '已修改真实文件名',
+        color: 'green',
+        autoClose: 2500,
+      })
+    } catch (err) {
+      notifications.show({
+        title: '修改失败',
+        message: err instanceof Error ? err.message : '请稍后重试',
+        color: 'red',
+        autoClose: 3000,
+      })
+    } finally {
+      setNameEditSaving(false)
+    }
+  }
+
   if (loading) {
     return <Skeleton height={400} radius="md" />
   }
@@ -125,7 +163,26 @@ export default function PlayPage() {
           >
             返回
           </Button>
-          <Title order={3}>{media.file_name}</Title>
+          <Title order={3}>{mediaDisplayName(media)}</Title>
+          {/* 双模式改名入口（FR-30）：均需二次确认 */}
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconPencil size={14} />}
+            onClick={() => setNameEditKind('display')}
+          >
+            改显示名
+          </Button>
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconFileText size={14} />}
+            onClick={() => setNameEditKind('real')}
+          >
+            改文件名
+          </Button>
         </Group>
 
         {/* 字幕选择菜单 */}
@@ -176,6 +233,10 @@ export default function PlayPage() {
         <Text fw={600} size="sm" mb="sm">媒体信息</Text>
         <Group gap="md" wrap="wrap">
           <div>
+            <Text size="xs" c="dimmed">真实文件名</Text>
+            <Text size="sm" truncate maw={400}>{media.file_name}</Text>
+          </div>
+          <div>
             <Text size="xs" c="dimmed">路径</Text>
             <Text size="sm" truncate maw={400}>{media.file_path}</Text>
           </div>
@@ -193,6 +254,31 @@ export default function PlayPage() {
           </div>
         </Group>
       </Paper>
+
+      {/* 改显示名（仅库内，不动磁盘）：二次确认弹窗 */}
+      <NameEditModal
+        opened={nameEditKind === 'display'}
+        title="修改显示名"
+        label="显示名"
+        message="仅修改系统内的展示名称，不会改动磁盘上的真实文件。留空则清除显示名、回退为真实文件名。"
+        initialValue={media.display_name || ''}
+        allowEmpty
+        loading={nameEditSaving}
+        onConfirm={confirmNameEdit}
+        onCancel={() => setNameEditKind(null)}
+      />
+
+      {/* 改真实文件名（磁盘改名）：二次确认弹窗 */}
+      <NameEditModal
+        opened={nameEditKind === 'real'}
+        title="修改真实文件名"
+        label="真实文件名"
+        message="将直接重命名磁盘上的文件，此操作会改动真实文件名。请确认无误后再继续。"
+        initialValue={media.file_name}
+        loading={nameEditSaving}
+        onConfirm={confirmNameEdit}
+        onCancel={() => setNameEditKind(null)}
+      />
     </Stack>
   )
 }

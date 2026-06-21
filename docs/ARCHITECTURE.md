@@ -81,7 +81,8 @@
 | id | INTEGER PK | 自增主键 |
 | library_id | INTEGER FK | 所属媒体库目录 |
 | file_path | TEXT, INDEX | 文件完整路径（file_path 索引加速目录浏览前缀查询） |
-| file_name | TEXT | 文件名 |
+| file_name | TEXT | 真实文件名（与磁盘一致） |
+| display_name | TEXT | 库内显示名（FR-30），空则展示回退 file_name，不影响磁盘文件名 |
 | file_size | INTEGER | 文件大小（字节） |
 | format | TEXT | 容器格式（mp4/mkv/avi 等） |
 | video_codec | TEXT | 视频编码格式 |
@@ -98,7 +99,9 @@
 | watched | INTEGER | 是否已看完（FR-44），0/1 |
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
 
-> 注：`media_files` 还含软删/显示名/EXIF 等列（FR-25/30/31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
+| display_name | TEXT | 系统内显示名（FR-30），空则回退 `file_name` |
+
+> 注：`media_files` 还含软删/EXIF 等列（FR-25/31），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 
 **媒体后缀配置（media_extensions）**

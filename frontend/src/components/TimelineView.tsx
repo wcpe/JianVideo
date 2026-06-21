@@ -3,7 +3,7 @@ import { SimpleGrid, Card, Text, Group, Box, Badge, Skeleton, Alert, Stack, Load
 import { IconFolder, IconAlertCircle, IconStar, IconStarFilled } from '@tabler/icons-react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { formatSize, formatDuration } from '@/utils/format'
-import { isImageFile } from '@/utils/media'
+import { isImageFile, mediaDisplayName } from '@/utils/media'
 import { groupMediaByDate } from '@/utils/timeline'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import type { MediaFile } from '@/types'
@@ -96,7 +96,7 @@ function DateGroupRow({
                     </ActionIcon>
                   )}
                 </Box>
-                <Text fw={500} size="sm" truncate mb="xs">{file.file_name}</Text>
+                <Text fw={500} size="sm" truncate mb="xs" title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
                 <Group gap="xs" wrap="nowrap">
                   <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
                   <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>

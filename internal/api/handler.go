@@ -262,6 +262,33 @@ func (h *Handler) RenameMediaFile(c *gin.Context) {
 	c.JSON(http.StatusOK, mf)
 }
 
+// UpdateDisplayName PUT /api/library/media/:id/display-name
+// 请求体：{"display_name": "..."}，仅更新库内显示名，不动磁盘文件名。空串表示清除显示名。
+func (h *Handler) UpdateDisplayName(c *gin.Context) {
+	id, ok := parseMediaID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
+		return
+	}
+
+	mf, err := h.library.UpdateDisplayName(id, req.DisplayName)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "DISPLAY_NAME_FAILED", "message": "更新显示名失败"})
+		return
+	}
+	c.JSON(http.StatusOK, mf)
+}
+
 // BrowseDirectory GET /api/library/browse
 func (h *Handler) BrowseDirectory(c *gin.Context) {
 	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)

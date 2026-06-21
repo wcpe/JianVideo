@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
@@ -39,6 +40,83 @@ describe('PlayPage', () => {
     await waitFor(() => {
       expect(screen.getByText('无效的媒体 ID')).toBeInTheDocument()
     })
+  })
+
+  it('改显示名：经二次确认后调用 display-name 端点并刷新标题', async () => {
+    let displayNameBody: { display_name?: string } | null = null
+    server.use(
+      http.get('*/api/library/media/1', () =>
+        HttpResponse.json({
+          id: 1, library_id: 1, file_path: 'D:/V/real.mkv', file_name: 'real.mkv',
+          file_size: 0, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac',
+          duration: 0, width: 0, height: 0, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '',
+        }),
+      ),
+      http.put('*/api/library/media/1/display-name', async ({ request }) => {
+        displayNameBody = await request.json() as { display_name?: string }
+        return HttpResponse.json({
+          id: 1, library_id: 1, file_path: 'D:/V/real.mkv', file_name: 'real.mkv',
+          file_size: 0, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac',
+          duration: 0, width: 0, height: 0, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '', display_name: displayNameBody?.display_name,
+        })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+
+    // 初始展示真实文件名（无显示名时回退）
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'real.mkv' })).toBeInTheDocument())
+
+    // 打开「改显示名」二次确认弹窗
+    await user.click(screen.getByRole('button', { name: '改显示名' }))
+    const input = await screen.findByLabelText('显示名')
+    await user.clear(input)
+    await user.type(input, '我的影片')
+    // 二次确认
+    await user.click(screen.getByRole('button', { name: '确认修改' }))
+
+    // 调用了 display-name 端点且标题刷新为显示名
+    await waitFor(() => expect(displayNameBody).toEqual({ display_name: '我的影片' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '我的影片' })).toBeInTheDocument())
+  })
+
+  it('改文件名：经二次确认后调用 rename 端点（磁盘改名）', async () => {
+    let renameBody: { new_name?: string } | null = null
+    server.use(
+      http.get('*/api/library/media/1', () =>
+        HttpResponse.json({
+          id: 1, library_id: 1, file_path: 'D:/V/old.mkv', file_name: 'old.mkv',
+          file_size: 0, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac',
+          duration: 0, width: 0, height: 0, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '',
+        }),
+      ),
+      http.put('*/api/library/media/1/rename', async ({ request }) => {
+        renameBody = await request.json() as { new_name?: string }
+        return HttpResponse.json({
+          id: 1, library_id: 1, file_path: 'D:/V/new.mkv', file_name: 'new.mkv',
+          file_size: 0, format: 'mkv', video_codec: 'hevc', audio_codec: 'aac',
+          duration: 0, width: 0, height: 0, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '',
+        })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'old.mkv' })).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '改文件名' }))
+    const input = await screen.findByLabelText('真实文件名')
+    await user.clear(input)
+    await user.type(input, 'new.mkv')
+    await user.click(screen.getByRole('button', { name: '确认修改' }))
+
+    await waitFor(() => expect(renameBody).toEqual({ new_name: 'new.mkv' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'new.mkv' })).toBeInTheDocument())
   })
 
   it('master.m3u8 不可用时改用 /api/play/:id/stream', async () => {

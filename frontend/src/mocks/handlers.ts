@@ -130,6 +130,36 @@ export const handlers = [
 
   // ─── 收藏与标签（FR-41）──────────────────────────────
 
+  // 真实文件名改名（FR-30）：仅模拟更新 file_name，不动 display_name
+  http.put('*/api/library/media/:id/rename', async ({ request, params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    const body = await request.json() as { new_name: string }
+    const newName = (body.new_name || '').trim()
+    if (!newName || /[/\\]/.test(newName) || newName === '.' || newName === '..') {
+      return HttpResponse.json({ code: 'RENAME_REJECTED', message: '新文件名不合法' }, { status: 400 })
+    }
+    file.file_name = newName
+    return HttpResponse.json(file)
+  }),
+
+  // 显示名修改（FR-30）：仅更新库内 display_name，不动磁盘真实文件名
+  http.put('*/api/library/media/:id/display-name', async ({ request, params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    const body = await request.json() as { display_name: string }
+    file.display_name = (body.display_name || '').trim()
+    return HttpResponse.json(file)
+  }),
+
   http.put('*/api/library/media/:id/favorite', async ({ request, params }) => {
     await delay(100)
     const id = Number(params.id)

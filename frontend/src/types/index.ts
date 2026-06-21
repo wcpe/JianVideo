@@ -27,6 +27,8 @@ export interface MediaFile {
   subtitle_tracks: string
   added_at: string
   modified_at: string
+  /** 库内显示名（FR-30）：空则展示回退到 file_name，不影响磁盘真实文件名；旧数据可能缺省 */
+  display_name?: string
   /** 收藏标记（FR-41），旧数据可能缺省 */
   favorite?: boolean
   /** 上次播放位置（秒，FR-44），旧数据可能缺省 */
