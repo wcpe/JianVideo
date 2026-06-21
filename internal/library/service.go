@@ -215,44 +215,7 @@ func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int
 
 // ListMediaFiles 分页查询媒体文件列表。
 func (s *Service) ListMediaFiles(libraryID int64, sort, search string, page, pageSize int) ([]models.MediaFile, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-
-	var total int64
-	query := s.db.Model(&models.MediaFile{})
-	if libraryID > 0 {
-		query = query.Where("library_id = ?", libraryID)
-	}
-	if search != "" {
-		// 转义 LIKE 通配符，防止用户输入 % 或 _ 干扰查询
-		escaped := strings.ReplaceAll(search, "%", "\\%")
-		escaped = strings.ReplaceAll(escaped, "_", "\\_")
-		query = query.Where("file_name LIKE ?", "%"+escaped+"%")
-	}
-
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var items []models.MediaFile
-	// 排序
-	switch sort {
-	case "time_asc":
-		query = query.Order("added_at ASC")
-	case "name":
-		query = query.Order("file_name ASC")
-	default:
-		query = query.Order("added_at DESC")
-	}
-
-	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
-		return nil, 0, err
-	}
-	return items, total, nil
+	return s.ListMediaFilesFiltered(MediaFilter{LibraryID: libraryID, Sort: sort, Search: search}, page, pageSize)
 }
 
 // GetMediaFileByID 根据 ID 获取媒体文件。

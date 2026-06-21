@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Badge, Skeleton, Alert, Stack, Loader, Center } from '@mantine/core'
-import { IconFolder, IconAlertCircle } from '@tabler/icons-react'
+import { SimpleGrid, Card, Text, Group, Box, Badge, Skeleton, Alert, Stack, Loader, Center, ActionIcon } from '@mantine/core'
+import { IconFolder, IconAlertCircle, IconStar, IconStarFilled } from '@tabler/icons-react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile } from '@/utils/media'
@@ -16,6 +16,8 @@ interface TimelineViewProps {
   customImageExtensions: Record<number, string[]>
   onErrorClose: () => void
   onOpenFile: (file: MediaFile) => void
+  // 切换收藏（FR-41）：传入时媒体卡片展示标星按钮
+  onToggleFavorite?: (file: MediaFile) => void
   // 滚动到底部时触发加载更多
   onLoadMore?: () => void
   // 是否还有更多数据可加载
@@ -39,10 +41,12 @@ function DateGroupRow({
   group,
   customImageExtensions,
   onOpenFile,
+  onToggleFavorite,
 }: {
   group: DateGroup
   customImageExtensions: Record<number, string[]>
   onOpenFile: (file: MediaFile) => void
+  onToggleFavorite?: (file: MediaFile) => void
 }) {
   const { year, monthDay } = splitDate(group.date)
   return (
@@ -71,9 +75,26 @@ function DateGroupRow({
                 onClick={() => onOpenFile(file)}
                 className="hover-card"
               >
-                {/* 视频与图片都展示缩略图 */}
-                <Box mb="xs">
+                {/* 视频与图片都展示缩略图，右上角叠加标星按钮（FR-41） */}
+                <Box mb="xs" style={{ position: 'relative' }}>
                   <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
+                  {onToggleFavorite && (
+                    <ActionIcon
+                      variant="filled"
+                      color={file.favorite ? 'yellow' : 'dark'}
+                      size="sm"
+                      aria-label={file.favorite ? '取消收藏' : '收藏'}
+                      title={file.favorite ? '取消收藏' : '收藏'}
+                      style={{ position: 'absolute', top: 6, right: 6, opacity: 0.9 }}
+                      onClick={(e) => {
+                        // 阻止冒泡，避免触发卡片打开
+                        e.stopPropagation()
+                        onToggleFavorite(file)
+                      }}
+                    >
+                      {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                    </ActionIcon>
+                  )}
                 </Box>
                 <Text fw={500} size="sm" truncate mb="xs">{file.file_name}</Text>
                 <Group gap="xs" wrap="nowrap">
@@ -101,6 +122,7 @@ export default function TimelineView({
   customImageExtensions,
   onErrorClose,
   onOpenFile,
+  onToggleFavorite,
   onLoadMore,
   hasMore,
   loadingMore,
@@ -200,6 +222,7 @@ export default function TimelineView({
                 group={group}
                 customImageExtensions={customImageExtensions}
                 onOpenFile={onOpenFile}
+                onToggleFavorite={onToggleFavorite}
               />
             </Box>
           )

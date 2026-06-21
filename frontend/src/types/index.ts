@@ -27,6 +27,15 @@ export interface MediaFile {
   subtitle_tracks: string
   added_at: string
   modified_at: string
+  /** 收藏标记（FR-41），旧数据可能缺省 */
+  favorite?: boolean
+}
+
+/** 标签（FR-41） */
+export interface Tag {
+  id: number
+  name: string
+  created_at?: string
 }
 
 /** 媒体文件列表响应 */

@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -10,6 +10,11 @@ import { mockPaths, mockMediaFiles } from '@/mocks/data'
 let nextMockId = 100
 let nextMockExtensionId = 1
 const mockExtensions: MediaExtension[] = []
+
+// 标签 mock 状态（FR-41）：标签表 + 媒体-标签映射
+let nextMockTagId = 1
+const mockTags: Tag[] = []
+const mockTagMappings: { tag_id: number; media_id: number }[] = []
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
@@ -44,10 +49,49 @@ async function realDeleteLibraryPath(id: number): Promise<void> {
 }
 
 async function realGetMediaFiles(params: {
-  library_id?: number; sort?: string; page?: number; page_size?: number; search?: string
+  library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number
 } = {}): Promise<MediaListResponse> {
   const res = await client.get<MediaListResponse>('/api/library/media', { params })
   return res.data
+}
+
+// ─── 收藏与标签（FR-41）──────────────────────────────
+
+async function realSetMediaFavorite(id: number, favorite: boolean): Promise<MediaFile> {
+  const res = await client.put<MediaFile>(`/api/library/media/${id}/favorite`, { favorite })
+  return res.data
+}
+
+async function realGetTags(): Promise<Tag[]> {
+  const res = await client.get<{ items: Tag[] }>('/api/library/tags')
+  return res.data.items
+}
+
+async function realCreateTag(name: string): Promise<Tag> {
+  try {
+    const res = await client.post<Tag>('/api/library/tags', { name })
+    return res.data
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '创建标签失败'), { cause: err })
+  }
+}
+
+async function realGetMediaTags(mediaID: number): Promise<Tag[]> {
+  const res = await client.get<{ items: Tag[] }>(`/api/library/media/${mediaID}/tags`)
+  return res.data.items
+}
+
+async function realAddMediaTag(mediaID: number, tag: { tag_id?: number; name?: string }): Promise<Tag> {
+  try {
+    const res = await client.post<Tag>(`/api/library/media/${mediaID}/tags`, tag)
+    return res.data
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '打标签失败'), { cause: err })
+  }
+}
+
+async function realRemoveMediaTag(mediaID: number, tagID: number): Promise<void> {
+  await client.delete(`/api/library/media/${mediaID}/tags/${tagID}`)
 }
 
 async function realGetMediaFile(id: number): Promise<MediaFile> {
@@ -127,16 +171,71 @@ async function mockDeleteLibraryPath(id: number): Promise<void> {
 }
 
 async function mockGetMediaFiles(params: {
-  library_id?: number; sort?: string; page?: number; page_size?: number; search?: string
+  library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number
 } = {}): Promise<MediaListResponse> {
   await mockDelay(200)
-  const { page = 1, page_size = 20, search, sort } = params
+  const { page = 1, page_size = 20, search, sort, favorite, tag_id } = params
   let items = [...mockMediaFiles]
   if (search) items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+  if (favorite) items = items.filter(m => m.favorite)
+  if (tag_id) {
+    const ids = new Set(mockTagMappings.filter(tm => tm.tag_id === tag_id).map(tm => tm.media_id))
+    items = items.filter(m => ids.has(m.id))
+  }
   if (sort === 'time_desc') items.sort((a, b) => b.added_at.localeCompare(a.added_at))
   const total = items.length
   const start = (page - 1) * page_size
   return { items: items.slice(start, start + page_size), total, page, page_size }
+}
+
+// ─── 收藏与标签 mock（FR-41）─────────────────────────
+
+async function mockSetMediaFavorite(id: number, favorite: boolean): Promise<MediaFile> {
+  await mockDelay(100)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (!f) throw new Error('媒体文件不存在')
+  f.favorite = favorite
+  return f
+}
+
+async function mockGetTags(): Promise<Tag[]> {
+  await mockDelay(100)
+  return [...mockTags].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function mockCreateTag(name: string): Promise<Tag> {
+  await mockDelay(100)
+  const normalized = name.trim()
+  if (!normalized) throw new Error('标签名不能为空')
+  const existing = mockTags.find(t => t.name === normalized)
+  if (existing) return existing
+  const tag: Tag = { id: nextMockTagId++, name: normalized, created_at: new Date().toISOString() }
+  mockTags.push(tag)
+  return tag
+}
+
+async function mockGetMediaTags(mediaID: number): Promise<Tag[]> {
+  await mockDelay(100)
+  const ids = new Set(mockTagMappings.filter(tm => tm.media_id === mediaID).map(tm => tm.tag_id))
+  return mockTags.filter(t => ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+async function mockAddMediaTag(mediaID: number, tag: { tag_id?: number; name?: string }): Promise<Tag> {
+  await mockDelay(100)
+  let resolved: Tag | undefined
+  if (tag.tag_id) resolved = mockTags.find(t => t.id === tag.tag_id)
+  else if (tag.name) resolved = await mockCreateTag(tag.name)
+  if (!resolved) throw new Error('标签不存在')
+  if (!mockTagMappings.some(tm => tm.tag_id === resolved!.id && tm.media_id === mediaID)) {
+    mockTagMappings.push({ tag_id: resolved.id, media_id: mediaID })
+  }
+  return resolved
+}
+
+async function mockRemoveMediaTag(mediaID: number, tagID: number): Promise<void> {
+  await mockDelay(100)
+  const idx = mockTagMappings.findIndex(tm => tm.tag_id === tagID && tm.media_id === mediaID)
+  if (idx !== -1) mockTagMappings.splice(idx, 1)
 }
 
 async function mockGetMediaFile(id: number): Promise<MediaFile> {
@@ -249,7 +348,7 @@ async function mockBrowseDirectory(libraryID: number, parentPath: string): Promi
 export function getLibraryPaths() { return useMock ? mockGetLibraryPaths() : realGetLibraryPaths() }
 export function createLibraryPath(p: string, t = 'local', l = '') { return useMock ? mockCreateLibraryPath(p, t, l) : realCreateLibraryPath(p, t, l) }
 export function deleteLibraryPath(id: number) { return useMock ? mockDeleteLibraryPath(id) : realDeleteLibraryPath(id) }
-export function getMediaFiles(params?: { library_id?: number; sort?: string; page?: number; page_size?: number; search?: string }) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
+export function getMediaFiles(params?: { library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number }) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
@@ -270,5 +369,13 @@ export function createScanProgressSSE(onProgress: (status: ScanStatus) => void):
   return () => eventSource.close()
 }
 export function browseDirectory(libraryID: number, parentPath: string) { return useMock ? mockBrowseDirectory(libraryID, parentPath) : realBrowseDirectory(libraryID, parentPath) }
+
+// 收藏与标签（FR-41）
+export function setMediaFavorite(id: number, favorite: boolean) { return useMock ? mockSetMediaFavorite(id, favorite) : realSetMediaFavorite(id, favorite) }
+export function getTags() { return useMock ? mockGetTags() : realGetTags() }
+export function createTag(name: string) { return useMock ? mockCreateTag(name) : realCreateTag(name) }
+export function getMediaTags(mediaID: number) { return useMock ? mockGetMediaTags(mediaID) : realGetMediaTags(mediaID) }
+export function addMediaTag(mediaID: number, tag: { tag_id?: number; name?: string }) { return useMock ? mockAddMediaTag(mediaID, tag) : realAddMediaTag(mediaID, tag) }
+export function removeMediaTag(mediaID: number, tagID: number) { return useMock ? mockRemoveMediaTag(mediaID, tagID) : realRemoveMediaTag(mediaID, tagID) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }

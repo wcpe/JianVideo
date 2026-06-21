@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockPaths, mockMediaFiles } from './data'
-import type { LibraryPath, MediaFile, MediaExtension, Album } from '@/types'
+import type { LibraryPath, MediaFile, MediaExtension, Album, Tag } from '@/types'
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths]
@@ -19,6 +19,11 @@ const settingsStore: Record<string, string> = {
 let albums: Album[] = []
 let albumItems: { album_id: number; media_id: number }[] = []
 let nextAlbumId = 1
+
+// 标签（FR-41）
+const tags: Tag[] = []
+let tagMappings: { tag_id: number; media_id: number }[] = []
+let nextTagId = 1
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -98,10 +103,19 @@ export const handlers = [
     const pageSize = Number(url.searchParams.get('page_size') || '20')
     const search = url.searchParams.get('search') || ''
     const sort = url.searchParams.get('sort') || ''
+    const favorite = url.searchParams.get('favorite')
+    const tagID = Number(url.searchParams.get('tag_id') || '0')
 
     let items = [...mediaFiles]
     if (search) {
       items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+    }
+    if (favorite === 'true' || favorite === '1') {
+      items = items.filter(m => m.favorite)
+    }
+    if (tagID > 0) {
+      const ids = new Set(tagMappings.filter(tm => tm.tag_id === tagID).map(tm => tm.media_id))
+      items = items.filter(m => ids.has(m.id))
     }
     if (sort === 'time_desc') {
       items.sort((a, b) => b.added_at.localeCompare(a.added_at))
@@ -112,6 +126,78 @@ export const handlers = [
     const paged = items.slice(start, start + pageSize)
 
     return HttpResponse.json({ items: paged, total, page, page_size: pageSize })
+  }),
+
+  // ─── 收藏与标签（FR-41）──────────────────────────────
+
+  http.put('*/api/library/media/:id/favorite', async ({ request, params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    const body = await request.json() as { favorite: boolean }
+    file.favorite = body.favorite
+    return HttpResponse.json(file)
+  }),
+
+  http.get('*/api/library/tags', async () => {
+    await delay(100)
+    return HttpResponse.json({ items: [...tags].sort((a, b) => a.name.localeCompare(b.name)) })
+  }),
+
+  http.post('*/api/library/tags', async ({ request }) => {
+    await delay(100)
+    const body = await request.json() as { name: string }
+    const name = (body.name || '').trim()
+    if (!name) {
+      return HttpResponse.json({ code: 'INVALID_TAG', message: '标签名不能为空' }, { status: 400 })
+    }
+    let tag = tags.find(t => t.name === name)
+    if (!tag) {
+      tag = { id: nextTagId++, name, created_at: new Date().toISOString() }
+      tags.push(tag)
+    }
+    return HttpResponse.json(tag, { status: 201 })
+  }),
+
+  http.get('*/api/library/media/:id/tags', async ({ params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const ids = new Set(tagMappings.filter(tm => tm.media_id === id).map(tm => tm.tag_id))
+    return HttpResponse.json({ items: tags.filter(t => ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name)) })
+  }),
+
+  http.post('*/api/library/media/:id/tags', async ({ request, params }) => {
+    await delay(100)
+    const mediaID = Number(params.id)
+    const body = await request.json() as { tag_id?: number; name?: string }
+    let tag: Tag | undefined
+    if (body.tag_id) {
+      tag = tags.find(t => t.id === body.tag_id)
+    } else if (body.name) {
+      const name = body.name.trim()
+      if (!name) return HttpResponse.json({ code: 'INVALID_TAG', message: '标签名不能为空' }, { status: 400 })
+      tag = tags.find(t => t.name === name)
+      if (!tag) {
+        tag = { id: nextTagId++, name, created_at: new Date().toISOString() }
+        tags.push(tag)
+      }
+    }
+    if (!tag) return HttpResponse.json({ code: 'ADD_TAG_FAILED', message: '标签不存在' }, { status: 400 })
+    if (!tagMappings.some(tm => tm.tag_id === tag!.id && tm.media_id === mediaID)) {
+      tagMappings.push({ tag_id: tag.id, media_id: mediaID })
+    }
+    return HttpResponse.json(tag, { status: 201 })
+  }),
+
+  http.delete('*/api/library/media/:id/tags/:tagId', async ({ params }) => {
+    await delay(100)
+    const mediaID = Number(params.id)
+    const tagID = Number(params.tagId)
+    tagMappings = tagMappings.filter(tm => !(tm.tag_id === tagID && tm.media_id === mediaID))
+    return new HttpResponse(null, { status: 204 })
   }),
 
   http.get('*/api/library/media/:id/raw', async ({ params }) => {

@@ -11,6 +11,7 @@
 - **跨平台打包（FR-22）**：新增根目录 `Makefile`（`frontend`/`build`/`build-hwaccel`/`package`/`clean`），一键产出单二进制发布包，构建期经 `-ldflags -X main.version` 注入版本号，并把用户自备的 ffmpeg/ffprobe 随包附带；主程序启动按「环境变量 → 可执行文件同目录捆绑版 → PATH」自动发现 ffmpeg/ffprobe，发布包开箱即用。各平台原生构建（CGO）。
 - **移动端 PWA（FR-45）**：引入 `vite-plugin-pwa`，构建产物含 `manifest.webmanifest`（中文名称/品牌紫主题色/192·512·maskable 图标/`display: standalone`）与 Service Worker（`autoUpdate`），支持「添加到主屏」并以独立窗口启动、断网时离线加载应用壳；Service Worker 仅预缓存壳静态资源，`/api` 与媒体流运行时走网络不缓存。`index.html` 补 PWA meta（主题色/iOS 主屏/`viewport-fit=cover`），并加移动端安全区与触控优化。可安装/离线属真机维度，自动化覆盖 manifest 字段与 SW 注册逻辑。
 - **设置子系统（FR-24）**：新增 `internal/settings` 服务（按 key 读/写、批量 upsert）与 `GET /api/settings`、`PUT /api/settings` 端点，运行期设置以 SQLite `settings` 表为唯一真源、重启后保留；前端新增 `/settings` 设置页（Mantine）与导航项，支持配置「每盘符回收站路径」「扫描周期」等键值，为后续回收站清理（FR-26）、定时扫描（FR-28）提供配置真源。设置持久化决策见 ADR-0029。
+- **收藏与标签（FR-41）**：媒体支持标星收藏与自定义标签。新增收藏切换端点 `PUT /api/library/media/:id/favorite`、标签管理端点 `GET/POST /api/library/tags`、媒体打/去/列标签端点 `GET/POST /api/library/media/:id/tags` 与 `DELETE /api/library/media/:id/tags/:tag_id`；`GET /api/library/media` 新增 `favorite`、`tag_id` 筛选参数。前端时间轴媒体卡片加标星按钮，新增「仅收藏」开关、标签筛选下拉与新建标签入口。复用 foundation 已建的 `media_files.favorite` 字段及 `tags`/`tag_mappings` 表。
 
 ### 变更
 - **用户相册/合集（FR-40）**：新增相册服务与 `GET/POST /api/albums`、`DELETE /api/albums/:id`、`GET/POST /api/albums/:id/items`、`DELETE /api/albums/:id/items/:mediaId` 端点，支持跨目录把任意媒体手动归入相册、浏览相册成员、移出成员；删除相册仅清理 `albums` 与 `album_items`，不删除源文件与 `media_files` 记录。前端新增 `/albums` 相册页（列相册、建相册、删相册、看相册内容、从媒体库加入/移出媒体）与导航入口。

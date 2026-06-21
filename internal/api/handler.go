@@ -182,7 +182,9 @@ func (h *Handler) ListMediaFiles(c *gin.Context) {
 	}
 	search := c.Query("search")
 
-	items, total, err := h.library.ListMediaFiles(libraryID, sort, search, page, pageSize)
+	// 收藏/标签筛选（FR-41）：favorite=true、tag_id=N
+	filter := parseMediaFilter(c, libraryID, sort, search)
+	items, total, err := h.library.ListMediaFilesFiltered(filter, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return

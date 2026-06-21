@@ -41,6 +41,14 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
 
+		// 收藏与标签（FR-41）
+		lib.PUT("/media/:id/favorite", h.SetMediaFavorite)
+		lib.GET("/media/:id/tags", h.ListMediaTags)
+		lib.POST("/media/:id/tags", h.AddMediaTag)
+		lib.DELETE("/media/:id/tags/:tag_id", h.RemoveMediaTag)
+		lib.GET("/tags", h.ListTags)
+		lib.POST("/tags", h.CreateTag)
+
 		lib.GET("/extensions", h.ListMediaExtensions)
 		lib.POST("/extensions", h.AddMediaExtension)
 

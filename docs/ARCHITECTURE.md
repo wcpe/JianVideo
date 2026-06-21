@@ -93,6 +93,9 @@
 | subtitle_tracks | TEXT | 字幕轨道信息（JSON） |
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
+| favorite | INTEGER | 收藏标记（FR-41），0/1 |
+
+> 注：`media_files` 还含软删/显示名/EXIF/观看状态等列（FR-25/30/31/44），随各 FR 落地，此处仅列与当前已实现能力相关的字段。
 
 **媒体后缀配置（media_extensions）**
 
@@ -157,6 +160,24 @@
 | added_at | DATETIME | 加入时间 |
 
 相册是物理目录之外的逻辑集合，支持跨目录手动归类媒体。唯一索引 `(album_id, media_id)` 保证同一媒体在同一相册内不重复，重复加入做幂等处理。删除相册时，服务层在同一事务中删除该相册的 `album_items`，但**不删除源文件与 `media_files` 记录**（真源不变量见 `.claude/rules`）。
+
+**标签（tags）（FR-41）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| name | TEXT, UNIQUE | 标签名（去首尾空白后唯一） |
+| created_at | DATETIME | 创建时间 |
+
+**标签映射（tag_mappings）（FR-41）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| tag_id | INTEGER FK | 关联标签 |
+| media_id | INTEGER FK | 关联媒体文件 |
+
+媒体与标签为多对多关系，`(tag_id, media_id)` 唯一索引保证去重。按标签筛选媒体走 `tag_mappings` 子查询。
 
 ## 4. 接口
 

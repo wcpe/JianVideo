@@ -5,6 +5,9 @@ import type { MediaFile } from '@/types'
 interface UseInfiniteMediaOptions {
   pageSize?: number
   sort?: string
+  // 收藏/标签筛选（FR-41）：favorite=true 仅收藏，tagId>0 仅含该标签
+  favorite?: boolean
+  tagId?: number
 }
 
 /**
@@ -13,7 +16,7 @@ interface UseInfiniteMediaOptions {
  * search 变化时重置并从第一页重新累积。
  */
 export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
-  const { pageSize = 60, sort = 'time_desc' } = options
+  const { pageSize = 60, sort = 'time_desc', favorite = false, tagId = 0 } = options
 
   const [items, setItems] = useState<MediaFile[]>([])
   const [total, setTotal] = useState(0)
@@ -47,6 +50,8 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
         page_size: pageSize,
         search: s || undefined,
         sort,
+        favorite: favorite || undefined,
+        tag_id: tagId || undefined,
       })
       setTotal(res.total)
       setItems((prev) => {
@@ -62,7 +67,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
       setLoading(false)
       fetchingRef.current = false
     }
-  }, [pageSize, sort])
+  }, [pageSize, sort, favorite, tagId])
 
   // 搜索防抖 400ms
   useEffect(() => {
