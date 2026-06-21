@@ -59,7 +59,7 @@ function DateGroupRow({
         </Group>
         <Text fw={700} size="lg" pl={18}>{monthDay}</Text>
         {/* 竖线营造时间线视觉 */}
-        <Box style={{ position: 'absolute', left: 4, top: 14, bottom: -24, width: 2, background: 'var(--mantine-color-dark-4)' }} />
+        <Box style={{ position: 'absolute', left: 4, top: 14, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
       </Box>
 
       {/* 右侧媒体卡片网格 */}
@@ -191,7 +191,7 @@ export default function TimelineView({
     return (
       <Box py="xl" ta="center">
         <Box mb="sm" style={{ textAlign: 'center' }}>
-          <IconFolder size={48} color="var(--mantine-color-dark-3)" />
+          <IconFolder size={48} color="var(--mantine-color-dimmed)" />
         </Box>
         <Text c="dimmed">暂无媒体文件</Text>
       </Box>

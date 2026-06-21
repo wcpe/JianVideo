@@ -166,7 +166,7 @@ export default function DirectoryBrowser({
         <Stack gap="xs">
           <Box py="xl" ta="center">
             <Box mb="sm" style={{ textAlign: 'center' }}>
-              <IconFolder size={48} color="var(--mantine-color-dark-3)" />
+              <IconFolder size={48} color="var(--mantine-color-dimmed)" />
             </Box>
             <Text c="dimmed">此目录暂无内容</Text>
           </Box>

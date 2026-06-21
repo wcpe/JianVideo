@@ -273,8 +273,8 @@ export default function VideoPlayer({
         )}
       </Box>
 
-      <Box style={{ display: 'flex', alignItems: 'center', gap: 'var(--mantine-spacing-sm)', padding: '0.5rem 1rem', backgroundColor: 'var(--mantine-color-dark-8, #1a1b1e)' }}>
-        <ActionIcon variant="subtle" color="white" onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'}>
+      <Box style={{ display: 'flex', alignItems: 'center', gap: 'var(--mantine-spacing-sm)', padding: '0.5rem 1rem', backgroundColor: 'var(--mantine-color-default)' }}>
+        <ActionIcon variant="subtle" color="gray" onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'}>
           {isPlaying ? <IconPlayerPause size={22} /> : <IconPlayerPlay size={22} />}
         </ActionIcon>
 

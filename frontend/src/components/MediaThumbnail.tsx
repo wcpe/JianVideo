@@ -16,7 +16,7 @@ export default function MediaThumbnail({ mediaID, fileName }: MediaThumbnailProp
   }, [mediaID])
 
   return (
-    <Box style={{ aspectRatio: '16/9', background: 'var(--mantine-color-dark-6)', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+    <Box style={{ aspectRatio: '16/9', background: 'var(--mantine-color-default-hover)', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
       {loading && <Loader size="xs" />}
       {src && (
         <img src={src} alt={fileName} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
