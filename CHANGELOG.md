@@ -6,6 +6,10 @@
 
 ## 未发布版本
 
+（无）
+
+## 0.4.0（2026-06-22）
+
 ### 新增
 - **系统诊断页（FR-21）**：新增 `GET /api/system/info`（OS/架构/CPU 数/主机名/Go 版本/应用版本/ffmpeg 版本 + 复用硬件加速检测）与 `POST /api/system/codec-test`（对软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox 的 H.264/H.265 候选编码器用外部 ffmpeg 跑真机试编码，报告是否编入/是否成功/失败尾部）；前端 `/system` 页展示并支持一键复制纯文本报告。编解码器实测走外部 ffmpeg CLI，独立于 CGO 检测，普通构建即可用，专供 FR-10/FR-11 真机验收。
 - **跨平台打包（FR-22）**：新增根目录 `Makefile`（`frontend`/`build`/`build-hwaccel`/`package`/`clean`），一键产出单二进制发布包，构建期经 `-ldflags -X main.version` 注入版本号，并把用户自备的 ffmpeg/ffprobe 随包附带；主程序启动按「环境变量 → 可执行文件同目录捆绑版 → PATH」自动发现 ffmpeg/ffprobe，发布包开箱即用。各平台原生构建（CGO）。
