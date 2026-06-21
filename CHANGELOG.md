@@ -24,6 +24,7 @@
 - **存储库管理页精简（FR-23）**：`/library-manager` 移除页内媒体文件列表，仅保留存储库卡片（扫描进度 + 已索引媒体数量）；点击卡片携 `library_id` 与起始路径跳转 `/browse` 定位到该库根目录。`GET /api/library/paths` 响应每项新增 `media_count`（该库未软删媒体数量，按 `library_id` 一次 `GROUP BY` 统计，向后兼容）。
 
 ### 安全
+- **全 `/api` 路由强制鉴权（FR-13）**：修复未授权访问漏洞——此前仅 `/api/me` 挂了认证中间件，库、播放、HLS 切片、stream、raw、缩略图、设置、相册、SMB 凭据、系统诊断、转码等路由均注册在裸引擎上，未登录即可访问与修改全部数据和媒体。新增全局 `auth.APIGuard` 中间件，对路径前缀为 `/api/` 但不属于 `/api/auth/` 的请求强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer` 任一有效即放行，均无效返回 `401`）；`/api/auth/login`、`/api/auth/logout`、`/health`、静态资源 `/assets/*` 与 SPA 回退保持豁免，保证未登录也能加载前端壳与登录。
 - **SMB 主密码强制显式配置（FR-02）**：`smb.MasterPassword()` 不再在 `SMB_MASTER_PASSWORD` 未设置时回退公开弱默认值，改为返回错误；显式空串同样视为未配置。未配置时全部 Save/Load 调用点拒绝以弱密钥加解密——`POST /api/smb/credentials` 返回 `503`，添加 SMB 库路径仅记录 ERROR 不落弱密钥，SMB 扫描/播放返回明确错误。消除「拿到 `smb_credentials.enc` 即可用公开常量离线解出明文密码」的风险。同步更新 `docs/API.md`、`docs/OPERATIONS.md`。
 
 ## 0.3.0（2026-06-21）

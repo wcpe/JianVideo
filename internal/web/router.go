@@ -43,7 +43,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	// 认证（从 gorm.DB 提取底层 sql.DB）
 	sqlDB, _ := db.DB()
 	svc := auth.NewService(sqlDB, cfg.JWTSecret)
-	authMW := auth.Middleware(cfg.JWTSecret)
+
+	// 全局鉴权中间件：保护除 /api/auth/ 外的所有 /api/* 路由（FR-13）。
+	// 必须在注册业务路由之前挂上，确保库 / 播放 / HLS / 设置 / 相册等全部受保护。
+	r.Use(auth.APIGuard(cfg.JWTSecret))
 
 	// 确保默认用户存在
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -83,11 +86,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 			authGroup.POST("/logout", handleLogout)
 		}
 
-		protected := apiGroup.Group("")
-		protected.Use(authMW)
-		{
-			protected.GET("/me", handleMe)
-		}
+		// /api/me 由全局 APIGuard 统一保护，无需再单独挂中间件。
+		apiGroup.GET("/me", handleMe)
 	}
 
 	// 健康检查

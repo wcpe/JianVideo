@@ -25,6 +25,8 @@ import (
 
 // newPlaybackTestServer 创建包含播放路由的测试服务器。
 // 标准 NewRouter 不注册播放路由，此函数额外注册。
+// 注：播放路由（/api/play/*）受全局 APIGuard 保护，测试需带登录 Cookie 访问，
+// 故各用例先经 loginAndGetCookie 取得 Cookie 再请求。
 func newPlaybackTestServer(t *testing.T) (*httptest.Server, *gorm.DB, *playback.Service, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -87,7 +89,9 @@ func TestE2E_GetProgress_NoSession(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
-	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/progress", server.URL), nil, nil)
+	cookie := loginAndGetCookie(t, server.URL)
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/progress", server.URL), nil,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode, "不存在的会话应返回 200 空进度")
 
 	var result struct {
@@ -106,8 +110,10 @@ func TestE2E_HandleSeek(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
+	cookie := loginAndGetCookie(t, server.URL)
 	body := `{"position":10.5}`
-	resp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/seek", server.URL), body, nil)
+	resp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/seek", server.URL), body,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode, "Seek 应返回 200")
 
 	var result struct {
@@ -124,8 +130,10 @@ func TestE2E_HandleBufferReport(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
+	cookie := loginAndGetCookie(t, server.URL)
 	body := `{"current_position":30,"file_size":1000}`
-	resp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/buffer", server.URL), body, nil)
+	resp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/buffer", server.URL), body,
+		map[string]string{"Cookie": cookie})
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "缓冲上报应返回 200")
 }
 
@@ -134,13 +142,16 @@ func TestE2E_GetProgress_AfterSeek(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
+	cookie := loginAndGetCookie(t, server.URL)
 	// 先 Seek
 	seekBody := `{"position":45.0}`
-	seekResp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/seek", server.URL), seekBody, nil)
+	seekResp := doRequest(t, "POST", fmt.Sprintf("%s/api/play/1/seek", server.URL), seekBody,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, seekResp.StatusCode)
 
 	// 查询进度
-	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/progress", server.URL), nil, nil)
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/progress", server.URL), nil,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var result struct {
@@ -155,7 +166,9 @@ func TestE2E_StreamMedia_InvalidID(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
-	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/abc/stream", server.URL), nil, nil)
+	cookie := loginAndGetCookie(t, server.URL)
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/abc/stream", server.URL), nil,
+		map[string]string{"Cookie": cookie})
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "无效 ID 应返回 400")
 
 	var result map[string]string
@@ -168,7 +181,9 @@ func TestE2E_StreamMedia_NotFound(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
-	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/99999/stream", server.URL), nil, nil)
+	cookie := loginAndGetCookie(t, server.URL)
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/99999/stream", server.URL), nil,
+		map[string]string{"Cookie": cookie})
 	// 不存在的文件可能返回 404（文件打开失败）
 	assert.True(t, resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError,
 		"不存在的媒体应返回 404 或 500，实际 %d", resp.StatusCode)
@@ -179,23 +194,27 @@ func TestE2E_SeekThenBufferThenProgress(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
+	cookie := loginAndGetCookie(t, server.URL)
 	mediaID := int64(42)
 
 	// 1. Seek 到 100s
 	seekBody := `{"position":100}`
 	resp := doRequest(t, "POST",
-		fmt.Sprintf("%s/api/play/%d/seek", server.URL, mediaID), seekBody, nil)
+		fmt.Sprintf("%s/api/play/%d/seek", server.URL, mediaID), seekBody,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 2. 上报缓冲
 	bufferBody := fmt.Sprintf(`{"current_position":100,"file_size":%d}`, 5000000)
 	resp = doRequest(t, "POST",
-		fmt.Sprintf("%s/api/play/%d/buffer", server.URL, mediaID), bufferBody, nil)
+		fmt.Sprintf("%s/api/play/%d/buffer", server.URL, mediaID), bufferBody,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 3. 查询进度，验证位置和文件大小
 	resp = doRequest(t, "GET",
-		fmt.Sprintf("%s/api/play/%d/progress", server.URL, mediaID), nil, nil)
+		fmt.Sprintf("%s/api/play/%d/progress", server.URL, mediaID), nil,
+		map[string]string{"Cookie": cookie})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var progress playback.ProgressInfo
@@ -209,8 +228,10 @@ func TestE2E_PlaySubtitles(t *testing.T) {
 	server, _, _, _ := newPlaybackTestServer(t)
 	defer server.Close()
 
-	// 字幕路由不需要认证，直接访问
-	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/subtitles", server.URL), nil, nil)
+	// 字幕路由受全局 APIGuard 保护，需带登录 Cookie 访问
+	cookie := loginAndGetCookie(t, server.URL)
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/1/subtitles", server.URL), nil,
+		map[string]string{"Cookie": cookie})
 	// 不存在的媒体文件可能返回空列表或 404，只要不崩溃即可
 	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound,
 		"字幕路由应返回 200 或 404，实际 %d", resp.StatusCode)

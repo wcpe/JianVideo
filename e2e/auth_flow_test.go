@@ -81,7 +81,7 @@ func TestE2E_Me(t *testing.T) {
 }
 
 // TestE2E_UnauthorizedAccess 验证未认证访问受保护路由返回 401。
-// /api/me 是当前唯一受保护路由（authMW 挂在 /api 下空分组内），故用 /api/me 做断言。
+// /api/me 由全局 APIGuard 保护（覆盖除 /api/auth/ 外的所有 /api/*），此处以 /api/me 做断言。
 func TestE2E_UnauthorizedAccess(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	defer server.Close()
@@ -122,6 +122,58 @@ func TestE2E_LoginNonExistentUser(t *testing.T) {
 	body := `{"username":"nonexistent","password":"password123"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "不存在的用户应返回 401")
+}
+
+// TestE2E_ProtectedAPIRequireAuth 验证除豁免路径外的所有 /api/* 路由都强制 JWT 鉴权（FR-13）。
+// 修复前漏洞：库 / 播放 / 设置等路由注册在裸引擎上，未登录即可访问与修改全部数据，
+// 故此用例对一组代表性受保护端点断言「无凭据 → 401」，并验证带有效 Cookie 时正常放行。
+func TestE2E_ProtectedAPIRequireAuth(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	defer server.Close()
+
+	// 一组代表性的受保护端点：库、播放、HLS、设置、相册、系统、SMB
+	protected := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/library/media"},
+		{"GET", "/api/library/paths"},
+		{"GET", "/api/play/hls/9999/index.m3u8"},
+		{"GET", "/api/settings"},
+		{"GET", "/api/albums"},
+		{"GET", "/api/system/info"},
+		{"POST", "/api/smb/credentials"},
+	}
+	for _, ep := range protected {
+		resp := doRequest(t, ep.method, server.URL+ep.path, nil, nil)
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+			"%s %s 无凭据应返回 401", ep.method, ep.path)
+		resp.Body.Close()
+	}
+
+	// 带有效 Cookie 时应放行（不再是 401）
+	cookie := loginAndGetCookie(t, server.URL)
+	resp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
+		map[string]string{"Cookie": cookie})
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "带有效 Cookie 访问库列表应返回 200")
+	resp.Body.Close()
+}
+
+// TestE2E_PublicPathsNoAuth 验证豁免路径在未登录时仍可访问（登录壳 / 健康检查）。
+func TestE2E_PublicPathsNoAuth(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	defer server.Close()
+
+	// 健康检查无需鉴权
+	healthResp := doRequest(t, "GET", server.URL+"/health", nil, nil)
+	assert.Equal(t, http.StatusOK, healthResp.StatusCode, "/health 无需鉴权")
+	healthResp.Body.Close()
+
+	// 登录端点无需鉴权（错误凭据返回 401 是业务结果，而非中间件拦截）
+	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
+		`{"username":"admin","password":"admin"}`, nil)
+	assert.Equal(t, http.StatusOK, loginResp.StatusCode, "/api/auth/login 无需鉴权即可登录")
+	loginResp.Body.Close()
 }
 
 // loginAndGetCookie 是辅助函数：登录并返回 Cookie 字符串。

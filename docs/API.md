@@ -5,7 +5,7 @@
 ## 1. 通用约定
 
 - **协议**：HTTP/HTTPS RESTful API
-- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部
+- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`
 - **编码**：请求/响应体使用 JSON（`Content-Type: application/json`），视频流使用 `video/mp2t`
 - **分页**：列表接口支持 `page`（从 1 开始）和 `page_size`（默认 20，最大 100）参数
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
