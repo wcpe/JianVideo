@@ -1,9 +1,11 @@
 package library
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -48,6 +50,14 @@ type thumbnailJob struct {
 
 // runThumbnail 执行实际的缩略图生成动作，抽成可注入的函数变量以便测试限并发行为。
 var runThumbnail = realRunThumbnail
+
+// runFFmpegThumbnail 执行一次缩略图 ffmpeg 命令并捕获 stderr，
+// 抽成可注入的函数变量以便测试在不依赖真实 ffmpeg 的情况下注入失败桩。
+// 失败时返回的错误已包含 stderr 关键尾部，便于上层按 ERROR 级别记录具体原因。
+var runFFmpegThumbnail = realRunFFmpegThumbnail
+
+// thumbnailStderrTailLimit 失败日志中保留的 ffmpeg stderr 尾部最大字符数。
+const thumbnailStderrTailLimit = 500
 
 // thumbnailConcurrency 返回缩略图生成并发上限：min(thumbnailMaxConcurrency, CPU 核数)。
 func thumbnailConcurrency() int {
@@ -135,13 +145,14 @@ func generateImageThumbnail(filePath string) {
 	// 使用 ffmpeg 缩放图片（比引入 imaging 库更轻量，项目已依赖 ffmpeg）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", filePath, "-vf", "scale=320:-1", "-vframes", "1", "-y", outputPath)
-	if err := cmd.Run(); err != nil {
+	args := []string{"-i", filePath, "-vf", "scale=320:-1", "-vframes", "1", "-y", outputPath}
+	if err := runFFmpegThumbnail(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 图片缩略图生成超时（已终止 ffmpeg）: %s", filePath)
 			return
 		}
-		log.Printf("[WARN] 图片缩略图生成失败: %s, err=%v", filePath, err)
+		// 记录 ffmpeg stderr 关键尾部，便于定位具体失败原因（如格式不支持、文件损坏）
+		log.Printf("[ERROR] 图片缩略图生成失败: %s, err=%v", filePath, err)
 	}
 }
 
@@ -150,14 +161,40 @@ func generateVideoThumbnail(filePath string) {
 	// 提取第 2 秒帧（第 1 秒常是黑屏）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", filePath, "-ss", "00:00:02", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath)
-	if err := cmd.Run(); err != nil {
+	args := []string{"-i", filePath, "-ss", "00:00:02", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath}
+	if err := runFFmpegThumbnail(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 视频缩略图生成超时（已终止 ffmpeg）: %s", filePath)
 			return
 		}
-		log.Printf("[WARN] 视频缩略图生成失败: %s, err=%v", filePath, err)
+		// 记录 ffmpeg stderr 关键尾部，便于定位具体失败原因（如格式不支持、文件损坏）
+		log.Printf("[ERROR] 视频缩略图生成失败: %s, err=%v", filePath, err)
 	}
+}
+
+// realRunFFmpegThumbnail 用给定参数执行 ffmpeg 缩略图命令，捕获 stderr。
+// 命令失败时返回的错误包含 stderr 关键尾部（截断至 thumbnailStderrTailLimit 字符），
+// 以便上层日志说明「为什么失败」，而非仅一句 exit status。
+func realRunFFmpegThumbnail(ctx context.Context, args []string) error {
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if tail := tailString(stderr.String(), thumbnailStderrTailLimit); tail != "" {
+			return fmt.Errorf("%w; ffmpeg stderr: %s", err, tail)
+		}
+		return err
+	}
+	return nil
+}
+
+// tailString 返回字符串末尾至多 n 个字符（用于截断 ffmpeg stderr）。
+func tailString(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 func getThumbnailPath(filePath string) string {

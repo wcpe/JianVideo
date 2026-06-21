@@ -16,6 +16,9 @@ import (
 	"jianvideo/internal/player"
 )
 
+// probeOutputTailLimit 分辨率探测失败时，错误中保留的 ffmpeg 输出尾部最大字符数。
+const probeOutputTailLimit = 500
+
 // PreSliceResult PreSlice 的执行结果摘要。
 type PreSliceResult struct {
 	MediaID    int64
@@ -83,14 +86,18 @@ func PreSlice(
 
 	pipeline := NewMultiPipeline(NewPipeline())
 	if err := pipeline.RunMultiToDir(runCtx, inputPath, qualityNames, outputDir); err != nil {
-		// 失败清理
+		// 失败清理；与成功日志对称，记录 mediaID/输出目录/档位上下文便于排查
 		_ = os.RemoveAll(outputDir)
+		log.Printf("[ERROR] HLS 预切片失败（ffmpeg 切片）: mediaID=%d, outputDir=%s, qualities=%v, err=%v",
+			mediaID, outputDir, qualityNames, err)
 		return nil, fmt.Errorf("ffmpeg 切片失败: %w", err)
 	}
 
 	// 校验 ffmpeg 真的产出了 m3u8
 	if err := verifySliceOutputs(outputDir, qualityNames); err != nil {
 		_ = os.RemoveAll(outputDir)
+		log.Printf("[ERROR] HLS 预切片失败（m3u8 校验）: mediaID=%d, outputDir=%s, qualities=%v, err=%v",
+			mediaID, outputDir, qualityNames, err)
 		return nil, err
 	}
 
@@ -98,6 +105,8 @@ func PreSlice(
 	masterContent := buildMasterM3U8(qualityNames, qualityLadders)
 	if err := hlsMgr.SaveMasterM3U8(mediaID, masterContent); err != nil {
 		_ = os.RemoveAll(outputDir)
+		log.Printf("[ERROR] HLS 预切片失败（保存 master.m3u8）: mediaID=%d, outputDir=%s, err=%v",
+			mediaID, outputDir, err)
 		return nil, fmt.Errorf("保存 master.m3u8 失败: %w", err)
 	}
 
@@ -126,7 +135,9 @@ func probeResolution(ctx context.Context, inputPath string) (int, int, error) {
 	out, _ := cmd.CombinedOutput()
 	matches := resPattern.FindStringSubmatch(string(out))
 	if len(matches) != 3 {
-		return 0, 0, fmt.Errorf("无法从 ffmpeg 输出解析分辨率")
+		// 解析失败时附带 ffmpeg 输出关键尾部，便于区分「文件损坏/格式不支持」与「正则不匹配」
+		return 0, 0, fmt.Errorf("无法从 ffmpeg 输出解析分辨率; ffmpeg 输出: %s",
+			tailString(string(out), probeOutputTailLimit))
 	}
 	w, _ := strconv.Atoi(matches[1])
 	h, _ := strconv.Atoi(matches[2])
@@ -141,7 +152,7 @@ func verifySliceOutputs(outputDir string, qualityNames []string) error {
 	for _, q := range qualityNames {
 		m3u8Path := filepath.Join(outputDir, fmt.Sprintf("%s.m3u8", q))
 		if _, err := os.Stat(m3u8Path); err != nil {
-			return fmt.Errorf("档位 %s 的 m3u8 未生成: %w", q, err)
+			return fmt.Errorf("档位 %s 的 m3u8 未生成（输出目录: %s）: %w", q, outputDir, err)
 		}
 	}
 	return nil
