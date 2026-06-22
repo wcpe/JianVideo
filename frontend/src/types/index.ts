@@ -240,6 +240,18 @@ export interface CodecTestResult {
   results: EncoderProbeResult[]
 }
 
+// 自更新检测结果（FR-46）
+export interface UpdateCheckResult {
+  current: string
+  latest: string
+  has_update: boolean
+  tag: string
+  prerelease: boolean
+  channel: 'stable' | 'prerelease'
+  notes: string
+  asset_name: string
+}
+
 /** 运行期设置键值映射（key → value，值统一为字符串） */
 export type SettingsMap = Record<string, string>
 

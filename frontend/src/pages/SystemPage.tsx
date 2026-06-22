@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box,
+  Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
 } from '@mantine/core'
 import { useClipboard } from '@mantine/hooks'
-import { IconAlertCircle, IconCopy, IconCheck } from '@tabler/icons-react'
+import { IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp } from '@tabler/icons-react'
 import * as systemApi from '@/api/system'
 import { extractErrorMessage } from '@/utils/error'
-import type { SystemInfo, CodecTestResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
 
 /** 单行信息项：左侧标签 + 右侧值 */
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -66,6 +66,14 @@ export default function SystemPage() {
   const [codecLoading, setCodecLoading] = useState(false)
   const clipboard = useClipboard({ timeout: 2000 })
 
+  // 自更新（FR-46）
+  const [channel, setChannel] = useState<'stable' | 'prerelease'>('stable')
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false) // 应用/回滚中（含重启等待）
+  const [restartMsg, setRestartMsg] = useState<string | null>(null)
+
   // 挂载时加载系统信息
   useEffect(() => {
     let active = true
@@ -93,6 +101,59 @@ export default function SystemPage() {
   const handleCopy = useCallback(() => {
     clipboard.copy(buildReport(info, codec))
   }, [clipboard, info, codec])
+
+  const handleCheckUpdate = useCallback(async () => {
+    setUpdateChecking(true)
+    setUpdateError(null)
+    setUpdateInfo(null)
+    try {
+      setUpdateInfo(await systemApi.checkUpdate(channel))
+    } catch (err) {
+      setUpdateError(extractErrorMessage(err, '检查更新失败'))
+    } finally {
+      setUpdateChecking(false)
+    }
+  }, [channel])
+
+  // waitForRestart 轮询 /health 等待自更新/回滚后的服务重启，恢复后刷新页面。
+  const waitForRestart = useCallback(async (action: string) => {
+    setRestartMsg(`${action}已触发，等待服务重启…`)
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      if (await systemApi.pingHealth()) {
+        setRestartMsg(`${action}完成，服务已重启，即将刷新页面…`)
+        setTimeout(() => window.location.reload(), 1500)
+        return
+      }
+    }
+    setRestartMsg(`${action}已触发，但等待重启超时，请手动检查服务状态。`)
+  }, [])
+
+  const handleApplyUpdate = useCallback(async () => {
+    if (!window.confirm(`确定更新到 ${updateInfo?.tag}？更新后服务将自动重启。`)) return
+    setUpdateBusy(true)
+    setUpdateError(null)
+    try {
+      await systemApi.applyUpdate(channel)
+      await waitForRestart('更新')
+    } catch (err) {
+      setUpdateError(extractErrorMessage(err, '更新失败'))
+      setUpdateBusy(false)
+    }
+  }, [channel, updateInfo, waitForRestart])
+
+  const handleRollback = useCallback(async () => {
+    if (!window.confirm('确定回滚到上一版本？服务将自动重启。')) return
+    setUpdateBusy(true)
+    setUpdateError(null)
+    try {
+      await systemApi.rollbackUpdate()
+      await waitForRestart('回滚')
+    } catch (err) {
+      setUpdateError(extractErrorMessage(err, '回滚失败'))
+      setUpdateBusy(false)
+    }
+  }, [waitForRestart])
 
   return (
     <Stack gap="md">
@@ -178,6 +239,80 @@ export default function SystemPage() {
           </Card>
         </>
       ) : null}
+
+      {/* 应用更新（FR-46）*/}
+      <Card withBorder padding="md" radius="md">
+        <Group justify="space-between" mb="sm">
+          <Title order={4}>应用更新</Title>
+          <Group gap="xs">
+            <SegmentedControl
+              size="xs"
+              value={channel}
+              onChange={(v) => setChannel(v as 'stable' | 'prerelease')}
+              data={[{ label: '稳定版', value: 'stable' }, { label: '预发布', value: 'prerelease' }]}
+              disabled={updateBusy}
+            />
+            <Button
+              variant="light"
+              color="purple"
+              leftSection={<IconRefresh size={16} />}
+              onClick={handleCheckUpdate}
+              loading={updateChecking}
+              disabled={updateBusy}
+            >
+              检查更新
+            </Button>
+          </Group>
+        </Group>
+
+        {updateError && (
+          <Alert icon={<IconAlertCircle size={16} />} color="red" title="更新出错" mb="sm">
+            {updateError}
+          </Alert>
+        )}
+        {restartMsg && <Alert color="blue" mb="sm">{restartMsg}</Alert>}
+
+        {updateInfo ? (
+          <Stack gap="xs">
+            <InfoRow label="当前版本" value={updateInfo.current} />
+            <InfoRow label="最新版本" value={updateInfo.latest || '—'} />
+            <Group gap="xs">
+              {updateInfo.has_update
+                ? <Badge color="orange">有可用更新</Badge>
+                : <Badge color="green">已是最新</Badge>}
+              {updateInfo.prerelease && <Badge variant="light" color="grape">预发布</Badge>}
+            </Group>
+            {updateInfo.notes && (
+              <Box style={{ maxHeight: 160, overflowY: 'auto' }}>
+                <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>{updateInfo.notes}</Text>
+              </Box>
+            )}
+            <Group gap="xs">
+              <Button
+                color="purple"
+                leftSection={<IconDownload size={16} />}
+                onClick={handleApplyUpdate}
+                loading={updateBusy}
+                disabled={!updateInfo.has_update}
+              >
+                立即更新并重启
+              </Button>
+              <Button
+                variant="default"
+                leftSection={<IconArrowBackUp size={16} />}
+                onClick={handleRollback}
+                disabled={updateBusy}
+              >
+                回滚到上一版
+              </Button>
+            </Group>
+          </Stack>
+        ) : (
+          !updateError && (
+            <Text size="sm" c="dimmed">选择频道后点击「检查更新」，从 GitHub Releases 检测新版本。</Text>
+          )
+        )}
+      </Card>
 
       {/* 编解码器测试 */}
       <Card withBorder padding="md" radius="md">

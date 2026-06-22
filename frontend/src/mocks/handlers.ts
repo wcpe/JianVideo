@@ -501,6 +501,31 @@ export const handlers = [
     })
   }),
 
+  // 自更新（FR-46）
+  http.get('*/api/system/update/check', async ({ request }) => {
+    await delay(150)
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
+    const prerelease = channel === 'prerelease'
+    return HttpResponse.json({
+      current: '0.3.0',
+      latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+      has_update: true,
+      tag: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+      prerelease,
+      channel,
+      notes: '示例发布说明',
+      asset_name: 'jianvideo-linux-amd64',
+    })
+  }),
+  http.post('*/api/system/update/apply', async () => {
+    await delay(100)
+    return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' })
+  }),
+  http.post('*/api/system/update/rollback', async () => {
+    await delay(100)
+    return HttpResponse.json({ status: 'rolling_back', message: '已回滚到上一版本，服务即将重启' })
+  }),
+
   // ─── 运行期设置 ────────────────────────────────────────
 
   http.get('*/api/settings', async () => {

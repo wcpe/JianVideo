@@ -74,6 +74,21 @@ describe('SystemPage', () => {
     })
   })
 
+  it('检查更新后展示最新版本与可更新状态（FR-46）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('0.3.0') // 系统信息加载完成
+
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('v0.6.3')).toBeVisible()
+    })
+    expect(screen.getByText('有可用更新')).toBeVisible()
+    // 有更新时「立即更新并重启」按钮可用
+    expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+  })
+
   it('点击「复制结果」后写入剪贴板并显示已复制反馈', async () => {
     const user = userEvent.setup()
     renderPage()

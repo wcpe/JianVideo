@@ -1,4 +1,4 @@
-import type { SystemInfo, CodecTestResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
 import client from './client'
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -18,6 +18,19 @@ async function realGetSystemInfo(): Promise<SystemInfo> {
 async function realRunCodecTest(): Promise<CodecTestResult> {
   const res = await client.post<CodecTestResult>('/api/system/codec-test')
   return res.data
+}
+
+async function realCheckUpdate(channel: string): Promise<UpdateCheckResult> {
+  const res = await client.get<UpdateCheckResult>('/api/system/update/check', { params: { channel } })
+  return res.data
+}
+
+async function realApplyUpdate(channel: string): Promise<void> {
+  await client.post('/api/system/update/apply', { channel })
+}
+
+async function realRollbackUpdate(): Promise<void> {
+  await client.post('/api/system/update/rollback')
 }
 
 // ─── Mock API 实现 ──────────────────────────────────
@@ -76,6 +89,29 @@ async function mockRunCodecTest(): Promise<CodecTestResult> {
   }
 }
 
+async function mockCheckUpdate(channel: string): Promise<UpdateCheckResult> {
+  await mockDelay(200)
+  const prerelease = channel === 'prerelease'
+  return {
+    current: '0.6.2',
+    latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+    has_update: true,
+    tag: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+    prerelease,
+    channel: prerelease ? 'prerelease' : 'stable',
+    notes: '示例发布说明：修复若干问题。',
+    asset_name: 'jianvideo-linux-amd64',
+  }
+}
+
+async function mockApplyUpdate(_channel: string): Promise<void> {
+  await mockDelay(300)
+}
+
+async function mockRollbackUpdate(): Promise<void> {
+  await mockDelay(300)
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -84,4 +120,27 @@ export function getSystemInfo(): Promise<SystemInfo> {
 
 export function runCodecTest(): Promise<CodecTestResult> {
   return useMock ? mockRunCodecTest() : realRunCodecTest()
+}
+
+export function checkUpdate(channel: string): Promise<UpdateCheckResult> {
+  return useMock ? mockCheckUpdate(channel) : realCheckUpdate(channel)
+}
+
+export function applyUpdate(channel: string): Promise<void> {
+  return useMock ? mockApplyUpdate(channel) : realApplyUpdate(channel)
+}
+
+export function rollbackUpdate(): Promise<void> {
+  return useMock ? mockRollbackUpdate() : realRollbackUpdate()
+}
+
+// pingHealth 探测服务是否在线，用于自更新/回滚重启后轮询恢复。
+export async function pingHealth(): Promise<boolean> {
+  if (useMock) return true
+  try {
+    const res = await client.get('/health', { timeout: 3000 })
+    return res.status === 200
+  } catch {
+    return false
+  }
 }
