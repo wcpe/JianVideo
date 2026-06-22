@@ -9,7 +9,8 @@ import (
 )
 
 // ffmpegPathFromEnvOrPath 在测试环境查找 ffmpeg 可执行文件。
-// 优先级：JIANVIDEO_FFMPEG_PATH 环境变量 > PATH 中的 ffmpeg > Windows 常见安装位置。
+// 优先级：JIANVIDEO_FFMPEG_PATH 环境变量 > PATH 中的 ffmpeg。
+// 自定义安装位置请通过 JIANVIDEO_FFMPEG_PATH 指定，避免在源码中硬编码机器特定的绝对路径。
 func ffmpegPathFromEnvOrPath(t *testing.T) string {
 	t.Helper()
 	if p := os.Getenv("JIANVIDEO_FFMPEG_PATH"); p != "" {
@@ -19,15 +20,6 @@ func ffmpegPathFromEnvOrPath(t *testing.T) string {
 	}
 	if p, err := exec.LookPath("ffmpeg"); err == nil {
 		return p
-	}
-	for _, candidate := range []string{
-		`C:\bin\ffmpeg\bin\ffmpeg.exe`,
-		`C:\Program Files\ffmpeg\bin\ffmpeg.exe`,
-		`/c/bin/ffmpeg/bin/ffmpeg.exe`,
-	} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
 	}
 	return ""
 }
