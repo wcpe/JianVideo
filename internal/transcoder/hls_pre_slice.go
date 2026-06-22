@@ -27,6 +27,47 @@ type PreSliceResult struct {
 	MasterPath string
 }
 
+// PreSliceWithCodec 是带目标编码维度的预切片分发入口（FR-51 播放/转码输出分发点）。
+//
+//   - 目标编码为 h264（或空、未知）→ 调用 PreSlice，走现有多码率 MPEG-TS/HLS 路径（分支实现不动）。
+//   - 目标编码为 h265/av1/vp9 → 走 fMP4/CMAF 路径，输出 init.mp4 + seg_NNN.m4s + index.m3u8。
+//
+// fMP4 路径产物与 HLS 产物同目录策略（hlsDir/{mediaID}/），复用现有静态服务端点。
+// 编码器选取读进程级实测快照（FR-49），无硬件可用时软件兜底。
+func PreSliceWithCodec(
+	ctx context.Context,
+	mediaID int64,
+	inputPath string,
+	srcWidth int,
+	srcHeight int,
+	codec string,
+	hlsMgr *player.HLSManager,
+	hlsDir string,
+) (*PreSliceResult, error) {
+	if SelectOutputPath(codec) == OutputPathTS {
+		return PreSlice(ctx, mediaID, inputPath, srcWidth, srcHeight, hlsMgr, hlsDir)
+	}
+
+	if hlsDir == "" {
+		return nil, fmt.Errorf("hlsDir 不能为空")
+	}
+	outputDir := filepath.Join(hlsDir, fmt.Sprintf("%d", mediaID))
+	var results []EncoderProbeResult
+	if snap := probeSnapshot.Load(); snap != nil {
+		results = *snap
+	}
+	res, err := RunFMP4ToDir(ctx, mediaID, inputPath, codec, outputDir, results)
+	if err != nil {
+		return nil, err
+	}
+	return &PreSliceResult{
+		MediaID:    mediaID,
+		OutputDir:  res.OutputDir,
+		Qualities:  []string{res.Codec},
+		MasterPath: res.ManifestPath,
+	}, nil
+}
+
 // PreSlice 为单个媒体文件同步执行 ffmpeg 多码率切片，输出 HLS 产物到 hlsDir/{mediaID}/。
 //
 // 流程：

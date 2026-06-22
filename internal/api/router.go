@@ -282,12 +282,20 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) 
 }
 
 // detectHLSMimeType 根据 HLS 文件路径返回对应的 Content-Type。
+// 识别 TS（H.264 路径）与 fMP4/CMAF（FR-51 高级编码路径）两类产物。
 func detectHLSMimeType(path string) string {
-	if strings.HasSuffix(path, ".m3u8") {
+	switch {
+	case strings.HasSuffix(path, ".m3u8"):
 		return "application/vnd.apple.mpegurl"
-	}
-	if strings.HasSuffix(path, ".ts") {
+	case strings.HasSuffix(path, ".ts"):
 		return "video/mp2t"
+	case strings.HasSuffix(path, ".m4s"):
+		// fMP4/CMAF media segment（moof+mdat）
+		return "video/iso.segment"
+	case strings.HasSuffix(path, ".mp4"):
+		// fMP4/CMAF init segment（含 moov）
+		return "video/mp4"
+	default:
+		return "application/octet-stream"
 	}
-	return "application/octet-stream"
 }

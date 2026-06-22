@@ -316,7 +316,7 @@
 
 - 上述各家族另探测 AV1（`av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_vaapi`/`av1_vulkan`/`libsvtav1`）与 VP9（`vp9_qsv`/`vp9_vaapi`/`libvpx-vp9`）等高级编码并如实展示。
 - **转码目标编码可配置（FR-50，见 [ADR-0034](adr/0034-configurable-target-codec.md)，扩展 ADR-0003 而非推翻）**：服务端以 `settings` 表持久化「首选目标编码优先级」（键 `transcode_codec_priority`，JSON 数组，如 `["av1","h265","h264"]`），写入时按 FR-49 实测可输出集校验。单/多码率管道按所选编码参数化输出——编码器名由 `SelectEncoderForCodec(results, codec)` 选取，像素格式与关键参数由纯函数 `CodecOutputParams(codec)`（h264/h265/av1/vp9）映射，替代原先硬编 H.264。**默认仍 H.264**（未配置 / 非法回落 `["h264"]`，`NewPipeline()` 等价 `NewPipelineForCodec("h264")`，参数字节级不变，mpegts.js 可播）。
-- **输出容器不随编码改变**：playback 仍 `-f mpegts`、ABR 仍 `-f hls`（FR-06 播放路径不动）。故非 H.264 编码当前不保证端到端可播（MPEG-TS 无 AV1/VP9 标准流类型，AV1 over TS 被 ffprobe 探测为 `bin_data`）；高级编码的容器与播放路径属 FR-51/52（第五期）。
+- **播放/转码输出分发（FR-51，见 §5.4）**：`SelectOutputPath(codec)` 纯函数按目标编码分发——`h264`（含空、未知）走现有 **MPEG-TS/HLS** 路径（mpegts.js 内核，分支实现不动）；`h265`/`av1`/`vp9` 走新增的 **fMP4/CMAF + 原生 MSE** 路径（见 [ADR-0035](adr/0035-fmp4-mse-playback-path.md)）。fMP4 编码器经 `SelectFMP4Encoder` 复用 §5.6 实测快照按硬件优先级选取，无硬件可用时软件兜底（`libx265`/`libsvtav1`/`libvpx-vp9`）。MPEG-TS 无 AV1/VP9 标准流类型（AV1 over TS 被 ffprobe 探测为 `bin_data`），故高级编码统一走 fMP4 路径；端到端可播仍需前端自适应播放器（FR-52）与协商（FR-53）。
 - Intel 核显检测：通过 sysfs（`/sys/class/drm/card0/device/vendor` = `0x8086`）+ 驱动名（`i915`/`xe`）+ 无独立显存确认核显身份。
 - 硬件检测优先级：CUDA → QSV → VAAPI → D3D11VA → DXVA2 → VideoToolbox → Vulkan → 软件。
 - 硬件加速失败时自动降级，不中断播放。
@@ -327,6 +327,15 @@
 - mpegts.js 通过 HTTP Range 请求获取最新切片数据。
 - 播放器轮询 m3u8 索引文件，检测到新切片时自动追加到 MSE 缓冲区。
 - 追播延迟控制：播放器保持 3-5 秒的缓冲距离。
+- 以上为 **H.264 路径**（[ADR-0003](adr/0003-hls-ts-streaming.md)/[ADR-0004](adr/0004-mpegts-js-player.md)，播放内核锁定 mpegts.js，本路径承载追播/边下边播/Seek，不变）。
+
+#### 5.4.1 高级编码 fMP4/CMAF 输出路径（FR-51）
+
+- **扩展而非取代播放内核**：H.264 维持 mpegts.js + MPEG-TS + HLS 不动；非 H.264（H.265/AV1/VP9）走新增的 **fMP4/CMAF 分片 + 浏览器原生 MSE** 路径（见 [ADR-0035](adr/0035-fmp4-mse-playback-path.md)）。fMP4 容器不是 TS，不触犯「禁止用原生 video/MSE 播 TS 流」红线，且与 FR-16「不走 TS 的直出场景允许原生 video」自洽。
+- **产物**：`RunFMP4ToDir` 用外部 ffmpeg（`-f hls -hls_segment_type fmp4 -hls_playlist_type vod`）产出 HLS-fMP4（CMAF）——init segment `init.mp4`（含 `moov`）+ media segments `seg_NNN.m4s`（`moof`+`mdat`）+ 清单 `index.m3u8`（`EXT-X-MAP` + `EXTINF` + `EXT-X-ENDLIST`，VOD）。强制 8-bit `yuv420p`、固定 GOP（与 TS 路径同策略）；HEVC 打 `-tag:v hvc1`（Safari/MSE 兼容）；音频统一转 AAC（fMP4 不能 copy 裸流任意编码）。
+- **前端契约（FR-52 消费）**：容器 fMP4/CMAF；codec MIME 串由 `FMP4CodecMIME` 给出（H.265 `video/mp4; codecs="hvc1.1.6.L93.B0"`、AV1 `av01.0.05M.08`、VP9 `vp09.00.10.08`）；URL 沿用 `/api/play/hls/{mediaID}/{index.m3u8|init.mp4|seg_NNN.m4s}`（静态服务，`.m4s`→`video/iso.segment`、init `.mp4`→`video/mp4`）。
+- **追播边界**：本路径仅 **VOD（转码完成后整段播放）**，**不**实现实时追播/边下边播（实时 fMP4 追播复杂度高、属前端协同与后续阶段，不在本期）。H.264 路径追播能力不受影响。
+- **与 FR-50 重叠点**：本路径接收一个「目标编码」入参产出对应 fMP4；目标编码优先级的持久化设置属 FR-50，整合时由 FR-50 设置层产出目标编码喂入。
 
 ### 5.5 多码率自适应（ABR）
 
