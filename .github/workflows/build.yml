@@ -38,8 +38,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: 构建前端（供 go:embed 内嵌）
+        # 用 npm install 而非 npm ci：package-lock 在 Windows 生成，缺 Linux 平台的可选依赖
+        # （@emnapi/* 等 napi WASM 垫片），npm ci 的严格同步校验在 Linux runner 会失败；
+        # npm install 按目标平台重新解析依赖，跨平台可靠（牺牲少量可复现性，可接受）。
         run: |
-          npm --prefix frontend ci
+          npm --prefix frontend install --no-audit --no-fund
           npm --prefix frontend run build
       - name: 编译单二进制（CGO 原生 + 注入版本号）
         shell: bash

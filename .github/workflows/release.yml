@@ -1,13 +1,15 @@
 # 正式发布工作流（FR-47）。
-# 触发：VERSION 文件变更并 push 到 main —— 按版本号自动建 tag vX.Y.Z，
+# 触发：推送版本 tag（如 v0.7.0）即发布；亦可在 Actions 页手动触发（workflow_dispatch）。
+# 说明：原「VERSION 变更 push 到 main」触发对「仅改提交消息」的历史改写不生效（无文件变更），
+# 故改用 tag 推送触发——推版本 tag 一定触发，是 GitHub 标准发布模式（见 ADR-0032）。
 # 经可复用 build.yml 在 ubuntu/windows 原生 runner 各自 CGO 原生构建（不交叉编译、不引 Docker，见 ADR-0032/0027），
 # 汇总各平台二进制 + sha256，创建正式 GitHub Release（非预发布）。
 name: 正式发布
 
 on:
   push:
-    branches: [main]
-    paths: ['VERSION']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
 
 # 创建 tag 与 Release 需要写权限。
 permissions:

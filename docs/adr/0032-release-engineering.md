@@ -10,7 +10,7 @@
 
 ## 决策
 1. **构建分发走 GitHub Actions 原生 runner 矩阵**：`ubuntu-latest`（linux/amd64）+ `windows-latest`（windows/amd64）各自 `CGO_ENABLED=1` 原生编译（前端 `npm build` → `go:embed` → `go build` 注入版本），**不引入 Docker、不交叉编译**。
-2. **正式发布（FR-47）**：`VERSION` 文件变更 push 到 main 即按版本号建 tag `vX.Y.Z` + 矩阵构建 + 创建 GitHub Release（`prerelease: false`），上传各平台二进制 + `checksums.txt`（sha256）。
+2. **正式发布（FR-47）**：推送版本 tag `vX.Y.Z`（亦可在 Actions 页手动触发）即矩阵构建 + 创建 GitHub Release（`prerelease: false`），上传各平台二进制 + `checksums.txt`（sha256）。采用 tag 推送触发（而非 VERSION 变更触发）——推 tag 一定触发、是 GitHub 标准发布模式，且对「仅改提交消息」的历史改写仍可靠生效。
 3. **预发布（FR-48）**：普通代码 push 到 main（排除 VERSION/文档变更）滚动刷新 `dev` 预发布（`prerelease: true`），上传最新主干产物。
 4. **二进制自更新（FR-46）**：服务器端鉴权后经 GitHub Releases API 检测版本（稳定 / 可切预发布频道）→ 按 `GOOS/GOARCH` 选资产 → 下载 → 校验 `checksums.txt` 的 sha256 → 原子替换（Windows 用「改名旧 exe + 落新 exe + 重启」绕开运行中文件锁）→ 自动重启 → 保留上一版二进制可回滚。
 
