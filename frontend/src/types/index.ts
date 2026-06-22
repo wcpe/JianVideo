@@ -37,6 +37,18 @@ export interface MediaFile {
   watched?: boolean
   /** 最近一次观看时间（FR-44），旧数据可能缺省 */
   last_watched_at?: string | null
+
+  /** 媒体时间与 EXIF（FR-31 提取、FR-38 展示），旧数据可能缺省 */
+  media_time?: string | null
+  /** 媒体时间来源：exif / filename / created / modified */
+  media_time_source?: string
+  camera?: string
+  lens?: string
+  aperture?: string
+  shutter?: string
+  iso?: number
+  gps_lat?: number
+  gps_lon?: number
 }
 
 /** 标签（FR-41） */

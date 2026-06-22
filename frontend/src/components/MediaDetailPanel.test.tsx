@@ -59,6 +59,27 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/play/9')
   })
 
+  it('有 EXIF 时展示拍摄信息与外部地图链接（FR-38），无 EXIF 时不展示', async () => {
+    const { unmount } = renderPanel([mediaFile({
+      id: 5, file_name: '照片.jpg',
+      media_time: '2023-05-01T08:30:00Z', media_time_source: 'exif',
+      camera: 'Sony A7', lens: 'FE 35mm', aperture: 'f/1.8', shutter: '1/200', iso: 100,
+      gps_lat: 31.23, gps_lon: 121.47,
+    })], 0)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Sony A7/)).toBeInTheDocument()
+    expect(within(dialog).getByText('ISO')).toBeInTheDocument()
+    const mapLink = within(dialog).getByRole('link', { name: /在外部地图打开/ })
+    expect(mapLink).toHaveAttribute('href', expect.stringContaining('mlat=31.23'))
+    expect(mapLink).toHaveAttribute('target', '_blank')
+    unmount()
+
+    // 无 EXIF：不渲染相机/地图链接
+    renderPanel([mediaFile({ id: 6, file_name: '无exif.jpg' })], 0)
+    const dialog2 = await screen.findByRole('dialog')
+    expect(within(dialog2).queryByRole('link', { name: /在外部地图打开/ })).not.toBeInTheDocument()
+  })
+
   it('上一项/下一项在已加载列表内切换并在端点夹紧', async () => {
     const user = userEvent.setup()
     const files = [

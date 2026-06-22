@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Group, Stack, Button, ActionIcon, Text, Box, ScrollArea, Divider, Tooltip } from '@mantine/core'
+import { Modal, Group, Stack, Button, ActionIcon, Text, Box, ScrollArea, Divider, Tooltip, Anchor } from '@mantine/core'
 import {
   IconChevronLeft, IconChevronRight, IconX, IconMaximize, IconMinimize,
   IconDownload, IconPlayerPlay,
@@ -37,6 +37,16 @@ function formatTime(s?: string | null): string {
   if (!s) return ''
   const d = new Date(s)
   return isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
+
+// 媒体时间来源中文标注（FR-38）
+const MEDIA_TIME_SOURCE_LABEL: Record<string, string> = {
+  exif: 'EXIF', filename: '文件名', created: '创建时间', modified: '修改时间',
+}
+
+/** 是否含可展示的 EXIF 信息（FR-38） */
+function hasExif(f: MediaFile): boolean {
+  return !!(f.media_time || f.camera || f.lens || f.aperture || f.shutter || (f.iso ?? 0) > 0 || (f.gps_lat ?? 0) !== 0 || (f.gps_lon ?? 0) !== 0)
 }
 
 /**
@@ -163,6 +173,37 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             <Divider my={4} />
             <DetailRow label="加入时间" value={formatTime(file.added_at)} />
             <DetailRow label="修改时间" value={formatTime(file.modified_at)} />
+
+            {/* EXIF 信息（FR-38）：有数据才展示 */}
+            {hasExif(file) && (
+              <>
+                <Divider my={4} label="EXIF" labelPosition="left" />
+                <DetailRow
+                  label="拍摄时间"
+                  value={file.media_time ? `${formatTime(file.media_time)}${file.media_time_source ? `（${MEDIA_TIME_SOURCE_LABEL[file.media_time_source] ?? file.media_time_source}）` : ''}` : ''}
+                />
+                <DetailRow label="相机" value={file.camera} />
+                <DetailRow label="镜头" value={file.lens} />
+                <DetailRow label="光圈" value={file.aperture} />
+                <DetailRow label="快门" value={file.shutter} />
+                <DetailRow label="ISO" value={(file.iso ?? 0) > 0 ? file.iso : ''} />
+                {((file.gps_lat ?? 0) !== 0 || (file.gps_lon ?? 0) !== 0) && (
+                  <>
+                    <DetailRow label="GPS" value={`${file.gps_lat?.toFixed(6)}, ${file.gps_lon?.toFixed(6)}`} />
+                    <Group justify="flex-end">
+                      <Anchor
+                        href={`https://www.openstreetmap.org/?mlat=${file.gps_lat}&mlon=${file.gps_lon}#map=15/${file.gps_lat}/${file.gps_lon}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="sm"
+                      >
+                        在外部地图打开
+                      </Anchor>
+                    </Group>
+                  </>
+                )}
+              </>
+            )}
 
             <Divider my="sm" />
             <Button
