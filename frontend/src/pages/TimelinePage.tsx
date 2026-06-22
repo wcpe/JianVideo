@@ -7,6 +7,7 @@ import { useInfiniteMedia } from '@/hooks/useInfiniteMedia'
 import { useScanProgress } from '@/hooks/useScanProgress'
 import TimelineView from '@/components/TimelineView'
 import MediaFilterBar from '@/components/MediaFilterBar'
+import MediaQueryFilters from '@/components/MediaQueryFilters'
 import ContinueWatching from '@/components/ContinueWatching'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import { extractErrorMessage } from '@/utils/error'
@@ -20,7 +21,12 @@ export default function TimelinePage() {
   // 收藏/标签筛选（FR-41）
   const [favorite, setFavorite] = useState(false)
   const [tagId, setTagId] = useState(0)
-  const infinite = useInfiniteMedia({ favorite, tagId })
+  // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
+  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('')
+  const [sizeMin, setSizeMin] = useState(0)
+  const [timeFrom, setTimeFrom] = useState('')
+  const [timeTo, setTimeTo] = useState('')
+  const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo })
   const paths = useLibraryPaths(undefined)
   const exts = paths.customImageExtensions
   // 扫描完成后重载第一页
@@ -49,9 +55,9 @@ export default function TimelinePage() {
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
       <ContinueWatching />
 
-      {/* 搜索 */}
+      {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词） */}
       <TextInput
-        placeholder="搜索文件名..."
+        placeholder="搜索：文件名，或 ext:jpg type:image size:>10mb"
         leftSection={<IconSearch size={14} />}
         value={infinite.searchInput}
         onChange={(e) => infinite.setSearchInput(e.target.value)}
@@ -64,6 +70,18 @@ export default function TimelinePage() {
         onFavoriteChange={setFavorite}
         tagId={tagId}
         onTagIdChange={setTagId}
+      />
+
+      {/* 结构化筛选（FR-36）：类型 / 大小 / 拍摄时间范围 */}
+      <MediaQueryFilters
+        mediaType={mediaType}
+        onMediaTypeChange={setMediaType}
+        sizeMin={sizeMin}
+        onSizeMinChange={setSizeMin}
+        timeFrom={timeFrom}
+        onTimeFromChange={setTimeFrom}
+        timeTo={timeTo}
+        onTimeToChange={setTimeTo}
       />
 
       <TimelineView

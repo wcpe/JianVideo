@@ -8,6 +8,11 @@ interface UseInfiniteMediaOptions {
   // 收藏/标签筛选（FR-41）：favorite=true 仅收藏，tagId>0 仅含该标签
   favorite?: boolean
   tagId?: number
+  // 结构化筛选（FR-35/36）：类型 / 最小大小（字节）/ 拍摄时间范围（YYYY-MM-DD）
+  mediaType?: 'image' | 'video' | ''
+  sizeMin?: number
+  timeFrom?: string
+  timeTo?: string
 }
 
 /**
@@ -16,7 +21,8 @@ interface UseInfiniteMediaOptions {
  * search 变化时重置并从第一页重新累积。
  */
 export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
-  const { pageSize = 60, sort = 'time_desc', favorite = false, tagId = 0 } = options
+  const { pageSize = 60, sort = 'time_desc', favorite = false, tagId = 0,
+    mediaType = '', sizeMin = 0, timeFrom = '', timeTo = '' } = options
 
   const [items, setItems] = useState<MediaFile[]>([])
   const [total, setTotal] = useState(0)
@@ -52,6 +58,10 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
         sort,
         favorite: favorite || undefined,
         tag_id: tagId || undefined,
+        type: mediaType || undefined,
+        size_min: sizeMin || undefined,
+        time_from: timeFrom || undefined,
+        time_to: timeTo || undefined,
       })
       setTotal(res.total)
       setItems((prev) => {
@@ -67,7 +77,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
       setLoading(false)
       fetchingRef.current = false
     }
-  }, [pageSize, sort, favorite, tagId])
+  }, [pageSize, sort, favorite, tagId, mediaType, sizeMin, timeFrom, timeTo])
 
   // 搜索防抖 400ms
   useEffect(() => {

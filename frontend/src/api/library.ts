@@ -55,9 +55,14 @@ async function realDeleteLibraryPath(id: number): Promise<void> {
   await client.delete(`/api/library/paths/${id}`)
 }
 
-async function realGetMediaFiles(params: {
+// 媒体列表查询参数（FR-41 收藏/标签 + FR-35/36 结构化筛选与表达式搜索）
+export interface MediaListParams {
   library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number
-} = {}): Promise<MediaListResponse> {
+  // FR-35/36 结构化筛选
+  type?: 'image' | 'video'; size_min?: number; size_max?: number; time_from?: string; time_to?: string; path?: string
+}
+
+async function realGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
   const res = await client.get<MediaListResponse>('/api/library/media', { params })
   return res.data
 }
@@ -231,9 +236,7 @@ async function mockDeleteLibraryPath(id: number): Promise<void> {
   }
 }
 
-async function mockGetMediaFiles(params: {
-  library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number
-} = {}): Promise<MediaListResponse> {
+async function mockGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
   await mockDelay(200)
   const { page = 1, page_size = 20, search, sort, favorite, tag_id } = params
   // 常规列表排除已软删项（FR-25）
@@ -485,7 +488,7 @@ async function mockBrowseDirectory(libraryID: number, parentPath: string): Promi
 export function getLibraryPaths() { return useMock ? mockGetLibraryPaths() : realGetLibraryPaths() }
 export function createLibraryPath(p: string, t = 'local', l = '') { return useMock ? mockCreateLibraryPath(p, t, l) : realCreateLibraryPath(p, t, l) }
 export function deleteLibraryPath(id: number) { return useMock ? mockDeleteLibraryPath(id) : realDeleteLibraryPath(id) }
-export function getMediaFiles(params?: { library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number }) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
+export function getMediaFiles(params?: MediaListParams) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }

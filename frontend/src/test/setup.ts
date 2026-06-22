@@ -45,6 +45,17 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   configurable: true,
 });
 
+// Mantine SegmentedControl 等需要 MutationObserver（jsdom 不提供，给个空实现）
+Object.defineProperty(globalThis, 'MutationObserver', {
+  value: class {
+    observe() {}
+    disconnect() {}
+    takeRecords() { return []; }
+  },
+  writable: true,
+  configurable: true,
+});
+
 // Mantine 需要 matchMedia
 Object.defineProperty(globalThis.window, 'matchMedia', {
   writable: true,

@@ -53,6 +53,40 @@ describe('TimelinePage 收藏与标签筛选（FR-41）', () => {
     })
   })
 
+  it('选择类型「图片」后媒体请求带上 type=image（FR-36）', async () => {
+    const typeParams: (string | null)[] = []
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        typeParams.push(new URL(request.url).searchParams.get('type'))
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 60 })
+      }),
+      http.get('*/api/library/tags', () => HttpResponse.json({ items: [] })),
+    )
+
+    renderPage()
+    await waitFor(() => expect(typeParams.length).toBeGreaterThan(0))
+
+    await userEvent.click(await screen.findByRole('radio', { name: '图片' }))
+    await waitFor(() => expect(typeParams).toContain('image'))
+  })
+
+  it('选择最小大小后媒体请求带上 size_min（FR-36）', async () => {
+    const sizeParams: (string | null)[] = []
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        sizeParams.push(new URL(request.url).searchParams.get('size_min'))
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 60 })
+      }),
+      http.get('*/api/library/tags', () => HttpResponse.json({ items: [] })),
+    )
+
+    renderPage()
+    await waitFor(() => expect(sizeParams.length).toBeGreaterThan(0))
+
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: '最小大小' }), String(10 * (1 << 20)))
+    await waitFor(() => expect(sizeParams).toContain(String(10 * (1 << 20))))
+  })
+
   it('选择标签后媒体请求带上 tag_id', async () => {
     const tagParams: (string | null)[] = []
     server.use(
