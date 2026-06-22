@@ -49,16 +49,31 @@ func fetchReleases(ctx context.Context, client *http.Client, baseURL, owner, rep
 	return rels, nil
 }
 
-// selectRelease 按频道选目标 Release：始终跳过 draft；
-// includePrerelease=true 取最新（含预发布），否则取最新正式版。无匹配返回 nil。
-func selectRelease(rels []Release, includePrerelease bool) *Release {
+// selectRelease 按频道选目标 Release（跳过 draft）：
+// wantPrerelease=false（正式版）选最新正式版（!prerelease）；
+// wantPrerelease=true（测试版）选最新预发布（prerelease==true，即 CI 的滚动 dev）。
+// 注意：不能取「最新整体」——GitHub 列表里正式版可能排在预发布之前，会让测试版误取正式版。
+func selectRelease(rels []Release, wantPrerelease bool) *Release {
 	for i := range rels {
 		if rels[i].Draft {
 			continue
 		}
-		if includePrerelease || !rels[i].Prerelease {
+		if rels[i].Prerelease == wantPrerelease {
 			return &rels[i]
 		}
 	}
 	return nil
+}
+
+// releaseVersion 返回用于比较/展示的版本号：tag 本身是语义版本则用 tag；
+// 否则（如滚动预发布的 "dev" tag）从 release 名提取内嵌语义版本（CI 在名中写了完整版本，
+// 如「开发预览（dev · 0.7.0-dev.abc1234）」）。
+func releaseVersion(rel *Release) string {
+	if parseVersion(rel.TagName).ok {
+		return rel.TagName
+	}
+	if v := extractSemverish(rel.Name); v != "" {
+		return v
+	}
+	return rel.TagName
 }

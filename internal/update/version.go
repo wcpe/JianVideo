@@ -1,9 +1,18 @@
 package update
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// semverishPattern 匹配形如 1.2.3 或 1.2.3-dev.abc1234 的语义版本子串。
+var semverishPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.\-]+)?`)
+
+// extractSemverish 从任意文本（如 release 名）中提取首个语义版本子串；无则返回空串。
+func extractSemverish(s string) string {
+	return semverishPattern.FindString(s)
+}
 
 // parsedVersion 解析后的版本：主/次/修订三段 + 预发布标识。
 type parsedVersion struct {

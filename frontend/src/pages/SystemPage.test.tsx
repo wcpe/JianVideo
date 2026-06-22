@@ -89,6 +89,22 @@ describe('SystemPage', () => {
     expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
   })
 
+  it('切换到测试版后检查更新走预发布频道（FR-46）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    // 切到「测试版」频道（Mantine SegmentedControl 点标签文本）
+    await user.click(screen.getByText('测试版'))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+
+    // 预发布频道应返回 dev 内嵌版本 + 预发布标记
+    await waitFor(() => {
+      expect(screen.getByText('v0.6.3-dev.abc1234')).toBeVisible()
+    })
+    expect(screen.getByText('预发布')).toBeVisible()
+  })
+
   it('点击「复制结果」后写入剪贴板并显示已复制反馈', async () => {
     const user = userEvent.setup()
     renderPage()

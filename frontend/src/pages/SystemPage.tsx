@@ -5,6 +5,7 @@ import {
 import { useClipboard } from '@mantine/hooks'
 import { IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp } from '@tabler/icons-react'
 import * as systemApi from '@/api/system'
+import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
 
@@ -86,6 +87,18 @@ export default function SystemPage() {
     return () => { active = false }
   }, [])
 
+  // 加载持久化的更新频道（正式版/测试版），读失败回退 stable
+  useEffect(() => {
+    let active = true
+    getSettings()
+      .then((s) => {
+        const ch = s[SETTING_KEY_UPDATE_CHANNEL]
+        if (active && (ch === 'prerelease' || ch === 'stable')) setChannel(ch)
+      })
+      .catch(() => { /* 读失败用默认 stable */ })
+    return () => { active = false }
+  }, [])
+
   const handleCodecTest = useCallback(async () => {
     setCodecLoading(true)
     setCodecError(null)
@@ -114,6 +127,15 @@ export default function SystemPage() {
       setUpdateChecking(false)
     }
   }, [channel])
+
+  // 切换并持久化更新频道（正式版/测试版），清空旧检查结果
+  const handleChannelChange = useCallback((v: string) => {
+    const ch: 'stable' | 'prerelease' = v === 'prerelease' ? 'prerelease' : 'stable'
+    setChannel(ch)
+    setUpdateInfo(null)
+    setUpdateError(null)
+    updateSettings({ [SETTING_KEY_UPDATE_CHANNEL]: ch }).catch(() => { /* 持久化失败不阻塞使用 */ })
+  }, [])
 
   // waitForRestart 轮询 /health 等待自更新/回滚后的服务重启，恢复后刷新页面。
   const waitForRestart = useCallback(async (action: string) => {
@@ -248,8 +270,8 @@ export default function SystemPage() {
             <SegmentedControl
               size="xs"
               value={channel}
-              onChange={(v) => setChannel(v as 'stable' | 'prerelease')}
-              data={[{ label: '稳定版', value: 'stable' }, { label: '预发布', value: 'prerelease' }]}
+              onChange={handleChannelChange}
+              data={[{ label: '正式版', value: 'stable' }, { label: '测试版', value: 'prerelease' }]}
               disabled={updateBusy}
             />
             <Button

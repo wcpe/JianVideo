@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -92,13 +93,29 @@ func (s *Service) Check(ctx context.Context, current, channel string) (*CheckRes
 	if rel == nil {
 		return res, nil
 	}
-	res.Latest, res.Tag, res.Prerelease, res.Notes = rel.TagName, rel.TagName, rel.Prerelease, rel.Body
+	latest := releaseVersion(rel)
+	res.Latest, res.Tag, res.Prerelease, res.Notes = latest, rel.TagName, rel.Prerelease, rel.Body
 	if bin != nil {
 		res.AssetName = bin.Name
 	}
-	// 有更新需同时满足：版本更新 且 该平台有可下载产物
-	res.HasUpdate = bin != nil && isNewer(rel.TagName, current)
+	// 有更新需同时满足：按频道判定有更新 且 该平台有可下载产物
+	res.HasUpdate = bin != nil && hasUpdate(latest, current, ch)
 	return res, nil
+}
+
+// hasUpdate 判断目标版本相对当前版本是否应提示更新。
+// 正式版（stable）：按语义版本比较，仅更高才提示。
+// 测试版（prerelease，dev 滚动）：只要最新预发布版本与当前不同即提示——
+// 既支持从正式版切到测试版，也支持 dev→更新的 dev；同一 dev 则不提示。
+func hasUpdate(latest, current string, ch Channel) bool {
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return false
+	}
+	if ch == ChannelPrerelease {
+		return latest != strings.TrimSpace(current)
+	}
+	return isNewer(latest, current)
 }
 
 // Apply 下载目标频道最新版、校验 sha256 后替换二进制并重启。
@@ -112,7 +129,7 @@ func (s *Service) Apply(ctx context.Context, current, channel string) error {
 	if rel == nil {
 		return fmt.Errorf("该频道无可用发布")
 	}
-	if !isNewer(rel.TagName, current) {
+	if !hasUpdate(releaseVersion(rel), current, ch) {
 		return fmt.Errorf("已是最新版本")
 	}
 	if bin == nil {

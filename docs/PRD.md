@@ -83,7 +83,7 @@
 | FR-43 | 分享链接：token 化只读公开访问指定媒体/相册，带过期与范围，免登访问；作为鉴权的受控例外，依赖 FR-13 鉴权修复 | P2 | 已交付@v0.5.0 |
 | FR-44 | 续播与观看状态：持久化每媒体上次播放位置 + 已看/未看标记 + 首页「继续观看」 | P2 | 已交付@v0.4.0 |
 | FR-45 | 移动端 PWA：vite-plugin-pwa（manifest + Service Worker，可安装到主屏 + 离线壳）+ 响应式细节完善 | P2 | 已交付@v0.6.2（真机浏览器：SW 注册并 activated + manifest 可安装 + 离线壳从缓存渲染、断网时 API 正确失败；物理手机加主屏属 OS 级手势） |
-| FR-46 | 远程自更新：服务器 UI 鉴权后检测 GitHub releases（稳定 + 可切预发布频道），下载对应平台产物并校验 checksum 后替换二进制、自动重启，保留旧二进制可回滚 | P4 | 开发中（后端 internal/update + 前端 UI + 单测完成；对真实 Release 的端到端替换/重启/回滚待 push 后真机验） |
+| FR-46 | 远程自更新：服务器 UI 鉴权后检测 GitHub releases（正式版=最新正式 release / 测试版=最新预发布 dev，频道持久化于设置），下载对应平台产物并校验 checksum 后替换二进制、自动重启，保留旧二进制可回滚 | P4 | 开发中（后端 internal/update + 前端 UI + 单测完成；正式/测试频道区分已对真实仓库验证检测命中；端到端替换/重启/回滚待真机验） |
 | FR-47 | 正式发布 CI：GitHub Actions 按版本号自动打 tag，windows/linux 原生 runner 构建（前端 embed + 版本注入），创建 GitHub Release（产物 + checksums） | P4 | 计划 |
 | FR-48 | 预发布 CI：GitHub Actions 普通 push 触发多平台构建，发布 prerelease（标 prerelease，上传打包产物） | P4 | 计划 |
 

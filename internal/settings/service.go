@@ -20,6 +20,8 @@ const (
 	KeyRecycleBinPaths = "recycle_bin_paths"
 	// KeyScanInterval 定时扫描周期（秒），值为字符串形式的整数。
 	KeyScanInterval = "scan_interval"
+	// KeyUpdateChannel 自更新频道：stable=正式版（正式 release）/ prerelease=测试版（最新预发布 dev）。
+	KeyUpdateChannel = "update_channel"
 )
 
 // Service 运行期设置业务逻辑。

@@ -107,3 +107,59 @@ func TestApply_RejectsWhenNotNewer(t *testing.T) {
 		t.Errorf("非更新版本应拒绝，得到 err=%v", err)
 	}
 }
+
+// devReleaseList 构造 CI 风格列表：正式版 v0.7.0 在前、滚动 dev 预发布在后
+// （模拟 GitHub 把正式版排在预发布之前——用户实际遇到的顺序），dev 名内嵌完整版本。
+func devReleaseList(stableTag, devEmbedded string) func(base string) []Release {
+	return func(b string) []Release {
+		mk := func(tag string, pre bool, name string) Release {
+			return Release{TagName: tag, Prerelease: pre, Name: name, Assets: []Asset{
+				{Name: platAsset(), URL: b + "/dl/" + platAsset()},
+				{Name: checksumsFileName, URL: b + "/sums"},
+			}}
+		}
+		return []Release{
+			mk(stableTag, false, stableTag),
+			mk("dev", true, "开发预览（dev · "+devEmbedded+"）"),
+		}
+	}
+}
+
+// TestCheck_PrereleaseSelectsDevNotNewestStable 回归核心 bug：
+// 即便正式版排在列表最前，测试版频道也要选「最新预发布」（dev）而非最新整体。
+func TestCheck_PrereleaseSelectsDevNotNewestStable(t *testing.T) {
+	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
+
+	// 测试版：选 dev，latest 取内嵌版本，相对正式版 0.7.0 视为有更新（可切换）
+	res, err := s.Check(context.Background(), "0.7.0", "prerelease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Latest != "0.7.0-dev.abc1234" || !res.Prerelease || !res.HasUpdate {
+		t.Fatalf("测试版应选 dev 内嵌版本且有更新，得到 %+v", res)
+	}
+	// 正式版：仍选 v0.7.0，当前即 0.7.0 → 无更新
+	st, _ := s.Check(context.Background(), "0.7.0", "stable")
+	if st.Latest != "v0.7.0" || st.HasUpdate {
+		t.Errorf("正式版应选 v0.7.0 且无更新，得到 %+v", st)
+	}
+}
+
+// TestCheck_PrereleaseSameDevNoUpdate 已在最新 dev 时测试版不应再提示更新。
+func TestCheck_PrereleaseSameDevNoUpdate(t *testing.T) {
+	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
+	res, _ := s.Check(context.Background(), "0.7.0-dev.abc1234", "prerelease")
+	if res.HasUpdate {
+		t.Errorf("已在最新 dev 不应提示更新，得到 %+v", res)
+	}
+}
+
+// TestReleaseVersion 校验：语义 tag 原样用；非语义 tag（dev）从名提取内嵌版本。
+func TestReleaseVersion(t *testing.T) {
+	if v := releaseVersion(&Release{TagName: "v0.7.0"}); v != "v0.7.0" {
+		t.Errorf("语义 tag 应原样返回，得到 %q", v)
+	}
+	if v := releaseVersion(&Release{TagName: "dev", Name: "开发预览（dev · 0.7.0-dev.abc1234）"}); v != "0.7.0-dev.abc1234" {
+		t.Errorf("dev 应从名提取内嵌版本，得到 %q", v)
+	}
+}

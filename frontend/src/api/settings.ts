@@ -7,6 +7,8 @@ const useMock = import.meta.env.VITE_USE_MOCK === 'true'
 // 已知设置键，与后端 internal/settings 常量保持一致。
 export const SETTING_KEY_RECYCLE_BIN_PATHS = 'recycle_bin_paths'
 export const SETTING_KEY_SCAN_INTERVAL = 'scan_interval'
+// 更新频道：stable=正式版（拉正式 release）/ prerelease=测试版（拉最新预发布 dev）
+export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel'
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
@@ -30,6 +32,7 @@ async function realUpdateSettings(values: SettingsMap): Promise<SettingsMap> {
 const mockStore: SettingsMap = {
   [SETTING_KEY_SCAN_INTERVAL]: '3600',
   [SETTING_KEY_RECYCLE_BIN_PATHS]: '{"D":"D:/.recycle"}',
+  [SETTING_KEY_UPDATE_CHANNEL]: 'stable',
 }
 
 async function mockGetSettings(): Promise<SettingsMap> {

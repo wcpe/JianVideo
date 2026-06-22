@@ -7,14 +7,30 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/wcpe/JianVideo/internal/settings"
 )
 
+// resolveUpdateChannel 解析更新频道：显式参数优先；否则读持久化设置（FR-46 测试/正式频道），
+// 都没有时回退正式版（stable）。让「检查/更新」按用户持久化的频道走。
+func (h *Handler) resolveUpdateChannel(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if h.settings != nil {
+		if v, err := h.settings.Get(settings.KeyUpdateChannel); err == nil && v != "" {
+			return v
+		}
+	}
+	return "stable"
+}
+
 // CheckUpdate GET /api/system/update/check?channel=stable|prerelease
-// 检测 GitHub Releases 是否有可应用的新版本（FR-46）。
+// 检测 GitHub Releases 是否有可应用的新版本（FR-46）。channel 省略时用持久化设置。
 func (h *Handler) CheckUpdate(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	res, err := h.updateSvc.Check(ctx, h.versionOrDefault(), c.Query("channel"))
+	res, err := h.updateSvc.Check(ctx, h.versionOrDefault(), h.resolveUpdateChannel(c.Query("channel")))
 	if err != nil {
 		log.Printf("[WARN] 检查更新失败: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"code": "UPDATE_CHECK_FAILED", "message": "检查更新失败：" + err.Error()})
@@ -34,7 +50,7 @@ func (h *Handler) ApplyUpdate(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := h.updateSvc.Apply(ctx, h.versionOrDefault(), req.Channel); err != nil {
+	if err := h.updateSvc.Apply(ctx, h.versionOrDefault(), h.resolveUpdateChannel(req.Channel)); err != nil {
 		log.Printf("[ERROR] 自更新失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "UPDATE_FAILED", "message": "更新失败：" + err.Error()})
 		return
