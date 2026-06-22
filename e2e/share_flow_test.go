@@ -129,7 +129,7 @@ func createLibraryWithMedia(t *testing.T, serverURL, cookie, dir, label string, 
 	}
 	scanResp.Body.Close()
 
-	items := waitForMediaItems(t, serverURL, cookie, len(files))
+	items := waitForLibraryMedia(t, serverURL, cookie, lp.ID, len(files))
 	idByName := make(map[string]int64, len(files))
 	for _, m := range items {
 		if _, want := files[m.FileName]; want {
@@ -142,6 +142,29 @@ func createLibraryWithMedia(t *testing.T, serverURL, cookie, dir, label string, 
 		}
 	}
 	return lp.ID, idByName
+}
+
+// waitForLibraryMedia 按 library_id 过滤轮询，等待本库恰好/至少 want 条入库。
+// 相比全局 waitForMediaItems，显式按库隔离，不隐式依赖「TempDir 全局空库」前提。
+func waitForLibraryMedia(t *testing.T, serverURL, cookie string, libraryID int64, want int) []models.MediaFile {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp := doRequest(t, "GET",
+			fmt.Sprintf("%s/api/library/media?library_id=%d&page_size=100", serverURL, libraryID), nil,
+			map[string]string{"Cookie": cookie})
+		var result struct {
+			Items []models.MediaFile `json:"items"`
+		}
+		parseJSON(t, resp, &result)
+		if len(result.Items) >= want {
+			return result.Items
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等待本库媒体入库超时：库 %d 期望 ≥%d，实际 %d", libraryID, want, len(result.Items))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // createShare 经管理端点创建分享，expiresInHours>0 设过期、否则永不过期；返回 token。
@@ -289,7 +312,13 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		exp.Body.Close()
 	}
 
-	// 10) 撤销后免登访问失效 → 404
+	// 10) 撤销前后对照（让 204 有证明力，而非空操作也返回 204）：撤销前 200 → 撤销 204 → 撤销后 404
+	if pre := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil); pre.StatusCode != http.StatusOK {
+		pre.Body.Close()
+		t.Fatalf("撤销前 token 应仍有效 200, 实际 %d", pre.StatusCode)
+	} else {
+		pre.Body.Close()
+	}
 	delResp := doRequest(t, "DELETE", server.URL+"/api/shares/"+token, nil, map[string]string{"Cookie": cookie})
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("撤销应 204, 实际 %d", delResp.StatusCode)

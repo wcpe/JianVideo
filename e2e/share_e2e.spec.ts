@@ -131,6 +131,14 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
       }
       if (albumID) await api.delete(`/api/albums/${albumID}`);
       if (libraryID) await api.delete(`/api/library/paths/${libraryID}`);
+      // 兜底：beforeAll 中途失败可能 libraryID 未赋值但库已建，按 label 反查清理本测试残留
+      const listRes = await api.get('/api/library/paths');
+      if (listRes.ok()) {
+        const paths: Array<{ id: number; label: string }> = (await listRes.json()).items ?? [];
+        for (const p of paths) {
+          if (p.label === '分享 E2E') await api.delete(`/api/library/paths/${p.id}`);
+        }
+      }
       await api.dispose();
     } catch (e) {
       console.warn('[share-e2e] afterAll 清理失败（不影响测试结论）:', e);
@@ -183,6 +191,8 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
       page.getByRole('link', { name: /下载原文件/ }).click(),
     ]);
     expect(download.suggestedFilename()).toContain('.jpg');
+    const savedPath = await download.path();
+    expect(statSync(savedPath).size).toBeGreaterThan(0);
   });
 
   test('无痕打开相册分享：网格缩略图真出像素、点开成员可查看下载', async ({ page }) => {
