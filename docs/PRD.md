@@ -83,6 +83,9 @@
 | FR-43 | 分享链接：token 化只读公开访问指定媒体/相册，带过期与范围，免登访问；作为鉴权的受控例外，依赖 FR-13 鉴权修复 | P2 | 已交付@v0.5.0 |
 | FR-44 | 续播与观看状态：持久化每媒体上次播放位置 + 已看/未看标记 + 首页「继续观看」 | P2 | 已交付@v0.4.0 |
 | FR-45 | 移动端 PWA：vite-plugin-pwa（manifest + Service Worker，可安装到主屏 + 离线壳）+ 响应式细节完善 | P2 | 已交付@v0.6.2（真机浏览器：SW 注册并 activated + manifest 可安装 + 离线壳从缓存渲染、断网时 API 正确失败；物理手机加主屏属 OS 级手势） |
+| FR-46 | 远程自更新：服务器 UI 鉴权后检测 GitHub releases（稳定 + 可切预发布频道），下载对应平台产物并校验 checksum 后替换二进制、自动重启，保留旧二进制可回滚 | P4 | 计划 |
+| FR-47 | 正式发布 CI：GitHub Actions 按版本号自动打 tag，windows/linux 原生 runner 构建（前端 embed + 版本注入），创建 GitHub Release（产物 + checksums） | P4 | 计划 |
+| FR-48 | 预发布 CI：GitHub Actions 普通 push 触发多平台构建，发布 prerelease（标 prerelease，上传打包产物） | P4 | 计划 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
@@ -134,6 +137,7 @@
 - **第一期（MVP）**：核心媒体库 + 全格式转码播放 + 基础 Web 界面。实现多目录聚合、实时路径监控、FFmpeg 流式转码、HLS/TS 输出、mpegts.js 播放内核、边下边播追播机制、精准 Seek、硬件加速（Intel QSV + NVIDIA NVENC）、单用户认证、时间轴视图。
 - **第二**期：SMB 网络共享支持 + 自适应码率（ABR）+ 文件目录视图 + 双进度条 + 字幕支持增强。
 - **第三**期**：性能优化 + 更大规模媒体库支持 + 可选 PWA + 运维工具完善。
+- **第四期（发布与分发工程）**：Go 模块社区化（`github.com/wcpe/JianVideo`）、GitHub Actions 多平台原生构建与自动发布（正式 release 按版本号打 tag + 普通 push 发 prerelease）、服务器端二进制自更新（拉取 GitHub release、校验 checksum、替换、自动重启、回滚）。
 
 > **分期不会堆到上百**：期是粗粒度路线图横轴，数量很少（走到成熟通常 3~6 个），一期含很多 FR、跨很多版本。**产品成熟（1.0 后稳态迭代）就不再加"第 N 期"**，改按版本（CHANGELOG / tag）+ 功能（FR 表 / specs）组织。
 
