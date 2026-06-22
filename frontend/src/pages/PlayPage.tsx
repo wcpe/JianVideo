@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
+import ShareDialog from '@/components/ShareDialog'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
 import * as libApi from '@/api/library'
@@ -35,6 +36,9 @@ export default function PlayPage() {
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
   const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null)
+
+  // 分享弹窗开关（FR-43）
+  const [shareOpened, setShareOpened] = useState(false)
   const [nameEditSaving, setNameEditSaving] = useState(false)
 
   useEffect(() => {
@@ -195,6 +199,16 @@ export default function PlayPage() {
           >
             下载
           </Button>
+          {/* 分享链接（FR-43）：生成 token 化免登访问链接 */}
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconShare size={14} />}
+            onClick={() => setShareOpened(true)}
+          >
+            分享
+          </Button>
         </Group>
 
         {/* 字幕选择菜单 */}
@@ -290,6 +304,15 @@ export default function PlayPage() {
         loading={nameEditSaving}
         onConfirm={confirmNameEdit}
         onCancel={() => setNameEditKind(null)}
+      />
+
+      {/* 分享链接弹窗（FR-43） */}
+      <ShareDialog
+        opened={shareOpened}
+        onClose={() => setShareOpened(false)}
+        resourceType="media"
+        resourceID={media.id}
+        title="分享此媒体"
       />
     </Stack>
   )

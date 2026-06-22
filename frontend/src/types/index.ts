@@ -72,6 +72,28 @@ export interface LoginRequest {
   password: string
 }
 
+/** 分享资源类型（FR-43） */
+export type ShareResourceType = 'media' | 'album'
+
+/** 分享链接（FR-43） */
+export interface Share {
+  token: string
+  resource_type: ShareResourceType
+  resource_id: number
+  /** 过期时间；null 表示永不过期 */
+  expires_at: string | null
+  created_at: string
+}
+
+/** 公开分享元信息（FR-43）：媒体分享含 media，相册分享含 album 与 items */
+export interface ShareInfo {
+  resource_type: ShareResourceType
+  expires_at: string | null
+  media?: MediaFile
+  album?: Album
+  items?: MediaFile[]
+}
+
 /** 扫描模式（FR-27）：增量更新只索引新增文件；全量扫描遍历并对账已删文件 */
 export type ScanMode = 'incremental' | 'full'
 

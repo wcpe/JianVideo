@@ -22,6 +22,7 @@ import (
 	"jianvideo/internal/library"
 	"jianvideo/internal/player"
 	"jianvideo/internal/settings"
+	"jianvideo/internal/share"
 	"jianvideo/internal/smb"
 	"jianvideo/internal/transcoder"
 )
@@ -42,6 +43,7 @@ type Handler struct {
 	hlsDir    string             // HLS 切片输出根目录
 	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
 	version   string             // 应用版本号，由 main 经 ldflags 注入
+	share     *share.Service     // 分享链接读写（FR-43），未注入时分享端点不可用
 
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 }
@@ -74,6 +76,12 @@ func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
 // 用于让定时扫描周期等运行期配置即时生效，无需重启。
 func (h *Handler) WithSettingsReload(fn func()) *Handler {
 	h.settingsReload = fn
+	return h
+}
+
+// WithShareService 注入分享链接服务（FR-43）。
+func (h *Handler) WithShareService(svc *share.Service) *Handler {
+	h.share = svc
 	return h
 }
 
@@ -575,8 +583,11 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
+	h.serveThumbnail(c, mf)
+}
 
-	// 查找缩略图文件
+// serveThumbnail 回传缩略图（不存在则异步生成并返回 202）。抽出供鉴权版与分享版（FR-43）共用。
+func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
 	thumbnailPath := library.FindThumbnailPath(mf.FilePath)
 	if _, err := os.Stat(thumbnailPath); err != nil {
 		// 缩略图不存在，异步生成后返回 202
@@ -601,6 +612,12 @@ func (h *Handler) GetRawImage(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
+	h.serveRawImage(c, mf)
+}
+
+// serveRawImage 回传图片原始内容（HEIC/RAW 经 ImageMagick 转 JPEG，FR-37）。
+// 抽出供鉴权版 GetRawImage 与分享版（FR-43）共用，行为一致。
+func (h *Handler) serveRawImage(c *gin.Context, mf *models.MediaFile) {
 	mediaType, ok := h.library.MediaTypeByPathForLibrary(mf.LibraryID, mf.FilePath)
 	if !ok || mediaType != library.MediaTypeImage {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "NOT_IMAGE", "message": "仅支持图片 raw 访问"})
@@ -656,6 +673,11 @@ func (h *Handler) DownloadMediaFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
+	h.serveDownload(c, mf)
+}
+
+// serveDownload 以附件形式回传媒体原始文件。抽出供鉴权版与分享版（FR-43）共用。
+func (h *Handler) serveDownload(c *gin.Context, mf *models.MediaFile) {
 	if strings.HasPrefix(mf.FilePath, "smb://") {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "UNSUPPORTED_PATH", "message": "暂不支持 SMB 文件下载"})
 		return

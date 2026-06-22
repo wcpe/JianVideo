@@ -27,6 +27,24 @@ for (const type of domTypes) {
   }
 }
 
+// Mantine ScrollArea（Select 下拉等）需要 getComputedStyle 作为全局函数
+Object.defineProperty(globalThis, 'getComputedStyle', {
+  value: (elt: Element, pseudoElt?: string) => dom.window.getComputedStyle(elt, pseudoElt),
+  writable: true,
+  configurable: true,
+});
+
+// Mantine ScrollArea 需要 ResizeObserver（jsdom 不提供，给个空实现）
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  value: class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+  writable: true,
+  configurable: true,
+});
+
 // Mantine 需要 matchMedia
 Object.defineProperty(globalThis.window, 'matchMedia', {
   writable: true,

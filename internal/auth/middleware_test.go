@@ -92,8 +92,31 @@ func setupGuardRouter(secret string) *gin.Engine {
 	r.Use(APIGuard(secret))
 	r.GET("/api/library/media", func(c *gin.Context) { c.String(http.StatusOK, "media") })
 	r.POST("/api/auth/login", func(c *gin.Context) { c.String(http.StatusOK, "login") })
+	r.GET("/api/share/:token", func(c *gin.Context) { c.String(http.StatusOK, "share") })
+	r.GET("/api/shares", func(c *gin.Context) { c.String(http.StatusOK, "shares") })
 	r.GET("/health", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 	return r
+}
+
+// TestAPIGuard_ExemptsPublicShareButGuardsManagement 公开分享端点豁免、管理端点仍受保护（FR-43 安全边界）。
+func TestAPIGuard_ExemptsPublicShareButGuardsManagement(t *testing.T) {
+	r := setupGuardRouter("test-secret")
+
+	// 公开分享端点 /api/share/:token 免登放行
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/share/sometoken", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("/api/share/:token 应豁免鉴权返回 200, 得到 %d", w.Code)
+	}
+
+	// 管理端点 /api/shares（复数）不被 "/api/share/" 前缀误伤，无凭据应 401
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/api/shares", nil)
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("/api/shares 管理端点无凭据应 401, 得到 %d", w2.Code)
+	}
 }
 
 func TestAPIGuard_ProtectsAPIWithoutToken(t *testing.T) {

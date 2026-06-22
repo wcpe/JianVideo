@@ -73,9 +73,15 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 
 	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，
 	// handler 内部查 db 拿到 filePath 后转发给 pbSvc.StreamFile。
+	var playbackSvc *playback.Service
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
-		registerStreamRoute(r, libSvc, pbSvc[0])
+		playbackSvc = pbSvc[0]
+		registerStreamRoute(r, libSvc, playbackSvc)
 	}
+
+	// 公开分享路由（FR-43，免登）：APIGuard 已豁免 /api/share/ 前缀，
+	// 路由内经 shareAuth 自校验 token；视频流复用 playback（渐进式，不公开转码/HLS）。
+	api.RegisterShareRoutes(r, apiHandler, playbackSvc)
 
 	// 认证路由
 	apiGroup := r.Group("/api")

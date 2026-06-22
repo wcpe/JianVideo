@@ -4,7 +4,8 @@ import {
   ActionIcon, Loader, Center, Box, Anchor,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconPhoto, IconTrash, IconPlus, IconArrowLeft } from '@tabler/icons-react'
+import { IconPhoto, IconTrash, IconPlus, IconArrowLeft, IconShare } from '@tabler/icons-react'
+import ShareDialog from '@/components/ShareDialog'
 import * as albumApi from '@/api/albums'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
@@ -22,6 +23,8 @@ export default function AlbumsPage() {
   const [selected, setSelected] = useState<Album | null>(null)
   const [create, setCreate] = useState<typeof initCreate>(initCreate)
   const [delAlbum, setDelAlbum] = useState<typeof initDelAlbum>(initDelAlbum)
+  // 分享的相册（FR-43）：null 表示分享弹窗关闭
+  const [shareAlbum, setShareAlbum] = useState<Album | null>(null)
 
   const loadAlbums = useCallback(async () => {
     setLoading(true)
@@ -96,10 +99,16 @@ export default function AlbumsPage() {
                   <IconPhoto size={20} style={{ color: 'var(--mantine-color-purple-4)', flexShrink: 0 }} />
                   <Text fw={600} truncate>{album.name}</Text>
                 </Group>
-                <ActionIcon variant="subtle" color="red" aria-label="删除相册"
-                  onClick={() => setDelAlbum({ opened: true, album, loading: false })}>
-                  <IconTrash size={16} />
-                </ActionIcon>
+                <Group gap={4} wrap="nowrap">
+                  <ActionIcon variant="subtle" color="blue" aria-label="分享相册"
+                    onClick={() => setShareAlbum(album)}>
+                    <IconShare size={16} />
+                  </ActionIcon>
+                  <ActionIcon variant="subtle" color="red" aria-label="删除相册"
+                    onClick={() => setDelAlbum({ opened: true, album, loading: false })}>
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                </Group>
               </Group>
               <Box onClick={() => setSelected(album)}>
                 {album.description && <Text size="sm" c="dimmed" truncate mb={4}>{album.description}</Text>}
@@ -128,6 +137,15 @@ export default function AlbumsPage() {
         message={`确定要删除相册 "${delAlbum.album?.name}" 吗？仅移除相册，源文件与媒体记录不受影响。`}
         confirmLabel="删除" cancelLabel="取消" confirmColor="red" loading={delAlbum.loading}
         onConfirm={handleDelAlbum} onCancel={() => setDelAlbum(initDelAlbum)} />
+
+      {/* 分享相册弹窗（FR-43） */}
+      <ShareDialog
+        opened={!!shareAlbum}
+        onClose={() => setShareAlbum(null)}
+        resourceType="album"
+        resourceID={shareAlbum?.id ?? 0}
+        title={shareAlbum ? `分享相册「${shareAlbum.name}」` : '分享相册'}
+      />
     </Stack>
   )
 }

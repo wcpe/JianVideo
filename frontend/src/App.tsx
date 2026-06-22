@@ -13,6 +13,7 @@ import RecyclePage from './pages/RecyclePage'
 import PlayPage from './pages/PlayPage'
 import SystemPage from './pages/SystemPage'
 import SettingsPage from './pages/SettingsPage'
+import SharePage from './pages/SharePage'
 import '@mantine/core/styles.css'
 import './index.css'
 
@@ -26,6 +27,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<RequireAnon><LoginPage /></RequireAnon>} />
+          {/* 公开分享查看页（FR-43）：免登、不套 AppLayout / ProtectedRoute */}
+          <Route path="/s/:token" element={<SharePage />} />
           <Route path="/library-manager" element={<ProtectedRoute><AppLayout><LibraryManagerPage /></AppLayout></ProtectedRoute>} />
           <Route path="/" element={<ProtectedRoute><AppLayout><TimelinePage /></AppLayout></ProtectedRoute>} />
           <Route path="/browse" element={<ProtectedRoute><AppLayout><BrowsePage /></AppLayout></ProtectedRoute>} />

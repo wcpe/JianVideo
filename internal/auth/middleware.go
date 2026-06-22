@@ -51,6 +51,12 @@ func APIGuard(jwtSecret string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// 豁免公开分享端点（FR-43）：免登只读访问，路由内经 shareAuth 自校验 token。
+		// 注意带尾斜杠 "/api/share/"，不会误伤受保护的管理端点 "/api/shares"。
+		if strings.HasPrefix(path, "/api/share/") {
+			c.Next()
+			return
+		}
 
 		token := extractToken(c)
 		if token == "" {

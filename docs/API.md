@@ -648,3 +648,44 @@
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
 - **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。保存成功后触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。
 - **错误**：`400` 请求参数错误或 `settings` 为空，`503` 设置服务未启用，`500` 保存失败
+
+## 分享链接（FR-43）
+
+分享分两层：**管理端点** `/api/shares`（鉴权后，受 APIGuard 保护）创建/列出/撤销；**公开端点** `/api/share/:token`（免登，APIGuard 豁免 `/api/share/` 前缀）由 token 持有者只读访问。公开端点经 `shareAuth` 校验 token + 过期，并对每个 `:mediaId` 做范围校验——不在分享范围内一律 `404`。
+
+### 创建分享
+
+- **方法 / 路径**：`POST /api/shares`（鉴权后）
+- **请求体**：
+  ```json
+  { "resource_type": "media", "resource_id": 12, "expires_in_hours": 168 }
+  ```
+  `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。
+- **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "created_at": "..." }`
+- **错误**：`400` 参数错误或非法类型，`404` 被分享资源不存在，`503` 分享服务未启用，`500` 创建失败
+
+### 列出分享
+
+- **方法 / 路径**：`GET /api/shares`（鉴权后）
+- **响应**（200）：`{ "shares": [ ... ] }`（含已过期，供管理展示）
+
+### 撤销分享
+
+- **方法 / 路径**：`DELETE /api/shares/:token`（鉴权后）
+- **响应**：`204`
+
+### 公开访问分享元信息
+
+- **方法 / 路径**：`GET /api/share/:token`（免登）
+- **响应**（200）：媒体分享 `{ "resource_type": "media", "expires_at": ..., "media": {...} }`；相册分享 `{ "resource_type": "album", "expires_at": ..., "album": {...}, "items": [...] }`
+- **错误**：`404` token 不存在/已过期/已撤销
+
+### 公开访问分享内的媒体
+
+- **方法 / 路径**：
+  - `GET /api/share/:token/media/:mediaId/raw`（图片在线查看）
+  - `GET /api/share/:token/media/:mediaId/thumbnail`（缩略图）
+  - `GET /api/share/:token/media/:mediaId/download`（原文件下载）
+  - `GET /api/share/:token/media/:mediaId/stream`（视频渐进式在线播放，支持 Range；不开放转码/HLS）
+- **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。
+- **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删，`503` 播放服务未启用（stream）

@@ -86,6 +86,15 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		albums.DELETE("/:id/items/:mediaId", h.RemoveAlbumItem)
 	}
 
+	// 分享链接管理（FR-43，鉴权后）：创建 / 列出 / 撤销分享。
+	// 公开免登访问端点 /api/share/:token 由 web 层 RegisterShareRoutes 单独注册（需 playback 服务）。
+	shares := r.Group("/api/shares")
+	{
+		shares.POST("", h.CreateShare)
+		shares.GET("", h.ListShares)
+		shares.DELETE("/:token", h.RevokeShare)
+	}
+
 	// 字幕与观看状态路由（不需要 playback 服务，作用于 media_files）
 	sub := r.Group("/api/play")
 	{

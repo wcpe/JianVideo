@@ -54,6 +54,7 @@
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
+| `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 
@@ -215,6 +216,18 @@
 
 扫描任务队列以本表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
 
+**分享链接（shares）（FR-43）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| token | TEXT PK | 加密随机不可枚举令牌（`crypto/rand` 32 字节 hex） |
+| resource_type | TEXT | 分享资源类型：`media` / `album` |
+| resource_id | INTEGER, INDEX | 被分享的媒体 ID 或相册 ID |
+| expires_at | DATETIME NULL | 过期时间；空表示永不过期 |
+| created_at | DATETIME | 创建时间 |
+
+公开访问以 token 为唯一凭据，过期/撤销即失效；范围与安全边界见 §5.9。
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -230,6 +243,8 @@
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期键值设置读取与批量写入 |
+| 分享管理 | `/api/shares` | 创建/列出/撤销分享链接（鉴权后，FR-43） |
+| 公开分享 | `/api/share/:token` | 免登只读访问被分享媒体/相册：元信息、图片 raw、缩略图、原文件下载、视频渐进式播放（APIGuard 豁免，经 shareAuth + 范围校验，FR-43） |
 
 ### 5.0 目录浏览
 
@@ -338,6 +353,14 @@
 - `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端 `/settings` 页读写「每盘符回收站路径」「扫描周期」等键值。
 - 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。
+
+### 5.9 分享链接（FR-43）
+
+- 分享以 SQLite `shares` 表为真源（`token` 主键、`resource_type`、`resource_id`、`expires_at` 可空）。`share.Service` 只管 token 生命周期：`crypto/rand` 生成 32 字节不可枚举 token，`Get` 校验过期（已过期/不存在统一为错误，公开层映射 `404`）。
+- **鉴权受控例外**：`auth.APIGuard` 豁免前缀 `/api/share/`（带尾斜杠，不误伤受保护的管理端点 `/api/shares`）；公开路由内经 `shareAuth` 中间件自校验 token + 过期。
+- **范围隔离（安全核心）**：每个 `/api/share/:token/media/:mediaId/*` 端点都做范围校验 `shareAllowsMedia`——media 分享比对 ID，album 分享查 `library.IsMediaInAlbum`；越权/不在范围/不存在一律 `404`，不区分以免信息泄露。
+- **公开播放的安全边界**：免登视频播放只走 `playback.StreamFile`（渐进式原文件 + Range），**不**把 ffmpeg 转码/HLS 管线开放给匿名访客（防资源滥用/DoS）；需转码才能在浏览器播放的格式可下载原文件。`smb://` 不支持。
+- 资源存在性与范围判定在 api 层用 `library` 完成，`share` 服务不依赖 `library`，保持无跨模块耦合。
 
 ## 6. 部署
 

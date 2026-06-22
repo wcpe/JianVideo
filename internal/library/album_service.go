@@ -99,6 +99,17 @@ func (s *Service) RemoveAlbumItem(albumID, mediaID int64) error {
 		Delete(&models.AlbumItem{}).Error
 }
 
+// IsMediaInAlbum 判断指定媒体是否为相册成员（FR-43 分享范围校验用）。
+func (s *Service) IsMediaInAlbum(albumID, mediaID int64) (bool, error) {
+	var cnt int64
+	if err := s.db.Model(&models.AlbumItem{}).
+		Where("album_id = ? AND media_id = ?", albumID, mediaID).
+		Count(&cnt).Error; err != nil {
+		return false, err
+	}
+	return cnt > 0, nil
+}
+
 // ListAlbumItems 列出相册内的媒体成员，按加入时间排序。
 func (s *Service) ListAlbumItems(albumID int64) ([]models.MediaFile, error) {
 	var items []models.AlbumItem
