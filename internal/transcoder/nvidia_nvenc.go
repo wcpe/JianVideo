@@ -36,7 +36,7 @@ func DetectNVIDIA() (*NVIDIAHWAccel, error) {
 	return &NVIDIAHWAccel{
 		H264Encoder: "h264_nvenc",
 		H265Encoder: "hevc_nvenc",
-		Available:   h264 != nil && h265 != nil,
+		Available:   h264 && h265,
 	}, nil
 }
 

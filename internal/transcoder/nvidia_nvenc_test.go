@@ -45,7 +45,7 @@ func TestDetectNVIDIA_RequiresBothCodecs(t *testing.T) {
 		t.Fatalf("查找 hevc_nvenc 失败: %v", err)
 	}
 
-	bothFound := h264 != nil && h265 != nil
+	bothFound := h264 && h265
 	if nvidia.Available != bothFound {
 		t.Errorf("NVIDIA 可用性判定不一致: Available=%v, bothCodecsFound=%v", nvidia.Available, bothFound)
 	}

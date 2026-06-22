@@ -21,7 +21,7 @@ func TestDetectQSV_H264Encoder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查找 H.264 QSV 编码器时出错: %v", err)
 	}
-	t.Logf("H.264 QSV 编码器: found=%v", enc != nil)
+	t.Logf("H.264 QSV 编码器: found=%v", enc)
 }
 
 // TestDetectQSV_H265Encoder 验证 H.265 QSV 编码器查找。
@@ -30,7 +30,7 @@ func TestDetectQSV_H265Encoder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查找 H.265 QSV 编码器时出错: %v", err)
 	}
-	t.Logf("H.265 QSV 编码器: found=%v", enc != nil)
+	t.Logf("H.265 QSV 编码器: found=%v", enc)
 }
 
 // TestQSVAvailable 验证 QSV 整体可用性判断（需要 H.264 + H.265 同时可用）。
@@ -58,7 +58,7 @@ func TestDetectQSV_RequiresBothCodecs(t *testing.T) {
 		t.Fatalf("查找 H.265 QSV 编码器时出错: %v", err)
 	}
 
-	bothFound := h264 != nil && h265 != nil
+	bothFound := h264 && h265
 	if available != bothFound {
 		t.Errorf("QSV 可用性判定不一致: available=%v, bothCodecsFound=%v", available, bothFound)
 	}
