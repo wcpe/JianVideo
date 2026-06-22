@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **媒体筛选与表达式查询引擎（FR-35）**：`GET /api/library/media` 的 `search` 升级为 everything 式表达式（`library.ParseSearchExpression`）：裸词→文件名包含（多词 AND）、`ext:jpg,png`→扩展名、`type:image|video`→类型、`size:>10mb`/`<=2gb`/`>=500kb`（单位 b/kb/mb/gb/tb）→大小；纯文本向后兼容。另新增结构化查询参数 `type`/`size_min`/`size_max`/`time_from`/`time_to`（按 `COALESCE(media_time, added_at)` 比较）/`path`（目录前缀）。表达式只解析为结构化 `MediaFilter` 字段、全部走参数化查询，无 SQL 注入面；类型按内置图片扩展名集合粗筛。
 - **EXIF 详情展示（FR-38）**：文件详情面板右侧新增 EXIF 区块（有数据才显示），展示拍摄时间（含来源标注 EXIF/文件名/创建/修改）、相机、镜头、光圈、快门、ISO、GPS 坐标，并对有 GPS 的媒体提供「在外部地图打开」链接（OpenStreetMap，新标签打开）。消费 FR-31 后端已提取并随 `media` 接口返回的 EXIF 字段；真实 EXIF 端到端依赖 FR-31 真机提取。
 - **文件详情面板（FR-34）**：新增 `MediaDetailPanel`（全屏 Modal），时间轴点击媒体（图片与视频统一）打开：左侧预览（图片为可滚轮缩放的原图 1–4 倍、换项复位；视频为缩略图 + 「打开播放」按钮跳 `/play/:id`），右侧展示文件元数据（显示名/真实名/类型/大小/分辨率/时长/编码/加入与修改时间）并提供原文件下载入口。支持全屏切换、`←`/`→` 在已加载列表内切换上/下一项（端点夹紧）、`Esc` 关闭。取代时间轴原「图片弹窗 / 视频直跳」的分裂打开方式；`ImagePreviewModal` 仍由目录页使用（待 FR-33 统一）。
 

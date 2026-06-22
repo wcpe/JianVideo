@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -149,13 +151,15 @@ func (h *Handler) RemoveMediaTag(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// parseMediaFilter 从查询参数解析收藏/标签筛选条件（供 ListMediaFiles 使用）。
+// parseMediaFilter 从查询参数解析筛选条件（FR-41 收藏/标签 + FR-35 结构化筛选与表达式搜索）。
+// search 走 everything 式表达式解析（裸词→文件名、ext:/type:/size: → 结构化），
+// 另接受显式结构化参数 type/size_min/size_max/time_from/time_to/path（显式参数优先于表达式）。
 func parseMediaFilter(c *gin.Context, libraryID int64, sort, search string) library.MediaFilter {
-	filter := library.MediaFilter{
-		LibraryID: libraryID,
-		Sort:      sort,
-		Search:    search,
-	}
+	// 先由表达式解析出 Formats/MediaType/Size/Terms
+	filter := library.ParseSearchExpression(search)
+	filter.LibraryID = libraryID
+	filter.Sort = sort
+
 	if fav := c.Query("favorite"); fav != "" {
 		v := fav == "true" || fav == "1"
 		filter.Favorite = &v
@@ -163,5 +167,39 @@ func parseMediaFilter(c *gin.Context, libraryID int64, sort, search string) libr
 	if tagID, err := strconv.ParseInt(c.Query("tag_id"), 10, 64); err == nil && tagID > 0 {
 		filter.TagID = tagID
 	}
+
+	// FR-35 显式结构化参数（优先于表达式同名约束）
+	if t := c.Query("type"); t == library.MediaTypeImage || t == library.MediaTypeVideo {
+		filter.MediaType = t
+	}
+	if v, err := strconv.ParseInt(c.Query("size_min"), 10, 64); err == nil && v > 0 {
+		filter.SizeMin = v
+	}
+	if v, err := strconv.ParseInt(c.Query("size_max"), 10, 64); err == nil && v > 0 {
+		filter.SizeMax = v
+	}
+	if tf := parseFilterTime(c.Query("time_from")); tf != nil {
+		filter.TimeFrom = tf
+	}
+	if tt := parseFilterTime(c.Query("time_to")); tt != nil {
+		filter.TimeTo = tt
+	}
+	if p := c.Query("path"); p != "" {
+		filter.PathPrefix = p
+	}
 	return filter
+}
+
+// parseFilterTime 解析筛选用时间参数，接受 RFC3339 或 YYYY-MM-DD，无法解析返回 nil。
+func parseFilterTime(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return &t
+		}
+	}
+	return nil
 }

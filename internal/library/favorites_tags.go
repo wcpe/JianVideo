@@ -3,13 +3,14 @@ package library
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
 	"jianvideo/internal/db/models"
 )
 
-// MediaFilter 媒体列表筛选条件（FR-41）。
+// MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
 // Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
 type MediaFilter struct {
 	LibraryID int64
@@ -17,6 +18,16 @@ type MediaFilter struct {
 	Search    string
 	Favorite  *bool
 	TagID     int64
+
+	// FR-35 结构化筛选（零值表示不约束，全部走参数化查询，无 SQL 注入面）
+	MediaType  string     // "image" / "video" / ""(不限)
+	Formats    []string   // 按扩展名过滤（小写，不含点），如 [jpg png]
+	SizeMin    int64      // 文件大小下界（字节，含）；>0 生效
+	SizeMax    int64      // 文件大小上界（字节，含）；>0 生效
+	TimeFrom   *time.Time // 媒体时间下界（含）
+	TimeTo     *time.Time // 媒体时间上界（含）
+	PathPrefix string     // 目录前缀过滤（file_path LIKE prefix%）
+	Terms      []string   // 表达式解析出的文件名关键词（多词 AND）
 }
 
 // ListMediaFilesFiltered 按筛选条件分页查询媒体文件列表（FR-41）。
@@ -47,6 +58,44 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		// 子查询限定打了该标签的媒体，避免联表导致的重复行
 		query = query.Where("id IN (?)",
 			s.db.Model(&models.TagMapping{}).Select("media_id").Where("tag_id = ?", filter.TagID))
+	}
+
+	// FR-35 结构化筛选（全部参数化）
+	// 类型：按内置图片扩展名集合区分 image / video（自定义图片后缀不计入此粗筛）
+	switch filter.MediaType {
+	case MediaTypeImage:
+		query = query.Where("LOWER(format) IN ?", builtInImageExtensionList())
+	case MediaTypeVideo:
+		query = query.Where("LOWER(format) NOT IN ?", builtInImageExtensionList())
+	}
+	if len(filter.Formats) > 0 {
+		query = query.Where("LOWER(format) IN ?", lowerAll(filter.Formats))
+	}
+	if filter.SizeMin > 0 {
+		query = query.Where("file_size >= ?", filter.SizeMin)
+	}
+	if filter.SizeMax > 0 {
+		query = query.Where("file_size <= ?", filter.SizeMax)
+	}
+	if filter.TimeFrom != nil {
+		query = query.Where("COALESCE(media_time, added_at) >= ?", *filter.TimeFrom)
+	}
+	if filter.TimeTo != nil {
+		query = query.Where("COALESCE(media_time, added_at) <= ?", *filter.TimeTo)
+	}
+	if filter.PathPrefix != "" {
+		escaped := strings.ReplaceAll(filter.PathPrefix, "%", "\\%")
+		escaped = strings.ReplaceAll(escaped, "_", "\\_")
+		query = query.Where("file_path LIKE ?", escaped+"%")
+	}
+	// 表达式 bare 关键词：多词 AND，各自文件名 LIKE
+	for _, term := range filter.Terms {
+		if term == "" {
+			continue
+		}
+		escaped := strings.ReplaceAll(term, "%", "\\%")
+		escaped = strings.ReplaceAll(escaped, "_", "\\_")
+		query = query.Where("file_name LIKE ?", "%"+escaped+"%")
 	}
 
 	var total int64

@@ -136,9 +136,10 @@
   - `sort`：排序方式，`time_desc`（默认，按入库时间降序）/ `time_asc` / `name` / `media_time`（按媒体时间降序，缺失回退入库时间，FR-31）/ `media_time_asc`（按媒体时间升序）
   - `page`：页码
   - `page_size`：每页条数
-  - `search`：搜索关键词（可选）
+  - `search`：搜索（可选）。走 everything 式表达式解析（FR-35）：裸词→文件名包含（多词 AND）；`ext:jpg` 或 `ext:jpg,png`→按扩展名；`type:image`/`type:video`→按类型；`size:>10mb`/`size:<=2gb`/`size:>=500kb`（单位 b/kb/mb/gb/tb）→按大小。无法识别的 `key:val` 退化为文件名关键词。纯文本与旧行为一致（向后兼容）。
   - `favorite`：传 `true`/`1` 时仅返回已收藏媒体（可选，FR-41）
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
+  - 结构化筛选（可选，FR-35，显式参数优先于 `search` 表达式同名约束）：`type`（`image`/`video`）、`size_min`/`size_max`（字节）、`time_from`/`time_to`（媒体时间范围，`RFC3339` 或 `YYYY-MM-DD`，按 `COALESCE(media_time, added_at)` 比较）、`path`（目录前缀）。以上全部走参数化查询，无 SQL 注入面。
 - **响应**（200）：
   ```json
   {
