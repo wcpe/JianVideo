@@ -53,6 +53,9 @@
 - 管理端点 `/api/shares` 未鉴权 → `401`（仍受 APIGuard）；公开端点 `/api/share/:token` 免登可达（豁免生效），且 `/api/shares` 不被豁免误伤。
 - 图片在线查看、视频渐进式在线播放、原文件下载经 token 正常工作；`smb://` 流被拒。
 - 后端 `go build ./...`、受影响包 `go test`（含范围隔离与豁免边界用例）、`go test -race` 全绿；前端 `npm run build`/`npm run test` 全绿。
+- **端到端（免登真实路径）**：
+  - Go HTTP E2E（`e2e/share_flow_test.go`，生产同构服务器）：无 Cookie 客户端走通 `/s/:token` 返回 SPA 壳、分享元信息、原文件下载（字节一致）、视频 `Range` 流（`206` + 片段字节）、越权 `404`、管理端 `401`、撤销后 `404`、相册成员/非成员范围。
+  - Playwright 真浏览器 E2E（`e2e/share_e2e.spec.ts`，ffmpeg 生成真实样片 + 全新无痕上下文）：无痕打开分享链接不跳登录；视频**确实在线播放**（`currentTime` 推进、`readyState≥2`）；图片真实渲染（`naturalWidth>0`）；点击触发原文件**下载**；无效 token 显示过期提示。
 
 ## 5. 风险 / 待定
 

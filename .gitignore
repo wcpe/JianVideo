@@ -46,3 +46,12 @@ Thumbs.db
 .env
 .env.local
 /.narrafork/
+
+# Playwright 端到端测试产物（不入库）
+/test-results/
+/playwright-report/
+
+# 从仓库根运行 go run . 产生的运行时产物（不入库）
+/thumbnails/
+/hls/
+/image_cache/
