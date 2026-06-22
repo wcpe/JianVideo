@@ -22,14 +22,25 @@ func (w *logWriter) Write(p []byte) (int, error) {
 
 // Pipeline 封装一次 ffmpeg 转码会话。
 type Pipeline struct {
-	encoderName  string
-	deviceType   string
-	hwAccel      string
+	encoderName string
+	deviceType  string
+	hwAccel     string
+	codec       string // 目标输出编码（"h264"/"h265"/"av1"/"vp9"）；空按 h264 处理
 }
 
-// NewPipeline 创建转码管道，自动选择最佳编码器。
+// NewPipeline 创建转码管道，自动选择最佳 H.264 编码器（默认目标编码 H.264，行为不变）。
 func NewPipeline() *Pipeline {
-	name, deviceType, _ := SelectBestEncoder()
+	return NewPipelineForCodec(DefaultTargetCodec)
+}
+
+// NewPipelineForCodec 按目标编码创建转码管道（FR-50）。
+// 编码器经 SelectEncoderForCodec 按 codec 选硬件优先、无则软件兜底；
+// 未知编码回落默认 H.264，保证默认行为不变。
+func NewPipelineForCodec(codec string) *Pipeline {
+	if _, ok := CodecOutputParams(codec); !ok {
+		codec = DefaultTargetCodec
+	}
+	name, deviceType := selectEncoder(codec)
 	hwAccel := ""
 	if deviceType != "" {
 		hwAccel = deviceType
@@ -38,7 +49,46 @@ func NewPipeline() *Pipeline {
 		encoderName: name,
 		deviceType:  deviceType,
 		hwAccel:     hwAccel,
+		codec:       codec,
 	}
+}
+
+// selectEncoder 读实测快照按硬件优先级为 codec 选编码器，冷态/无可用时软件兜底。
+func selectEncoder(codec string) (encoderName, deviceType string) {
+	// h264 维持既有入口（含冷态 libx264 兜底），保证默认行为不变
+	if codec == DefaultTargetCodec {
+		name, dev, _ := SelectBestEncoder()
+		return name, dev
+	}
+	snap := probeSnapshot.Load()
+	if snap != nil {
+		if enc, dev, ok := SelectEncoderForCodec(*snap, codec); ok {
+			return enc, dev
+		}
+	}
+	return softwareEncoderForCodec(codec), ""
+}
+
+// softwareEncoderForCodec 返回各编码的软件兜底编码器名。
+func softwareEncoderForCodec(codec string) string {
+	switch codec {
+	case "h265":
+		return "libx265"
+	case "av1":
+		return "libsvtav1"
+	case "vp9":
+		return "libvpx-vp9"
+	default:
+		return "libx264"
+	}
+}
+
+// pipelineCodec 返回管道的有效目标编码，空值按默认 H.264 处理。
+func (p *Pipeline) pipelineCodec() string {
+	if p.codec == "" {
+		return DefaultTargetCodec
+	}
+	return p.codec
 }
 
 // Run 启动转码管道，将 ffmpeg stdout 写入 dst。
@@ -98,12 +148,20 @@ func (p *Pipeline) buildArgs(inputPath string, seekPosition float64) []string {
 		args = append(args, "-hwaccel", p.hwAccel)
 	}
 
+	// 按目标编码取输出参数（编码器名 + 像素格式 + 关键参数），默认 h264 行为不变。
+	params, _ := CodecOutputParams(p.pipelineCodec())
+
 	args = append(args,
 		"-i", inputPath,
 		"-c:v", p.encoderName,
-		// 强制 8-bit yuv420p：10-bit 源（如 HEVC Main 10）否则编出 High 10 的 10-bit H.264，
+		// 强制 8-bit yuv420p：10-bit 源（如 HEVC Main 10）否则编出 10-bit High/Main 10，
 		// 浏览器与 mpegts.js 无法解码播放。
-		"-pix_fmt", "yuv420p",
+		"-pix_fmt", params.PixFmt,
+	)
+	// 该编码的额外输出参数（如 h265 的 -tag:v hvc1）
+	args = append(args, params.ExtraArgs...)
+
+	args = append(args,
 		// 固定 GOP = 48 帧
 		"-g", "48",
 		"-keyint_min", "48",

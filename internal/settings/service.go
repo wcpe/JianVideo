@@ -22,6 +22,8 @@ const (
 	KeyScanInterval = "scan_interval"
 	// KeyUpdateChannel 自更新频道：stable=正式版（正式 release）/ prerelease=测试版（最新预发布 dev）。
 	KeyUpdateChannel = "update_channel"
+	// KeyTranscodeCodecPriority 转码首选目标编码优先级（FR-50），值为 JSON 数组（如 ["av1","h265","h264"]）。
+	KeyTranscodeCodecPriority = "transcode_codec_priority"
 )
 
 // Service 运行期设置业务逻辑。

@@ -314,7 +314,9 @@
 | Vulkan | `h264_vulkan` | `hevc_vulkan` | `vulkan` |
 | 软件兜底 | `libx264` | `libx265` | — |
 
-- 上述各家族另探测 AV1（`av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_vaapi`/`av1_vulkan`/`libsvtav1`）与 VP9（`vp9_qsv`/`vp9_vaapi`/`libvpx-vp9`）等高级编码并如实展示；当前**转码输出仍固定 H.264**（保证 mpegts.js 可播），AV1/VP9 实际用于输出与播放属 FR-50/51（第五期）。
+- 上述各家族另探测 AV1（`av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_vaapi`/`av1_vulkan`/`libsvtav1`）与 VP9（`vp9_qsv`/`vp9_vaapi`/`libvpx-vp9`）等高级编码并如实展示。
+- **转码目标编码可配置（FR-50，见 [ADR-0034](adr/0034-configurable-target-codec.md)，扩展 ADR-0003 而非推翻）**：服务端以 `settings` 表持久化「首选目标编码优先级」（键 `transcode_codec_priority`，JSON 数组，如 `["av1","h265","h264"]`），写入时按 FR-49 实测可输出集校验。单/多码率管道按所选编码参数化输出——编码器名由 `SelectEncoderForCodec(results, codec)` 选取，像素格式与关键参数由纯函数 `CodecOutputParams(codec)`（h264/h265/av1/vp9）映射，替代原先硬编 H.264。**默认仍 H.264**（未配置 / 非法回落 `["h264"]`，`NewPipeline()` 等价 `NewPipelineForCodec("h264")`，参数字节级不变，mpegts.js 可播）。
+- **输出容器不随编码改变**：playback 仍 `-f mpegts`、ABR 仍 `-f hls`（FR-06 播放路径不动）。故非 H.264 编码当前不保证端到端可播（MPEG-TS 无 AV1/VP9 标准流类型，AV1 over TS 被 ffprobe 探测为 `bin_data`）；高级编码的容器与播放路径属 FR-51/52（第五期）。
 - Intel 核显检测：通过 sysfs（`/sys/class/drm/card0/device/vendor` = `0x8086`）+ 驱动名（`i915`/`xe`）+ 无独立显存确认核显身份。
 - 硬件检测优先级：CUDA → QSV → VAAPI → D3D11VA → DXVA2 → VideoToolbox → Vulkan → 软件。
 - 硬件加速失败时自动降级，不中断播放。

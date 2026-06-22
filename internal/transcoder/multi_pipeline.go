@@ -207,6 +207,9 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 
 	args = append(args, "-i", inputPath)
 
+	// 按目标编码取输出参数（编码器名来自 pipeline，像素格式 + 关键参数来自映射），默认 h264 行为不变。
+	params, _ := CodecOutputParams(mp.pipeline.pipelineCodec())
+
 	// 构建 filter_complex split + scale
 	// [0:v]split=3[v1][v2][v3]; [v1]scale=1920:1080[v1out]; ...
 	splitPart := fmt.Sprintf("[0:v]split=%d", n)
@@ -218,9 +221,9 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 
 	scaleParts := make([]string, n)
 	for i, q := range qualities {
-		// 强制 8-bit yuv420p：10-bit（如 HEVC Main 10）源若不转换，会编出 High 10 的
-		// 10-bit H.264，浏览器与 mpegts.js 均无法解码播放（见 HEVC/AAC 720p 不可播放问题）。
-		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d,format=yuv420p[v%dout]", i+1, q.Width, q.Height, i+1)
+		// 强制 8-bit yuv420p：10-bit（如 HEVC Main 10）源若不转换，会编出 10-bit High/Main 10，
+		// 浏览器与 mpegts.js 均无法解码播放（见 HEVC/AAC 720p 不可播放问题）。
+		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d,format=%s[v%dout]", i+1, q.Width, q.Height, params.PixFmt, i+1)
 	}
 
 	filterComplex := splitPart + "; " + strings.Join(scaleParts, "; ")
@@ -238,6 +241,10 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 			"-map", outLabel,
 			"-c:v", mp.pipeline.encoderName,
 			"-b:v", q.VideoRate,
+		)
+		// 该编码的额外输出参数（如 h265 的 -tag:v hvc1）
+		outputParts = append(outputParts, params.ExtraArgs...)
+		outputParts = append(outputParts,
 			"-g", "48",
 			"-keyint_min", "48",
 			"-sc_threshold", "0",
