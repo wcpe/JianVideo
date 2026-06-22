@@ -54,8 +54,9 @@
 - 图片在线查看、视频渐进式在线播放、原文件下载经 token 正常工作；`smb://` 流被拒。
 - 后端 `go build ./...`、受影响包 `go test`（含范围隔离与豁免边界用例）、`go test -race` 全绿；前端 `npm run build`/`npm run test` 全绿。
 - **端到端（免登真实路径）**：
-  - Go HTTP E2E（`e2e/share_flow_test.go`，生产同构服务器）：无 Cookie 客户端走通 `/s/:token` 返回 SPA 壳、分享元信息、原文件下载（字节一致）、视频 `Range` 流（`206` + 片段字节）、越权 `404`、管理端 `401`、撤销后 `404`、相册成员/非成员范围。
-  - Playwright 真浏览器 E2E（`e2e/share_e2e.spec.ts`，ffmpeg 生成真实样片 + 全新无痕上下文）：无痕打开分享链接不跳登录；视频**确实在线播放**（`currentTime` 推进、`readyState≥2`）；图片真实渲染（`naturalWidth>0`）；点击触发原文件**下载**；无效 token 显示过期提示。
+  - Go HTTP E2E（`e2e/share_flow_test.go`，生产同构服务器，t.TempDir 隔离库）：无 Cookie 客户端走通 `/s/:token` 返回 SPA 壳、分享元信息、原文件下载（字节一致）、`stream` 端点 `Range` 转发（`206` + 片段字节）、范围内 `raw`/`thumbnail` 可达；**范围隔离按 raw/thumbnail/download/stream 四端点逐一断言越权 `404`**；过期（改 `expires_at` 至过去）、伪造、撤销 token 均 `404`；管理端 `GET`/`DELETE /api/shares` 免登 `401`；相册成员下载字节一致、非成员四端点 `404`。
+  - Playwright 真浏览器 E2E（`e2e/share_e2e.spec.ts`，ffmpeg 生成真实样片 + 全新无痕上下文，缺 ffmpeg 自动 skip，串行执行）：无痕打开分享链接停留公开页不跳登录；视频**确实在线播放**（`currentTime` 推进、`readyState≥2`）+ 下载落盘字节非空；图片真实渲染（`naturalWidth>0`）+ 下载；**相册分享网格缩略图真出像素、点开成员 Modal 可查看下载**；无效 token 显示过期提示。
+  - 隔离：Playwright `webServer` 先 `npm --prefix frontend run build` 再起服、固定 `reuseExistingServer:false` 并用 `.tmp/e2e.db` 隔离库，测的是当次源码且不污染开发库。
 
 ## 5. 风险 / 待定
 

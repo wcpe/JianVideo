@@ -1,44 +1,54 @@
 import { test, expect, request as pwRequest, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// FR-43 真浏览器端到端：无痕（无认证）打开分享链接 → 视频在线播放 / 图片查看 / 原文件下载。
+// FR-43 真浏览器端到端：无痕（无认证）打开分享链接 → 视频在线播放 / 图片查看 / 相册网格 / 原文件下载。
 // 数据准备经认证 API；查看走全新浏览器上下文（无 cookie = 无痕），验证不跳登录、确实可播放/下载。
 
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8080';
 
+// 探测 ffmpeg：缺失时整组用例 skip（而非 execFileSync 抛 ENOENT 让 spec 硬红），保证跨机可重复。
+const hasFfmpeg = (() => {
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 let mediaDir = '';
 let videoToken = '';
 let imageToken = '';
+let albumToken = '';
 let videoID = 0;
 let imageID = 0;
 let libraryID = 0;
+let albumID = 0;
 const videoName = `share-e2e-video-${Date.now()}.mp4`;
 const imageName = `share-e2e-image-${Date.now()}.jpg`;
 
 // 用 ffmpeg 生成可被浏览器解码播放的真实样片（H.264 baseline + AAC，moov 前置）。
 function generateFixtures(dir: string) {
-  const videoPath = join(dir, videoName);
-  const imagePath = join(dir, imageName);
   execFileSync('ffmpeg', [
     '-y', '-f', 'lavfi', '-i', 'testsrc=duration=2:size=320x240:rate=15',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
     '-c:v', 'libx264', '-profile:v', 'baseline', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-movflags', '+faststart', videoPath,
+    '-c:a', 'aac', '-movflags', '+faststart', join(dir, videoName),
   ], { stdio: 'ignore' });
   execFileSync('ffmpeg', [
     '-y', '-f', 'lavfi', '-i', 'testsrc=duration=1:size=320x240:rate=1',
-    '-frames:v', '1', imagePath,
+    '-frames:v', '1', join(dir, imageName),
   ], { stdio: 'ignore' });
 }
 
-// 仅查询本次新建库下的媒体（避免持久化开发库历史数据 + 分页截断导致找不到样片）。
+// 仅查询本次新建库下的媒体（library_id 过滤 + page_size=100=后端上限，避免历史数据/分页截断）。
 async function pollMediaIDs(api: APIRequestContext): Promise<void> {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    const res = await api.get(`/api/library/media?library_id=${libraryID}&page_size=500`);
+    const res = await api.get(`/api/library/media?library_id=${libraryID}&page_size=100`);
     const data = await res.json();
     const items: Array<{ id: number; file_name: string }> = data.items ?? [];
     const v = items.find(m => m.file_name === videoName);
@@ -53,100 +63,151 @@ async function pollMediaIDs(api: APIRequestContext): Promise<void> {
   throw new Error('等待媒体入库超时');
 }
 
-test.beforeAll(async () => {
-  // 1) 生成真实样片到临时目录
-  mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-share-e2e-'));
-  generateFixtures(mediaDir);
-
-  // 2) 认证 API 上下文：登录 → 建库 → 扫描 → 取媒体 ID → 建分享
-  const api = await pwRequest.newContext({ baseURL: BASE_URL });
-  const login = await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
-  expect(login.ok()).toBeTruthy();
-
-  const createLib = await api.post('/api/library/paths', {
-    data: { path: mediaDir.replace(/\\/g, '/'), type: 'local', label: '分享 E2E' },
-  });
-  expect(createLib.ok()).toBeTruthy();
-  libraryID = (await createLib.json()).id;
-
-  await api.post(`/api/library/scan/${libraryID}`);
-  await pollMediaIDs(api);
-
-  const vShare = await api.post('/api/shares', { data: { resource_type: 'media', resource_id: videoID } });
-  expect(vShare.ok()).toBeTruthy();
-  videoToken = (await vShare.json()).token;
-
-  const iShare = await api.post('/api/shares', { data: { resource_type: 'media', resource_id: imageID } });
-  expect(iShare.ok()).toBeTruthy();
-  imageToken = (await iShare.json()).token;
-
-  // 撤销/删除清理交给 afterAll；此处保留 api 上下文释放
-  await api.dispose();
-});
-
-test.afterAll(async () => {
-  // 清理：撤销分享、删除库、删临时样片，避免污染开发库
-  try {
-    const api = await pwRequest.newContext({ baseURL: BASE_URL });
-    await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
-    if (videoToken) await api.delete(`/api/shares/${videoToken}`);
-    if (imageToken) await api.delete(`/api/shares/${imageToken}`);
-    if (libraryID) await api.delete(`/api/library/paths/${libraryID}`);
-    await api.dispose();
-  } catch {
-    // 清理失败不影响测试结论
+// 预热缩略图：缩略图首请求异步生成返回 202，预热到 200 后浏览器 <img> 才能稳定加载（避免相册网格偶发不出图）。
+async function warmThumbnail(api: APIRequestContext, id: number): Promise<void> {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const r = await api.get(`/api/library/thumbnail/${id}`);
+    if (r.status() === 200) return;
+    await new Promise(res => setTimeout(res, 300));
   }
-  if (mediaDir) rmSync(mediaDir, { recursive: true, force: true });
-});
+  // 预热超时不致命：交由用例断言暴露
+}
 
-test('无痕打开视频分享链接：不跳登录、视频确实在线播放、可下载原文件', async ({ page }) => {
-  // 全新浏览器上下文默认无 cookie = 无痕/免登
-  await page.goto(`/s/${videoToken}`);
+test.describe('FR-43 分享链接真浏览器端到端', () => {
+  // 缺 ffmpeg 时跳过（fixture 需可解码样片）；解码类用例较重，串行以减少 CPU 争抢导致的偶发超时
+  test.skip(!hasFfmpeg, '未检测到 ffmpeg，跳过真浏览器分享 E2E（fixture 需 ffmpeg 生成可解码样片）');
+  test.describe.configure({ mode: 'serial' });
 
-  // 不被重定向到登录页
-  await expect(page).toHaveURL(new RegExp(`/s/${videoToken}$`));
-  await expect(page).not.toHaveURL(/\/login/);
+  test.beforeAll(async () => {
+    // 1) 生成真实样片到临时目录
+    mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-share-e2e-'));
+    generateFixtures(mediaDir);
 
-  // 视频元素出现
-  const video = page.locator('video');
-  await expect(video).toBeVisible();
+    // 2) 认证 API：登录 → 建库 → 扫描 → 取媒体 ID → 建分享（媒体 / 相册）
+    const api = await pwRequest.newContext({ baseURL: BASE_URL });
+    const login = await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
+    expect(login.ok()).toBeTruthy();
 
-  // 真正播放：静音后 play()，断言 currentTime 推进（解码出帧）
-  await video.evaluate((el: HTMLVideoElement) => { el.muted = true; return el.play(); });
-  await expect
-    .poll(async () => video.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 10000 })
-    .toBeGreaterThan(0);
-  const readyState = await video.evaluate((el: HTMLVideoElement) => el.readyState);
-  expect(readyState).toBeGreaterThanOrEqual(2); // ≥ HAVE_CURRENT_DATA
+    const createLib = await api.post('/api/library/paths', {
+      data: { path: mediaDir.replace(/\\/g, '/'), type: 'local', label: '分享 E2E' },
+    });
+    expect(createLib.ok()).toBeTruthy();
+    libraryID = (await createLib.json()).id;
 
-  // 下载原文件：点击触发下载事件，文件名为真实视频名
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByRole('link', { name: /下载原文件/ }).click(),
-  ]);
-  expect(download.suggestedFilename()).toContain('.mp4');
-});
+    const scan = await api.post(`/api/library/scan/${libraryID}`);
+    expect(scan.ok()).toBeTruthy();
+    await pollMediaIDs(api);
+    await warmThumbnail(api, imageID);
 
-test('无痕打开图片分享链接：图片真实渲染、可下载', async ({ page }) => {
-  await page.goto(`/s/${imageToken}`);
-  await expect(page).not.toHaveURL(/\/login/);
+    const vShare = await api.post('/api/shares', { data: { resource_type: 'media', resource_id: videoID } });
+    expect(vShare.ok()).toBeTruthy();
+    videoToken = (await vShare.json()).token;
 
-  const img = page.locator('img').first();
-  await expect(img).toBeVisible();
-  // 图片确实加载（解码出非零尺寸）
-  await expect
-    .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 10000 })
-    .toBeGreaterThan(0);
+    const iShare = await api.post('/api/shares', { data: { resource_type: 'media', resource_id: imageID } });
+    expect(iShare.ok()).toBeTruthy();
+    imageToken = (await iShare.json()).token;
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByRole('link', { name: /下载原文件/ }).click(),
-  ]);
-  expect(download.suggestedFilename()).toContain('.jpg');
-});
+    // 相册分享：建相册、加入图片成员
+    const createAlbum = await api.post('/api/albums', { data: { name: '分享相册 E2E', description: '' } });
+    expect(createAlbum.ok()).toBeTruthy();
+    albumID = (await createAlbum.json()).id;
+    const addItem = await api.post(`/api/albums/${albumID}/items`, { data: { media_id: imageID } });
+    expect(addItem.ok()).toBeTruthy();
+    const aShare = await api.post('/api/shares', { data: { resource_type: 'album', resource_id: albumID } });
+    expect(aShare.ok()).toBeTruthy();
+    albumToken = (await aShare.json()).token;
 
-test('无痕打开无效分享：显示过期提示且不跳登录', async ({ page }) => {
-  await page.goto('/s/deadbeefdeadbeefdeadbeef');
-  await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.getByText(/分享不存在或已过期/)).toBeVisible({ timeout: 10000 });
+    await api.dispose();
+  });
+
+  test.afterAll(async () => {
+    // 清理：撤销分享、删相册、删库、删临时样片（隔离库 .tmp/e2e.db，清理失败仅告警不致命）
+    try {
+      const api = await pwRequest.newContext({ baseURL: BASE_URL });
+      await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
+      for (const tk of [videoToken, imageToken, albumToken]) {
+        if (tk) await api.delete(`/api/shares/${tk}`);
+      }
+      if (albumID) await api.delete(`/api/albums/${albumID}`);
+      if (libraryID) await api.delete(`/api/library/paths/${libraryID}`);
+      await api.dispose();
+    } catch (e) {
+      console.warn('[share-e2e] afterAll 清理失败（不影响测试结论）:', e);
+    }
+    if (mediaDir) rmSync(mediaDir, { recursive: true, force: true });
+  });
+
+  test('无痕打开视频分享链接：不跳登录、视频确实在线播放、可下载原文件', async ({ page }) => {
+    // 全新浏览器上下文默认无 cookie = 无痕/免登
+    await page.goto(`/s/${videoToken}`);
+
+    // 停留在公开页、未被任何路由改写到登录页
+    await expect(page).toHaveURL(new RegExp(`/s/${videoToken}$`));
+    await expect(page).not.toHaveURL(/\/login/);
+
+    const video = page.locator('video');
+    await expect(video).toBeVisible();
+
+    // 真正播放：静音后 play()，断言 currentTime 推进（解码出帧）
+    await video.evaluate((el: HTMLVideoElement) => { el.muted = true; return el.play(); });
+    await expect
+      .poll(async () => video.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 20000 })
+      .toBeGreaterThan(0);
+    const readyState = await video.evaluate((el: HTMLVideoElement) => el.readyState);
+    expect(readyState).toBeGreaterThanOrEqual(2); // ≥ HAVE_CURRENT_DATA
+
+    // 下载原文件：点击触发下载事件，文件名为真实视频名，且确有字节落盘
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('link', { name: /下载原文件/ }).click(),
+    ]);
+    expect(download.suggestedFilename()).toContain('.mp4');
+    const savedPath = await download.path();
+    expect(statSync(savedPath).size).toBeGreaterThan(0);
+  });
+
+  test('无痕打开图片分享链接：图片真实渲染、可下载', async ({ page }) => {
+    await page.goto(`/s/${imageToken}`);
+    await expect(page).toHaveURL(new RegExp(`/s/${imageToken}$`));
+    await expect(page).not.toHaveURL(/\/login/);
+
+    const img = page.locator('img').first();
+    await expect(img).toBeVisible();
+    await expect
+      .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 20000 })
+      .toBeGreaterThan(0);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('link', { name: /下载原文件/ }).click(),
+    ]);
+    expect(download.suggestedFilename()).toContain('.jpg');
+  });
+
+  test('无痕打开相册分享：网格缩略图真出像素、点开成员可查看下载', async ({ page }) => {
+    await page.goto(`/s/${albumToken}`);
+    await expect(page).toHaveURL(new RegExp(`/s/${albumToken}$`));
+    await expect(page).not.toHaveURL(/\/login/);
+
+    // 网格缩略图（/thumbnail 端点）真出像素
+    const thumb = page.locator('img').first();
+    await expect(thumb).toBeVisible();
+    await expect
+      .poll(async () => thumb.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 20000 })
+      .toBeGreaterThan(0);
+
+    // 点开成员卡片 → Modal 内成员可查看，并提供下载入口（覆盖相册分支 + Modal 渲染）
+    await thumb.click();
+    const dl = page.getByRole('link', { name: /下载原文件/ });
+    await expect(dl).toBeVisible({ timeout: 10000 });
+    expect(await dl.getAttribute('href')).toContain(`/api/share/${albumToken}/media/${imageID}/download`);
+  });
+
+  test('无痕打开无效分享：显示过期提示且停留在公开页', async ({ page }) => {
+    await page.goto('/s/deadbeefdeadbeefdeadbeef');
+    await expect(page).toHaveURL(/\/s\/deadbeef/);
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.getByText(/分享不存在或已过期/)).toBeVisible({ timeout: 10000 });
+  });
 });

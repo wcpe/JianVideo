@@ -31,7 +31,8 @@ import (
 // newShareTestServer 构造一台「生产同构」测试服务器（FR-43 端到端用）：
 // 注入分享服务 + 播放服务 + 完整迁移（含 Album/Share）+ 桩内嵌前端，
 // 以便在真实 HTTP 层验证「免登 + APIGuard 豁免 + 范围隔离 + Range 流 + 下载」。
-func newShareTestServer(t *testing.T) (*httptest.Server, string) {
+// 返回 gormDB 供测试直接操纵过期时间等（每台服务器一套 t.TempDir 隔离库）。
+func newShareTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -84,7 +85,7 @@ func newShareTestServer(t *testing.T) (*httptest.Server, string) {
 		}
 	})
 
-	return server, tmpDir
+	return server, gormDB, tmpDir
 }
 
 // shareLogin 登录并返回认证 Cookie。
@@ -98,10 +99,55 @@ func shareLogin(t *testing.T, serverURL string) string {
 	return resp.Header.Get("Set-Cookie")
 }
 
-// createShare 经管理端点创建分享，返回 token。
-func createShare(t *testing.T, serverURL, cookie, resourceType string, resourceID int64) string {
+// createLibraryWithMedia 建库并放入指定文件（name→bytes），扫描后返回库 ID 与文件名→媒体 ID 映射。
+func createLibraryWithMedia(t *testing.T, serverURL, cookie, dir, label string, files map[string][]byte) (int64, map[string]int64) {
 	t.Helper()
-	body := fmt.Sprintf(`{"resource_type":"%s","resource_id":%d}`, resourceType, resourceID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("建目录失败: %v", err)
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatalf("写文件 %s 失败: %v", name, err)
+		}
+	}
+	escaped := strings.ReplaceAll(dir, `\`, `\\`)
+	createResp := doRequest(t, "POST", serverURL+"/api/library/paths",
+		fmt.Sprintf(`{"path":"%s","type":"local","label":"%s"}`, escaped, label),
+		map[string]string{"Cookie": cookie})
+	if createResp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("建库失败: %d, body: %s", createResp.StatusCode, string(b))
+	}
+	var lp models.LibraryPath
+	parseJSON(t, createResp, &lp)
+
+	scanResp := doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", serverURL, lp.ID), nil,
+		map[string]string{"Cookie": cookie})
+	if scanResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(scanResp.Body)
+		t.Fatalf("触发扫描失败: %d, body: %s", scanResp.StatusCode, string(b))
+	}
+	scanResp.Body.Close()
+
+	items := waitForMediaItems(t, serverURL, cookie, len(files))
+	idByName := make(map[string]int64, len(files))
+	for _, m := range items {
+		if _, want := files[m.FileName]; want {
+			idByName[m.FileName] = m.ID
+		}
+	}
+	for name := range files {
+		if idByName[name] == 0 {
+			t.Fatalf("未取到媒体 ID: %s（入库映射 %v）", name, idByName)
+		}
+	}
+	return lp.ID, idByName
+}
+
+// createShare 经管理端点创建分享，expiresInHours>0 设过期、否则永不过期；返回 token。
+func createShare(t *testing.T, serverURL, cookie, resourceType string, resourceID int64, expiresInHours int) string {
+	t.Helper()
+	body := fmt.Sprintf(`{"resource_type":"%s","resource_id":%d,"expires_in_hours":%d}`, resourceType, resourceID, expiresInHours)
 	resp := doRequest(t, "POST", serverURL+"/api/shares", body, map[string]string{"Cookie": cookie})
 	if resp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(resp.Body)
@@ -116,54 +162,27 @@ func createShare(t *testing.T, serverURL, cookie, resourceType string, resourceI
 	return sh.Token
 }
 
+// shareMediaStatus 免登 GET 某分享媒体子端点，返回状态码（不带 Cookie = 无痕）。
+func shareMediaStatus(t *testing.T, serverURL, token string, mediaID int64, suffix string, headers map[string]string) int {
+	t.Helper()
+	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/share/%s/media/%d/%s", serverURL, token, mediaID, suffix), nil, headers)
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
 // TestE2E_Share_PublicAccessFlow 端到端验证 FR-43：authed 建库扫描建分享 → 免登（无 Cookie）访问。
 func TestE2E_Share_PublicAccessFlow(t *testing.T) {
-	server, tmpDir := newShareTestServer(t)
+	server, gdb, tmpDir := newShareTestServer(t)
 	cookie := shareLogin(t, server.URL)
 
-	// 建库 + 放一个视频与一张图片
-	dir := filepath.Join(tmpDir, "media")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("建目录失败: %v", err)
-	}
 	videoBytes := []byte("VIDEO-ORIGINAL-BYTES-1234567890")
 	imageBytes := []byte("IMAGE-ORIGINAL-BYTES-abcdefghij")
-	if err := os.WriteFile(filepath.Join(dir, "movie.mp4"), videoBytes, 0o644); err != nil {
-		t.Fatalf("写视频失败: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "photo.jpg"), imageBytes, 0o644); err != nil {
-		t.Fatalf("写图片失败: %v", err)
-	}
-	escaped := strings.ReplaceAll(dir, `\`, `\\`)
-	createResp := doRequest(t, "POST", server.URL+"/api/library/paths",
-		fmt.Sprintf(`{"path":"%s","type":"local","label":"分享测试"}`, escaped),
-		map[string]string{"Cookie": cookie})
-	if createResp.StatusCode != http.StatusCreated {
-		b, _ := io.ReadAll(createResp.Body)
-		t.Fatalf("建库失败: %d, body: %s", createResp.StatusCode, string(b))
-	}
-	var lp models.LibraryPath
-	parseJSON(t, createResp, &lp)
+	_, ids := createLibraryWithMedia(t, server.URL, cookie, filepath.Join(tmpDir, "media"), "分享测试",
+		map[string][]byte{"movie.mp4": videoBytes, "photo.jpg": imageBytes})
+	videoID, imageID := ids["movie.mp4"], ids["photo.jpg"]
 
-	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
-		map[string]string{"Cookie": cookie})
-	items := waitForMediaItems(t, server.URL, cookie, 2)
-
-	var videoID, imageID int64
-	for _, m := range items {
-		switch {
-		case strings.HasSuffix(m.FileName, ".mp4"):
-			videoID = m.ID
-		case strings.HasSuffix(m.FileName, ".jpg"):
-			imageID = m.ID
-		}
-	}
-	if videoID == 0 || imageID == 0 {
-		t.Fatalf("未取到视频/图片 ID: video=%d image=%d", videoID, imageID)
-	}
-
-	// 为视频建媒体分享
-	token := createShare(t, server.URL, cookie, models.ShareResourceMedia, videoID)
+	// 为视频建媒体分享（永不过期）
+	token := createShare(t, server.URL, cookie, models.ShareResourceMedia, videoID, 0)
 
 	// ── 以下全部不带 Cookie（= 无痕/免登）────────────────────────────
 
@@ -205,7 +224,8 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		t.Fatalf("下载字节不一致: %q", string(dlBody))
 	}
 
-	// 4) 视频渐进式播放（免登）：带 Range 应 206 Partial Content + 片段字节
+	// 4) 视频 stream 端点免登 Range 转发：带 Range 应 206 Partial Content + 片段字节
+	//    （此处验证 stream 端点的 Range 转发链路；真实可解码播放由 Playwright 真浏览器用例覆盖）
 	streamURL := fmt.Sprintf("%s/api/share/%s/media/%d/stream", server.URL, token, videoID)
 	rangeResp := doRequest(t, "GET", streamURL, nil, map[string]string{"Range": "bytes=0-4"})
 	if rangeResp.StatusCode != http.StatusPartialContent {
@@ -217,81 +237,121 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		t.Fatalf("Range 片段不符: 期望 %q, 实际 %q", string(videoBytes[:5]), string(part))
 	}
 
-	// 5) 范围隔离（安全核心）：用该 token 访问不在范围内的图片 → 404
-	outResp := doRequest(t, "GET", fmt.Sprintf("%s/api/share/%s/media/%d/download", server.URL, token, imageID), nil, nil)
-	if outResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("越权访问范围外媒体应 404, 实际 %d", outResp.StatusCode)
+	// 5) 范围内 thumbnail/raw 也免登可达（证明 raw/thumbnail 端点的范围门已穿过）
+	//    缩略图可能尚在异步生成 → 200 或 202 均视为门已开
+	if code := shareMediaStatus(t, server.URL, token, videoID, "thumbnail", nil); code != http.StatusOK && code != http.StatusAccepted {
+		t.Fatalf("范围内 thumbnail 应 200/202, 实际 %d", code)
 	}
-	outResp.Body.Close()
-
-	// 6) 豁免边界：管理端点 /api/shares 不被豁免，无 Cookie → 401
-	mgmtResp := doRequest(t, "GET", server.URL+"/api/shares", nil, nil)
-	if mgmtResp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("管理端点免登应 401, 实际 %d", mgmtResp.StatusCode)
+	// 对视频请求 raw → 范围门通过后被 serveRawImage 以「非图片」拒为 400（≠404 证明门是开的）
+	if code := shareMediaStatus(t, server.URL, token, videoID, "raw", nil); code != http.StatusBadRequest {
+		t.Fatalf("范围内视频 raw 应 400(非图片), 实际 %d", code)
 	}
-	mgmtResp.Body.Close()
 
-	// 7) 撤销后免登访问失效 → 404
+	// 6) 范围隔离（安全核心）：用该 token 访问不在范围内的图片，raw/thumbnail/download/stream 全部 404
+	for _, suffix := range []string{"raw", "thumbnail", "download", "stream"} {
+		if code := shareMediaStatus(t, server.URL, token, imageID, suffix, nil); code != http.StatusNotFound {
+			t.Fatalf("越权访问范围外媒体 %s 应 404, 实际 %d", suffix, code)
+		}
+	}
+
+	// 7) 豁免边界：管理端点 /api/shares 不被豁免，无 Cookie → 401（GET 与 DELETE 都验）
+	if mgmt := doRequest(t, "GET", server.URL+"/api/shares", nil, nil); mgmt.StatusCode != http.StatusUnauthorized {
+		mgmt.Body.Close()
+		t.Fatalf("GET /api/shares 免登应 401, 实际 %d", mgmt.StatusCode)
+	} else {
+		mgmt.Body.Close()
+	}
+	if del := doRequest(t, "DELETE", server.URL+"/api/shares/"+token, nil, nil); del.StatusCode != http.StatusUnauthorized {
+		del.Body.Close()
+		t.Fatalf("DELETE /api/shares/:token 免登应 401, 实际 %d", del.StatusCode)
+	} else {
+		del.Body.Close()
+	}
+
+	// 8) 伪造/不存在 token → 404（API 层独立断言，与前端文案解耦）
+	if forged := doRequest(t, "GET", server.URL+"/api/share/deadbeefdeadbeefdeadbeef", nil, nil); forged.StatusCode != http.StatusNotFound {
+		forged.Body.Close()
+		t.Fatalf("伪造 token 应 404, 实际 %d", forged.StatusCode)
+	} else {
+		forged.Body.Close()
+	}
+
+	// 9) 过期 token → 404：另建一个分享，把 ExpiresAt 改到过去，免登访问应失效
+	expToken := createShare(t, server.URL, cookie, models.ShareResourceMedia, videoID, 0)
+	past := time.Now().Add(-time.Hour)
+	if err := gdb.Model(&models.Share{}).Where("token = ?", expToken).Update("expires_at", past).Error; err != nil {
+		t.Fatalf("置过期失败: %v", err)
+	}
+	if exp := doRequest(t, "GET", server.URL+"/api/share/"+expToken, nil, nil); exp.StatusCode != http.StatusNotFound {
+		exp.Body.Close()
+		t.Fatalf("过期 token 应 404, 实际 %d", exp.StatusCode)
+	} else {
+		exp.Body.Close()
+	}
+
+	// 10) 撤销后免登访问失效 → 404
 	delResp := doRequest(t, "DELETE", server.URL+"/api/shares/"+token, nil, map[string]string{"Cookie": cookie})
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("撤销应 204, 实际 %d", delResp.StatusCode)
 	}
 	delResp.Body.Close()
-	goneResp := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil)
-	if goneResp.StatusCode != http.StatusNotFound {
+	if goneResp := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil); goneResp.StatusCode != http.StatusNotFound {
+		goneResp.Body.Close()
 		t.Fatalf("撤销后免登访问应 404, 实际 %d", goneResp.StatusCode)
+	} else {
+		goneResp.Body.Close()
 	}
-	goneResp.Body.Close()
 }
 
-// TestE2E_Share_AlbumScopePublic 相册分享：成员免登可下载、非成员 404。
+// TestE2E_Share_AlbumScopePublic 相册分享：成员免登可下载（字节一致），非成员各端点 404。
 func TestE2E_Share_AlbumScopePublic(t *testing.T) {
-	server, tmpDir := newShareTestServer(t)
+	server, _, tmpDir := newShareTestServer(t)
 	cookie := shareLogin(t, server.URL)
 
-	dir := filepath.Join(tmpDir, "album")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "in.jpg"), []byte("IN-ALBUM"), 0o644)
-	os.WriteFile(filepath.Join(dir, "out.jpg"), []byte("OUT-ALBUM"), 0o644)
-	escaped := strings.ReplaceAll(dir, `\`, `\\`)
-	createResp := doRequest(t, "POST", server.URL+"/api/library/paths",
-		fmt.Sprintf(`{"path":"%s","type":"local","label":"相册分享"}`, escaped),
-		map[string]string{"Cookie": cookie})
-	var lp models.LibraryPath
-	parseJSON(t, createResp, &lp)
-	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
-		map[string]string{"Cookie": cookie})
-	items := waitForMediaItems(t, server.URL, cookie, 2)
-
-	var inID, outID int64
-	for _, m := range items {
-		if strings.HasSuffix(m.FileName, "in.jpg") {
-			inID = m.ID
-		} else if strings.HasSuffix(m.FileName, "out.jpg") {
-			outID = m.ID
-		}
-	}
+	inBytes := []byte("IN-ALBUM-BYTES")
+	outBytes := []byte("OUT-ALBUM-BYTES")
+	_, ids := createLibraryWithMedia(t, server.URL, cookie, filepath.Join(tmpDir, "album"), "相册分享",
+		map[string][]byte{"in.jpg": inBytes, "out.jpg": outBytes})
+	inID, outID := ids["in.jpg"], ids["out.jpg"]
 
 	// 建相册并只把 in.jpg 加入
 	albResp := doRequest(t, "POST", server.URL+"/api/albums", `{"name":"分享相册","description":""}`,
 		map[string]string{"Cookie": cookie})
+	if albResp.StatusCode != http.StatusCreated && albResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(albResp.Body)
+		t.Fatalf("建相册失败: %d, body: %s", albResp.StatusCode, string(b))
+	}
 	var album models.Album
 	parseJSON(t, albResp, &album)
-	doRequest(t, "POST", fmt.Sprintf("%s/api/albums/%d/items", server.URL, album.ID),
+	addResp := doRequest(t, "POST", fmt.Sprintf("%s/api/albums/%d/items", server.URL, album.ID),
 		fmt.Sprintf(`{"media_id":%d}`, inID), map[string]string{"Cookie": cookie})
+	if addResp.StatusCode != http.StatusOK && addResp.StatusCode != http.StatusCreated && addResp.StatusCode != http.StatusNoContent {
+		b, _ := io.ReadAll(addResp.Body)
+		t.Fatalf("加入相册失败: %d, body: %s", addResp.StatusCode, string(b))
+	}
+	addResp.Body.Close()
 
-	token := createShare(t, server.URL, cookie, models.ShareResourceAlbum, album.ID)
+	token := createShare(t, server.URL, cookie, models.ShareResourceAlbum, album.ID, 0)
 
-	// 成员 in.jpg 免登可下载
+	// 成员 in.jpg 免登可下载，且字节一致
 	inResp := doRequest(t, "GET", fmt.Sprintf("%s/api/share/%s/media/%d/download", server.URL, token, inID), nil, nil)
 	if inResp.StatusCode != http.StatusOK {
 		t.Fatalf("相册成员免登下载应 200, 实际 %d", inResp.StatusCode)
 	}
+	inBody, _ := io.ReadAll(inResp.Body)
 	inResp.Body.Close()
-	// 非成员 out.jpg → 404
-	outResp := doRequest(t, "GET", fmt.Sprintf("%s/api/share/%s/media/%d/download", server.URL, token, outID), nil, nil)
-	if outResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("非相册成员应 404, 实际 %d", outResp.StatusCode)
+	if string(inBody) != string(inBytes) {
+		t.Fatalf("相册成员下载字节不一致: %q", string(inBody))
 	}
-	outResp.Body.Close()
+	// 成员 raw 免登可达（图片 → 200）
+	if code := shareMediaStatus(t, server.URL, token, inID, "raw", nil); code != http.StatusOK {
+		t.Fatalf("相册成员 raw 应 200, 实际 %d", code)
+	}
+
+	// 非成员 out.jpg：raw/thumbnail/download/stream 全部 404（范围隔离）
+	for _, suffix := range []string{"raw", "thumbnail", "download", "stream"} {
+		if code := shareMediaStatus(t, server.URL, token, outID, suffix, nil); code != http.StatusNotFound {
+			t.Fatalf("非相册成员 %s 应 404, 实际 %d", suffix, code)
+		}
+	}
 }
