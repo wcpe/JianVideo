@@ -286,6 +286,19 @@ export const handlers = [
     return new HttpResponse('', { headers: { 'Content-Type': `image/${file.format}` } })
   }),
 
+  // 下载原文件（FR-42）：以附件形式回传原始文件
+  http.get('*/api/library/media/:id/download', async ({ params }) => {
+    await delay(100)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    return new HttpResponse('mock-file-bytes', {
+      headers: { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}` },
+    })
+  }),
+
   http.get('*/api/library/media/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)

@@ -251,6 +251,13 @@
 - **说明**：仅支持本地图片文件，用于前端预览；视频和 SMB 图片不走此接口。HEIC/RAW（cr2/nef/arw/dng/rw2 等）经外部 ImageMagick（`magick`）转成 JPEG 后返回，转换结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）（FR-37）。
 - **错误**：`400` 非图片或不支持的路径，`404` 记录或文件不存在，`503` 未安装 ImageMagick 无法转换 HEIC/RAW，`500` 图片转换失败
 
+### 下载原文件
+
+- **方法 / 路径**：`GET /api/library/media/:id/download`
+- **响应**（200）：媒体原始文件二进制，`Content-Disposition: attachment`，文件名为真实 `file_name`（按 RFC 5987 `filename*=UTF-8''` 编码，兼容中文）。经流式回传，支持 HTTP Range（断点续传）。
+- **说明**：图片与视频一视同仁，回传磁盘原始字节（不转码/不转换，区别于 raw 端点）。鉴权后访问（FR-13）；软删项不可下载（FR-25）。SMB 远程文件暂不支持（FR-42）。
+- **错误**：`400` ID 无效或 `smb://` 路径，`404` 记录不存在/已软删或磁盘文件不可访问
+
 ### 获取媒体缩略图
 
 - **方法 / 路径**：`GET /api/library/thumbnail/:id`

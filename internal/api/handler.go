@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -638,6 +639,35 @@ func (h *Handler) GetRawImage(c *gin.Context) {
 		contentType = http.DetectContentType(data)
 	}
 	c.Data(http.StatusOK, contentType, data)
+}
+
+// DownloadMediaFile GET /api/library/media/:id/download
+// 鉴权后回传媒体原始文件（图片与视频一视同仁，不转码/不转换），以附件形式下载。
+// 经 c.File 流式回传，天然支持 HTTP Range（断点续传）。
+func (h *Handler) DownloadMediaFile(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+
+	mf, err := h.library.GetMediaFileByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return
+	}
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "UNSUPPORTED_PATH", "message": "暂不支持 SMB 文件下载"})
+		return
+	}
+	if _, err := os.Stat(mf.FilePath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "FILE_NOT_FOUND", "message": "文件不可访问"})
+		return
+	}
+
+	// 以附件下载，文件名用真实文件名；按 RFC 5987 编码以兼容中文/特殊字符并防头注入
+	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(mf.FileName))
+	c.File(mf.FilePath)
 }
 
 // ListMediaExtensions GET /api/library/extensions

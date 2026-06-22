@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
 import { parseWebVTT } from '@/utils/subtitle'
@@ -182,6 +182,18 @@ export default function PlayPage() {
             onClick={() => setNameEditKind('real')}
           >
             改文件名
+          </Button>
+          {/* 下载原文件（FR-42）：附件下载磁盘原始文件 */}
+          <Button
+            component="a"
+            href={`/api/library/media/${media.id}/download`}
+            download
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconDownload size={14} />}
+          >
+            下载
           </Button>
         </Group>
 
