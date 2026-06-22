@@ -1,112 +1,144 @@
 import { test, expect, type Page } from '@playwright/test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-// 测试配置
+// 浏览器端到端：覆盖当前前端的登录、路由守卫、主导航与登出。
+// 选择器与路由期望对照 LoginPage / App.tsx 路由 / AppLayout / TimelinePage 编写。
+
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8080';
 const TEST_USER = 'admin';
 const TEST_PASS = 'admin';
 
-// 辅助函数：登录
+// 禁用 Service Worker：应用为 PWA（autoUpdate），SW 首次安装接管页面会触发整页重载，
+// 会在用例中途清空已填表单导致偶发失败；UI 流程测试不需要离线缓存，统一关闭以保证确定性。
+test.use({ serviceWorkers: 'block' });
+
+// 辅助函数：在登录页输入凭据并提交，成功后停留在首页（时间轴）。
 async function login(page: Page, username = TEST_USER, password = TEST_PASS) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.fill('input[name="username"]', username);
-  await page.fill('input[name="password"]', password);
-  await page.click('button[type="submit"]');
-  // 等待导航到媒体库
-  await page.waitForURL('**/library');
+  await page.goto('/login');
+  await page.getByLabel('用户名').fill(username);
+  await page.getByLabel('密码').fill(password);
+  await page.getByRole('button', { name: '登录' }).click();
+  // 登录成功后跳转首页，时间轴标题出现即视为进入受保护区
+  await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible({ timeout: 10000 });
 }
 
 test.describe('JianVideo 浏览器端到端测试', () => {
 
   test.beforeEach(async ({ page }) => {
-    // 每个测试前清除 localStorage 和 cookie
+    // 进入应用并清空本地存储，确保每个用例从未登录态起步
     await page.goto(BASE_URL);
     await page.evaluate(() => localStorage.clear());
   });
 
   test('登录页面渲染', async ({ page }) => {
-    await page.goto(`${BASE_URL}/login`);
-    await expect(page.locator('text=登录')).toBeVisible();
-    await expect(page.locator('input[name="username"]')).toBeVisible();
-    await expect(page.locator('input[name="password"]')).toBeVisible();
+    await page.goto('/login');
+    await expect(page.getByRole('heading', { name: 'JianVideo' })).toBeVisible();
+    await expect(page.getByLabel('用户名')).toBeVisible();
+    await expect(page.getByLabel('密码')).toBeVisible();
+    await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
   });
 
-  test('成功登录并跳转到媒体库', async ({ page }) => {
+  test('成功登录并跳转到首页', async ({ page }) => {
     await login(page);
-    await expect(page).toHaveURL(/.*library/);
+    await expect(page).toHaveURL(`${BASE_URL}/`);
+    await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
   });
 
   test('错误密码登录失败', async ({ page }) => {
-    await page.goto(`${BASE_URL}/login`);
-    await page.fill('input[name="username"]', TEST_USER);
-    await page.fill('input[name="password"]', 'wrongpassword');
-    await page.click('button[type="submit"]');
-    // 应该显示错误提示
-    await expect(page.locator('.mantine-Alert-root')).toBeVisible({ timeout: 5000 });
+    await page.goto('/login');
+    await page.getByLabel('用户名').fill(TEST_USER);
+    await page.getByLabel('密码').fill('wrongpassword');
+    // 登录接口必须返回 401（凭据错误的真实结果）。
+    // 注意：401 由 client.ts 响应拦截器整页跳回 /login，故不断言易朽的内联 Alert，
+    // 而是断言接口 401 + 最终仍停留在登录页（未进入受保护区）。
+    const [resp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/api/auth/login') && r.request().method() === 'POST',
+      ),
+      page.getByRole('button', { name: '登录' }).click(),
+    ]);
+    expect(resp.status()).toBe(401);
+    await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
   });
 
   test('未认证访问受保护页面重定向', async ({ page }) => {
-    await page.goto(`${BASE_URL}/library`);
-    // 未认证用户应被重定向到登录页或看到登录页面内容
-    await expect(page).toHaveURL(/.*login/);
+    await page.goto('/library-manager');
+    // 未认证用户访问受保护路由应被重定向到登录页
+    await expect(page).toHaveURL(/\/login/);
   });
 
-  test('媒体库页面渲染', async ({ page }) => {
+  test('首页时间轴渲染', async ({ page }) => {
     await login(page);
-    await expect(page.locator('text=媒体库')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
+    await expect(page.getByPlaceholder(/搜索：文件名/)).toBeVisible();
   });
 
-  test('添加媒体库路径', async ({ page }) => {
-    await login(page);
-    // 等待路径输入框出现
-    const pathInput = page.locator('input[placeholder*="路径"]');
-    await pathInput.waitFor({ state: 'visible', timeout: 5000 });
-    await pathInput.fill('/tmp/test_videos');
-    await page.click('button:has-text("添加")');
-    // 验证路径被添加到列表
-    await expect(page.locator('text=/tmp/test_videos')).toBeVisible({ timeout: 5000 });
-  });
+  test('管理页添加并移除媒体库目录', async ({ page }) => {
+    // 后端要求本地路径真实存在，故创建临时目录作为样本；用例结束清理库记录与目录
+    const dir = mkdtempSync(join(tmpdir(), 'jianvideo-browse-e2e-'));
+    const base = dir.split(/[\\/]/).pop()!;
+    let createdId = 0;
+    try {
+      await login(page);
+      await page.getByRole('link', { name: '管理' }).click();
+      await expect(page).toHaveURL(/\/library-manager/);
 
-  test('时间轴视图切换', async ({ page }) => {
-    await login(page);
-    // 等待 tab 出现
-    await page.waitForSelector('[role="tab"]', { timeout: 5000 });
-    const timelineTab = page.locator('[role="tab"]:has-text("时间轴")');
-    if (await timelineTab.count() > 0) {
-      await timelineTab.click();
-      await expect(timelineTab).toHaveAttribute('aria-selected', 'true');
+      await page.getByPlaceholder(/输入目录路径/).fill(dir);
+      await page.getByRole('button', { name: '添加', exact: true }).click();
+
+      // 经已登录上下文回查列表接口，确认新建库已落库并取回 ID（也用于 finally 清理）
+      await expect
+        .poll(async () => {
+          const res = await page.request.get('/api/library/paths');
+          const data = await res.json();
+          const created = (data.items ?? []).find((p: { id: number; path: string }) => p.path.includes(base));
+          if (created) createdId = created.id;
+          return Boolean(created);
+        }, { timeout: 10000 })
+        .toBe(true);
+
+      // 新目录也渲染到列表卡片中（卡片同一路径出现在多处文本节点，取首个即可）
+      await expect(page.getByText(new RegExp(base)).first()).toBeVisible();
+    } finally {
+      if (createdId) await page.request.delete(`/api/library/paths/${createdId}`);
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test('文件目录视图切换', async ({ page }) => {
+  test('导航回时间轴页', async ({ page }) => {
     await login(page);
-    await page.waitForSelector('[role="tab"]', { timeout: 5000 });
-    const directoryTab = page.locator('[role="tab"]:has-text("目录")');
-    if (await directoryTab.count() > 0) {
-      await directoryTab.click();
-      await expect(directoryTab).toHaveAttribute('aria-selected', 'true');
-    }
+    // 先离开首页，再点击导航回到时间轴，验证路由切换生效
+    await page.getByRole('link', { name: '目录' }).click();
+    await expect(page).toHaveURL(/\/browse/);
+
+    await page.getByRole('link', { name: '时间轴' }).click();
+    await expect(page).toHaveURL(`${BASE_URL}/`);
+    await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
+  });
+
+  test('导航到目录浏览页', async ({ page }) => {
+    await login(page);
+    await page.getByRole('link', { name: '目录' }).click();
+    await expect(page).toHaveURL(/\/browse/);
+    await expect(page.getByRole('heading', { name: '目录浏览' })).toBeVisible();
   });
 
   test('搜索功能', async ({ page }) => {
     await login(page);
-    const searchInput = page.locator('input[placeholder*="搜索"]');
-    if (await searchInput.count() > 0) {
-      await searchInput.fill('test');
-      // 等待防抖
-      await page.waitForTimeout(500);
-      // 验证搜索被触发（页面不崩溃即可）
-      await expect(page.locator('body')).toBeVisible();
-    }
+    const searchInput = page.getByPlaceholder(/搜索：文件名/);
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill('test');
+    await expect(searchInput).toHaveValue('test');
   });
 
   test('登出功能', async ({ page }) => {
     await login(page);
-    // 登出按钮可能在菜单组件中，尝试多种选择器
-    const logoutBtn = page.locator('button:has-text("登出")');
-    if (await logoutBtn.count() > 0) {
-      await logoutBtn.click();
-      await expect(page).toHaveURL(/.*login/);
-    }
+    // 顶栏登出按钮以 aria-label 暴露
+    await page.getByRole('button', { name: '退出登录' }).click();
+    await expect(page).toHaveURL(/\/login/);
   });
 
   test('API 健康检查', async ({ request }) => {
