@@ -79,6 +79,7 @@ export type ScanMode = 'incremental' | 'full'
 export interface ScanResponse {
   scanned?: number
   status?: string
+  task_id?: number   // 入队任务 ID（FR-29，队列启用时返回）
 }
 
 /** 扫描进度状态 */
@@ -91,6 +92,26 @@ export interface ScanStatus {
   error: string
   started_at: string
   completed_at: string
+}
+
+/** 扫描任务（队列，FR-29） */
+export interface ScanTask {
+  id: number
+  library_id: number
+  scan_type: string     // "full" / "incremental"
+  status: string        // "pending" / "running" / "completed" / "error"
+  scanned_files: number
+  total_files: number
+  error: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
+/** 扫描任务列表响应（FR-29） */
+export interface ScanTasksResponse {
+  tasks: ScanTask[]
+  current: ScanTask | null
 }
 
 /** 媒体库后缀类型 */

@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"jianvideo/internal/db/models"
 	"jianvideo/internal/library"
 	"jianvideo/internal/player"
 	"jianvideo/internal/settings"
@@ -34,11 +35,12 @@ type SubtitleTrack struct {
 
 // Handler API 请求处理器。
 type Handler struct {
-	library  *library.Service
-	settings *settings.Service  // 运行期设置读写（FR-24）
-	hlsDir   string             // HLS 切片输出根目录
-	hlsMgr   *player.HLSManager // 用于写入 master.m3u8
-	version  string             // 应用版本号，由 main 经 ldflags 注入
+	library   *library.Service
+	settings  *settings.Service  // 运行期设置读写（FR-24）
+	scanQueue *library.TaskQueue // 扫描任务队列（FR-29），未注入时扫描回退直接异步执行
+	hlsDir    string             // HLS 切片输出根目录
+	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
+	version   string             // 应用版本号，由 main 经 ldflags 注入
 }
 
 // NewHandler 创建处理器。
@@ -55,6 +57,13 @@ func (h *Handler) WithVersion(v string) *Handler {
 // WithSettings 注入运行期设置服务，启用 /api/settings 端点。
 func (h *Handler) WithSettings(svc *settings.Service) *Handler {
 	h.settings = svc
+	return h
+}
+
+// WithScanQueue 注入扫描任务队列，启用扫描入队与任务列表端点（FR-29）。
+// 未注入时 ScanLibrary 回退原直接异步执行、任务列表返回空，保持无队列环境可用。
+func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
+	h.scanQueue = q
 	return h
 }
 
@@ -419,9 +428,10 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 }
 
 // ScanLibrary POST /api/library/scan/:id
-// 启动异步扫描，立即返回 {"status": "scanning"}。
-// 查询参数 mode：full 全量扫描（含已删文件对账），incremental 或缺省为增量更新（FR-27）。
-// 扫描进度通过 GET /api/library/scan/progress SSE 端点获取。
+// 触发扫描：查询参数 mode（full 全量含已删文件对账 / incremental 或缺省增量，FR-27）。
+// 注入队列时建 pending 任务入队、串行执行（FR-29），返回 {"status":"queued","task_id":N}；
+// 未注入队列时回退原直接异步扫描，返回 {"status":"scanning"}。
+// 扫描进度通过 GET /api/library/scan/progress SSE 与 GET /api/library/scan/tasks 获取。
 func (h *Handler) ScanLibrary(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -435,17 +445,61 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	// 缺省/非法值回退增量，向后兼容既有调用方
+	// 缺省/非法值回退增量，向后兼容既有调用方（FR-27）
 	mode := library.NormalizeScanMode(c.Query("mode"))
-	h.library.StartAsyncScan(id, lp.Path, lp.Type, mode)
 
-	// 扫描启动后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
+	// 扫描触发后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
 	// 预切片失败不阻塞扫描响应（仅记日志）。
 	if transcoder.IsFFmpegAvailable() && h.hlsDir != "" && h.hlsMgr != nil {
 		go h.preSliceAllVideos(context.Background())
 	}
 
+	// 队列已注入：入队排队、单 worker 串行执行（FR-29）
+	if h.scanQueue != nil {
+		taskID, err := h.scanQueue.Enqueue(id, lp.Path, lp.Type, mode)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "ENQUEUE_FAILED", "message": "扫描入队失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "queued", "task_id": taskID})
+		return
+	}
+
+	// 未注入队列：回退原直接异步扫描
+	h.library.StartAsyncScan(id, lp.Path, lp.Type, mode)
 	c.JSON(http.StatusOK, gin.H{"status": "scanning"})
+}
+
+// ListScanTasks GET /api/library/scan/tasks
+// 返回扫描任务列表（按入队时间倒序）与当前进行中的任务（FR-29）。
+// 当前 running 任务的进度用实时全局扫描状态覆盖，已完成任务用其持久化的 scanned_files。
+func (h *Handler) ListScanTasks(c *gin.Context) {
+	if h.scanQueue == nil {
+		c.JSON(http.StatusOK, gin.H{"tasks": []models.ScanTask{}, "current": nil})
+		return
+	}
+
+	tasks, err := h.scanQueue.ListTasks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询任务失败"})
+		return
+	}
+
+	// 单 worker 串行 ⇒ 全局 ScanStatus 始终对应当前 running 任务；把实时进度覆盖到该任务
+	live := library.GetScanStatus()
+	var current *models.ScanTask
+	for i := range tasks {
+		if tasks[i].Status == models.ScanTaskStatusRunning {
+			if live.Status == "scanning" {
+				tasks[i].ScannedFiles = live.ScannedFiles
+				tasks[i].TotalFiles = live.TotalFiles
+			}
+			current = &tasks[i]
+			break
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"tasks": tasks, "current": current})
 }
 
 // ScanProgressSSE GET /api/library/scan/progress

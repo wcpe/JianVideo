@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from 'msw'
 import { mockPaths, mockMediaFiles } from './data'
-import type { LibraryPath, MediaFile, MediaExtension, Album, Tag } from '@/types'
+import type { LibraryPath, MediaFile, MediaExtension, Album, Tag, ScanTask } from '@/types'
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths]
@@ -27,6 +27,10 @@ let nextTagId = 1
 
 // 软删除/回收站（FR-25）：被软删的媒体 ID 集合
 const deletedMediaIds = new Set<number>()
+
+// 扫描任务队列（FR-29）内存数据
+const scanTasks: ScanTask[] = []
+let nextScanTaskId = 1
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -532,7 +536,21 @@ export const handlers = [
       }
       mediaFiles.push(newFile)
     }
-    return HttpResponse.json({ scanned: count })
+    // 扫描任务队列（FR-29）：入队一条已完成任务，供页眉任务展示
+    const now = new Date().toISOString()
+    scanTasks.unshift({
+      id: nextScanTaskId++, library_id: id, scan_type: 'full', status: 'completed',
+      scanned_files: count, total_files: count, error: '',
+      created_at: now, started_at: now, completed_at: now,
+    })
+    return HttpResponse.json({ status: 'queued', task_id: nextScanTaskId - 1 })
+  }),
+
+  // 扫描任务列表（FR-29）
+  http.get('*/api/library/scan/tasks', async () => {
+    await delay(50)
+    const current = scanTasks.find(t => t.status === 'running') ?? null
+    return HttpResponse.json({ tasks: [...scanTasks], current })
   }),
 
   // ─── 相册（FR-40）──────────────────────────────────────

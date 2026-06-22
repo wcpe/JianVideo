@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, ScanMode, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag, RecycleCleanupResult } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, ScanMode, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, ScanTask, ScanTasksResponse, Tag, RecycleCleanupResult } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -18,6 +18,10 @@ const mockTagMappings: { tag_id: number; media_id: number }[] = []
 
 // 软删除/回收站 mock 状态（FR-25）：被软删的媒体 ID 集合
 const mockDeletedIds = new Set<number>()
+
+// 扫描任务队列 mock 状态（FR-29）
+let nextMockTaskId = 1
+const mockScanTasks: ScanTask[] = []
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
@@ -160,6 +164,13 @@ async function realCleanupRecycle(): Promise<RecycleCleanupResult> {
 
 async function realScanLibrary(id: number, mode: ScanMode = 'incremental'): Promise<ScanResponse> {
   const res = await client.post<ScanResponse>(`/api/library/scan/${id}`, null, { params: { mode } })
+  return res.data
+}
+
+// ─── 扫描任务队列（FR-29）──────────────────────────────
+
+async function realGetScanTasks(): Promise<ScanTasksResponse> {
+  const res = await client.get<ScanTasksResponse>('/api/library/scan/tasks')
   return res.data
 }
 
@@ -391,7 +402,20 @@ async function mockScanLibrary(id: number, _mode: ScanMode = 'incremental'): Pro
       added_at: new Date().toISOString(), modified_at: new Date().toISOString(),
     })
   }
-  return { scanned: count }
+  // 模拟入队一条已完成的扫描任务（FR-29），供页眉任务展示
+  const now = new Date().toISOString()
+  mockScanTasks.unshift({
+    id: nextMockTaskId++, library_id: id, scan_type: 'full', status: 'completed',
+    scanned_files: count, total_files: count, error: '',
+    created_at: now, started_at: now, completed_at: now,
+  })
+  return { status: 'queued', task_id: nextMockTaskId - 1 }
+}
+
+async function mockGetScanTasks(): Promise<ScanTasksResponse> {
+  await mockDelay(80)
+  const current = mockScanTasks.find(t => t.status === 'running') ?? null
+  return { tasks: [...mockScanTasks], current }
 }
 
 async function mockAddMediaExtension(libraryID: number, extension: string, type: MediaExtensionType): Promise<void> {
@@ -472,6 +496,8 @@ export function restoreMediaFile(id: number) { return useMock ? mockRestoreMedia
 // 回收站清理（FR-26）
 export function cleanupRecycle() { return useMock ? mockCleanupRecycle() : realCleanupRecycle() }
 export function scanLibrary(id: number, mode: ScanMode = 'incremental') { return useMock ? mockScanLibrary(id, mode) : realScanLibrary(id, mode) }
+// 扫描任务队列（FR-29）
+export function getScanTasks() { return useMock ? mockGetScanTasks() : realGetScanTasks() }
 
 /**
  * 创建扫描进度 SSE 连接，返回关闭函数。

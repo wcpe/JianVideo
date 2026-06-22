@@ -3,6 +3,7 @@ import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, useMantineCol
 import { useDisclosure } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconAdjustments, IconTrash } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
+import ScanTaskIndicator from './ScanTaskIndicator'
 
 /** 全局布局 — Mantine AppShell */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -72,6 +73,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Group>
 
           <Group gap="sm">
+            {/* 扫描任务队列指示器（FR-29）：有进行中任务时常驻展示 */}
+            <ScanTaskIndicator />
             <Text size="sm" c="dimmed">{username}</Text>
             {/* 主题切换：暗色显示太阳（点击切浅色），浅色显示月亮（点击切暗色） */}
             <ActionIcon

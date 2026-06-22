@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
@@ -198,6 +198,23 @@
 
 媒体与标签为多对多关系，`(tag_id, media_id)` 唯一索引保证去重。按标签筛选媒体走 `tag_mappings` 子查询。
 
+**扫描任务（scan_tasks）（FR-29）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| library_id | INTEGER, INDEX | 待扫描媒体库目录 |
+| scan_type | TEXT | 扫描类型：`full` / `incremental`（当前 worker 统一按全量执行，差异留 FR-27） |
+| status | TEXT, INDEX | 任务状态：`pending` / `running` / `completed` / `error` |
+| scanned_files | INTEGER | 完成时记录的入库文件数 |
+| total_files | INTEGER | 待扫描文件总数 |
+| error | TEXT | 出错信息（status=error 时） |
+| created_at | DATETIME | 入队时间 |
+| started_at | DATETIME NULL | 开始执行时间 |
+| completed_at | DATETIME NULL | 结束时间 |
+
+扫描任务队列以本表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -207,7 +224,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、目录浏览、图片 raw 预览、缩略图、后缀配置、继续观看列表（FR-44）、软删除/回收站与还原（FR-25）、回收站清理（FR-26） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、目录浏览、图片 raw 预览、缩略图、后缀配置、继续观看列表（FR-44）、软删除/回收站与还原（FR-25）、回收站清理（FR-26） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
@@ -233,7 +250,14 @@
 - 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
 - 扫描入库按 `library_id + file_path` 去重，重复扫描不会重复写入。
 - 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR-0030）。
-- 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScan` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送，`completed`/`error` 后关闭连接。`ScanLibraryWithType` 仍保留同步签名供 watcher 等内部调用。
+- 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScan` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送，`completed`/`error` 后关闭连接。`ScanLibraryWithType` 仍保留同步签名供 watcher 与扫描队列调用。
+
+### 5.1.2 扫描任务队列（FR-29）
+
+- `library.TaskQueue`（`task_queue.go`）以 SQLite `scan_tasks` 表为持久化真源，单 worker goroutine 串行执行入队任务。触发扫描（`POST /api/library/scan/:id`）改为 `Enqueue` 建 `pending` 任务，立即返回任务 ID；worker 取最早 `pending` 置 `running`、调注入的执行函数（`Service.ScanLibraryWithType`，函数注入便于测试替身、不在队列重写扫描逻辑），按结果置 `completed`（记 `scanned_files`）或 `error`（记错误）。
+- 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数（path/dirType）为过程态，存内存映射不入库（path 真源仍是 `library_paths`）。
+- 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`（按 `library_id` 反查目录重建执行目标）后再启动 worker 重新执行；目录已失效的任务标记为 `error` 而非永久卡 `pending`。
+- 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 把实时 `ScanStatus` 的 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
 
 ### 5.1.1 缩略图生成
 

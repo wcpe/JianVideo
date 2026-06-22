@@ -73,6 +73,7 @@ func main() {
 		&models.Tag{},
 		&models.TagMapping{},
 		&models.Setting{},
+		&models.ScanTask{},
 	); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
@@ -117,7 +118,16 @@ func main() {
 	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
 	libSvc := library.NewService(gormDB)
 	settingsSvc := settings.NewService(gormDB)
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc)
+
+	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。
+	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType)
+	if err := scanQueue.RecoverRunning(); err != nil {
+		log.Printf("[WARN] 扫描队列重启恢复失败: %v", err)
+	}
+	scanQueue.Start()
+	defer scanQueue.Stop()
+
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

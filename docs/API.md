@@ -337,10 +337,10 @@
 - **查询参数**：`mode`（可选）——`full` 全量扫描（遍历后对账已删文件），`incremental` 或缺省/非法值为增量更新（只索引新增）。
 - **响应**（200）：
   ```json
-  {"status": "scanning"}
+  {"status": "queued", "task_id": 12}
   ```
-- **说明**：按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描不会重复入库。扫描在后台 goroutine 中异步执行，接口立即返回，不阻塞主线程；实际进度通过「扫描进度」SSE 端点获取，入库的媒体文件会异步生成缩略图。`mode=full` 时在入库后对账：库内未软删但源文件已不存在的记录标记软删进回收站（FR-27，复用 FR-25 软删，不物理删除、不动磁盘）；对账仅本地扫描启用。
-- **错误**：`400` ID 无效，`404` 目录不存在
+- **说明**：触发扫描会建一个 `pending` 扫描任务入队（FR-29），由单 worker 串行执行，接口立即返回任务 ID（未启用队列时回退直接异步扫描，返回 `{"status":"scanning"}`）。多次触发按入队顺序排队、不并发抢资源。worker 按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描不会重复入库，入库的媒体文件会异步生成缩略图。可选查询参数 `mode`（`full`/`incremental`，缺省增量，向后兼容，FR-27）：`full` 在入库后对账——库内未软删但源文件已不存在的记录标记软删进回收站（复用 FR-25 软删，不物理删除、不动磁盘），对账仅本地扫描启用。当前进行中任务的实时进度通过「扫描进度」SSE 端点获取，任务列表通过「扫描任务列表」端点获取。
+- **错误**：`400` ID 无效，`404` 目录不存在，`500` 入队失败
 
 ### 扫描进度（SSE）
 
@@ -359,6 +359,31 @@
   }
   ```
 - **说明**：`status` 取值 `idle` / `scanning` / `completed` / `error`，全局共享单一扫描状态（同一时刻仅跟踪一个扫描任务）。前端据此渲染进度条，`completed` 后自动刷新媒体列表。
+
+### 扫描任务列表（FR-29）
+
+- **方法 / 路径**：`GET /api/library/scan/tasks`
+- **响应**（200）：
+  ```json
+  {
+    "tasks": [
+      {
+        "id": 12,
+        "library_id": 1,
+        "scan_type": "full",
+        "status": "running",
+        "scanned_files": 30,
+        "total_files": 120,
+        "error": "",
+        "created_at": "2026-06-22T20:00:00Z",
+        "started_at": "2026-06-22T20:00:01Z",
+        "completed_at": null
+      }
+    ],
+    "current": { "id": 12, "status": "running", "...": "同上" }
+  }
+  ```
+- **说明**：返回全部扫描任务（按入队时间倒序）与当前进行中任务 `current`（无则 `null`）。`status` 取值 `pending` / `running` / `completed` / `error`，`scan_type` 取值 `full` / `incremental`（当前 worker 统一按全量执行，full/incremental 差异留 FR-27 对接）。队列以 SQLite `scan_tasks` 表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 任务重置为 `pending` 重新入队。当前 `running` 任务的 `scanned_files`/`total_files` 用实时全局扫描状态覆盖，已完成任务返回其持久化进度。前端页眉据此常驻展示进行中任务并可点开看任务列表与各自进度。
 
 ### 列出相册
 
