@@ -290,6 +290,72 @@ func TestScanLibrary_API(t *testing.T) {
 	}
 }
 
+// waitScanCompleted 轮询等待全局扫描状态进入终态，供端点异步扫描测试复用。
+func waitScanCompleted(t *testing.T) {
+	t.Helper()
+	for i := 0; i < 60; i++ {
+		s := library.GetScanStatus()
+		if s.Status == "completed" || s.Status == "error" {
+			if s.Status == "error" {
+				t.Fatalf("扫描出错: %s", s.Error)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("等待扫描完成超时")
+}
+
+// TestScanLibrary_FullModeReconciles 端点 mode=full 触发对账：删除源文件后全量扫，
+// 缺失记录进回收站、常规列表消失；缺省 mode 为增量、不对账。
+func TestScanLibrary_FullModeReconciles(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.mp4")
+	gone := filepath.Join(dir, "gone.mp4")
+	_ = os.WriteFile(keep, []byte("fake"), 0o644)
+	_ = os.WriteFile(gone, []byte("fake"), 0o644)
+	lp, _ := svc.CreateLibraryPath(dir, "local", "对账测试")
+
+	// 首次全量扫入库两条
+	req := httptest.NewRequest("POST", "/api/library/scan/"+strconv.FormatInt(lp.ID, 10)+"?mode=full", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	waitScanCompleted(t)
+
+	// 删源文件后缺省（增量）扫一次：不应对账
+	_ = os.Remove(gone)
+	req = httptest.NewRequest("POST", "/api/library/scan/"+strconv.FormatInt(lp.ID, 10), nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	waitScanCompleted(t)
+	recycled, _ := svc.ListDeletedMediaFiles()
+	if len(recycled) != 0 {
+		t.Fatalf("增量扫描不应对账软删, 回收站实际 %d 条", len(recycled))
+	}
+
+	// 再 mode=full 扫一次：缺失记录进回收站
+	req = httptest.NewRequest("POST", "/api/library/scan/"+strconv.FormatInt(lp.ID, 10)+"?mode=full", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	waitScanCompleted(t)
+
+	recycled, _ = svc.ListDeletedMediaFiles()
+	if len(recycled) != 1 {
+		t.Fatalf("全量扫描后回收站应有 1 条, 实际 %d", len(recycled))
+	}
+	if recycled[0].FileName != "gone.mp4" {
+		t.Fatalf("软删的应为 gone.mp4, 实际 %s", recycled[0].FileName)
+	}
+	_, total, _ := svc.ListMediaFiles(lp.ID, "", "", 1, 20)
+	if total != 1 {
+		t.Fatalf("常规列表应只剩 1 条, 实际 %d", total)
+	}
+}
+
 // ─── 错误路径测试 ──────────────────────────────────────
 
 func TestCreateLibraryPath_InvalidJSON(t *testing.T) {

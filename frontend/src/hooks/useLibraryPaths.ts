@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { notifications } from '@mantine/notifications'
 import * as libApi from '@/api/library'
-import type { LibraryPath, MediaExtensionType } from '@/types'
+import type { LibraryPath, MediaExtensionType, ScanMode } from '@/types'
 
 export function useLibraryPaths(
   onPathsChanged?: () => void,
@@ -79,12 +79,14 @@ export function useLibraryPaths(
     }
   }, [loadPaths, onPathsChanged])
 
-  const handleScan = useCallback(async (id: number, onScanDone?: () => Promise<void>) => {
+  // 触发扫描（FR-27）：mode=incremental 增量更新只索引新增；mode=full 全量扫描并对账已删文件。
+  const handleScan = useCallback(async (id: number, mode: ScanMode = 'incremental', onScanDone?: () => Promise<void>) => {
     setScanLoading(prev => ({ ...prev, [id]: true }))
     try {
       // 扫描已改为后端异步执行，立即返回；实际进度由扫描进度 SSE 推送
-      await libApi.scanLibrary(id)
-      notifications.show({ title: '扫描已开始', message: '正在后台扫描，完成后将自动刷新', color: 'blue', autoClose: 3000 })
+      await libApi.scanLibrary(id, mode)
+      const label = mode === 'full' ? '全量扫描已开始' : '增量更新已开始'
+      notifications.show({ title: label, message: '正在后台扫描，完成后将自动刷新', color: 'blue', autoClose: 3000 })
       await onPathsChanged?.()
       await onScanDone?.()
     } catch {

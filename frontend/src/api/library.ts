@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag, RecycleCleanupResult } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, ScanMode, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag, RecycleCleanupResult } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -158,8 +158,8 @@ async function realCleanupRecycle(): Promise<RecycleCleanupResult> {
   }
 }
 
-async function realScanLibrary(id: number): Promise<ScanResponse> {
-  const res = await client.post<ScanResponse>(`/api/library/scan/${id}`)
+async function realScanLibrary(id: number, mode: ScanMode = 'incremental'): Promise<ScanResponse> {
+  const res = await client.post<ScanResponse>(`/api/library/scan/${id}`, null, { params: { mode } })
   return res.data
 }
 
@@ -371,8 +371,9 @@ async function mockUpdateDisplayName(id: number, displayName: string): Promise<M
   return f
 }
 
-async function mockScanLibrary(id: number): Promise<ScanResponse> {
+async function mockScanLibrary(id: number, _mode: ScanMode = 'incremental'): Promise<ScanResponse> {
   await mockDelay(400)
+  // mock 模式仅模拟新增入库，不区分对账（全量对账行为由后端集成测试覆盖）
   const libraryPath = mockPaths.find(p => p.id === id)?.path || 'D:\\Videos'
   const count = Math.floor(Math.random() * 3) + 1
   const fmts = ['mp4', 'mkv', 'avi', 'mov']
@@ -470,7 +471,7 @@ export function getRecycleMediaFiles() { return useMock ? mockGetRecycleMediaFil
 export function restoreMediaFile(id: number) { return useMock ? mockRestoreMediaFile(id) : realRestoreMediaFile(id) }
 // 回收站清理（FR-26）
 export function cleanupRecycle() { return useMock ? mockCleanupRecycle() : realCleanupRecycle() }
-export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
+export function scanLibrary(id: number, mode: ScanMode = 'incremental') { return useMock ? mockScanLibrary(id, mode) : realScanLibrary(id, mode) }
 
 /**
  * 创建扫描进度 SSE 连接，返回关闭函数。

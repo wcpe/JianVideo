@@ -44,6 +44,23 @@ const (
 	MediaTypeImage = "image"
 )
 
+// 扫描模式常量（FR-27）。
+const (
+	// ScanModeIncremental 增量更新：只索引新增/变更文件，不对账，速度快。
+	ScanModeIncremental = "incremental"
+	// ScanModeFull 全量扫描：遍历全部文件并对账——库内未软删但源文件已不存在的记录标记软删（进回收站）。
+	ScanModeFull = "full"
+)
+
+// NormalizeScanMode 规范化扫描模式：仅 full 视为全量，其余（含空串/非法值）按增量。
+// 供端点解析查询参数时回退，保证向后兼容。
+func NormalizeScanMode(mode string) string {
+	if mode == ScanModeFull {
+		return ScanModeFull
+	}
+	return ScanModeIncremental
+}
+
 var builtInMediaExtensions = map[string]string{
 	"mp4": MediaTypeVideo, "mkv": MediaTypeVideo, "avi": MediaTypeVideo, "mov": MediaTypeVideo,
 	"webm": MediaTypeVideo, "flv": MediaTypeVideo, "wmv": MediaTypeVideo, "ts": MediaTypeVideo,
@@ -524,26 +541,27 @@ func normalizeSMBLibraryPath(path string) string {
 	return strings.Trim(p, "/")
 }
 
-// ScanLibrary 异步扫描指定目录，立即返回。
-// 根据 dirType 分发到本地扫描或 SMB 扫描。
+// ScanLibrary 异步扫描指定本地目录，立即返回。默认增量模式（FR-27）。
 func (s *Service) ScanLibrary(libraryID int64, dirPath string) {
-	s.StartAsyncScan(libraryID, dirPath, "local")
+	s.StartAsyncScan(libraryID, dirPath, "local", ScanModeIncremental)
 }
 
 // ScanLibraryWithType 按类型同步扫描指定目录，索引所有媒体文件。
-// 供 watcher 轮询等内部同步调用使用。
-func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType string) (int, error) {
+// mode 为增量（ScanModeIncremental）或全量（ScanModeFull）：全量模式在本地扫描后对账，
+// 库内未软删但源文件已不存在的记录标记软删进回收站（FR-27）。供 watcher 轮询等内部同步调用使用。
+func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType, mode string) (int, error) {
 	switch dirType {
 	case "smb":
+		// SMB 远程列举不保证完整，不做对账以免误删（FR-27 设计）
 		return s.scanSMBLibrary(libraryID, dirPath)
 	default:
-		return s.scanLocalLibrary(libraryID, dirPath)
+		return s.scanLocalLibrary(libraryID, dirPath, mode)
 	}
 }
 
 // StartAsyncScan 按类型启动异步扫描，立即返回。
 // 实际扫描在后台 goroutine 中执行，进度通过 GetScanStatus 查询。
-func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType string) {
+func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType, mode string) {
 	updateScanStatus(func(ss *ScanStatus) {
 		*ss = ScanStatus{
 			Status:       "scanning",
@@ -556,7 +574,7 @@ func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType string) {
 	})
 
 	go func() {
-		count, err := s.ScanLibraryWithType(libraryID, dirPath, dirType)
+		count, err := s.ScanLibraryWithType(libraryID, dirPath, dirType, mode)
 
 		if err != nil {
 			updateScanStatus(func(ss *ScanStatus) {
@@ -578,7 +596,8 @@ func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType string) {
 }
 
 // scanLocalLibrary 扫描本地目录。
-func (s *Service) scanLocalLibrary(libraryID int64, dirPath string) (int, error) {
+// mode 为全量（ScanModeFull）时在入库后对账：库内未软删但本次未遍历到的记录标记软删（FR-27）。
+func (s *Service) scanLocalLibrary(libraryID int64, dirPath, mode string) (int, error) {
 	policy, err := s.mediaExtensionPolicy(libraryID)
 	if err != nil {
 		return 0, err
@@ -600,19 +619,55 @@ func (s *Service) scanLocalLibrary(libraryID int64, dirPath string) (int, error)
 		return nil
 	})
 	if err != nil {
+		// 遍历整体失败则现存集合不完整，放弃对账以免误删，直接上报错误
 		return 0, err
 	}
 
-	if len(paths) == 0 {
-		return 0, nil
+	count := 0
+	if len(paths) > 0 {
+		// 记录待扫描文件总数
+		updateScanStatus(func(ss *ScanStatus) {
+			ss.TotalFiles = len(paths)
+		})
+		count, err = s.indexMediaFiles(libraryID, paths)
+		if err != nil {
+			return count, err
+		}
 	}
 
-	// 记录待扫描文件总数
-	updateScanStatus(func(ss *ScanStatus) {
-		ss.TotalFiles = len(paths)
-	})
+	// 全量模式对账：以本次遍历到的现存路径集合为基准，软删缺失记录。
+	// paths 为空（空库/全删空目录）也需对账，故不依赖 len(paths) > 0。
+	if mode == ScanModeFull {
+		if err := s.reconcileDeleted(libraryID, paths); err != nil {
+			return count, err
+		}
+	}
 
-	return s.indexMediaFiles(libraryID, paths)
+	return count, nil
+}
+
+// reconcileDeleted 对账已删文件（FR-27）：库内未软删、且 file_path 不在 existingPaths 中的记录标记软删。
+// existingPaths 为本次遍历到的现存文件路径（任意分隔符，内部统一为正斜杠）；不物理删除、不动磁盘。
+// 已软删记录（deleted_at 非空）跳过，不改写其 deleted_at。
+func (s *Service) reconcileDeleted(libraryID int64, existingPaths []string) error {
+	now := time.Now()
+	query := s.db.Model(&models.MediaFile{}).
+		Where("library_id = ? AND deleted_at IS NULL", libraryID)
+	if len(existingPaths) > 0 {
+		normalized := make([]string, len(existingPaths))
+		for i, p := range existingPaths {
+			normalized[i] = filepath.ToSlash(p)
+		}
+		query = query.Where("file_path NOT IN ?", normalized)
+	}
+	result := query.Update("deleted_at", now)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("[INFO] 全量扫描对账：库 %d 软删 %d 条源文件已不存在的记录", libraryID, result.RowsAffected)
+	}
+	return nil
 }
 
 // scanSMBLibrary 扫描 SMB 共享目录。

@@ -166,9 +166,31 @@ describe('LibraryManagerPage', () => {
     renderPage()
 
     await screen.findByText('电影')
-    const scanButton = screen.getAllByRole('button', { name: '扫描' })[0]
+    const scanButton = screen.getAllByRole('button', { name: '增量更新' })[0]
     await user.click(scanButton)
 
     expect(screen.getByRole('status')).toHaveTextContent('正在扫描')
+  })
+
+  it('提供增量更新与全量扫描两个入口，分别携带对应 mode（FR-27）', async () => {
+    let capturedMode = ''
+    server.use(
+      http.post('*/api/library/scan/:id', ({ request }) => {
+        capturedMode = new URL(request.url).searchParams.get('mode') || ''
+        return HttpResponse.json({ scanned: 0 })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('电影')
+
+    // 增量更新入口 → mode=incremental
+    await user.click(screen.getAllByRole('button', { name: '增量更新' })[0])
+    await waitFor(() => expect(capturedMode).toBe('incremental'))
+
+    // 全量扫描入口 → mode=full
+    await user.click(screen.getAllByRole('button', { name: '全量扫描' })[0])
+    await waitFor(() => expect(capturedMode).toBe('full'))
   })
 })

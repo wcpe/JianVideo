@@ -257,7 +257,7 @@ func (w *Watcher) pollSMBLoop() {
 // pollAllSMB 轮询所有 SMB 媒体库路径。
 func (w *Watcher) pollAllSMB() {
 	for _, lp := range w.smbLibs {
-		count, err := w.library.ScanLibraryWithType(lp.ID, lp.Path, "smb")
+		count, err := w.library.ScanLibraryWithType(lp.ID, lp.Path, "smb", library.ScanModeIncremental)
 		if err != nil {
 			log.Printf("[WARN] SMB 轮询扫描失败: %s, err=%v", lp.Path, err)
 			continue

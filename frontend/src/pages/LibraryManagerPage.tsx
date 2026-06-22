@@ -38,7 +38,7 @@ export default function LibraryManagerPage() {
         extensionTypes={paths.extensionTypes} extensionLoading={paths.extensionLoading}
         onNewPathChange={paths.setNewPath} onAddPath={paths.handleAddPath}
         onDeletePath={(p) => setDelPath({ opened: true, path: p, loading: false })}
-        onScan={(id) => paths.handleScan(id)} onBrowsePath={handleOpenLibrary}
+        onScan={(id, mode) => paths.handleScan(id, mode)} onBrowsePath={handleOpenLibrary}
         onExtensionInputChange={(id, v) => paths.setExtensionInputs(p => ({ ...p, [id]: v }))}
         onExtensionTypeChange={(id, t) => paths.setExtensionTypes(p => ({ ...p, [id]: t }))}
         onAddExtension={paths.handleAddExtension} />

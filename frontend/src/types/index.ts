@@ -72,6 +72,9 @@ export interface LoginRequest {
   password: string
 }
 
+/** 扫描模式（FR-27）：增量更新只索引新增文件；全量扫描遍历并对账已删文件 */
+export type ScanMode = 'incremental' | 'full'
+
 /** 扫描响应 */
 export interface ScanResponse {
   scanned?: number

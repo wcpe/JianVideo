@@ -420,6 +420,7 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 
 // ScanLibrary POST /api/library/scan/:id
 // 启动异步扫描，立即返回 {"status": "scanning"}。
+// 查询参数 mode：full 全量扫描（含已删文件对账），incremental 或缺省为增量更新（FR-27）。
 // 扫描进度通过 GET /api/library/scan/progress SSE 端点获取。
 func (h *Handler) ScanLibrary(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -434,7 +435,9 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	h.library.StartAsyncScan(id, lp.Path, lp.Type)
+	// 缺省/非法值回退增量，向后兼容既有调用方
+	mode := library.NormalizeScanMode(c.Query("mode"))
+	h.library.StartAsyncScan(id, lp.Path, lp.Type, mode)
 
 	// 扫描启动后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
 	// 预切片失败不阻塞扫描响应（仅记日志）。

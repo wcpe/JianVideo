@@ -45,7 +45,7 @@ func TestScanEnrich_BoundedConcurrency(t *testing.T) {
 		}
 	}
 
-	count, err := svc.ScanLibraryWithType(1, dir, "local")
+	count, err := svc.ScanLibraryWithType(1, dir, "local", ScanModeIncremental)
 	if err != nil {
 		t.Fatalf("扫描失败: %v", err)
 	}

@@ -1,6 +1,6 @@
 import { Stack, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge } from '@mantine/core'
-import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader } from '@tabler/icons-react'
-import type { LibraryPath, MediaExtensionType } from '@/types'
+import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader, IconListSearch } from '@tabler/icons-react'
+import type { LibraryPath, MediaExtensionType, ScanMode } from '@/types'
 
 interface LibraryPathManagerProps {
   paths: LibraryPath[]
@@ -14,7 +14,7 @@ interface LibraryPathManagerProps {
   onNewPathChange: (value: string) => void
   onAddPath: () => void
   onDeletePath: (path: LibraryPath) => void
-  onScan: (id: number) => void
+  onScan: (id: number, mode: ScanMode) => void
   onBrowsePath: (path: LibraryPath) => void
   onExtensionInputChange: (pathId: number, value: string) => void
   onExtensionTypeChange: (pathId: number, type: MediaExtensionType) => void
@@ -68,7 +68,9 @@ export default function LibraryPathManager({
                   <Button size="xs" variant="subtle" color="blue" leftSection={<IconEye size={12} />}
                     onClick={() => onBrowsePath(p)}>浏览</Button>
                   <Button size="xs" variant="subtle" color="purple" leftSection={<IconRefresh size={12} />}
-                    onClick={() => onScan(p.id)} loading={scanLoading[p.id]}>扫描</Button>
+                    onClick={() => onScan(p.id, 'incremental')} loading={scanLoading[p.id]}>增量更新</Button>
+                  <Button size="xs" variant="subtle" color="purple" leftSection={<IconListSearch size={12} />}
+                    onClick={() => onScan(p.id, 'full')} loading={scanLoading[p.id]}>全量扫描</Button>
                   <ActionIcon size="sm" variant="subtle" color="red" onClick={() => onDeletePath(p)}>
                     <IconTrash size={14} />
                   </ActionIcon>
