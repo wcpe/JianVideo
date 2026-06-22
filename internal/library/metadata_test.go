@@ -1,6 +1,7 @@
 package library
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -227,6 +228,40 @@ func TestExtractImageEXIF_NoExif(t *testing.T) {
 		if !exif.Taken.IsZero() || exif.Camera != "" {
 			t.Fatalf("无 EXIF 图片不应解析出拍摄时间/相机: %+v", exif)
 		}
+	}
+}
+
+// imagemeta 自带的真实 GoPro Hero8 样片，含真实 GPS / 光圈 / 快门 / ISO。
+// 用真实相机样片而非 piexif 合成图回归：piexif 生成的 EXIF 在 ExifIFD/GPS 子目录省略了
+// 4 字节 next-IFD 指针，imagemeta v1.0.0 据此把子目录内所有偏移存储的值整体读偏 4 字节
+// （光圈/快门/镜头/GPS 全乱），无法作为有效回归输入；真实相机均写该指针，可正确解析。
+const sampleRealGPS = "testImages/Hero8.GPR"
+
+// TestExtractImageEXIF_RealGPSSample 用真实带 GPS 的样片回归光圈格式化与 GPS 提取。
+// 光圈是本次修复点：真实 f/2.8 经 imagemeta 得 float32(2.8)=2.79999...，
+// 必须按 float32 精度格式化为 "f/2.8"，修复前会输出 "f/2.799999952316284"。
+func TestExtractImageEXIF_RealGPSSample(t *testing.T) {
+	sample := resolveSample(t, sampleRealGPS)
+
+	exif := ExtractImageEXIF(sample)
+	if exif == nil {
+		t.Fatal("应解析出 EXIF")
+	}
+	if exif.Aperture != "f/2.8" {
+		t.Fatalf("光圈期望 f/2.8, 实际 %q", exif.Aperture)
+	}
+	if exif.Shutter != "1/240" {
+		t.Fatalf("快门期望 1/240, 实际 %q", exif.Shutter)
+	}
+	if exif.ISO != 317 {
+		t.Fatalf("ISO 期望 317, 实际 %d", exif.ISO)
+	}
+	// GPS：FR-39 地图依赖此坐标，必须非零且接近样片真值（约 56.30N, 10.15E）。
+	if math.Abs(exif.GPSLat-56.2984346) > 1e-4 {
+		t.Fatalf("GPS 纬度期望约 56.2984, 实际 %v", exif.GPSLat)
+	}
+	if math.Abs(exif.GPSLon-10.1465592) > 1e-4 {
+		t.Fatalf("GPS 经度期望约 10.1466, 实际 %v", exif.GPSLon)
 	}
 }
 

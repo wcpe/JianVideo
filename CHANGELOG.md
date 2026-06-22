@@ -8,6 +8,7 @@
 
 ### 修复
 - **PWA 资源被 SPA 兜底（FR-45）**：内嵌前端服务此前仅把 `/assets/*` 作静态服务，其余路径一律由 `NoRoute` 回退 `index.html`，导致 vite-plugin-pwa 产在 dist 根目录的 `sw.js`、`manifest.webmanifest`、`workbox-*.js` 在打包二进制中被当作 SPA 路由返回 `text/html`——Service Worker 无法注册、manifest 无效，实际部署中 PWA 安装/离线失效。改为 SPA 兜底前先尝试从内嵌 `frontend/dist` 命中根级真实文件并按真实 MIME 返回（`.webmanifest` → `application/manifest+json`），命中不到才回 `index.html`。新增 web 层回归用例断言这些根资源返回正确 Content-Type（非 `text/html`）。此前 FR-45 的 vitest 仅 mock 测 manifest 字段与 SW 注册逻辑，未覆盖内嵌服务器是否真把文件服出，故 bug 被掩盖、真机 curl 才暴露。
+- **EXIF 光圈格式化（FR-31）**：图片 EXIF 光圈此前用 `float64` 精度格式化 imagemeta 的 `float32` 光圈值，对非整光圈（如 f/1.8、f/2.8）会输出 `f/2.799999952316284` 之类的精度噪声串，并经 FR-38 详情面板 / 时间轴对用户可见。改为按 `float32` 精度取最短往返表示，正确显示 `f/2.8`。快门、镜头、GPS 提取本即正确，未改动；以真实带 GPS 样片新增回归用例。
 
 ## 0.6.0（2026-06-22）
 

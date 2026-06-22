@@ -225,11 +225,14 @@ func joinCameraName(make, model string) string {
 }
 
 // apertureString 把光圈数值格式化为 "f/2.8"，零或负值返回空串。
+// 入参来自 imagemeta 的 meta.Aperture（float32）经 float64 加宽，
+// 直接 float32→float64 会带入精度噪声（如 2.8 变 2.799999952316284）。
+// 故按 float32 精度（bitSize=32）取最短往返表示，得 "2.8"。
 func apertureString(f float64) string {
 	if f <= 0 {
 		return ""
 	}
-	return "f/" + strconv.FormatFloat(f, 'f', -1, 64)
+	return "f/" + strconv.FormatFloat(f, 'f', -1, 32)
 }
 
 // ffprobePath ffprobe 可执行文件路径，由 main.go 经 SetFFprobePath 注入。
