@@ -6,9 +6,11 @@
 
 ## 未发布版本
 
+## 0.7.0（2026-06-22）
+
 ### 新增
 - **远程自更新（FR-46）**：系统诊断页新增「应用更新」——频道切换（稳定/预发布）、检查更新（展示当前 vs 最新版本与发布说明）、一键更新并重启（二次确认）、回滚到上一版。后端 `internal/update` 经 GitHub Releases 检测/按平台选资产/下载/校验 sha256/替换运行中二进制（改名旧 exe 绕 Windows 文件锁）/自动重启/回滚；`main.go` 监听带端口重试以完成重启接管；API `GET/POST /api/system/update/{check,apply,rollback}`（复用 FR-13 鉴权）。校验失败/缺产物/非更新版本一律拒绝替换。单测覆盖版本比较/资产匹配/checksums 校验/频道选择/校验失败拒绝。对真实 Release 的端到端替换重启需 push 后真机验证（见 ADR-0032）。
-- **自动发布 CI（FR-47/FR-48）**：新增 GitHub Actions 工作流——`build.yml`（可复用：`ubuntu-latest`/`windows-latest` 原生 runner 各自 CGO 原生构建前端 `go:embed` + 注入版本号的单二进制 + sha256 校验和）；`release.yml`（`VERSION` 变更 push 即按版本号建 tag `vX.Y.Z` + 多平台构建 + 创建正式 GitHub Release，附产物 + `checksums.txt`）；`prerelease.yml`（普通 push 滚动刷新 `dev` 预发布）。不引 Docker、不交叉编译，沿用 ADR-0027 的「各平台原生构建」并扩展到 CI（见 ADR-0032）。CI 全绿/Release 真出现需推送线上仓库后验证。
+- **自动发布 CI（FR-47/FR-48）**：新增 GitHub Actions 工作流——`build.yml`（可复用：`ubuntu-latest`/`windows-latest` 原生 runner 各自 CGO 原生构建前端 `go:embed` + 注入版本号的单二进制 + sha256 校验和）；`release.yml`（推送版本 tag `vX.Y.Z` 或手动触发 → 多平台构建 + 创建正式 GitHub Release，附产物 + `checksums.txt`）；`prerelease.yml`（普通 push 或手动触发 → 滚动刷新 `dev` 预发布）。不引 Docker、不交叉编译，沿用 ADR-0027 的「各平台原生构建」并扩展到 CI（见 ADR-0032）。CI 全绿/Release 真出现需推送线上仓库后验证。
 
 ### 变更
 - **真机验收归真**：FR-21（系统诊断 + 编解码实测）、FR-22（跨平台打包·Windows 单二进制）、FR-45（移动端 PWA：SW 注册激活 + 可安装 manifest + 离线壳）经真机验收通过，PRD 标记已交付@v0.6.2——功能代码随 v0.6.2 发布，本条仅记录验收归真、无代码变更。FR-10/11（Intel QSV/VAAPI、NVIDIA NVENC）与 FR-22 的 Linux 维度因验收机无对应硬件/环境，保持开发中待真机。
