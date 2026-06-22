@@ -140,6 +140,7 @@
   - `favorite`：传 `true`/`1` 时仅返回已收藏媒体（可选，FR-41）
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
   - 结构化筛选（可选，FR-35，显式参数优先于 `search` 表达式同名约束）：`type`（`image`/`video`）、`size_min`/`size_max`（字节）、`time_from`/`time_to`（媒体时间范围，`RFC3339` 或 `YYYY-MM-DD`，按 `COALESCE(media_time, added_at)` 比较）、`path`（目录前缀）。以上全部走参数化查询，无 SQL 注入面。
+  - `has_gps`：传 `true` 时仅返回带 GPS 坐标（`gps_lat != 0 OR gps_lon != 0`）的媒体（可选，FR-39 照片地图）。
 - **响应**（200）：
   ```json
   {

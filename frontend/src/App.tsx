@@ -14,6 +14,7 @@ import PlayPage from './pages/PlayPage'
 import SystemPage from './pages/SystemPage'
 import SettingsPage from './pages/SettingsPage'
 import SharePage from './pages/SharePage'
+import MapPage from './pages/MapPage'
 import '@mantine/core/styles.css'
 import './index.css'
 
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><AppLayout><TimelinePage /></AppLayout></ProtectedRoute>} />
           <Route path="/browse" element={<ProtectedRoute><AppLayout><BrowsePage /></AppLayout></ProtectedRoute>} />
           <Route path="/albums" element={<ProtectedRoute><AppLayout><AlbumsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/map" element={<ProtectedRoute><AppLayout><MapPage /></AppLayout></ProtectedRoute>} />
           <Route path="/recycle" element={<ProtectedRoute><AppLayout><RecyclePage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           <Route path="/system" element={<ProtectedRoute><AppLayout><SystemPage /></AppLayout></ProtectedRoute>} />

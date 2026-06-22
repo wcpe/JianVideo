@@ -3,6 +3,8 @@ package library
 import (
 	"reflect"
 	"testing"
+
+	"jianvideo/internal/db/models"
 )
 
 // TestParseSearchExpression 表达式解析为结构化筛选（FR-35）。
@@ -125,6 +127,31 @@ func TestListMediaFilesFiltered_FR35(t *testing.T) {
 	// 组合：图片 + >=1mb → 仅 png
 	if n := count(MediaFilter{MediaType: MediaTypeImage, SizeMin: 1 << 20}); n != 1 {
 		t.Errorf("image+>=1mb 期望 1, 实际 %d", n)
+	}
+}
+
+// TestListMediaFilesFiltered_HasGPS 仅返回带 GPS 坐标的媒体（FR-39）。
+func TestListMediaFilesFiltered_HasGPS(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	withGPS, err := svc.CreateMediaFile(1, "D:/pics/有定位.jpg", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateMediaFile(1, "D:/pics/无定位.jpg", 1000); err != nil {
+		t.Fatal(err)
+	}
+	// 给其中一条置 GPS
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", withGPS.ID).
+		Updates(map[string]any{"gps_lat": 31.23, "gps_lon": 121.47}).Error; err != nil {
+		t.Fatalf("置 GPS 失败: %v", err)
+	}
+
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{HasGPS: true}, 1, 100)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != withGPS.ID {
+		t.Fatalf("has_gps 期望仅 1 条带定位媒体, 实际 total=%d items=%d", total, len(items))
 	}
 }
 

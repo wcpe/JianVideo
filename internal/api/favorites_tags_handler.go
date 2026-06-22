@@ -187,6 +187,9 @@ func parseMediaFilter(c *gin.Context, libraryID int64, sort, search string) libr
 	if p := c.Query("path"); p != "" {
 		filter.PathPrefix = p
 	}
+	if c.Query("has_gps") == "true" {
+		filter.HasGPS = true
+	}
 	return filter
 }
 

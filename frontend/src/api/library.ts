@@ -60,6 +60,8 @@ export interface MediaListParams {
   library_id?: number; sort?: string; page?: number; page_size?: number; search?: string; favorite?: boolean; tag_id?: number
   // FR-35/36 结构化筛选
   type?: 'image' | 'video'; size_min?: number; size_max?: number; time_from?: string; time_to?: string; path?: string
+  // FR-39 照片地图：仅带 GPS 的媒体
+  has_gps?: boolean
 }
 
 async function realGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {

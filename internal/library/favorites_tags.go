@@ -28,6 +28,7 @@ type MediaFilter struct {
 	TimeTo     *time.Time // 媒体时间上界（含）
 	PathPrefix string     // 目录前缀过滤（file_path LIKE prefix%）
 	Terms      []string   // 表达式解析出的文件名关键词（多词 AND）
+	HasGPS     bool       // 仅返回带 GPS 坐标的媒体（FR-39 照片地图）
 }
 
 // ListMediaFilesFiltered 按筛选条件分页查询媒体文件列表（FR-41）。
@@ -87,6 +88,10 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		escaped := strings.ReplaceAll(filter.PathPrefix, "%", "\\%")
 		escaped = strings.ReplaceAll(escaped, "_", "\\_")
 		query = query.Where("file_path LIKE ?", escaped+"%")
+	}
+	if filter.HasGPS {
+		// 仅带 GPS 坐标的媒体（FR-39 照片地图）
+		query = query.Where("gps_lat != 0 OR gps_lon != 0")
 	}
 	// 表达式 bare 关键词：多词 AND，各自文件名 LIKE
 	for _, term := range filter.Terms {

@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **照片地图视图（FR-39）**：新增 `/map` 页，基于照片 EXIF GPS（FR-31）在 OpenStreetMap 在线瓦片上展示地理分布，标记弹窗显示缩略图与名称。引入 `leaflet` + `react-leaflet`（+ devDep `@types/leaflet`）+ OSM 在线瓦片（无 token/账号，见 ADR-0031）。后端 `GET /api/library/media` 新增 `has_gps=true` 结构化筛选（`gps_lat != 0 OR gps_lon != 0`，并入 FR-35 `MediaFilter`，参数化）；地图页分页累积拉取地理标记子集。导航新增「地图」入口。瓦片显示依赖联网、真实 GPS 依赖 FR-31 真机提取。
 - **目录资源管理器视图（FR-33）**：目录浏览增强为类资源管理器——展示方式切换（列表详情 / 大-中-小图标，缩略图密度随档位）、排序切换（名称 / 大小 / 类型 / 修改时间，目录恒在前）、单选 + `Shift` 区间选 + `Ctrl/Cmd` 切换（选中高亮），**双击**文件打开 FR-34 详情面板（取代原单击打开）。目录页接入 `MediaDetailPanel` 并移除已无引用的 `ImagePreviewModal`。为支持多档位与选择，目录视图改用常规网格/列表（单目录条目有界；时间轴大列表仍保留虚拟化）。
 - **时间轴缩放与按媒体时间组织（FR-32）**：时间轴改为按**媒体时间**（FR-31，缺失回退入库时间）组织（`sort=media_time`），新增缩放粒度控件（日/月/年）：日按 `YYYY-MM-DD`、月按 `YYYY-MM`、年按 `YYYY` 分组，日期轴标签随粒度自适应；拖动浏览复用现有虚拟滚动。
 - **前端筛选/搜索 UI（FR-36）**：时间轴页搜索框升级提示表达式语法（`ext:`/`type:`/`size:`），新增 `MediaQueryFilters` 结构化筛选控件（类型「全部/图片/视频」分段控件、最小大小预设、拍摄时间范围日期），经 `useInfiniteMedia` 把 `type`/`size_min`/`time_from`/`time_to` 透传给媒体列表接口（消费 FR-35 引擎，筛选变化即重置首屏）。
