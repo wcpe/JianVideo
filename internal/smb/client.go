@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -17,7 +18,19 @@ const (
 	maxReconnectAttempts = 3
 	// reconnectDelay 重连间隔。
 	reconnectDelay = 2 * time.Second
+	// defaultSMBPort SMB 默认端口；host 未带端口时补此端口再拨号。
+	defaultSMBPort = "445"
 )
+
+// normalizeDialAddr 规整拨号地址：host 不含端口时补默认 SMB 端口 445。
+// go-smb2 的 Dial 要求 "host:port"，仅给主机名（如 "localhost"）会报
+// 「missing port in address」。已带端口（含 IPv6 带括号）则原样返回。
+func normalizeDialAddr(host string) string {
+	if _, _, err := net.SplitHostPort(host); err == nil {
+		return host
+	}
+	return net.JoinHostPort(host, defaultSMBPort)
+}
 
 // Client 封装 SMB 会话，提供连接池和重连能力。
 type Client struct {
@@ -54,7 +67,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	addr := c.creds.Host
+	addr := normalizeDialAddr(c.creds.Host)
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 

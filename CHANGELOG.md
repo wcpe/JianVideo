@@ -9,6 +9,7 @@
 ### 修复
 - **扫描入库未提取视频时长/编码/分辨率（FR-31）**：库扫描入库视频时，`enrichMediaMetadata` 此前仅用 ffprobe 读取容器 `creation_time` 定媒体时间，从未探测时长/编码/分辨率，导致 `media_files` 的 `duration`/`video_codec`/`audio_codec`/`width`/`height`/`bitrate` 恒为零值，FR-34 详情面板的「分辨率/时长/视频编码/音频编码」始终空白。改为入库时一次 `ffprobe -show_format -show_streams` 同时取容器时长/码率/`creation_time` 与首个视频/音频流的编码及分辨率并写库（library 包直接用注入的 ffprobe 路径，不依赖 transcoder 以守模块依赖方向）。新增 ffprobe JSON 解析纯函数单测与「真实 ffmpeg 生成视频→入库→断言字段非零」的集成回归用例。
 - **HEIC/RAW 转换在 ImageMagick 7 下失效（FR-37）**：`buildMagickConvertArgs`/`buildMagickThumbnailArgs` 把 `-auto-orient` 等图像算子放在输入图像之前，ImageMagick 7 的 `magick` 按左到右解析时报「no images found for operation `-auto-orient`」，致 HEIC/RAW 的 `/raw` 与缩略图转换在真机 IM7 下全部失败（此前单测只断言命令含输出路径、未校验算子相对输入的位置，故未发现；真机装 IM7 才暴露）。改为输入图像在前、算子在后；强化单测断言 `-auto-orient`/`-thumbnail` 位于输入之后。真机以 ImageMagick 7.1.2（libheif+libraw）端到端验证：真实 HEIC→JPEG、真实 Sony ARW→JPEG + 缩略图 + 缓存命中。
+- **SMB 连接缺省端口（FR-02）**：`smb.Client.Connect` 直接以 `creds.Host` 作为拨号地址传给 go-smb2 的 `Dial`，host 未带端口（如 `localhost`、`192.168.x.x`）时报「missing port in address」致连接必失败。新增 `normalizeDialAddr`：host 无端口补默认 SMB 端口 445、已带端口原样保留，附纯函数单测。真机以本地 SMB 共享端到端验证：连接成功、扫描入库 4 个文件（`smb://` 路径），错误凭据时优雅失败不崩溃（FR-02 高风险区「凭据错误处理」）。
 
 ## 0.6.1（2026-06-22）
 
