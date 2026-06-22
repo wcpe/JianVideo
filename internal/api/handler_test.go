@@ -717,7 +717,7 @@ func TestHWAccelEndpoint_ReturnsJSON(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
 		t.Fatalf("响应非 JSON: %v, body=%s", err, w.Body.String())
 	}
-	for _, k := range []string{"available", "preferred", "software_fallback", "h264_supported", "h265_supported"} {
+	for _, k := range []string{"available", "preferred", "software_fallback", "codecs", "from_cache"} {
 		if _, ok := info[k]; !ok {
 			t.Fatalf("硬件能力响应缺字段 %q，body=%s", k, w.Body.String())
 		}

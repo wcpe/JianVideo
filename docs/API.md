@@ -526,13 +526,37 @@
 ### 查询硬件加速能力
 
 - **方法 / 路径**：`GET /api/transcode/hwaccel`
-- **响应**（200）：
+- **响应**（200）：以编码器实测为真源、per-codec 表达（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
   ```json
   {
-    "available": ["nvenc", "qsv"],
-    "preferred": "nvenc"
+    "available": [
+      {
+        "name": "AMD AMF", "family": "amf", "device_type": "d3d11va", "available": true,
+        "codecs": [
+          { "codec": "h264", "encoder": "h264_amf", "compiled": true, "tested_ok": true },
+          { "codec": "h265", "encoder": "hevc_amf", "compiled": true, "tested_ok": true },
+          { "codec": "av1",  "encoder": "av1_amf",  "compiled": true, "tested_ok": false }
+        ]
+      },
+      {
+        "name": "软件编码", "family": "software", "device_type": "", "available": true,
+        "codecs": [
+          { "codec": "h264", "encoder": "libx264",   "compiled": true, "tested_ok": true },
+          { "codec": "av1",  "encoder": "libsvtav1", "compiled": true, "tested_ok": true }
+        ]
+      }
+    ],
+    "preferred": "h264_amf",
+    "codecs": ["h264", "h265", "av1", "vp9"],
+    "intel_gpu": false,
+    "intel_gpu_detail": "",
+    "software_fallback": false,
+    "from_cache": true,
+    "ffmpeg_version": "ffmpeg version 7.1 ...",
+    "tested_at": "2026-06-23T10:00:00Z"
   }
   ```
+- **说明**：`available` 为各硬件/软件家族的 per-codec 实测能力，家族 `available` = 至少一编码 `tested_ok`；`preferred` 为转码默认 H.264 编码器（保证 mpegts.js 可播）；`codecs` 为系统可输出编码并集；`from_cache`/`ffmpeg_version`/`tested_at` 标示实测来源；冷态（从未实测）`available` 为空、`preferred` 为 `libx264`、`tested_at` 为空。
 
 ### 系统信息
 
@@ -544,25 +568,29 @@
     "os": "linux", "arch": "amd64", "num_cpu": 8, "hostname": "nas01",
     "go_version": "go1.22.5",
     "ffmpeg": { "available": true, "path": "/opt/jianvideo/ffmpeg", "version": "ffmpeg version 6.1.1 ..." },
-    "hwaccel": { "available": [], "preferred": "libx264", "intel_gpu": false, "h264_supported": true, "h265_supported": true, "software_fallback": true }
+    "hwaccel": { "available": [], "preferred": "libx264", "codecs": [], "intel_gpu": false, "intel_gpu_detail": "", "software_fallback": true, "from_cache": false, "ffmpeg_version": "", "tested_at": "" }
   }
   ```
-- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的结构；`app_version` 由构建期 `-ldflags -X main.version` 注入。
+- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的 per-codec 结构（上例为冷态，未实测）；`app_version` 由构建期 `-ldflags -X main.version` 注入。
 
 ### 编解码器实测
 
-- **方法 / 路径**：`POST /api/system/codec-test`
+- **方法 / 路径**：`POST /api/system/codec-test`（可选查询参数 `?force=true` 强制重测）
 - **响应**（200）：
   ```json
   {
     "ffmpeg_available": true,
     "results": [
       { "encoder": "libx264", "family": "software", "codec": "h264", "compiled": true, "tested_ok": true, "detail": "" },
-      { "encoder": "h264_qsv", "family": "qsv", "codec": "h264", "compiled": true, "tested_ok": false, "detail": "<stderr 尾部>" }
-    ]
+      { "encoder": "h264_amf", "family": "amf", "codec": "h264", "compiled": true, "tested_ok": true, "detail": "" },
+      { "encoder": "av1_amf", "family": "amf", "codec": "av1", "compiled": true, "tested_ok": false, "detail": "<stderr 尾部>" }
+    ],
+    "from_cache": true,
+    "ffmpeg_version": "ffmpeg version 7.1 ...",
+    "tested_at": "2026-06-23T10:00:00Z"
   }
   ```
-- **说明**：对候选编码器用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。逐个试编码，响应可能耗时数秒。
+- **说明**：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。**默认读按 ffmpeg 版本持久化的缓存即时返回**（`from_cache:true`），`?force=true` 强制重测覆盖缓存（`from_cache:false`，逐个试编码可能耗时数分钟）。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。结果与 `GET /api/transcode/hwaccel` 同源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
 
 ### 获取字幕轨道列表
 

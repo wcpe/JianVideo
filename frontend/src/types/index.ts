@@ -185,24 +185,47 @@ export interface CurrentUser {
   username: string
 }
 
-/** 单项硬件加速能力 */
+/** 单个编码（codec）的支持情况：编入与试编码结果 */
+export interface CodecSupport {
+  /** 编码格式，如 h264 / h265 / av1 / vp9 */
+  codec: string
+  /** 编码器名，如 h264_amf */
+  encoder: string
+  /** 是否编入当前 ffmpeg */
+  compiled: boolean
+  /** 试编码是否成功 */
+  tested_ok: boolean
+}
+
+/** 单项硬件加速能力（per-codec：逐家族 × 逐编码） */
 export interface HWAccelCapability {
+  /** 家族显示名，如 "AMD AMF"/"软件编码" */
   name: string
+  /** 家族标识，如 software/amf/nvenc/qsv/vaapi/videotoolbox/vulkan */
+  family: string
+  /** 设备类型，如 d3d11va/cuda/qsv（software 为 ""） */
   device_type: string
-  h264_encoder: string
-  h265_encoder: string
+  /** 该家族至少一个编码可用 */
   available: boolean
+  /** 该家族逐编码支持情况 */
+  codecs: CodecSupport[]
 }
 
 /** 硬件加速汇总信息 */
 export interface HWAccelInfo {
   available: HWAccelCapability[]
   preferred: string
+  /** 系统可输出编码并集，如 ["h264","h265","av1","vp9"] */
+  codecs: string[]
   intel_gpu: boolean
   intel_gpu_detail: string
-  h264_supported: boolean
-  h265_supported: boolean
   software_fallback: boolean
+  /** 结果是否来自缓存 */
+  from_cache: boolean
+  /** 实测所用 ffmpeg 版本 */
+  ffmpeg_version: string
+  /** 实测时间（RFC3339），未测为 "" */
+  tested_at: string
 }
 
 /** FFmpeg 可用性信息 */
@@ -238,6 +261,12 @@ export interface EncoderProbeResult {
 export interface CodecTestResult {
   ffmpeg_available: boolean
   results: EncoderProbeResult[]
+  /** 结果是否来自缓存 */
+  from_cache: boolean
+  /** 实测所用 ffmpeg 版本 */
+  ffmpeg_version: string
+  /** 实测时间（RFC3339），未测为 "" */
+  tested_at: string
 }
 
 // 自更新检测结果（FR-46）

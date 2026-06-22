@@ -19,6 +19,7 @@ const (
 	familyNVENC        EncoderFamily = "nvenc"
 	familyAMF          EncoderFamily = "amf"
 	familyVideoToolbox EncoderFamily = "videotoolbox"
+	familyVulkan       EncoderFamily = "vulkan"
 )
 
 // EncoderCandidate 描述一个待实测的编码器候选。
@@ -45,20 +46,39 @@ const probeEncodeTimeout = 20 * time.Second
 const vaapiDevice = "/dev/dri/renderD128"
 
 // candidateEncoders 返回所有待实测的编码器候选（顺序即展示顺序）。
+// hevc 编码器的 codec 字段统一记为 "h265"（与现有约定一致）。
 func candidateEncoders() []EncoderCandidate {
 	return []EncoderCandidate{
+		// 软件编码：H.264 / H.265 / AV1（用 libsvtav1）/ VP9
 		{"libx264", familySoftware, "h264"},
 		{"libx265", familySoftware, "h265"},
+		{"libsvtav1", familySoftware, "av1"},
+		{"libvpx-vp9", familySoftware, "vp9"},
+		// Intel QSV
 		{"h264_qsv", familyQSV, "h264"},
 		{"hevc_qsv", familyQSV, "h265"},
-		{"h264_vaapi", familyVAAPI, "h264"},
-		{"hevc_vaapi", familyVAAPI, "h265"},
+		{"av1_qsv", familyQSV, "av1"},
+		{"vp9_qsv", familyQSV, "vp9"},
+		// NVIDIA NVENC
 		{"h264_nvenc", familyNVENC, "h264"},
 		{"hevc_nvenc", familyNVENC, "h265"},
+		{"av1_nvenc", familyNVENC, "av1"},
+		// AMD AMF
 		{"h264_amf", familyAMF, "h264"},
 		{"hevc_amf", familyAMF, "h265"},
+		{"av1_amf", familyAMF, "av1"},
+		// VAAPI
+		{"h264_vaapi", familyVAAPI, "h264"},
+		{"hevc_vaapi", familyVAAPI, "h265"},
+		{"av1_vaapi", familyVAAPI, "av1"},
+		{"vp9_vaapi", familyVAAPI, "vp9"},
+		// Apple VideoToolbox
 		{"h264_videotoolbox", familyVideoToolbox, "h264"},
 		{"hevc_videotoolbox", familyVideoToolbox, "h265"},
+		// Vulkan
+		{"h264_vulkan", familyVulkan, "h264"},
+		{"hevc_vulkan", familyVulkan, "h265"},
+		{"av1_vulkan", familyVulkan, "av1"},
 	}
 }
 
@@ -92,7 +112,7 @@ func parseCompiledEncoders(out string) map[string]bool {
 }
 
 // buildProbeArgs 按家族构建一次试编码的 ffmpeg 参数（试编码 5 帧到 null）。
-// VAAPI 需显式初始化硬件设备并 hwupload，其余家族通用模板即可。
+// VAAPI、Vulkan 需显式初始化硬件设备并 hwupload，其余家族通用模板即可。
 func buildProbeArgs(c EncoderCandidate) []string {
 	const src = "color=c=black:s=256x256:r=5"
 	if c.Family == familyVAAPI {
@@ -100,6 +120,18 @@ func buildProbeArgs(c EncoderCandidate) []string {
 			"-hide_banner", "-loglevel", "error",
 			"-init_hw_device", "vaapi=va:" + vaapiDevice,
 			"-filter_hw_device", "va",
+			"-f", "lavfi", "-i", src,
+			"-frames:v", "5", "-an",
+			"-vf", "format=nv12,hwupload",
+			"-c:v", c.Encoder,
+			"-f", "null", "-",
+		}
+	}
+	if c.Family == familyVulkan {
+		return []string{
+			"-hide_banner", "-loglevel", "error",
+			"-init_hw_device", "vulkan=vk:0",
+			"-filter_hw_device", "vk",
 			"-f", "lavfi", "-i", src,
 			"-frames:v", "5", "-an",
 			"-vf", "format=nv12,hwupload",

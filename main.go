@@ -79,6 +79,7 @@ func main() {
 		&models.Setting{},
 		&models.ScanTask{},
 		&models.Share{},
+		&models.CodecProbeCache{},
 	); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
@@ -151,7 +152,10 @@ func main() {
 	scanScheduler.Start()
 	defer scanScheduler.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc)
+	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，后台预热。
+	capSvc := transcoder.NewCapabilityService(gormDB)
+
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。
@@ -174,6 +178,9 @@ func main() {
 	}
 
 	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist, apiHandler, pbSvc)
+
+	// 后台预热硬件加速能力缓存（FR-49）：非阻塞，避免首次访问 /system 触发 3 分钟同步实测。
+	capSvc.WarmCacheAsync()
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.ServerPort)
 	log.Printf("JianVideo 启动于 %s", addr)

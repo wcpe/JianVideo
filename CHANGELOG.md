@@ -6,6 +6,11 @@
 
 ## 未发布版本
 
+### 新增
+- **硬件加速检测统一为实测真源 + 持久化缓存 + 全编码探测（FR-49）**：此前硬件加速列表（`/api/transcode/hwaccel`，CGO 只查编码器是否编入、硬编 NVENC+QSV）与编解码器实测（`/api/system/codec-test`，外部 ffmpeg 真实试编码、含 AMF）是两套独立逻辑，导致 AMD 的 `h264_amf`/`hevc_amf` 实测成功却不显示在硬件加速列表，且实测无缓存每次重跑约 3 分钟、能力模型只认 H.264/H.265。改为以**编码器实测为单一真源**：结果按 ffmpeg 版本持久化于 SQLite（`codec_probe_caches`，版本变更失效重测 + 手动「重新测试」），硬件加速列表/系统信息/转码选码统一读这份缓存；能力模型重构为 **per-codec**（每家族逐编码记录可用性，家族可用=至少一编码试编码成功）；补齐 **AMD AMF（含 `av1_amf`）、VAAPI、VideoToolbox、Vulkan** 全家族与 **AV1/VP9** 探测（`av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_vaapi`/`av1_vulkan`/`libsvtav1`、`vp9_qsv`/`vp9_vaapi`/`libvpx-vp9`）；启动时后台预热缓存（不阻塞、单航道防重复），GET 冷态返回「未测」不触发同步实测。前端硬件加速卡片改为按家族×编码逐项展示、标示缓存来源与「重新测试」。顺带修正 `intel_gpu` 假阳性（仅 qsv 实测可用或 sysfs 确认 Intel 核显才标记，不再因候选恒含 qsv 而误报）。AMD 真机验收：`/api/transcode/hwaccel` 与 `/system` 页正确显示 `h264_amf`/`hevc_amf` 可用、`preferred=h264_amf`、可输出编码含 av1/vp9（软件）、`intel_gpu=false`。取代 [ADR-0015](docs/adr/0015-hw-fallback.md)（见 [ADR-0033](docs/adr/0033-hwaccel-probe-source-cache.md)）。转码输出仍固定 H.264（AV1/VP9 实际用于输出与自适应播放属 FR-50~53）。
+
+## 0.7.1（2026-06-23）
+
 ### 修复
 - **自更新「测试版」频道错拉正式版、无法识别开发预览（FR-46）**：检测时按「整体最新 Release」选取，而 GitHub 把正式版排在滚动 `dev` 之前，导致测试版频道仍命中正式版（已发 0.7.0 后测试版仍显示 0.7.0、无更新）；且滚动 `dev` 的 tag 恒为 `dev`（非语义版本）无法参与版本比较。改为**按频道选对应 `prerelease` 标志的最新项**（正式版取 `prerelease=false`、测试版取 `prerelease=true`），测试版从 Release 名提取内嵌版本（如「开发预览（dev · 0.7.1-dev.<sha>）」）并按版本串不等判定更新；频道选择持久化到设置 `update_channel`（检查/更新不带 channel 时取设置）；前端频道标签由「稳定/预发布」改为「正式版/测试版」。对真实仓库验证：正式版→0.7.0 无更新、测试版→开发预览 有更新。
 - **开发预览版本号比正式版还旧、发布说明为空（FR-48）**：预发布工作流原以 `$(cat VERSION)-dev.<sha>` 作版本号，而 `VERSION` 发版后不上抬，导致发布 0.7.0 后开发预览仍是 `0.7.0-dev.<sha>`——语义化版本里它**小于**已发布的 0.7.0（比正式版还旧），测试版频道会把它当「更新」推送（实为降级）。改为基于最新正式版 tag 用 `git describe` 推导下一修订号作 dev 基线（`v0.7.0 → 0.7.1-dev.<sha>`，始终领先于上个正式版），checkout 取全部 tag；并补齐开发预览的发布说明（滚动预览提示 + 版本/提交 + 自上个正式版以来的 CHANGELOG 未发布段）。

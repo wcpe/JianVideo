@@ -15,8 +15,12 @@ async function realGetSystemInfo(): Promise<SystemInfo> {
   return res.data
 }
 
-async function realRunCodecTest(): Promise<CodecTestResult> {
-  const res = await client.post<CodecTestResult>('/api/system/codec-test')
+async function realRunCodecTest(force?: boolean): Promise<CodecTestResult> {
+  const res = await client.post<CodecTestResult>(
+    '/api/system/codec-test',
+    undefined,
+    force ? { params: { force: 'true' } } : undefined,
+  )
   return res.data
 }
 
@@ -52,40 +56,60 @@ async function mockGetSystemInfo(): Promise<SystemInfo> {
     hwaccel: {
       available: [
         {
-          name: 'NVIDIA NVENC',
-          device_type: 'cuda',
-          h264_encoder: 'h264_nvenc',
-          h265_encoder: 'hevc_nvenc',
+          name: 'AMD AMF',
+          family: 'amf',
+          device_type: 'd3d11va',
           available: true,
+          codecs: [
+            { codec: 'h264', encoder: 'h264_amf', compiled: true, tested_ok: true },
+            { codec: 'h265', encoder: 'hevc_amf', compiled: true, tested_ok: true },
+            { codec: 'av1', encoder: 'av1_amf', compiled: true, tested_ok: false },
+          ],
+        },
+        {
+          name: '软件编码',
+          family: 'software',
+          device_type: '',
+          available: true,
+          codecs: [
+            { codec: 'h264', encoder: 'libx264', compiled: true, tested_ok: true },
+            { codec: 'h265', encoder: 'libx265', compiled: true, tested_ok: true },
+          ],
         },
       ],
-      preferred: 'h264_nvenc',
+      preferred: 'h264_amf',
+      codecs: ['h264', 'h265'],
       intel_gpu: false,
       intel_gpu_detail: '',
-      h264_supported: true,
-      h265_supported: true,
-      software_fallback: false,
+      software_fallback: true,
+      from_cache: true,
+      ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
+      tested_at: '2026-06-23T10:00:00Z',
     },
   }
 }
 
-async function mockRunCodecTest(): Promise<CodecTestResult> {
+async function mockRunCodecTest(_force?: boolean): Promise<CodecTestResult> {
   await mockDelay(400)
   return {
     ffmpeg_available: true,
     results: [
       { encoder: 'libx264', family: 'software', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
       { encoder: 'libx265', family: 'software', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
-      { encoder: 'h264_nvenc', family: 'nvenc', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
+      { encoder: 'h264_amf', family: 'amf', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
+      { encoder: 'hevc_amf', family: 'amf', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
       {
-        encoder: 'h264_qsv',
-        family: 'qsv',
-        codec: 'h264',
+        encoder: 'av1_amf',
+        family: 'amf',
+        codec: 'av1',
         compiled: true,
         tested_ok: false,
-        detail: '[h264_qsv @ 0x55] Error initializing an internal MFX session: unsupported (-3)',
+        detail: '[av1_amf @ 0x55] AMF 不支持 AV1 编码',
       },
     ],
+    from_cache: true,
+    ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
+    tested_at: '2026-06-23T10:00:00Z',
   }
 }
 
@@ -118,8 +142,8 @@ export function getSystemInfo(): Promise<SystemInfo> {
   return useMock ? mockGetSystemInfo() : realGetSystemInfo()
 }
 
-export function runCodecTest(): Promise<CodecTestResult> {
-  return useMock ? mockRunCodecTest() : realRunCodecTest()
+export function runCodecTest(force?: boolean): Promise<CodecTestResult> {
+  return useMock ? mockRunCodecTest(force) : realRunCodecTest(force)
 }
 
 export function checkUpdate(channel: string): Promise<UpdateCheckResult> {

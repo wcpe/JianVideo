@@ -39,7 +39,23 @@ describe('SystemPage', () => {
     expect(screen.getByText('go1.22.5')).toBeVisible()
   })
 
-  it('点击「测试编解码器」后渲染编解码器结果行', async () => {
+  it('渲染硬件加速卡片的 per-codec 能力与可输出编码', async () => {
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    // 家族显示名
+    expect(await screen.findByText('AMD AMF')).toBeVisible()
+    // per-codec：逐编码列出编码器名（h264_amf 同时出现在「首选编码器」，故用 getAllByText）
+    expect(screen.getAllByText('h264_amf').length).toBeGreaterThan(0)
+    expect(screen.getByText('hevc_amf')).toBeVisible()
+    expect(screen.getByText('av1_amf')).toBeVisible()
+    // 系统可输出编码并集以 Badge 展示（h264/h265）
+    expect(screen.getByText('可输出编码')).toBeVisible()
+    // av1 试编码失败 → 失败标记存在
+    expect(screen.getAllByText('✗ 试编码失败').length).toBeGreaterThan(0)
+  })
+
+  it('点击「测试编解码器」后渲染 per-codec 结果行并显示缓存来源', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -48,18 +64,52 @@ describe('SystemPage', () => {
 
     await user.click(screen.getByRole('button', { name: '测试编解码器' }))
 
-    // libx264 成功行出现
+    // libx264 成功行出现（结果表内 Code 渲染）
     await waitFor(() => {
-      expect(screen.getByText('libx264')).toBeVisible()
+      expect(screen.getAllByText('libx264').length).toBeGreaterThan(0)
     })
-    // 失败编码器也应渲染
-    expect(screen.getByText('h264_qsv')).toBeVisible()
+    // AMF 编码器结果行也应渲染
+    expect(screen.getAllByText('av1_amf').length).toBeGreaterThan(0)
+    // from_cache 提示：结果来自缓存
+    expect(screen.getByText(/结果来自缓存，实测于/)).toBeVisible()
+  })
+
+  it('提供「重新测试」按钮强制重跑（force）', async () => {
+    const user = userEvent.setup()
+    let forceParam: string | null = null
+    server.use(
+      http.post('*/api/system/codec-test', ({ request }) => {
+        forceParam = new URL(request.url).searchParams.get('force')
+        return HttpResponse.json({
+          ffmpeg_available: true,
+          results: [
+            { encoder: 'libx264', family: 'software', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
+          ],
+          from_cache: false,
+          ffmpeg_version: 'ffmpeg version 6.1.1',
+          tested_at: '2026-06-23T11:00:00Z',
+        })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    const rerunBtn = screen.getByRole('button', { name: '重新测试' })
+    expect(rerunBtn).toBeVisible()
+    await user.click(rerunBtn)
+
+    // 强制重跑应带 force=true，且结果来源标为实测（非缓存）
+    await waitFor(() => {
+      expect(screen.getByText(/实测于 2026-06-23T11:00:00Z/)).toBeVisible()
+    })
+    expect(forceParam).toBe('true')
   })
 
   it('ffmpeg 不可用时提示无法测试', async () => {
     server.use(
       http.post('*/api/system/codec-test', () =>
-        HttpResponse.json({ ffmpeg_available: false, results: [] }),
+        HttpResponse.json({ ffmpeg_available: false, results: [], from_cache: false, ffmpeg_version: '', tested_at: '' }),
       ),
     )
 

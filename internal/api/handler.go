@@ -47,6 +47,9 @@ type Handler struct {
 	share     *share.Service     // 分享链接读写（FR-43），未注入时分享端点不可用
 	updateSvc *update.Service    // 二进制自更新服务（FR-46），无外部依赖恒可用
 
+	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，未注入时回退冷态默认
+	capability *transcoder.CapabilityService
+
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 }
 
@@ -85,6 +88,25 @@ func (h *Handler) WithSettingsReload(fn func()) *Handler {
 func (h *Handler) WithShareService(svc *share.Service) *Handler {
 	h.share = svc
 	return h
+}
+
+// WithCapabilityService 注入硬件加速能力服务（FR-49）。
+// 未注入时硬件加速相关端点回退冷态默认（软件兜底），保证无服务环境可用。
+func (h *Handler) WithCapabilityService(svc *transcoder.CapabilityService) *Handler {
+	h.capability = svc
+	return h
+}
+
+// HWAccel GET /api/transcode/hwaccel
+// 返回与 SystemInfo 同源的硬件加速能力（读能力服务缓存派生）。
+func (h *Handler) HWAccel(c *gin.Context) {
+	var info *transcoder.HWAccelInfo
+	if h.capability != nil {
+		info = h.capability.Capabilities(c.Request.Context())
+	} else {
+		info = transcoder.BuildCapabilities(nil)
+	}
+	c.JSON(http.StatusOK, info)
 }
 
 // versionOrDefault 返回版本号，未注入时回退 "dev"。

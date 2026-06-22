@@ -35,11 +35,13 @@ function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): st
       lines.push(`FFmpeg 版本: ${info.ffmpeg.version}`)
     }
     lines.push(`首选编码器: ${info.hwaccel.preferred || '无'}`)
-    lines.push(`H.264 支持: ${info.hwaccel.h264_supported ? '是' : '否'}`)
-    lines.push(`H.265 支持: ${info.hwaccel.h265_supported ? '是' : '否'}`)
+    lines.push(`可输出编码: ${info.hwaccel.codecs.length ? info.hwaccel.codecs.join(', ') : '无'}`)
     lines.push(`软件回退: ${info.hwaccel.software_fallback ? '是' : '否'}`)
+    lines.push(`实测来源: ${info.hwaccel.tested_at ? `${info.hwaccel.from_cache ? '缓存' : '实测'} @ ${info.hwaccel.tested_at}` : '未测'}`)
     for (const cap of info.hwaccel.available) {
-      lines.push(`硬件加速: ${cap.name} (${cap.device_type}) -> ${cap.h264_encoder} / ${cap.h265_encoder} [${cap.available ? '可用' : '不可用'}]`)
+      for (const c of cap.codecs) {
+        lines.push(`硬件加速: ${cap.family}/${c.codec} ${c.encoder} 试编码:${c.tested_ok ? '成功' : '失败'}`)
+      }
     }
   }
   if (codec) {
@@ -48,6 +50,9 @@ function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): st
     if (!codec.ffmpeg_available) {
       lines.push('ffmpeg 不可用')
     } else {
+      if (codec.tested_at) {
+        lines.push(`实测来源: ${codec.from_cache ? '缓存' : '实测'} @ ${codec.tested_at}`)
+      }
       for (const r of codec.results) {
         const status = r.tested_ok ? '成功' : '失败'
         lines.push(`${r.encoder} [${r.family}/${r.codec}] 编入:${r.compiled ? '是' : '否'} 试编码:${status}${r.detail ? ` 详情:${r.detail}` : ''}`)
@@ -99,11 +104,12 @@ export default function SystemPage() {
     return () => { active = false }
   }, [])
 
-  const handleCodecTest = useCallback(async () => {
+  // 默认走缓存（force 为 false），「重新测试」强制重跑（force 为 true）
+  const handleCodecTest = useCallback(async (force: boolean) => {
     setCodecLoading(true)
     setCodecError(null)
     try {
-      setCodec(await systemApi.runCodecTest())
+      setCodec(await systemApi.runCodecTest(force))
     } catch (err) {
       setCodecError(extractErrorMessage(err, '编解码器测试失败'))
     } finally {
@@ -226,13 +232,18 @@ export default function SystemPage() {
             <Title order={4} mb="sm">硬件加速</Title>
             <Stack gap="xs">
               <InfoRow label="首选编码器" value={info.hwaccel.preferred || '无（使用软件编码）'} />
+              {/* 系统可输出编码并集（codecs），按编码逐个展示 */}
+              <Group gap="xs" align="center">
+                <Text size="sm" c="dimmed">可输出编码</Text>
+                {info.hwaccel.codecs.length === 0 ? (
+                  <Text size="sm" c="dimmed">无</Text>
+                ) : (
+                  info.hwaccel.codecs.map((c) => (
+                    <Badge key={c} variant="light" color="green">{c}</Badge>
+                  ))
+                )}
+              </Group>
               <Group gap="xs">
-                <Badge variant="light" color={info.hwaccel.h264_supported ? 'green' : 'gray'}>
-                  H.264 {info.hwaccel.h264_supported ? '支持' : '不支持'}
-                </Badge>
-                <Badge variant="light" color={info.hwaccel.h265_supported ? 'green' : 'gray'}>
-                  H.265 {info.hwaccel.h265_supported ? '支持' : '不支持'}
-                </Badge>
                 {info.hwaccel.software_fallback && (
                   <Badge variant="light" color="yellow">软件回退</Badge>
                 )}
@@ -240,20 +251,38 @@ export default function SystemPage() {
                   <Badge variant="light" color="blue">Intel GPU</Badge>
                 )}
               </Group>
+              {/* 实测来源（缓存/实测 + 时间） */}
+              <Text size="xs" c="dimmed">
+                {info.hwaccel.tested_at
+                  ? `${info.hwaccel.from_cache ? '结果来自缓存，实测于' : '实测于'} ${info.hwaccel.tested_at}`
+                  : '尚未实测硬件加速能力'}
+              </Text>
               {info.hwaccel.available.length === 0 ? (
                 <Text size="sm" c="dimmed">未检测到可用的硬件加速。</Text>
               ) : (
                 info.hwaccel.available.map((cap) => (
-                  <Card key={cap.name} withBorder padding="xs" radius="sm" bg="var(--mantine-color-default-hover)">
+                  <Card key={cap.family} withBorder padding="xs" radius="sm" bg="var(--mantine-color-default-hover)">
                     <Group justify="space-between" mb={4}>
                       <Text size="sm" fw={600}>{cap.name}</Text>
                       <Badge size="sm" color={cap.available ? 'green' : 'red'}>
                         {cap.available ? '可用' : '不可用'}
                       </Badge>
                     </Group>
-                    <Text size="xs" c="dimmed">
-                      设备类型 {cap.device_type}；H.264 编码器 {cap.h264_encoder || '无'}；H.265 编码器 {cap.h265_encoder || '无'}
-                    </Text>
+                    {cap.device_type && (
+                      <Text size="xs" c="dimmed" mb={4}>设备类型 {cap.device_type}</Text>
+                    )}
+                    {/* 逐 codec 展示：编码格式 + 编码器名 + 试编码结果 */}
+                    <Stack gap={4}>
+                      {cap.codecs.map((c) => (
+                        <Group key={c.encoder} gap="xs" wrap="nowrap">
+                          <Badge size="xs" variant="outline" color="gray">{c.codec}</Badge>
+                          <Code>{c.encoder}</Code>
+                          <Badge size="xs" color={c.tested_ok ? 'green' : 'red'}>
+                            {c.tested_ok ? '✓ 试编码成功' : '✗ 试编码失败'}
+                          </Badge>
+                        </Group>
+                      ))}
+                    </Stack>
                   </Card>
                 ))
               )}
@@ -341,8 +370,17 @@ export default function SystemPage() {
         <Group justify="space-between" mb="sm">
           <Title order={4}>编解码器测试</Title>
           <Group gap="xs">
-            <Button color="purple" onClick={handleCodecTest} loading={codecLoading}>
+            <Button color="purple" onClick={() => handleCodecTest(false)} loading={codecLoading}>
               测试编解码器
+            </Button>
+            <Button
+              variant="light"
+              color="purple"
+              leftSection={<IconRefresh size={16} />}
+              onClick={() => handleCodecTest(true)}
+              loading={codecLoading}
+            >
+              重新测试
             </Button>
             <Button
               variant="light"
@@ -366,6 +404,12 @@ export default function SystemPage() {
           <Alert icon={<IconAlertCircle size={16} />} color="yellow">
             ffmpeg 不可用，无法测试编解码器。
           </Alert>
+        )}
+
+        {codec && codec.ffmpeg_available && codec.tested_at && (
+          <Text size="xs" c="dimmed" mb="xs">
+            {codec.from_cache ? `结果来自缓存，实测于 ${codec.tested_at}` : `实测于 ${codec.tested_at}`}
+          </Text>
         )}
 
         {codec && codec.ffmpeg_available && (

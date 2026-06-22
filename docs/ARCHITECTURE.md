@@ -12,8 +12,8 @@
 - 不依赖外部数据库服务，元数据使用 SQLite（WAL 模式）本地存储。
 - 不依赖外部消息队列、缓存或容器编排。
 - FFmpeg 通过 CGO 绑定（csnewman/ffmpeg-go）直接调用 libavcodec/libavformat/libavutil/libswscale C API，编译时需链接 FFmpeg 开发库（libavcodec-dev 等）。
-- 支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan），必须同时支持 H.264 和 H.265。
-- 硬件加速能力在启动时自动检测，通过 `GET /api/transcode/hwaccel` 接口暴露。
+- 支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan）与软件编码，按 per-codec（H.264/H.265/AV1/VP9）逐编码实测能力（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
+- 硬件加速能力以编码器实测为单一真源，结果按 ffmpeg 版本持久化于 SQLite（启动后台预热、可手动重测），通过 `GET /api/transcode/hwaccel` 接口暴露。
 
 ## 2. 模块与依赖
 
@@ -302,7 +302,7 @@
 - 编码输出经 ffmpeg stdout 与 HLS 切片文件提供，实时流式传输给客户端。
 - 每个转码会话运行在独立 goroutine，通过 context.Context 管理生命周期。
 - Seek 时 cancel 旧 context（终止旧 ffmpeg 进程），启动新进程定位到目标位置。
-- 硬件加速编码器完整清单（必须同时支持 H.264 和 H.265）：
+- 硬件加速编码器清单（按 per-codec 实测，见 §5.6 / [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）：
 
 | 平台 | H.264 编码器 | H.265 编码器 | 设备类型 |
 |---|---|---|---|
@@ -314,6 +314,7 @@
 | Vulkan | `h264_vulkan` | `hevc_vulkan` | `vulkan` |
 | 软件兜底 | `libx264` | `libx265` | — |
 
+- 上述各家族另探测 AV1（`av1_nvenc`/`av1_qsv`/`av1_amf`/`av1_vaapi`/`av1_vulkan`/`libsvtav1`）与 VP9（`vp9_qsv`/`vp9_vaapi`/`libvpx-vp9`）等高级编码并如实展示；当前**转码输出仍固定 H.264**（保证 mpegts.js 可播），AV1/VP9 实际用于输出与播放属 FR-50/51（第五期）。
 - Intel 核显检测：通过 sysfs（`/sys/class/drm/card0/device/vendor` = `0x8086`）+ 驱动名（`i915`/`xe`）+ 无独立显存确认核显身份。
 - 硬件检测优先级：CUDA → QSV → VAAPI → D3D11VA → DXVA2 → VideoToolbox → Vulkan → 软件。
 - 硬件加速失败时自动降级，不中断播放。
@@ -337,15 +338,17 @@
 
 ### 5.6 硬件加速管理
 
-- 硬件编码器检测：`-tags ffmpeg` 构建下经 CGO 调用 libav `avcodec_find_encoder_by_name` 判断编码器是否编入，辅以 Intel sysfs 识别核显；非该构建走纯 Go 存根（按软件编码降级）。
-- 实际编码仍由外部 ffmpeg 进程以对应编码器名完成。
-- 按优先级尝试：NVIDIA NVENC → Intel QSV → VAAPI → 软件；失败自动降级，不中断播放。
+- 硬件加速能力以**编码器实测**为单一真源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)，取代 ADR-0015）：对各家族 × 各编码（H.264/H.265/AV1/VP9）候选用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`，VAAPI/Vulkan 另带设备初始化），判定「编入 / 试编码成功」。
+- 实测结果按 **ffmpeg 版本为键持久化于 SQLite**（`codec_probe_caches` 表）：版本不变复用缓存、版本变化失效重测，提供手动「重新测试」；启动时后台 goroutine 预热（不阻塞、单航道防重复实测）。
+- 能力模型为 **per-codec**：每家族逐编码记录可用性，家族「可用」= 至少一编码试编码成功（不再强制 H.264 与 H.265 同时可用）。Intel 核显另辅以 sysfs 识别（仅 qsv 实测可用或 sysfs 确认才标记）。
+- 转码选码 `SelectBestEncoder()` 读实测快照按硬件优先级（NVENC→QSV→AMF→VAAPI→Vulkan→VideoToolbox）选 H.264 编码器，冷态（预热未完成）软件兜底；实际编码仍由外部 ffmpeg 进程完成。失败自动降级，不中断播放。
+- `-tags ffmpeg` 构建下另保留 CGO `avcodec_find_encoder_by_name` 低层检测（ADR-0013/0014），不在 HTTP/选码热路径。
 
 ### 5.7 系统诊断与编解码器实测（FR-21）
 
-- `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速检测结果。
-- `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox 的 H.264/H.265）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。独立于 §5.6 的 CGO 检测，普通构建即可用，专供真机验收。
-- 前端 `/system` 页展示并支持一键复制纯文本报告。
+- `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速实测能力（per-codec）。
+- `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。默认读 §5.6 持久化缓存即时返回，`?force=true` 强制重测；响应附 `from_cache`/`ffmpeg_version`/`tested_at`。与 §5.6 同源（实测即真源）。
+- 前端 `/system` 页展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。
 
 ### 5.8 运行期设置（FR-24）
 

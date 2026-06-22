@@ -62,6 +62,65 @@ func TestBuildProbeArgs_VAAPI(t *testing.T) {
 	}
 }
 
+// TestCandidateEncoders_FullFamilies 验证候选清单已补齐全硬件家族及 AV1/VP9。
+func TestCandidateEncoders_FullFamilies(t *testing.T) {
+	cands := candidateEncoders()
+	byEncoder := make(map[string]EncoderCandidate, len(cands))
+	for _, c := range cands {
+		byEncoder[c.Encoder] = c
+	}
+
+	// 必须涵盖各家族的 AV1/VP9 等扩展编码器
+	wantEncoders := []string{
+		"libsvtav1", "libvpx-vp9", // 软件 AV1/VP9
+		"av1_qsv", "vp9_qsv", // QSV AV1/VP9
+		"av1_nvenc",         // NVENC AV1
+		"av1_amf",           // AMD AMF AV1
+		"av1_vaapi", "vp9_vaapi", // VAAPI AV1/VP9
+		"h264_vulkan", "hevc_vulkan", "av1_vulkan", // Vulkan 全家族
+	}
+	for _, enc := range wantEncoders {
+		if _, ok := byEncoder[enc]; !ok {
+			t.Errorf("候选清单应包含编码器 %q，但缺失", enc)
+		}
+	}
+
+	// hevc 编码器的 codec 字段统一记为 "h265"（与现有约定一致）
+	if c, ok := byEncoder["hevc_amf"]; ok && c.Codec != "h265" {
+		t.Errorf("hevc_amf 的 codec 应为 h265，实际 %q", c.Codec)
+	}
+	// av1 编码器的 codec 字段应为 "av1"
+	if c, ok := byEncoder["av1_amf"]; ok && c.Codec != "av1" {
+		t.Errorf("av1_amf 的 codec 应为 av1，实际 %q", c.Codec)
+	}
+	// vp9 编码器的 codec 字段应为 "vp9"
+	if c, ok := byEncoder["libvpx-vp9"]; ok && c.Codec != "vp9" {
+		t.Errorf("libvpx-vp9 的 codec 应为 vp9，实际 %q", c.Codec)
+	}
+	// av1_vulkan 应归属 vulkan 家族
+	if c, ok := byEncoder["av1_vulkan"]; ok && c.Family != familyVulkan {
+		t.Errorf("av1_vulkan 应归属 vulkan 家族，实际 %q", c.Family)
+	}
+}
+
+// TestBuildProbeArgs_Vulkan 验证 Vulkan 分支带设备初始化与 hwupload。
+func TestBuildProbeArgs_Vulkan(t *testing.T) {
+	args := buildProbeArgs(EncoderCandidate{Encoder: "h264_vulkan", Family: familyVulkan, Codec: "h264"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-init_hw_device vulkan") {
+		t.Errorf("Vulkan 应初始化硬件设备，实际: %s", joined)
+	}
+	if !strings.Contains(joined, "-filter_hw_device vk") {
+		t.Errorf("Vulkan 应指定 filter_hw_device，实际: %s", joined)
+	}
+	if !strings.Contains(joined, "hwupload") {
+		t.Errorf("Vulkan 应包含 hwupload 滤镜，实际: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_vulkan") {
+		t.Errorf("应包含 Vulkan 编码器名，实际: %s", joined)
+	}
+}
+
 func TestTailString(t *testing.T) {
 	if got := tailString("  abc  ", 10); got != "abc" {
 		t.Errorf("应去空白返回 abc，实际 %q", got)

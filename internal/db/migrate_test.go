@@ -62,3 +62,42 @@ func TestAutoMigrate_FoundationModels(t *testing.T) {
 		t.Fatalf("写入 Setting 失败: %v", err)
 	}
 }
+
+// TestAutoMigrate_CodecProbeCache 验证编码器实测缓存表（FR-49）迁移与按 ffmpeg 版本 round-trip。
+func TestAutoMigrate_CodecProbeCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "codec-probe-test.db")
+	g, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开 gorm 失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if s, e := g.DB(); e == nil {
+			s.Close()
+		}
+	})
+	if err := g.AutoMigrate(&models.CodecProbeCache{}); err != nil {
+		t.Fatalf("AutoMigrate CodecProbeCache 失败: %v", err)
+	}
+
+	now := time.Now()
+	row := models.CodecProbeCache{
+		FFmpegVersion: "ffmpeg version test-1.0",
+		Results:       `[{"encoder":"libx264","family":"software","codec":"h264","compiled":true,"tested_ok":true}]`,
+		TestedAt:      now,
+	}
+	if err := g.Create(&row).Error; err != nil {
+		t.Fatalf("写入 CodecProbeCache 失败: %v", err)
+	}
+
+	// 以 ffmpeg 版本为主键读回
+	var got models.CodecProbeCache
+	if err := g.Where("ffmpeg_version = ?", "ffmpeg version test-1.0").First(&got).Error; err != nil {
+		t.Fatalf("读回 CodecProbeCache 失败: %v", err)
+	}
+	if got.Results != row.Results {
+		t.Fatalf("Results 未正确持久化: %q", got.Results)
+	}
+	if got.TestedAt.Unix() != now.Unix() {
+		t.Fatalf("TestedAt 未正确持久化: %v", got.TestedAt)
+	}
+}

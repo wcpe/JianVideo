@@ -1,0 +1,42 @@
+# ADR-0033：硬件加速能力以实测为单一真源 + 持久化缓存 + per-codec 模型
+
+## 状态
+已接受（取代 [ADR-0015](0015-hw-fallback.md)）
+
+## 背景
+取代 ADR-0015。原方案存在三处与现实不符的问题（FR-49）：
+
+1. **两套真源互相矛盾**：硬件加速列表（`/api/transcode/hwaccel`）走 `DetectAllHardwareAccels()`，仅 CGO 检查编码器是否**编入**，且只硬编 NVENC + QSV；编解码器实测（`/api/system/codec-test`）走 `ProbeEncoders()`，对包括 AMD AMF 在内的候选**真实试编码**。结果：AMD 机上 `h264_amf`/`hevc_amf` 实测「成功」却不出现在硬件加速列表（不一致，违背单一真源）。
+2. **「编入」≠「可用」**：CGO `avcodec_find_encoder_by_name` 只说明编码器被编进 ffmpeg，不代表当前硬件能真正编码；实测试编码才是可用性的可靠判据。
+3. **能力模型僵化**：`HWAccelCapability` 硬编 `H264Encoder`+`H265Encoder` 双槽、且要求两者同时可用，无法表达 AV1/VP9 等更多编码。
+4. **无持久化、重复实测**：`codec-test` 每次重跑，单次最长约 3 分钟。
+
+## 决策
+以**编码器实测结果（`ProbeEncoders`）作为硬件加速能力的唯一真源**，并：
+
+- 实测结果按 **ffmpeg 版本为键持久化到 SQLite**（新表 `codec_probe_caches`）。版本不变即复用缓存、避免重复 3 分钟实测；版本变化即视为失效、下次重测；提供**手动「重新测试」**强制重跑。
+- 能力模型从「H.264/H.265 双槽 + 两者皆可用」重构为 **per-codec**：每个硬件家族下逐编码（h264/h265/av1/vp9…）记录「是否编入 / 试编码是否成功」；家族「可用」= 至少一个编码试编码成功（不再强制 H.264 与 H.265 同时可用）。
+- `/api/transcode/hwaccel`、`/api/system/info` 的 hwaccel、以及转码选码 `SelectBestEncoder()` **统一读这份缓存派生**。
+- **核心计算为纯函数**（候选清单、probe 结果 → per-codec 能力映射、选码），副作用（SQLite 读写 + cold-cache 触发实测）隔离在能力服务层。
+- 启动时**后台异步预热**缓存（goroutine，单航道防并发重复实测），保留 ADR-0015「启动检测 + 缓存」精神，但检测手段从 CGO 升级为实测、缓存从内存升级为 SQLite 持久化。GET 端点**不阻塞** 3 分钟：冷缓存时返回「未测」状态，由用户触发 `codec-test`（POST）或启动预热填充。
+- 探测候选补齐**全硬件家族 + AV1/VP9**：AMD AMF（含 `av1_amf`）、VAAPI、VideoToolbox、Vulkan、NVENC/QSV 的 AV1、软件 AV1/VP9（`libsvtav1`/`libvpx-vp9` 等）。
+
+## 理由
+- **单一真源**：实测既驱动展示也驱动选码，消除「实测成功却不显示」的漂移（架构红线「禁止多处记录同一事实且互相矛盾」）。
+- **实测更可靠**：以真实试编码而非「编入」判定可用，真机结果即权威。
+- **per-codec 可扩展**：自然容纳 AV1/VP9 及未来编码，且为 FR-50（可配置目标编码）提供「系统可输出哪些编码」的数据源。
+- **持久化按版本失效**：ffmpeg 版本是编码器能力的决定因素，以它为键既能跨重启复用、又能在升级 ffmpeg 后自动重测。
+- **纯函数 + 副作用隔离**：核心映射/选码可穷举单测；缓存层薄、易测。
+
+## 后果
+- **正**：补齐 AMD AMF 及全家族/全编码；codec-test 与硬件加速列表一致；重复实测消除；为 FR-50/51 铺底。
+- **负（破坏性，已协调）**：`/api/transcode/hwaccel` 与 `/api/system/info` 的 `hwaccel` JSON 结构变化（双槽 `h264_encoder`/`h265_encoder` → per-codec `codecs[]`）。唯一消费方是内嵌前端，随本变更同步更新；同步 `docs/API.md`。
+- **负**：首次实测（或 ffmpeg 升级后首测）仍需约数分钟，但改为后台预热 + 一次性，不再每次重跑。
+- 运行时硬件热插拔仍不自动感知；ffmpeg 版本不变时即便换硬件也需手动「重新测试」。
+- 新增依赖方向：transcoder 能力服务读写 `db`（符合既定 `transcoder → db` 方向）。
+
+## 备选方案
+- **保留两套、各自补 AMF/AV1**：仍是双真源、易再次漂移；被否（brainstorming 已与用户确认统一）。
+- **结果存 `settings` 键值表而非新表**：可少建一张表，但「按 ffmpeg 版本为键的实测快照」语义更适合独立表；用户已明确选「SQLite 表，按 ffmpeg 版本为键」。
+- **GET 时同步 cold-probe**：会让 `/system` 首次加载阻塞数分钟；改为后台预热 + 冷缓存返回「未测」。
+- **启动同步实测**：阻塞启动数分钟；改为后台 goroutine 预热。

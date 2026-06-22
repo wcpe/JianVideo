@@ -86,6 +86,11 @@
 | FR-46 | 远程自更新：服务器 UI 鉴权后检测 GitHub releases（正式版=最新正式 release / 测试版=最新预发布 dev，频道持久化于设置），下载对应平台产物并校验 checksum 后替换二进制、自动重启，保留旧二进制可回滚 | P4 | 开发中（后端 internal/update + 前端 UI + 单测完成；正式/测试频道区分已对真实仓库验证检测命中；端到端替换/重启/回滚待真机验） |
 | FR-47 | 正式发布 CI：GitHub Actions 按版本号自动打 tag，windows/linux 原生 runner 构建（前端 embed + 版本注入），创建 GitHub Release（产物 + checksums） | P4 | 计划 |
 | FR-48 | 预发布 CI：GitHub Actions 普通 push 触发多平台构建，发布 prerelease（标 prerelease，上传打包产物） | P4 | 计划 |
+| FR-49 | 硬件加速检测统一为实测真源 + 持久化缓存：以编码器实测（codec-test）作为硬件加速能力唯一真源，结果按 ffmpeg 版本持久化于 SQLite（版本变更失效重测 + 手动重测），`/api/transcode/hwaccel` 与转码选码改读缓存；能力模型重构为 per-codec，补齐 AMD AMF 及全硬件家族（VAAPI/VideoToolbox/Vulkan）与 AV1/HEVC/VP9 探测展示 | P5 | 开发中 |
+| FR-50 | 转码目标编码可配置：服务端持久化「首选目标编码优先级」设置，单/多码率转码管道按所选编码参数化输出（扩展 FR-06 固定 H.264/TS 约束） | P5 | 计划 |
+| FR-51 | 高级编码 fMP4/CMAF 分片输出：非 H.264 编码经 fMP4/CMAF 分片 + 浏览器原生 MSE 播放路径输出，H.264 维持 mpegts.js+TS 路径不变（新 ADR 扩展播放内核决策） | P5 | 计划 |
+| FR-52 | 前端客户端能力探测 + 自适应播放器：以 `MediaSource.isTypeSupported` 探测客户端可解码编码，H.264 走 mpegts.js、高级编码走 MSE 播 fMP4，统一自适应播放入口 | P5 | 计划 |
+| FR-53 | 端到端编码协商：播放发起时按「首选优先级 ∩ 客户端能力 ∩ 硬件可产出」协商实际输出编码与播放路径，含降级兜底，会话记录实际编码与路径 | P5 | 计划 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
@@ -97,7 +102,7 @@
 | FR-G | 暗色模式 + 路由守卫 + 全局错误处理：Mantine ColorScheme 切换，ProtectedRoute，统一错误 toast | P2 | 已交付@v0.1.0 |
 | FR-H | 测试同步更新：parseWebVTT 提取为公共工具，重构后全量测试绿 | P1 | 已交付@v0.1.0 |
 
-> 状态取值：计划 / 开发中 / 已交付@vX.Y.Z。优先级：P1(MVP) / P2 / P3。
+> 状态取值：计划 / 开发中 / 已交付@vX.Y.Z。优先级：P1(MVP) / P2 / P3 / P4 / P5。
 > 标 `已交付` 是有门的：只有该 FR 的 §6 / spec 验收标准全部满足、对应测试 / 实机验收通过后，才由 `sdd-release-version` 在发版时统一标 `已交付@vX.Y.Z`——开发 / 修复过程中不得自行预标。
 
 ## 5. 非功能需求（NFR）
@@ -138,6 +143,7 @@
 - **第二**期：SMB 网络共享支持 + 自适应码率（ABR）+ 文件目录视图 + 双进度条 + 字幕支持增强。
 - **第三**期**：性能优化 + 更大规模媒体库支持 + 可选 PWA + 运维工具完善。
 - **第四期（发布与分发工程）**：Go 模块社区化（`github.com/wcpe/JianVideo`）、GitHub Actions 多平台原生构建与自动发布（正式 release 按版本号打 tag + 普通 push 发 prerelease）、服务器端二进制自更新（拉取 GitHub release、校验 checksum、替换、自动重启、回滚）。
+- **第五期（高级编码与自适应播放）**：硬件加速检测统一为实测真源 + 持久化缓存，补齐 AMD AMF 及全硬件家族（VAAPI/VideoToolbox/Vulkan）与 AV1/HEVC/VP9 探测；转码目标编码可配置；非 H.264 编码经 fMP4 + 浏览器原生 MSE 播放路径输出，按客户端能力自适应降级（H.264 维持 mpegts.js+TS 不变）。
 
 > **分期不会堆到上百**：期是粗粒度路线图横轴，数量很少（走到成熟通常 3~6 个），一期含很多 FR、跨很多版本。**产品成熟（1.0 后稳态迭代）就不再加"第 N 期"**，改按版本（CHANGELOG / tag）+ 功能（FR 表 / specs）组织。
 

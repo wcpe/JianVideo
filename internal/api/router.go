@@ -11,7 +11,6 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
-	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // parseMediaID 解析并校验路由中的 media ID 参数。
@@ -112,8 +111,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		smbGroup.POST("/credentials", h.SaveSMBCredentials)
 	}
 
-	// 硬件加速能力查询：启动时检测、经此接口暴露（见 ARCHITECTURE §1/§4）
-	r.GET("/api/transcode/hwaccel", gin.WrapF(transcoder.HWAccelHandler))
+	// 硬件加速能力查询：读编码器实测缓存派生，与 /api/system/info 同源（FR-49）
+	r.GET("/api/transcode/hwaccel", h.HWAccel)
 
 	// 系统诊断（FR-21）：系统信息查询与编解码器实测
 	sys := r.Group("/api/system")
