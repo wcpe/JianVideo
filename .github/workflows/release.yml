@@ -1,0 +1,61 @@
+# 正式发布工作流（FR-47）。
+# 触发：VERSION 文件变更并 push 到 main —— 按版本号自动建 tag vX.Y.Z，
+# 经可复用 build.yml 在 ubuntu/windows 原生 runner 各自 CGO 原生构建（不交叉编译、不引 Docker，见 ADR-0032/0027），
+# 汇总各平台二进制 + sha256，创建正式 GitHub Release（非预发布）。
+name: 正式发布
+
+on:
+  push:
+    branches: [main]
+    paths: ['VERSION']
+
+# 创建 tag 与 Release 需要写权限。
+permissions:
+  contents: write
+
+jobs:
+  # 读取版本号唯一真源，供后续 job 与构建复用。
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        name: 读取 VERSION
+        run: |
+          v="$(cat VERSION)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+
+  # 复用构建工作流产出各平台二进制工件。
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+
+  # 汇总工件、生成合并校验和，创建正式 Release。
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载全部平台工件
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 汇总产物与校验和
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'jianvideo-*-amd64*' ! -name '*.sha256' -exec cp {} release/ \;
+          cat artifacts/*/jianvideo-*-amd64.sha256 > release/checksums.txt
+          ls -l release
+      - name: 创建正式 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          prerelease: false
+          generate_release_notes: true
+          files: release/*

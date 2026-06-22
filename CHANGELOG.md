@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 新增
+- **自动发布 CI（FR-47/FR-48）**：新增 GitHub Actions 工作流——`build.yml`（可复用：`ubuntu-latest`/`windows-latest` 原生 runner 各自 CGO 原生构建前端 `go:embed` + 注入版本号的单二进制 + sha256 校验和）；`release.yml`（`VERSION` 变更 push 即按版本号建 tag `vX.Y.Z` + 多平台构建 + 创建正式 GitHub Release，附产物 + `checksums.txt`）；`prerelease.yml`（普通 push 滚动刷新 `dev` 预发布）。不引 Docker、不交叉编译，沿用 ADR-0027 的「各平台原生构建」并扩展到 CI（见 ADR-0032）。CI 全绿/Release 真出现需推送线上仓库后验证。
+
 ### 变更
 - **真机验收归真**：FR-21（系统诊断 + 编解码实测）、FR-22（跨平台打包·Windows 单二进制）、FR-45（移动端 PWA：SW 注册激活 + 可安装 manifest + 离线壳）经真机验收通过，PRD 标记已交付@v0.6.2——功能代码随 v0.6.2 发布，本条仅记录验收归真、无代码变更。FR-10/11（Intel QSV/VAAPI、NVIDIA NVENC）与 FR-22 的 Linux 维度因验收机无对应硬件/环境，保持开发中待真机。
 

@@ -372,6 +372,7 @@
 - **PWA**：经 `vite-plugin-pwa` 产出 `manifest.webmanifest` + Service Worker，支持「添加到主屏」与离线应用壳；Service Worker 仅预缓存壳静态资源，`/api`/媒体流运行时走网络（见 [ADR-0028](adr/0028-mobile-pwa.md)）。
 - **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
 - **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。
+- **自动发布**：GitHub Actions 原生 runner 矩阵（`ubuntu-latest`/`windows-latest`）各自 CGO 原生构建（复用 `build.yml`），`VERSION` 变更打 tag 出正式 Release、普通 push 滚动出 `dev` 预发布，产物含各平台单二进制 + `checksums.txt`；不引 Docker、不交叉编译（见 [ADR-0032](adr/0032-release-engineering.md)）。
 
 ## 7. 关键裁决与不做项
 
@@ -384,6 +385,7 @@
 | 原生 SMB 支持 | 避免用户手动挂载 NAS 共享 | [0005](adr/0005-native-smb-support.md) |
 | FFmpeg filter_complex split 单进程多输出 | 确保多码率 GOP 对齐，减少资源开销 | [0026](adr/0026-abr-adaptive-bitrate.md) |
 | 移动端 PWA（仅缓存应用壳） | 可添加到主屏 + 离线壳，媒体流不离线缓存 | [0028](adr/0028-mobile-pwa.md) |
+| 发布工程：CI 原生矩阵构建 + GitHub Releases 分发 + 二进制自更新 | 自动出全平台产物、用户一键更新；不引 Docker、不交叉编译 | [0032](adr/0032-release-engineering.md) |
 
 **不做项**：
 - 不做多用户/权限管理（单用户模式）

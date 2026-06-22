@@ -1,0 +1,59 @@
+# 预发布工作流（FR-48）。
+# 触发：普通代码 push 到 main（排除 VERSION/文档/工作流变更，那些走正式发布或无需出包）——
+# 经可复用 build.yml 多平台原生构建，滚动刷新 dev 预发布（prerelease），便于试用最新主干。
+name: 预发布
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['VERSION', '**.md', 'docs/**', '.github/**']
+
+# 创建/更新预发布与滚动 dev tag 需要写权限。
+permissions:
+  contents: write
+
+jobs:
+  # 预发布版本号 = 当前 VERSION + dev + 短 SHA，便于区分主干快照。
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        name: 生成预发布版本号
+        run: echo "version=$(cat VERSION)-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+  # 复用构建工作流产出各平台二进制工件。
+  build:
+    needs: prepare
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+
+  # 汇总工件，删除旧 dev 预发布后重建（滚动指向最新主干）。
+  prerelease:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载全部平台工件
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 汇总产物与校验和
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'jianvideo-*-amd64*' ! -name '*.sha256' -exec cp {} release/ \;
+          cat artifacts/*/jianvideo-*-amd64.sha256 > release/checksums.txt
+      - name: 删除旧 dev 预发布（若存在，连同滚动 tag）
+        run: gh release delete dev --cleanup-tag --yes || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: 发布 dev 预发布（滚动指向当前主干）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: 开发预览（dev · ${{ needs.prepare.outputs.version }}）
+          prerelease: true
+          files: release/*
