@@ -1,5 +1,4 @@
 import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Stack, Title, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconSearch } from '@tabler/icons-react'
@@ -9,16 +8,15 @@ import { useScanProgress } from '@/hooks/useScanProgress'
 import TimelineView from '@/components/TimelineView'
 import MediaFilterBar from '@/components/MediaFilterBar'
 import ContinueWatching from '@/components/ContinueWatching'
-import ImagePreviewModal from '@/components/ImagePreviewModal'
-import { isImageFile } from '@/utils/media'
+import MediaDetailPanel from '@/components/MediaDetailPanel'
 import { extractErrorMessage } from '@/utils/error'
 import * as libApi from '@/api/library'
 import type { MediaFile } from '@/types'
 
 /** 时间轴页：按日期分组的时间线浏览，虚拟滚动 + 滚动加载更多 */
 export default function TimelinePage() {
-  const navigate = useNavigate()
-  const [preview, setPreview] = useState<MediaFile | null>(null)
+  // 文件详情面板（FR-34）：选中项下标，null 表示关闭
+  const [detailIndex, setDetailIndex] = useState<number | null>(null)
   // 收藏/标签筛选（FR-41）
   const [favorite, setFavorite] = useState(false)
   const [tagId, setTagId] = useState(0)
@@ -28,10 +26,11 @@ export default function TimelinePage() {
   // 扫描完成后重载第一页
   useScanProgress(() => infinite.reload())
 
+  // 点击媒体（图片与视频统一）打开文件详情面板（FR-34）
   const handleOpen = useCallback((f: MediaFile) => {
-    if (isImageFile(f, exts)) setPreview(f)
-    else navigate(`/play/${f.id}`)
-  }, [navigate, exts])
+    const i = infinite.items.findIndex(x => x.id === f.id)
+    if (i >= 0) setDetailIndex(i)
+  }, [infinite.items])
 
   // 切换收藏（FR-41）：调用接口后刷新列表
   const handleToggleFavorite = useCallback(async (f: MediaFile) => {
@@ -80,7 +79,12 @@ export default function TimelinePage() {
         loadingMore={infinite.loading && infinite.items.length > 0}
       />
 
-      <ImagePreviewModal file={preview} onClose={() => setPreview(null)} />
+      <MediaDetailPanel
+        files={infinite.items}
+        initialIndex={detailIndex}
+        onClose={() => setDetailIndex(null)}
+        customImageExtensions={exts}
+      />
     </Stack>
   )
 }
