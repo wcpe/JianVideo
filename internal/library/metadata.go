@@ -136,7 +136,12 @@ func enrichMediaMetadata(mf *models.MediaFile) {
 			}
 		}
 	case MediaTypeVideo:
-		if t := ProbeVideoCreationTime(diskPath); !t.IsZero() {
+		// 一次 ffprobe 同时读取容器/流信息：写入时长、编码、分辨率、码率，
+		// 并取 creation_time 参与媒体时间降级链。
+		meta := probeVideoMetadata(diskPath)
+		applyVideoMetadata(mf, meta)
+		if !meta.CreationTime.IsZero() {
+			t := meta.CreationTime
 			exifTime = &t
 		}
 	}
@@ -150,6 +155,17 @@ func enrichMediaMetadata(mf *models.MediaFile) {
 	mediaTime, source := ResolveMediaTime(exifTime, filenameTime, created, modified)
 	mf.MediaTime = &mediaTime
 	mf.MediaTimeSource = source
+}
+
+// applyVideoMetadata 把视频探测结果写入媒体记录字段。
+// 缺失项为零值，直接写入即可（记录系新建，无既有有效值需保护）。
+func applyVideoMetadata(mf *models.MediaFile, meta videoMetadata) {
+	mf.Duration = meta.Duration
+	mf.VideoCodec = meta.VideoCodec
+	mf.AudioCodec = meta.AudioCodec
+	mf.Width = meta.Width
+	mf.Height = meta.Height
+	mf.Bitrate = meta.Bitrate
 }
 
 // applyImageEXIF 把图片 EXIF 明细写入媒体记录字段。
@@ -260,13 +276,32 @@ func getFFprobePath() string {
 	return ffprobePath
 }
 
-// ffprobeFormatTags ffprobe -show_format 输出中的 format.tags 子集。
-type ffprobeFormatTags struct {
+// videoMetadata 视频容器与流的探测结果。零值表示该项未探测到，交由调用方兜底。
+type videoMetadata struct {
+	CreationTime time.Time // 容器 creation_time，供媒体时间降级链
+	Duration     float64   // 时长（秒）
+	VideoCodec   string    // 首个视频流编码
+	AudioCodec   string    // 首个音频流编码
+	Width        int       // 首个视频流宽
+	Height       int       // 首个视频流高
+	Bitrate      int       // 容器总码率（bps）
+}
+
+// ffprobeVideoOutput 对应 ffprobe -show_format -show_streams 的 JSON 输出子集。
+type ffprobeVideoOutput struct {
 	Format struct {
-		Tags struct {
+		Duration string `json:"duration"`
+		BitRate  string `json:"bit_rate"`
+		Tags     struct {
 			CreationTime string `json:"creation_time"`
 		} `json:"tags"`
 	} `json:"format"`
+	Streams []struct {
+		CodecType string `json:"codec_type"`
+		CodecName string `json:"codec_name"`
+		Width     int    `json:"width"`
+		Height    int    `json:"height"`
+	} `json:"streams"`
 }
 
 // videoCreationTimeLayouts ffprobe creation_time 常见时间格式。
@@ -277,13 +312,14 @@ var videoCreationTimeLayouts = []string{
 	"2006-01-02 15:04:05",
 }
 
-// ProbeVideoCreationTime 用 ffprobe 读取视频容器的 creation_time。
-// 解析失败、ffprobe 不可用或无该标签时返回零值（交降级链兜底，不报错）。
-func ProbeVideoCreationTime(path string) time.Time {
+// probeVideoMetadata 用 ffprobe 一次性读取视频容器与流信息。
+// ffprobe 不可用 / 执行失败时返回零值结构（交降级链兜底，不报错）。
+func probeVideoMetadata(path string) videoMetadata {
 	args := []string{
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
+		"-show_streams",
 		path,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -291,17 +327,50 @@ func ProbeVideoCreationTime(path string) time.Time {
 
 	output, err := exec.CommandContext(ctx, getFFprobePath(), args...).Output()
 	if err != nil {
-		log.Printf("[DEBUG] ffprobe 读取视频时间失败: %s, err=%v", path, err)
-		return time.Time{}
+		log.Printf("[DEBUG] ffprobe 探测视频元数据失败: %s, err=%v", path, err)
+		return videoMetadata{}
 	}
+	return parseVideoProbe(output)
+}
 
-	var probe ffprobeFormatTags
+// parseVideoProbe 解析 ffprobe 的 JSON 输出为视频元数据。
+// 解析失败返回零值结构；纯函数、无 IO，便于穷举单测。
+func parseVideoProbe(output []byte) videoMetadata {
+	var probe ffprobeVideoOutput
 	if err := json.Unmarshal(output, &probe); err != nil {
-		log.Printf("[DEBUG] 解析 ffprobe 输出失败: %s, err=%v", path, err)
-		return time.Time{}
+		log.Printf("[DEBUG] 解析 ffprobe 输出失败: err=%v", err)
+		return videoMetadata{}
 	}
 
-	raw := strings.TrimSpace(probe.Format.Tags.CreationTime)
+	var meta videoMetadata
+	if d, err := strconv.ParseFloat(strings.TrimSpace(probe.Format.Duration), 64); err == nil {
+		meta.Duration = d
+	}
+	if b, err := strconv.Atoi(strings.TrimSpace(probe.Format.BitRate)); err == nil {
+		meta.Bitrate = b
+	}
+	// 取首个视频流与首个音频流的编码 / 分辨率
+	for _, s := range probe.Streams {
+		switch s.CodecType {
+		case "video":
+			if meta.VideoCodec == "" {
+				meta.VideoCodec = s.CodecName
+				meta.Width = s.Width
+				meta.Height = s.Height
+			}
+		case "audio":
+			if meta.AudioCodec == "" {
+				meta.AudioCodec = s.CodecName
+			}
+		}
+	}
+	meta.CreationTime = parseVideoCreationTime(probe.Format.Tags.CreationTime)
+	return meta
+}
+
+// parseVideoCreationTime 按常见格式解析 ffprobe creation_time，空值或无法解析返回零值。
+func parseVideoCreationTime(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return time.Time{}
 	}

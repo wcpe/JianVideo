@@ -6,7 +6,8 @@
 
 ## 未发布版本
 
-## 0.6.1（2026-06-22）
+### 修复
+- **扫描入库未提取视频时长/编码/分辨率（FR-31）**：库扫描入库视频时，`enrichMediaMetadata` 此前仅用 ffprobe 读取容器 `creation_time` 定媒体时间，从未探测时长/编码/分辨率，导致 `media_files` 的 `duration`/`video_codec`/`audio_codec`/`width`/`height`/`bitrate` 恒为零值，FR-34 详情面板的「分辨率/时长/视频编码/音频编码」始终空白。改为入库时一次 `ffprobe -show_format -show_streams` 同时取容器时长/码率/`creation_time` 与首个视频/音频流的编码及分辨率并写库（library 包直接用注入的 ffprobe 路径，不依赖 transcoder 以守模块依赖方向）。新增 ffprobe JSON 解析纯函数单测与「真实 ffmpeg 生成视频→入库→断言字段非零」的集成回归用例。
 
 ### 修复
 - **PWA 资源被 SPA 兜底（FR-45）**：内嵌前端服务此前仅把 `/assets/*` 作静态服务，其余路径一律由 `NoRoute` 回退 `index.html`，导致 vite-plugin-pwa 产在 dist 根目录的 `sw.js`、`manifest.webmanifest`、`workbox-*.js` 在打包二进制中被当作 SPA 路由返回 `text/html`——Service Worker 无法注册、manifest 无效，实际部署中 PWA 安装/离线失效。改为 SPA 兜底前先尝试从内嵌 `frontend/dist` 命中根级真实文件并按真实 MIME 返回（`.webmanifest` → `application/manifest+json`），命中不到才回 `index.html`。新增 web 层回归用例断言这些根资源返回正确 Content-Type（非 `text/html`）。此前 FR-45 的 vitest 仅 mock 测 manifest 字段与 SW 注册逻辑，未覆盖内嵌服务器是否真把文件服出，故 bug 被掩盖、真机 curl 才暴露。
