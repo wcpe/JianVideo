@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/playback"
-	"jianvideo/internal/player"
-	"jianvideo/internal/transcoder"
+	"github.com/wcpe/JianVideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // parseMediaID 解析并校验路由中的 media ID 参数。
@@ -225,9 +225,10 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 // master 走动态读取（HLSManager），其余路径（m3u8、ts）走 hlsDir 静态文件。
 //
 // URL 格式：
-//   /api/play/hls/{mediaID}/master            → master playlist（动态）
-//   /api/play/hls/{mediaID}/{quality}.m3u8    → 单码率 m3u8（静态文件）
-//   /api/play/hls/{mediaID}/{quality}_segment_NNN.ts → TS 切片（静态文件）
+//
+//	/api/play/hls/{mediaID}/master            → master playlist（动态）
+//	/api/play/hls/{mediaID}/{quality}.m3u8    → 单码率 m3u8（静态文件）
+//	/api/play/hls/{mediaID}/{quality}_segment_NNN.ts → TS 切片（静态文件）
 //
 // master 内容里的 playlist 路径写 "{quality}.m3u8"（与 master 同目录），
 // hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。

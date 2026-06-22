@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/playback"
 )
 
 // ─── 管理端点（鉴权后 /api/shares，受 APIGuard 保护）─────────────────────

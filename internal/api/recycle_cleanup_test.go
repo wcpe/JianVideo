@@ -13,9 +13,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
-	"jianvideo/internal/settings"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/settings"
 )
 
 // setupCleanupRouter 构建带 library + settings 服务的测试路由，并返回服务以便造数据。

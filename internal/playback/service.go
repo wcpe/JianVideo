@@ -14,16 +14,16 @@ import (
 	"sync"
 	"time"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/smb"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/smb"
 )
 
 // ProgressInfo 播放进度信息。
 type ProgressInfo struct {
-	CurrentPosition float64           `json:"current_position"`
-	Duration       float64           `json:"duration"`
-	FileSize        int64             `json:"file_size"`
-	BufferedRanges  [][2]int64        `json:"buffered_ranges"`
+	CurrentPosition float64    `json:"current_position"`
+	Duration        float64    `json:"duration"`
+	FileSize        int64      `json:"file_size"`
+	BufferedRanges  [][2]int64 `json:"buffered_ranges"`
 }
 
 // SeekRequest Seek 请求。
@@ -278,7 +278,7 @@ func (s *Service) GetProgress(mediaID int64) (*ProgressInfo, error) {
 
 	return &ProgressInfo{
 		CurrentPosition: currentPosition,
-		Duration:       duration,
+		Duration:        duration,
 		FileSize:        fileSize,
 		BufferedRanges:  ranges,
 	}, nil
@@ -292,9 +292,9 @@ func (s *Service) GetOrCreateSession(mediaID int64, duration float64, fileSize i
 	sess, exists := s.sessions[mediaID]
 	if !exists {
 		sess = &models.PlaybackSession{
-			MediaID:   mediaID,
-			Duration:  duration,
-			FileSize:  fileSize,
+			MediaID:  mediaID,
+			Duration: duration,
+			FileSize: fileSize,
 			ClientIP: "",
 		}
 		s.sessions[mediaID] = sess
@@ -309,7 +309,3 @@ func getClientIP(r *http.Request) string {
 	}
 	return host
 }
-
-
-
-

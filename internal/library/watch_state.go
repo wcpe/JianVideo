@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // continueWatchingMaxLimit 继续观看列表的最大返回条数，防止异常 limit 拉全表。

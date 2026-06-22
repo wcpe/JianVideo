@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // TestScanEnrich_BoundedConcurrency 验证扫描期对新文件的富化为有界并发：

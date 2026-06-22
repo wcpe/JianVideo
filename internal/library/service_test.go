@@ -11,7 +11,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // sanitizeDBName 将测试名转为合法的文件名。

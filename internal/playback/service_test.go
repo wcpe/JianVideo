@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

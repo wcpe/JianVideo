@@ -16,7 +16,7 @@ import (
 
 	"github.com/evanoberholster/imagemeta"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // 媒体时间来源标识（写入 media_files.media_time_source）。

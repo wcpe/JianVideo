@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // countDeleted 统计指定库内已软删（deleted_at 非空）记录数，供对账断言。

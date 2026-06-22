@@ -12,8 +12,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
 )
 
 // setupScanQueueRouter 构造注入了扫描任务队列的测试路由。

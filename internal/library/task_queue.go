@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // ScanExecFunc 扫描执行函数签名，与 Service.ScanLibraryWithType 一致。

@@ -8,7 +8,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // TestAutoMigrate_FoundationModels 验证基础迁移：媒体文件新增列与相册/标签/设置新表均能迁移并 round-trip。

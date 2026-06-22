@@ -11,9 +11,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
-	"jianvideo/internal/settings"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/settings"
 )
 
 // setupSettingsRouter 构建带 settings 服务的测试路由。

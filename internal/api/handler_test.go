@@ -19,8 +19,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
 )
 
 func setupTestRouter(t *testing.T) (*gin.Engine, *library.Service) {

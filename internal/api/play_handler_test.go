@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/library"
-	"jianvideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
 )
 
 // setupPlayTestRouter 创建带播放路由的测试路由器。

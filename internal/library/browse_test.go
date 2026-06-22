@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 func TestBrowseDirectory_Root(t *testing.T) {

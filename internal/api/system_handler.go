@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/transcoder"
+	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // SystemInfo GET /api/system/info

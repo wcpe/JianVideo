@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"testing"
 
-	"jianvideo/internal/db"
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db"
+	"github.com/wcpe/JianVideo/internal/db/models"
 
 	_ "github.com/mattn/go-sqlite3"
 )

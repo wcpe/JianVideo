@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // TestParseFilenameDate 表驱动校验文件名日期解析。

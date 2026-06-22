@@ -18,13 +18,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
-	"jianvideo/internal/player"
-	"jianvideo/internal/settings"
-	"jianvideo/internal/share"
-	"jianvideo/internal/smb"
-	"jianvideo/internal/transcoder"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/settings"
+	"github.com/wcpe/JianVideo/internal/share"
+	"github.com/wcpe/JianVideo/internal/smb"
+	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // SubtitleTrack 表示一个外挂字幕轨道。

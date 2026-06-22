@@ -12,7 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // 分享相关业务错误。公开访问层把以下错误统一映射为 404，不区分以免泄露分享是否存在。

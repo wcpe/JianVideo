@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 
 	"golang.org/x/crypto/bcrypt"
 )

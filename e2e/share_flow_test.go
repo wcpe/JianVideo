@@ -17,15 +17,15 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/config"
-	"jianvideo/internal/api"
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/library"
-	"jianvideo/internal/playback"
-	"jianvideo/internal/player"
-	"jianvideo/internal/settings"
-	"jianvideo/internal/share"
-	"jianvideo/internal/web"
+	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/api"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/settings"
+	"github.com/wcpe/JianVideo/internal/share"
+	"github.com/wcpe/JianVideo/internal/web"
 )
 
 // newShareTestServer 构造一台「生产同构」测试服务器（FR-43 端到端用）：

@@ -17,8 +17,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/smb"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/smb"
 )
 
 // 重命名相关业务错误（供上层映射为对应 HTTP 状态码）。

@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/library"
-	"jianvideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
 )
 
 // PlayHandler 播放请求处理器。

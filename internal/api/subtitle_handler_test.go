@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"jianvideo/internal/library"
-	"jianvideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
 )
 
 // insertTestMediaFile 向数据库插入一条测试媒体文件记录。

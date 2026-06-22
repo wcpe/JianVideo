@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // createSoftDeletedMedia 在指定库内创建一条媒体记录并立即软删（deleted_at=指定时刻）。

@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/library"
 )
 
 // Transcoder 定义转码器接口。

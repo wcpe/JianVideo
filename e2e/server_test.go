@@ -18,10 +18,10 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"jianvideo/config"
-	"jianvideo/internal/db/models"
-	"jianvideo/internal/player"
-	"jianvideo/internal/web"
+	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/web"
 )
 
 // newTestServer 创建完整的测试服务器。

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"jianvideo/internal/transcoder"
+	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 func TestSystemInfo_ReturnsVersionAndFields(t *testing.T) {

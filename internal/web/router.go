@@ -11,13 +11,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"jianvideo/config"
-	"jianvideo/internal/api"
-	"jianvideo/internal/auth"
-	"jianvideo/internal/library"
-	"jianvideo/internal/playback"
-	"jianvideo/internal/player"
-	"jianvideo/internal/settings"
+	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/api"
+	"github.com/wcpe/JianVideo/internal/auth"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/settings"
 )
 
 // NewRouter 创建并配置路由

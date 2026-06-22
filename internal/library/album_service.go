@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // AlbumWithCount 相册及其成员数量，用于列表展示。

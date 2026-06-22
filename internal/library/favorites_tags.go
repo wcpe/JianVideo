@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。

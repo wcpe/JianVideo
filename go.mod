@@ -1,4 +1,4 @@
-module jianvideo
+module github.com/wcpe/JianVideo
 
 go 1.25.0
 

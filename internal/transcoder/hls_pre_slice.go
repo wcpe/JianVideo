@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"jianvideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/player"
 )
 
 // probeOutputTailLimit 分辨率探测失败时，错误中保留的 ffmpeg 输出尾部最大字符数。

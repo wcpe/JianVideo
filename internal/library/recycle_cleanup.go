@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // ErrRecycleBinPathUnset 存在软删项的盘符未配置回收站路径（含 SMB/无盘符项），整体拒绝清理（FR-26）。

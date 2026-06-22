@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // scanTarget 扫描目标的执行参数。仅 worker 执行期需要，不入库（path 真源在 library_paths 表）。

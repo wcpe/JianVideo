@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"jianvideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 // TestParseSearchExpression 表达式解析为结构化筛选（FR-35）。
