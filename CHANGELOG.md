@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **目录资源管理器视图（FR-33）**：目录浏览增强为类资源管理器——展示方式切换（列表详情 / 大-中-小图标，缩略图密度随档位）、排序切换（名称 / 大小 / 类型 / 修改时间，目录恒在前）、单选 + `Shift` 区间选 + `Ctrl/Cmd` 切换（选中高亮），**双击**文件打开 FR-34 详情面板（取代原单击打开）。目录页接入 `MediaDetailPanel` 并移除已无引用的 `ImagePreviewModal`。为支持多档位与选择，目录视图改用常规网格/列表（单目录条目有界；时间轴大列表仍保留虚拟化）。
 - **时间轴缩放与按媒体时间组织（FR-32）**：时间轴改为按**媒体时间**（FR-31，缺失回退入库时间）组织（`sort=media_time`），新增缩放粒度控件（日/月/年）：日按 `YYYY-MM-DD`、月按 `YYYY-MM`、年按 `YYYY` 分组，日期轴标签随粒度自适应；拖动浏览复用现有虚拟滚动。
 - **前端筛选/搜索 UI（FR-36）**：时间轴页搜索框升级提示表达式语法（`ext:`/`type:`/`size:`），新增 `MediaQueryFilters` 结构化筛选控件（类型「全部/图片/视频」分段控件、最小大小预设、拍摄时间范围日期），经 `useInfiniteMedia` 把 `type`/`size_min`/`time_from`/`time_to` 透传给媒体列表接口（消费 FR-35 引擎，筛选变化即重置首屏）。
 - **媒体筛选与表达式查询引擎（FR-35）**：`GET /api/library/media` 的 `search` 升级为 everything 式表达式（`library.ParseSearchExpression`）：裸词→文件名包含（多词 AND）、`ext:jpg,png`→扩展名、`type:image|video`→类型、`size:>10mb`/`<=2gb`/`>=500kb`（单位 b/kb/mb/gb/tb）→大小；纯文本向后兼容。另新增结构化查询参数 `type`/`size_min`/`size_max`/`time_from`/`time_to`（按 `COALESCE(media_time, added_at)` 比较）/`path`（目录前缀）。表达式只解析为结构化 `MediaFilter` 字段、全部走参数化查询，无 SQL 注入面；类型按内置图片扩展名集合粗筛。

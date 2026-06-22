@@ -1,12 +1,16 @@
-import { useRef, useEffect, useState } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, ActionIcon } from '@mantine/core'
-import { IconFolder, IconTrash, IconAlertCircle } from '@tabler/icons-react'
-import { useWindowVirtualizer } from '@tanstack/react-virtual'
+import { useState, useMemo } from 'react'
+import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge } from '@mantine/core'
+import { IconFolder, IconAlertCircle } from '@tabler/icons-react'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
+
+/** 展示方式（FR-33）：列表详情 / 大-中-小图标 */
+export type DisplayMode = 'list' | 'large' | 'medium' | 'small'
+/** 排序方式（FR-33） */
+export type DirSort = 'name' | 'size' | 'type' | 'time'
 
 interface DirectoryBrowserProps {
   breadcrumbs: BreadcrumbItem[]
@@ -18,195 +22,170 @@ interface DirectoryBrowserProps {
   onEnterDir: (path: string) => void
   onBreadcrumbNavigate: (path: string) => void
   onErrorClose: () => void
-  onOpenFile: (file: MediaFile) => void
-  onDeleteFile?: (file: MediaFile) => void
+  /** 双击文件触发打开（FR-33）；参数为该文件在排序后 files 中的下标 */
+  onOpenFile: (file: MediaFile, index: number) => void
+  // 展示方式与排序（FR-33），缺省 list / name
+  displayMode?: DisplayMode
+  sort?: DirSort
 }
 
-/** 单个条目的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
-const ENTRY_ESTIMATE_SIZE = 120
-
-/** 虚拟列表的有序条目：先目录后文件 */
-type DirEntry = { kind: 'dir'; dir: DirInfo }
-type FileEntry = { kind: 'file'; file: MediaFile }
-type Entry = DirEntry | FileEntry
-
-/** 目录卡片：点击进入子目录 */
-function DirectoryCard({ dir, onEnterDir }: { dir: DirInfo; onEnterDir: (path: string) => void }) {
-  return (
-    <Card
-      withBorder p="sm" radius="sm" bg="dark.7"
-      style={{ cursor: 'pointer' }}
-      onClick={() => onEnterDir(dir.path)}
-      className="hover-card"
-    >
-      <Group gap="xs">
-        <IconFolder size={16} color="var(--mantine-color-purple-4)" />
-        <Text size="sm">{dir.name}</Text>
-      </Group>
-    </Card>
-  )
+// 各档位的网格列数（图标档）
+const GRID_COLS: Record<Exclude<DisplayMode, 'list'>, { base: number; sm: number; lg: number }> = {
+  large: { base: 2, sm: 3, lg: 4 },
+  medium: { base: 3, sm: 5, lg: 6 },
+  small: { base: 4, sm: 6, lg: 8 },
 }
 
-/** 文件卡片：点击打开，图片显示缩略图，可选删除 */
-function FileCard({
-  file,
-  customImageExtensions,
-  onOpenFile,
-  onDeleteFile,
-}: {
-  file: MediaFile
-  customImageExtensions: Record<number, string[]>
-  onOpenFile: (file: MediaFile) => void
-  onDeleteFile?: (file: MediaFile) => void
-}) {
-  const isImage = isImageFile(file, customImageExtensions)
-  return (
-    <Card
-      withBorder p="md" radius="md" bg="dark.7"
-      style={{ cursor: 'pointer' }}
-      onClick={() => onOpenFile(file)}
-      className="hover-card"
-    >
-      {isImage && (
-        <Box mb="xs">
-          <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
-        </Box>
-      )}
-      <Text fw={500} truncate mb="xs" title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
-      <Group gap="xs" wrap="nowrap">
-        <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
-        <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
-        {!isImage && <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>}
-        {file.width > 0 && file.height > 0 && (
-          <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>
-        )}
-      </Group>
-      {onDeleteFile && (
-        <Group justify="flex-end" mt="xs">
-          <ActionIcon
-            size="sm" variant="subtle" color="red"
-            aria-label="删除"
-            onClick={(e) => { e.stopPropagation(); onDeleteFile(file) }}
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
-      )}
-    </Card>
-  )
+/** 按排序方式对文件排序（纯函数，不改输入）。 */
+export function sortFiles(files: MediaFile[], sort: DirSort): MediaFile[] {
+  const arr = [...files]
+  switch (sort) {
+    case 'size':
+      return arr.sort((a, b) => a.file_size - b.file_size)
+    case 'type':
+      return arr.sort((a, b) => (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name))
+    case 'time':
+      return arr.sort((a, b) => (a.modified_at || '').localeCompare(b.modified_at || ''))
+    default:
+      return arr.sort((a, b) => mediaDisplayName(a).localeCompare(mediaDisplayName(b)))
+  }
 }
 
 /**
- * 目录浏览 UI 组件：面包屑导航 + 窗口虚拟化的条目列表（先目录后文件）。
- * 只渲染可见区 + overscan，目录条目很多时也流畅。
+ * 目录浏览 UI（FR-33 资源管理器视图）：面包屑 + 多展示档位 + 排序 + 单选/Shift 多选。
+ * 目录恒在文件前、目录按名称排序；双击文件打开详情面板。
  */
 export default function DirectoryBrowser({
-  breadcrumbs,
-  directories,
-  files,
-  loading,
-  error,
-  customImageExtensions,
-  onEnterDir,
-  onBreadcrumbNavigate,
-  onErrorClose,
-  onOpenFile,
-  onDeleteFile,
+  breadcrumbs, directories, files, loading, error, customImageExtensions,
+  onEnterDir, onBreadcrumbNavigate, onErrorClose, onOpenFile,
+  displayMode = 'list', sort = 'name',
 }: DirectoryBrowserProps) {
-  // 列表容器 ref，用于计算窗口虚拟化所需的 scrollMargin（列表相对文档顶部的偏移）
-  const listRef = useRef<HTMLDivElement>(null)
-  const [scrollMargin, setScrollMargin] = useState(0)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
 
-  // 合并为有序条目：先目录后文件，保持原顺序
-  const entries: Entry[] = loading
-    ? []
-    : [
-        ...directories.map((dir): Entry => ({ kind: 'dir', dir })),
-        ...files.map((file): Entry => ({ kind: 'file', file })),
-      ]
+  const sortedDirs = useMemo(() => [...directories].sort((a, b) => a.name.localeCompare(b.name)), [directories])
+  const sortedFiles = useMemo(() => sortFiles(files, sort), [files, sort])
 
-  // 列表挂载/数据变化后测量容器距文档顶部的偏移作为 scrollMargin
-  useEffect(() => {
-    if (listRef.current) {
-      setScrollMargin(listRef.current.getBoundingClientRect().top + window.scrollY)
+  // 文件单击选择：默认单选；Shift 区间选；Ctrl/Cmd 切换
+  function handleFileClick(index: number, e: React.MouseEvent) {
+    if (e.shiftKey && anchorIndex !== null) {
+      const [lo, hi] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex]
+      const next = new Set<number>()
+      for (let i = lo; i <= hi; i++) next.add(sortedFiles[i].id)
+      setSelectedIds(next)
+    } else if (e.ctrlKey || e.metaKey) {
+      const next = new Set(selectedIds)
+      const id = sortedFiles[index].id
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      setSelectedIds(next)
+      setAnchorIndex(index)
+    } else {
+      setSelectedIds(new Set([sortedFiles[index].id]))
+      setAnchorIndex(index)
     }
-  }, [entries.length])
+  }
 
-  const virtualizer = useWindowVirtualizer({
-    count: entries.length,
-    estimateSize: () => ENTRY_ESTIMATE_SIZE,
-    overscan: 4,
-    scrollMargin,
-  })
+  if (error) {
+    return (
+      <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={onErrorClose} mb="sm">
+        {error}
+      </Alert>
+    )
+  }
+
+  const isList = displayMode === 'list'
+  const cols = isList ? undefined : GRID_COLS[displayMode]
 
   return (
     <>
-      {error && (
-        <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={onErrorClose} mb="sm">
-          {error}
-        </Alert>
-      )}
-
-      {/* 面包屑导航 */}
       {breadcrumbs.length > 0 && (
         <Box mb="sm">
           <DirectoryBreadcrumb items={breadcrumbs} onNavigate={onBreadcrumbNavigate} />
         </Box>
       )}
 
-      {/* 目录浏览内容 */}
       {loading ? (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} height={60} radius="md" />
-          ))}
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={60} radius="md" />)}
         </SimpleGrid>
-      ) : entries.length === 0 ? (
-        // 空状态
-        <Stack gap="xs">
-          <Box py="xl" ta="center">
-            <Box mb="sm" style={{ textAlign: 'center' }}>
-              <IconFolder size={48} color="var(--mantine-color-dimmed)" />
-            </Box>
-            <Text c="dimmed">此目录暂无内容</Text>
+      ) : sortedDirs.length === 0 && sortedFiles.length === 0 ? (
+        <Box py="xl" ta="center">
+          <Box mb="sm" style={{ textAlign: 'center' }}>
+            <IconFolder size={48} color="var(--mantine-color-dimmed)" />
           </Box>
-        </Stack>
-      ) : (
-        // 虚拟化容器：高度撑满全部条目总高，内部按虚拟项绝对定位
-        <Box ref={listRef} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((virtualItem) => {
-            const entry = entries[virtualItem.index]
-            const key = entry.kind === 'dir' ? `dir-${entry.dir.path}` : `file-${entry.file.id}`
+          <Text c="dimmed">此目录暂无内容</Text>
+        </Box>
+      ) : isList ? (
+        // 列表（详情行）
+        <Stack gap={4}>
+          {sortedDirs.map((dir) => (
+            <Card key={`dir-${dir.path}`} withBorder p="xs" radius="sm" bg="dark.7"
+              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
+              <Group gap="xs" wrap="nowrap">
+                <IconFolder size={18} color="var(--mantine-color-purple-4)" />
+                <Text size="sm">{dir.name}</Text>
+              </Group>
+            </Card>
+          ))}
+          {sortedFiles.map((file, i) => {
+            const isImage = isImageFile(file, customImageExtensions)
+            const selected = selectedIds.has(file.id)
             return (
-              <Box
-                key={key}
-                data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  // 条目之间留间距，等价于原 Stack gap="xs"
-                  paddingBottom: 8,
-                  // 减去 scrollMargin 修正窗口虚拟化的起始偏移
-                  transform: `translateY(${virtualItem.start - virtualizer.options.scrollMargin}px)`,
-                }}
+              <Card key={`file-${file.id}`} withBorder p="xs" radius="sm"
+                bg={selected ? 'purple.9' : 'dark.7'}
+                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
+                className="hover-card"
+                onClick={(e) => handleFileClick(i, e)}
+                onDoubleClick={() => onOpenFile(file, i)}
+                data-selected={selected || undefined}
               >
-                {entry.kind === 'dir' ? (
-                  <DirectoryCard dir={entry.dir} onEnterDir={onEnterDir} />
-                ) : (
-                  <FileCard
-                    file={entry.file}
-                    customImageExtensions={customImageExtensions}
-                    onOpenFile={onOpenFile}
-                    onDeleteFile={onDeleteFile}
-                  />
-                )}
-              </Box>
+                <Group gap="sm" wrap="nowrap" justify="space-between">
+                  <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }} title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
+                  <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+                    <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
+                    <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
+                    {!isImage && <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>}
+                    {file.width > 0 && file.height > 0 && <Badge size="xs" variant="light" color="gray">{file.width}x{file.height}</Badge>}
+                  </Group>
+                </Group>
+              </Card>
             )
           })}
-        </Box>
+        </Stack>
+      ) : (
+        // 图标档（大/中/小）
+        <SimpleGrid cols={cols}>
+          {sortedDirs.map((dir) => (
+            <Card key={`dir-${dir.path}`} withBorder p="sm" radius="sm" bg="dark.7"
+              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
+              <Stack gap={4} align="center">
+                <IconFolder size={displayMode === 'small' ? 24 : 40} color="var(--mantine-color-purple-4)" />
+                <Text size="xs" truncate w="100%" ta="center">{dir.name}</Text>
+              </Stack>
+            </Card>
+          ))}
+          {sortedFiles.map((file, i) => {
+            const selected = selectedIds.has(file.id)
+            return (
+              <Card key={`file-${file.id}`} withBorder p={displayMode === 'small' ? 4 : 'sm'} radius="md"
+                bg={selected ? 'purple.9' : 'dark.7'}
+                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
+                className="hover-card"
+                onClick={(e) => handleFileClick(i, e)}
+                onDoubleClick={() => onOpenFile(file, i)}
+                data-selected={selected || undefined}
+              >
+                <Box mb={4}>
+                  <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
+                </Box>
+                {displayMode !== 'small' && (
+                  <Text size="xs" truncate title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
+                )}
+              </Card>
+            )
+          })}
+        </SimpleGrid>
       )}
     </>
   )
