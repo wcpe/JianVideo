@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -161,6 +162,15 @@ func main() {
 	} else {
 		defer w.Stop()
 		log.Printf("[INFO] 文件监听已启动 (fsnotify)")
+	}
+
+	// gin 运行模式：默认 release（仅 info 级请求日志，不输出 [GIN-debug] 调试噪声）；
+	// 仅当环境变量 JIANVIDEO_DEBUG=1/true 时启用 debug 模式。须在创建 gin 引擎前设置。
+	if v := os.Getenv("JIANVIDEO_DEBUG"); v == "1" || v == "true" {
+		gin.SetMode(gin.DebugMode)
+		log.Printf("[INFO] gin 运行于 debug 模式（JIANVIDEO_DEBUG 已开启）")
+	} else {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	r := web.NewRouter(cfg, gormDB, hlsMgr, frontendDist, apiHandler, pbSvc)

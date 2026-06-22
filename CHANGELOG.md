@@ -8,6 +8,7 @@
 
 ### 修复
 - **10-bit HEVC 源转码后不可播放**：转码（单/多码率管道）未强制 8-bit `yuv420p`，10-bit 源（如 HEVC Main 10）会编出 `High 10`（`yuv420p10le`）的 10-bit H.264，浏览器与 mpegts.js 均无法解码，表现为 HLS「能生成但不可播放」（如 TS/hevc/aac 1280×720）。多码率 scale 链加 `,format=yuv420p`、单管道加 `-pix_fmt yuv420p`，统一输出 8-bit H.264；以 10-bit HEVC/AAC TS 样片复现并验证修复后产物为 8-bit `High`。
+- **release 构建中 gin 开启 debug 模式**：发布二进制默认运行于 gin debug 模式，启动刷屏 `[GIN-debug]` 路由表与警告。改为默认 release 模式（仅 info 级请求日志），仅当环境变量 `JIANVIDEO_DEBUG=1/true` 时启用 debug（在创建 gin 引擎前 `SetMode`）。
 
 ## 0.7.0（2026-06-22）
 
