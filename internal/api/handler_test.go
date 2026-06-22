@@ -29,6 +29,13 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *library.Service) {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
+	// :memory: 库每条连接是独立内存库，并发扫描（有界并发富化）会取到未迁移的空连接而报「no such table」，
+	// 故限单连接，与 setupScanQueueRouter / newTaskQueueDB 保持一致。
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
