@@ -6,6 +6,8 @@
 
 ## 未发布版本
 
+## 0.5.0（2026-06-22）
+
 ### 新增
 - **分享链接（FR-43）**：为指定媒体 / 相册生成 token 化只读公开链接，免登访客凭链接在线查看图片、在线播放视频、下载原文件，带可配置过期（含永不过期）。作为鉴权的受控例外：`auth.APIGuard` 豁免 `/api/share/` 前缀（带尾斜杠，不误伤受保护的管理端点 `/api/shares`），公开路由经 `shareAuth` 中间件自校验 token + 过期，且每个媒体端点都做范围校验（mediaId 必须 == 被分享媒体或 ∈ 被分享相册成员，越权一律 404）。token 由 `crypto/rand` 生成 32 字节不可枚举。安全边界：免登视频播放只走渐进式 `StreamFile`（原文件 + Range），不向匿名访客开放 ffmpeg 转码 / HLS 管线（防资源滥用）。新增 `internal/share` 服务、`shares` 表、管理端点 `POST/GET /api/shares` 与 `DELETE /api/shares/:token`、公开端点 `GET /api/share/:token`(+`/media/:mediaId/raw|thumbnail|download|stream`)；前端播放页 / 相册页加「分享」入口（选有效期、生成、复制链接），新增免登公开查看页 `/s/:token`（不套登录守卫，按类型展示图片 / 视频 / 相册网格）。复用 FR-13 鉴权、FR-40 相册、FR-42 下载。
 - **下载原文件（FR-42）**：新增鉴权后的原文件下载端点 `GET /api/library/media/:id/download`，对图片与视频一视同仁回传磁盘原始字节（不转码/不转换，区别于 raw 端点），`Content-Disposition: attachment`、文件名为真实 `file_name`（RFC 5987 编码兼容中文），经流式回传支持 HTTP Range 断点续传。软删项不可下载（复用 FR-25）、`smb://` 远程文件暂不支持（返回 `400`，FR-02 真机受限）。前端播放页与图片预览弹窗新增「下载原文件」入口。
