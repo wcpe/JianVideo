@@ -103,20 +103,23 @@ func NeedsImageConvert(filePath string) bool {
 
 // buildMagickConvertArgs 构建「源 → JPEG」的 magick 命令行参数。
 // 取首帧 [0]，避免多页 HEIC 输出多个文件；保持纵横比，自动定向 EXIF。
+// 注意：ImageMagick 7 的 magick 按左到右解析，-auto-orient 等图像算子必须在输入图像之后，
+// 否则报「no images found for operation」。故输入在前、算子在后。
 func buildMagickConvertArgs(src, dst string) []string {
 	return []string{
-		"-auto-orient",
 		src + "[0]",
+		"-auto-orient",
 		dst,
 	}
 }
 
 // buildMagickThumbnailArgs 构建「源 → 缩略图 JPEG」的 magick 命令行参数。
 // 缩放为 width 宽、等比高度（width x，> 表示仅缩小不放大）。
+// 同上：输入在前，-auto-orient / -thumbnail 算子在后（ImageMagick 7 要求）。
 func buildMagickThumbnailArgs(src, dst string, width int) []string {
 	return []string{
-		"-auto-orient",
 		src + "[0]",
+		"-auto-orient",
 		"-thumbnail", strconv.Itoa(width) + "x>",
 		dst,
 	}

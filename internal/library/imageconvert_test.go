@@ -58,13 +58,16 @@ func TestBuildMagickConvertArgs(t *testing.T) {
 		t.Fatal("转换参数不应为空")
 	}
 	// 源（取首帧 [0] 以避免多页 HEIC 输出多文件）必须在输出之前
-	srcIdx, dstIdx := -1, -1
+	srcIdx, dstIdx, orientIdx := -1, -1, -1
 	for i, a := range args {
 		if strings.HasPrefix(a, "/data/a.heic") {
 			srcIdx = i
 		}
 		if a == "/cache/x.jpg" {
 			dstIdx = i
+		}
+		if a == "-auto-orient" {
+			orientIdx = i
 		}
 	}
 	if srcIdx < 0 {
@@ -76,6 +79,13 @@ func TestBuildMagickConvertArgs(t *testing.T) {
 	if srcIdx >= dstIdx {
 		t.Errorf("源文件应位于输出文件之前，args=%v", args)
 	}
+	// ImageMagick 7 要求图像算子在输入图像之后，否则报「no images found for operation」
+	if orientIdx < 0 {
+		t.Fatalf("参数中缺少 -auto-orient，args=%v", args)
+	}
+	if orientIdx <= srcIdx {
+		t.Errorf("-auto-orient 必须位于输入图像之后（ImageMagick 7 要求），args=%v", args)
+	}
 }
 
 // TestBuildMagickThumbnailArgs 验证缩略图命令行参数构建含缩放宽度。
@@ -85,15 +95,28 @@ func TestBuildMagickThumbnailArgs(t *testing.T) {
 	if !strings.Contains(joined, "320") {
 		t.Errorf("缩略图参数应包含缩放宽度 320，args=%v", args)
 	}
-	// 必须包含输出路径
-	found := false
-	for _, a := range args {
-		if a == "/thumb/y.jpg" {
-			found = true
+	// 必须包含输出路径，并校验算子位于输入图像之后（ImageMagick 7 要求）
+	srcIdx, dstIdx, orientIdx, thumbIdx := -1, -1, -1, -1
+	for i, a := range args {
+		switch {
+		case strings.HasPrefix(a, "/data/a.cr2"):
+			srcIdx = i
+		case a == "/thumb/y.jpg":
+			dstIdx = i
+		case a == "-auto-orient":
+			orientIdx = i
+		case a == "-thumbnail":
+			thumbIdx = i
 		}
 	}
-	if !found {
+	if dstIdx < 0 {
 		t.Errorf("缩略图参数应包含输出路径，args=%v", args)
+	}
+	if srcIdx < 0 || orientIdx < 0 || thumbIdx < 0 {
+		t.Fatalf("缩略图参数缺少 源/-auto-orient/-thumbnail，args=%v", args)
+	}
+	if orientIdx <= srcIdx || thumbIdx <= srcIdx {
+		t.Errorf("-auto-orient 与 -thumbnail 必须位于输入图像之后（ImageMagick 7 要求），args=%v", args)
 	}
 }
 
