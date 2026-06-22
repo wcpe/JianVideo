@@ -18,6 +18,10 @@ func TestPipelineBuildArgs_NoSeek_NoHwAccel(t *testing.T) {
 	assert.Contains(t, args, "/tmp/test.mp4")
 	assert.Contains(t, args, "-c:v")
 	assert.Contains(t, args, "libx264")
+	// 强制 8-bit yuv420p，避免 10-bit 源编出浏览器/mpegts.js 无法播放的 High 10
+	assert.Contains(t, args, "-pix_fmt")
+	assert.Contains(t, args, "yuv420p")
+	assert.Greater(t, indexOf(args, "-pix_fmt"), indexOf(args, "-i"), "-pix_fmt 应作用于输出（位于 -i 之后）")
 	assert.Contains(t, args, "-g")
 	assert.Contains(t, args, "48")
 	assert.Contains(t, args, "-keyint_min")

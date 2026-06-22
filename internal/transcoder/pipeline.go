@@ -101,6 +101,9 @@ func (p *Pipeline) buildArgs(inputPath string, seekPosition float64) []string {
 	args = append(args,
 		"-i", inputPath,
 		"-c:v", p.encoderName,
+		// 强制 8-bit yuv420p：10-bit 源（如 HEVC Main 10）否则编出 High 10 的 10-bit H.264，
+		// 浏览器与 mpegts.js 无法解码播放。
+		"-pix_fmt", "yuv420p",
 		// 固定 GOP = 48 帧
 		"-g", "48",
 		"-keyint_min", "48",

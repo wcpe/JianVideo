@@ -218,7 +218,9 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 
 	scaleParts := make([]string, n)
 	for i, q := range qualities {
-		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d[v%dout]", i+1, q.Width, q.Height, i+1)
+		// 强制 8-bit yuv420p：10-bit（如 HEVC Main 10）源若不转换，会编出 High 10 的
+		// 10-bit H.264，浏览器与 mpegts.js 均无法解码播放（见 HEVC/AAC 720p 不可播放问题）。
+		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d,format=yuv420p[v%dout]", i+1, q.Width, q.Height, i+1)
 	}
 
 	filterComplex := splitPart + "; " + strings.Join(scaleParts, "; ")

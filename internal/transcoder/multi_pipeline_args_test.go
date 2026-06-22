@@ -90,10 +90,10 @@ func TestBuildArgs_MultiQuality(t *testing.T) {
 	// filter_complex 应包含 split=3
 	assert.Contains(t, filterValue, "split=3")
 
-	// 验证各档位 scale 参数
-	assert.Contains(t, filterValue, "[v1]scale=1920:1080[v1out]")
-	assert.Contains(t, filterValue, "[v2]scale=1280:720[v2out]")
-	assert.Contains(t, filterValue, "[v3]scale=854:480[v3out]")
+	// 验证各档位 scale 参数（含 format=yuv420p 强制 8-bit，回归 10-bit High 10 不可播放）
+	assert.Contains(t, filterValue, "[v1]scale=1920:1080,format=yuv420p[v1out]")
+	assert.Contains(t, filterValue, "[v2]scale=1280:720,format=yuv420p[v2out]")
+	assert.Contains(t, filterValue, "[v3]scale=854:480,format=yuv420p[v3out]")
 
 	// 验证各档位的 m3u8 输出文件
 	found1080p := false

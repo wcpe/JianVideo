@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 修复
+- **10-bit HEVC 源转码后不可播放**：转码（单/多码率管道）未强制 8-bit `yuv420p`，10-bit 源（如 HEVC Main 10）会编出 `High 10`（`yuv420p10le`）的 10-bit H.264，浏览器与 mpegts.js 均无法解码，表现为 HLS「能生成但不可播放」（如 TS/hevc/aac 1280×720）。多码率 scale 链加 `,format=yuv420p`、单管道加 `-pix_fmt yuv420p`，统一输出 8-bit H.264；以 10-bit HEVC/AAC TS 样片复现并验证修复后产物为 8-bit `High`。
+
 ## 0.7.0（2026-06-22）
 
 ### 新增
