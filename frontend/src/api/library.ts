@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, Tag, RecycleCleanupResult } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -146,6 +146,16 @@ async function realGetRecycleMediaFiles(): Promise<MediaFile[]> {
 
 async function realRestoreMediaFile(id: number): Promise<void> {
   await client.post(`/api/library/media/${id}/restore`)
+}
+
+// 回收站清理（FR-26）：把全部软删项源文件移到盘符回收站目录并删记录，返回移动/失败统计。
+async function realCleanupRecycle(): Promise<RecycleCleanupResult> {
+  try {
+    const res = await client.post<RecycleCleanupResult>('/api/library/recycle/cleanup')
+    return res.data
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '清理回收站失败'), { cause: err })
+  }
 }
 
 async function realScanLibrary(id: number): Promise<ScanResponse> {
@@ -332,6 +342,19 @@ async function mockRestoreMediaFile(id: number): Promise<void> {
   mockDeletedIds.delete(id)
 }
 
+// 回收站清理 mock（FR-26）：把全部软删项从内存数据移除（模拟移到回收站目录 + 删记录）。
+async function mockCleanupRecycle(): Promise<RecycleCleanupResult> {
+  await mockDelay(200)
+  let moved = 0
+  for (const id of mockDeletedIds) {
+    const idx = mockMediaFiles.findIndex(m => m.id === id)
+    if (idx !== -1) mockMediaFiles.splice(idx, 1)
+    moved++
+  }
+  mockDeletedIds.clear()
+  return { moved, failed: 0 }
+}
+
 async function mockRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
   await mockDelay(150)
   const f = mockMediaFiles.find(m => m.id === id)
@@ -445,6 +468,8 @@ export function updateDisplayName(id: number, displayName: string) { return useM
 // 软删除与回收站（FR-25）
 export function getRecycleMediaFiles() { return useMock ? mockGetRecycleMediaFiles() : realGetRecycleMediaFiles() }
 export function restoreMediaFile(id: number) { return useMock ? mockRestoreMediaFile(id) : realRestoreMediaFile(id) }
+// 回收站清理（FR-26）
+export function cleanupRecycle() { return useMock ? mockCleanupRecycle() : realCleanupRecycle() }
 export function scanLibrary(id: number) { return useMock ? mockScanLibrary(id) : realScanLibrary(id) }
 
 /**

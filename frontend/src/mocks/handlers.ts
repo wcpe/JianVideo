@@ -344,6 +344,18 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // 回收站清理（FR-26）：把全部软删项移出（模拟移到回收站目录 + 删记录）
+  http.post('*/api/library/recycle/cleanup', async () => {
+    await delay(200)
+    let moved = 0
+    for (const id of deletedMediaIds) {
+      mediaFiles = mediaFiles.filter(m => m.id !== id)
+      moved++
+    }
+    deletedMediaIds.clear()
+    return HttpResponse.json({ moved, failed: 0 })
+  }),
+
   // ─── 目录浏览 ─────────────────────────────────────────
 
   http.get('*/api/library/browse', async ({ request }) => {

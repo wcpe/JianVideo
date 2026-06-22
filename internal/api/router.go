@@ -46,6 +46,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/recycle", h.ListRecycleMediaFiles)
 		lib.POST("/media/:id/restore", h.RestoreMediaFile)
 
+		// 回收站清理（FR-26）：源文件按盘符回收站路径移动并删记录
+		lib.POST("/recycle/cleanup", h.RecycleCleanup)
+
 		// 收藏与标签（FR-41）
 		lib.PUT("/media/:id/favorite", h.SetMediaFavorite)
 		lib.GET("/media/:id/tags", h.ListMediaTags)

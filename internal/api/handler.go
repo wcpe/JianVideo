@@ -255,6 +255,42 @@ func (h *Handler) RestoreMediaFile(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// RecycleCleanup POST /api/library/recycle/cleanup
+// 清理回收站（FR-26）：把全部软删项的源文件移动到其所在盘符对应的回收站目录（按删除日期分子目录），
+// 移动成功后删除 media_files 记录。盘符回收站路径取自 FR-24 设置键 recycle_bin_paths（JSON：盘符→目录）。
+// 存在软删项所在盘符未配置（含 SMB/无盘符项）时返回 409，不移动任何文件。
+func (h *Handler) RecycleCleanup(c *gin.Context) {
+	if h.settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
+		return
+	}
+
+	// 读取并解析每盘符回收站路径配置（JSON 字符串：盘符 → 目录）
+	raw, err := h.settings.Get(settings.KeyRecycleBinPaths)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "读取回收站路径配置失败"})
+		return
+	}
+	drivePaths := map[string]string{}
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &drivePaths); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INVALID_RECYCLE_CONFIG", "message": "回收站路径配置不是合法 JSON"})
+			return
+		}
+	}
+
+	result, err := h.library.CleanupRecycle(drivePaths)
+	if err != nil {
+		if errors.Is(err, library.ErrRecycleBinPathUnset) {
+			c.JSON(http.StatusConflict, gin.H{"code": "RECYCLE_PATH_UNSET", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "CLEANUP_FAILED", "message": "清理回收站失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"moved": result.Moved, "failed": result.Failed})
+}
+
 // RenameMediaFile PUT /api/library/media/:id/rename
 // 请求体：{"new_name": "新文件名.mp4"}，磁盘改名 + 更新数据库记录。
 func (h *Handler) RenameMediaFile(c *gin.Context) {

@@ -185,6 +185,12 @@ export interface CodecTestResult {
 /** 运行期设置键值映射（key → value，值统一为字符串） */
 export type SettingsMap = Record<string, string>
 
+/** 回收站清理结果统计（FR-26）：成功移动数与失败跳过数 */
+export interface RecycleCleanupResult {
+  moved: number
+  failed: number
+}
+
 /** 外挂字幕轨道 */
 export interface SubtitleTrack {
   index: number
