@@ -47,6 +47,11 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 通知设置变更，让定时扫描周期等运行期配置即时生效（FR-28）。
+	if h.settingsReload != nil {
+		h.settingsReload()
+	}
+
 	// 写入成功后回读返回，便于前端直接刷新状态。
 	all, err := h.settings.GetAll()
 	if err != nil {

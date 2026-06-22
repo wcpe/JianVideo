@@ -41,6 +41,8 @@ type Handler struct {
 	hlsDir    string             // HLS 切片输出根目录
 	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
 	version   string             // 应用版本号，由 main 经 ldflags 注入
+
+	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 }
 
 // NewHandler 创建处理器。
@@ -64,6 +66,13 @@ func (h *Handler) WithSettings(svc *settings.Service) *Handler {
 // 未注入时 ScanLibrary 回退原直接异步执行、任务列表返回空，保持无队列环境可用。
 func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
 	h.scanQueue = q
+	return h
+}
+
+// WithSettingsReload 注入设置变更回调（FR-28）：设置保存成功后调用，
+// 用于让定时扫描周期等运行期配置即时生效，无需重启。
+func (h *Handler) WithSettingsReload(fn func()) *Handler {
+	h.settingsReload = fn
 	return h
 }
 

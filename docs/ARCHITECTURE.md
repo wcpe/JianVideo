@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
@@ -258,6 +258,13 @@
 - 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数（path/dirType）为过程态，存内存映射不入库（path 真源仍是 `library_paths`）。
 - 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`（按 `library_id` 反查目录重建执行目标）后再启动 worker 重新执行；目录已失效的任务标记为 `error` 而非永久卡 `pending`。
 - 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 把实时 `ScanStatus` 的 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
+
+### 5.1.3 定时扫描调度（FR-28）
+
+- `library.ScanScheduler`（`scheduler.go`）是纯定时组件，经函数注入解耦（周期 `intervalFn`、触发 `triggerFn`），便于无依赖的 `-race` 单测；不重写扫描执行与入队，到点经 FR-29 队列入队即可。
+- 周期来自 `settings.scan_interval`（秒，FR-24 真源），`<=0`/非法视为关闭。调度循环每轮先读周期：关闭则阻塞等待重载/停止（不空转），否则 `time.NewTimer(周期)` 到点触发；等满一个周期才首次触发（不在启动/重启时立即扫，避免扫描风暴）。
+- 触发动作：枚举启用媒体库经 `TaskQueue.EnqueueScheduled` 入队**增量**扫描，逐库跳过禁用库与已有活动（`pending`/`running`）任务的库以防积压。定时只做增量；全量对账经手动 `mode=full` 触发（FR-27）。
+- 热生效：设置页保存 `scan_interval` 后，`PUT /api/settings` 经 Handler 的设置变更回调调用 `ScanScheduler.Reload()` 非阻塞唤醒循环重排，新周期即时生效、无需重启。
 
 ### 5.1.1 缩略图生成
 

@@ -62,6 +62,45 @@ func (q *TaskQueue) Enqueue(libraryID int64, path, dirType, scanType string) (in
 	return task.ID, nil
 }
 
+// EnqueueScheduled 为定时扫描（FR-28）批量入队：逐库跳过禁用库与已有活动（pending/running）任务的库，
+// 入队指定类型扫描并返回实际入队数量。复用 Enqueue，不另写扫描逻辑。
+func (q *TaskQueue) EnqueueScheduled(libs []models.LibraryPath, scanType string) int {
+	enqueued := 0
+	for _, lp := range libs {
+		if lp.Enabled != 1 {
+			continue
+		}
+		active, err := q.hasActiveTask(lp.ID)
+		if err != nil {
+			log.Printf("[WARN] 定时扫描查活动任务失败，跳过: libraryID=%d, err=%v", lp.ID, err)
+			continue
+		}
+		if active {
+			// 该库已有待执行 / 执行中的任务，跳过以防积压
+			continue
+		}
+		if _, err := q.Enqueue(lp.ID, lp.Path, lp.Type, scanType); err != nil {
+			log.Printf("[WARN] 定时扫描入队失败，跳过: libraryID=%d, err=%v", lp.ID, err)
+			continue
+		}
+		enqueued++
+	}
+	return enqueued
+}
+
+// hasActiveTask 判断指定库是否已有活动任务（pending 或 running）。
+func (q *TaskQueue) hasActiveTask(libraryID int64) (bool, error) {
+	var cnt int64
+	err := q.db.Model(&models.ScanTask{}).
+		Where("library_id = ? AND status IN ?", libraryID,
+			[]string{models.ScanTaskStatusPending, models.ScanTaskStatusRunning}).
+		Count(&cnt).Error
+	if err != nil {
+		return false, err
+	}
+	return cnt > 0, nil
+}
+
 // RecoverRunning 重启恢复：把残留 running 任务重置为 pending，以便 worker 重新执行（FR-29）。
 // 须在 Start 之前调用。注意：恢复后这些任务的扫描目标需经 Enqueue 重新登记，
 // 故恢复时按 library_id 反查目录路径重新登记内存目标。

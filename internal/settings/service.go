@@ -4,6 +4,8 @@ package settings
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -41,6 +43,20 @@ func (s *Service) Get(key string) (string, error) {
 		return "", err
 	}
 	return setting.Value, nil
+}
+
+// ScanInterval 读取定时扫描周期（FR-28）：值为秒的整数字符串。
+// 空 / 非法 / <=0 一律视为关闭定时扫描，返回 0。
+func (s *Service) ScanInterval() time.Duration {
+	raw, err := s.Get(KeyScanInterval)
+	if err != nil {
+		return 0
+	}
+	secs, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // GetAll 读取全部设置，返回 key → value 映射。

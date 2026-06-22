@@ -2,6 +2,7 @@ package settings
 
 import (
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -64,6 +65,36 @@ func TestSetUpsert(t *testing.T) {
 	v, _ := svc.Get(KeyScanInterval)
 	if v != "120" {
 		t.Fatalf("期望覆盖为 120, 实际 %q", v)
+	}
+}
+
+// TestScanInterval 周期解析（FR-28）：有效正整数转 Duration；空 / 非法 / <=0 视为关闭返回 0。
+func TestScanInterval(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+
+	// 未设置 → 0
+	if d := svc.ScanInterval(); d != 0 {
+		t.Fatalf("未设置时应为 0, 实际 %v", d)
+	}
+
+	cases := []struct {
+		raw  string
+		want time.Duration
+	}{
+		{"3600", 3600 * time.Second},
+		{" 600 ", 600 * time.Second}, // 含空白
+		{"0", 0},                     // 0 关闭
+		{"-5", 0},                    // 负数关闭
+		{"abc", 0},                   // 非法关闭
+		{"", 0},                      // 空关闭
+	}
+	for _, c := range cases {
+		if err := svc.Set(KeyScanInterval, c.raw); err != nil {
+			t.Fatalf("写入 %q 失败: %v", c.raw, err)
+		}
+		if got := svc.ScanInterval(); got != c.want {
+			t.Fatalf("raw=%q 期望 %v, 实际 %v", c.raw, c.want, got)
+		}
 	}
 }
 

@@ -127,7 +127,25 @@ func main() {
 	scanQueue.Start()
 	defer scanQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue)
+	// 定时扫描调度器（FR-28）：按设置中的可配置周期，周期性对所有启用库入队增量扫描。
+	// 周期来自 settings.scan_interval（<=0 关闭）；保存设置后经 Reload 即时生效。
+	scanScheduler := library.NewScanScheduler(
+		settingsSvc.ScanInterval,
+		func() {
+			libs, err := libSvc.ListLibraryPaths()
+			if err != nil {
+				log.Printf("[WARN] 定时扫描枚举媒体库失败: %v", err)
+				return
+			}
+			if n := scanQueue.EnqueueScheduled(libs, models.ScanTypeIncremental); n > 0 {
+				log.Printf("[INFO] 定时扫描已入队 %d 个媒体库", n)
+			}
+		},
+	)
+	scanScheduler.Start()
+	defer scanScheduler.Stop()
+
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

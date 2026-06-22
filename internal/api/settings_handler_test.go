@@ -122,6 +122,47 @@ func TestSettings_PutInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestSettings_PutTriggersReload 保存成功后调用设置变更回调（定时扫描周期热生效，FR-28）。
+func TestSettings_PutTriggersReload(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	reloaded := 0
+	h := NewHandler(library.NewService(gdb)).
+		WithSettings(settings.NewService(gdb)).
+		WithSettingsReload(func() { reloaded++ })
+	r := gin.New()
+	RegisterRoutes(r, h)
+
+	// 成功 PUT 应触发一次回调
+	req := httptest.NewRequest("PUT", "/api/settings", bytes.NewBufferString(`{"settings":{"scan_interval":"600"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT 期望 200, 实际 %d", w.Code)
+	}
+	if reloaded != 1 {
+		t.Fatalf("成功保存应触发 1 次设置变更回调, 实际 %d", reloaded)
+	}
+
+	// 失败 PUT（空设置 400）不应触发回调
+	req = httptest.NewRequest("PUT", "/api/settings", bytes.NewBufferString(`{"settings":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("空设置期望 400, 实际 %d", w.Code)
+	}
+	if reloaded != 1 {
+		t.Fatalf("失败保存不应触发回调, 回调次数 %d", reloaded)
+	}
+}
+
 // TestSettings_Unavailable 未注入 settings 服务时返回 503。
 func TestSettings_Unavailable(t *testing.T) {
 	h := NewHandler(library.NewService(nil))
