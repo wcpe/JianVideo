@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **时间轴缩放与按媒体时间组织（FR-32）**：时间轴改为按**媒体时间**（FR-31，缺失回退入库时间）组织（`sort=media_time`），新增缩放粒度控件（日/月/年）：日按 `YYYY-MM-DD`、月按 `YYYY-MM`、年按 `YYYY` 分组，日期轴标签随粒度自适应；拖动浏览复用现有虚拟滚动。
 - **前端筛选/搜索 UI（FR-36）**：时间轴页搜索框升级提示表达式语法（`ext:`/`type:`/`size:`），新增 `MediaQueryFilters` 结构化筛选控件（类型「全部/图片/视频」分段控件、最小大小预设、拍摄时间范围日期），经 `useInfiniteMedia` 把 `type`/`size_min`/`time_from`/`time_to` 透传给媒体列表接口（消费 FR-35 引擎，筛选变化即重置首屏）。
 - **媒体筛选与表达式查询引擎（FR-35）**：`GET /api/library/media` 的 `search` 升级为 everything 式表达式（`library.ParseSearchExpression`）：裸词→文件名包含（多词 AND）、`ext:jpg,png`→扩展名、`type:image|video`→类型、`size:>10mb`/`<=2gb`/`>=500kb`（单位 b/kb/mb/gb/tb）→大小；纯文本向后兼容。另新增结构化查询参数 `type`/`size_min`/`size_max`/`time_from`/`time_to`（按 `COALESCE(media_time, added_at)` 比较）/`path`（目录前缀）。表达式只解析为结构化 `MediaFilter` 字段、全部走参数化查询，无 SQL 注入面；类型按内置图片扩展名集合粗筛。
 - **EXIF 详情展示（FR-38）**：文件详情面板右侧新增 EXIF 区块（有数据才显示），展示拍摄时间（含来源标注 EXIF/文件名/创建/修改）、相机、镜头、光圈、快门、ISO、GPS 坐标，并对有 GPS 的媒体提供「在外部地图打开」链接（OpenStreetMap，新标签打开）。消费 FR-31 后端已提取并随 `media` 接口返回的 EXIF 字段；真实 EXIF 端到端依赖 FR-31 真机提取。

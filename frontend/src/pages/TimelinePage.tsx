@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Stack, Title, TextInput } from '@mantine/core'
+import { Stack, Title, TextInput, Group, SegmentedControl, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconSearch } from '@tabler/icons-react'
 import { useLibraryPaths } from '@/hooks/useLibraryPaths'
@@ -12,6 +12,7 @@ import ContinueWatching from '@/components/ContinueWatching'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import { extractErrorMessage } from '@/utils/error'
 import * as libApi from '@/api/library'
+import type { TimelineGranularity } from '@/utils/timeline'
 import type { MediaFile } from '@/types'
 
 /** 时间轴页：按日期分组的时间线浏览，虚拟滚动 + 滚动加载更多 */
@@ -26,7 +27,9 @@ export default function TimelinePage() {
   const [sizeMin, setSizeMin] = useState(0)
   const [timeFrom, setTimeFrom] = useState('')
   const [timeTo, setTimeTo] = useState('')
-  const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo })
+  // 时间轴缩放粒度（FR-32）：按媒体时间组织，日/月/年缩放
+  const [granularity, setGranularity] = useState<TimelineGranularity>('day')
+  const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo, sort: 'media_time' })
   const paths = useLibraryPaths(undefined)
   const exts = paths.customImageExtensions
   // 扫描完成后重载第一页
@@ -84,6 +87,22 @@ export default function TimelinePage() {
         onTimeToChange={setTimeTo}
       />
 
+      {/* 时间轴缩放（FR-32）：按媒体时间组织，日/月/年粒度切换 */}
+      <Group gap="xs" align="center">
+        <Text size="xs" c="dimmed">缩放</Text>
+        <SegmentedControl
+          aria-label="时间轴缩放"
+          size="xs"
+          value={granularity}
+          onChange={(v) => setGranularity(v as TimelineGranularity)}
+          data={[
+            { value: 'day', label: '日' },
+            { value: 'month', label: '月' },
+            { value: 'year', label: '年' },
+          ]}
+        />
+      </Group>
+
       <TimelineView
         mediaFiles={infinite.items}
         loading={infinite.loading && infinite.items.length === 0}
@@ -95,6 +114,7 @@ export default function TimelinePage() {
         onLoadMore={infinite.loadMore}
         hasMore={infinite.hasMore}
         loadingMore={infinite.loading && infinite.items.length > 0}
+        granularity={granularity}
       />
 
       <MediaDetailPanel

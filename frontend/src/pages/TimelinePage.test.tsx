@@ -39,7 +39,7 @@ describe('TimelinePage', () => {
     vi.clearAllMocks()
   })
 
-  it('时间轴媒体列表请求显式带上 time_desc 排序', async () => {
+  it('时间轴媒体列表按媒体时间组织（sort=media_time，FR-32）', async () => {
     let requestedSort: string | null = null
     server.use(
       http.get('*/api/library/media', ({ request }) => {
@@ -51,7 +51,7 @@ describe('TimelinePage', () => {
     renderPage()
 
     await waitFor(() => {
-      expect(requestedSort).toBe('time_desc')
+      expect(requestedSort).toBe('media_time')
     })
   })
 

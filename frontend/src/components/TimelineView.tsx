@@ -7,7 +7,7 @@ import { isImageFile, mediaDisplayName } from '@/utils/media'
 import { groupMediaByDate } from '@/utils/timeline'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import type { MediaFile } from '@/types'
-import type { DateGroup } from '@/utils/timeline'
+import type { DateGroup, TimelineGranularity } from '@/utils/timeline'
 
 interface TimelineViewProps {
   mediaFiles: MediaFile[]
@@ -24,16 +24,20 @@ interface TimelineViewProps {
   hasMore?: boolean
   // 是否正在加载下一页（用于底部提示）
   loadingMore?: boolean
+  // 分组粒度（FR-32 缩放）：日 / 月 / 年，默认日
+  granularity?: TimelineGranularity
 }
 
 /** 单个日期组的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
 const GROUP_ESTIMATE_SIZE = 320
 
-/** 把 YYYY-MM-DD 拆成年份与月-日两段，便于竖向日期轴展示 */
+/** 把分组键拆成年份与月-日两段，便于竖向日期轴展示（支持 年/年-月/年-月-日 三种粒度，FR-32） */
 function splitDate(date: string): { year: string; monthDay: string } {
+  if (/^\d{4}$/.test(date)) return { year: date, monthDay: '' } // 年粒度：仅年
+  if (/^\d{4}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) } // 年-月
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) } // 年-月-日
   // 非法/未知日期整段作为月日展示，年份留空
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { year: '', monthDay: date }
-  return { year: date.slice(0, 4), monthDay: date.slice(5) }
+  return { year: '', monthDay: date }
 }
 
 /** 渲染单个日期组：左侧竖向日期轴 + 右侧媒体缩略图网格 */
@@ -49,15 +53,18 @@ function DateGroupRow({
   onToggleFavorite?: (file: MediaFile) => void
 }) {
   const { year, monthDay } = splitDate(group.date)
+  // 主标签：日/月粒度为月日、年粒度为年；次标签：仅日/月粒度在上方显示年
+  const primary = monthDay || year
+  const secondary = monthDay ? year : ''
   return (
     <Group align="flex-start" wrap="nowrap" gap="md" pb="xl">
       {/* 左侧竖向日期轴：圆点 + 竖线 + 年/月日 */}
       <Box style={{ width: 80, flexShrink: 0, position: 'relative' }}>
         <Group gap={8} wrap="nowrap" align="center" mb={4}>
           <Box style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--mantine-color-purple-5)', flexShrink: 0 }} />
-          {year && <Text size="xs" c="dimmed">{year}</Text>}
+          {secondary && <Text size="xs" c="dimmed">{secondary}</Text>}
         </Group>
-        <Text fw={700} size="lg" pl={18}>{monthDay}</Text>
+        <Text fw={700} size="lg" pl={18}>{primary}</Text>
         {/* 竖线营造时间线视觉 */}
         <Box style={{ position: 'absolute', left: 4, top: 14, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
       </Box>
@@ -126,12 +133,13 @@ export default function TimelineView({
   onLoadMore,
   hasMore,
   loadingMore,
+  granularity = 'day',
 }: TimelineViewProps) {
   // 列表容器 ref，用于计算窗口虚拟化所需的 scrollMargin（列表相对文档顶部的偏移）
   const listRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
 
-  const groups = error || loading ? [] : groupMediaByDate(mediaFiles)
+  const groups = error || loading ? [] : groupMediaByDate(mediaFiles, granularity)
 
   // 列表挂载/数据变化后测量容器距文档顶部的偏移作为 scrollMargin
   useEffect(() => {

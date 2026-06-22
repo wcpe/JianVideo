@@ -67,4 +67,32 @@ describe('groupMediaByDate', () => {
   it('空输入返回空数组', () => {
     expect(groupMediaByDate([])).toEqual([])
   })
+
+  // FR-32：缩放粒度与媒体时间组织
+  it('media_time 优先于 added_at 作为时间源', () => {
+    const f = makeFile(1, '2020-01-01T00:00:00Z')
+    f.media_time = '2023-08-15T10:00:00Z'
+    const groups = groupMediaByDate([f])
+    expect(groups[0].date).toBe('2023-08-15')
+  })
+
+  it('按月粒度分组（YYYY-MM）', () => {
+    const groups = groupMediaByDate([
+      makeFile(1, '2025-01-09T12:00:00Z'),
+      makeFile(2, '2025-01-20T12:00:00Z'),
+      makeFile(3, '2024-12-31T12:00:00Z'),
+    ], 'month')
+    expect(groups.map((g) => g.date)).toEqual(['2025-01', '2024-12'])
+    expect(groups[0].files.map((x) => x.id)).toEqual([1, 2])
+  })
+
+  it('按年粒度分组（YYYY）', () => {
+    const groups = groupMediaByDate([
+      makeFile(1, '2025-01-09T12:00:00Z'),
+      makeFile(2, '2024-06-01T12:00:00Z'),
+      makeFile(3, '2024-12-31T12:00:00Z'),
+    ], 'year')
+    expect(groups.map((g) => g.date)).toEqual(['2025', '2024'])
+    expect(groups[1].files.map((x) => x.id)).toEqual([2, 3])
+  })
 })
