@@ -120,6 +120,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		sys.GET("/info", h.SystemInfo)
 		sys.POST("/codec-test", h.CodecTest)
+		// 远程自更新（FR-46）：检测 / 应用 / 回滚
+		sys.GET("/update/check", h.CheckUpdate)
+		sys.POST("/update/apply", h.ApplyUpdate)
+		sys.POST("/update/rollback", h.RollbackUpdate)
 	}
 
 	// 运行期设置（FR-24）：键值读写

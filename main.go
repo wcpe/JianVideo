@@ -4,10 +4,12 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -165,7 +167,29 @@ func main() {
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.ServerPort)
 	log.Printf("JianVideo 启动于 %s", addr)
-	if err := r.Run(addr); err != nil && err != http.ErrServerClosed {
+	// 自更新重启时新进程可能早于旧进程释放端口启动，故监听带短重试等待端口释放（FR-46）。
+	ln, err := listenWithRetry(addr, 10*time.Second)
+	if err != nil {
+		log.Fatalf("监听端口失败: %v", err)
+	}
+	if err := http.Serve(ln, r); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("服务启动失败: %v", err)
+	}
+}
+
+// listenWithRetry 在 addr 上监听 TCP；遇端口被占用（自更新重启时旧实例尚未退出）时
+// 每 500ms 重试一次，直至成功或超时。端口空闲时立即返回，无额外开销。
+func listenWithRetry(addr string, timeout time.Duration) (net.Listener, error) {
+	start := time.Now()
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		if time.Since(start) >= timeout {
+			return nil, err
+		}
+		log.Printf("[WARN] 端口 %s 暂被占用，等待旧实例释放后重试…", addr)
+		time.Sleep(500 * time.Millisecond)
 	}
 }

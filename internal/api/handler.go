@@ -25,6 +25,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
 	"github.com/wcpe/JianVideo/internal/transcoder"
+	"github.com/wcpe/JianVideo/internal/update"
 )
 
 // SubtitleTrack 表示一个外挂字幕轨道。
@@ -44,13 +45,14 @@ type Handler struct {
 	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
 	version   string             // 应用版本号，由 main 经 ldflags 注入
 	share     *share.Service     // 分享链接读写（FR-43），未注入时分享端点不可用
+	updateSvc *update.Service    // 二进制自更新服务（FR-46），无外部依赖恒可用
 
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 }
 
 // NewHandler 创建处理器。
 func NewHandler(lib *library.Service) *Handler {
-	return &Handler{library: lib}
+	return &Handler{library: lib, updateSvc: update.NewService()}
 }
 
 // WithVersion 注入应用版本号，供系统诊断接口展示。
