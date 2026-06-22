@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 修复
+- **PWA 资源被 SPA 兜底（FR-45）**：内嵌前端服务此前仅把 `/assets/*` 作静态服务，其余路径一律由 `NoRoute` 回退 `index.html`，导致 vite-plugin-pwa 产在 dist 根目录的 `sw.js`、`manifest.webmanifest`、`workbox-*.js` 在打包二进制中被当作 SPA 路由返回 `text/html`——Service Worker 无法注册、manifest 无效，实际部署中 PWA 安装/离线失效。改为 SPA 兜底前先尝试从内嵌 `frontend/dist` 命中根级真实文件并按真实 MIME 返回（`.webmanifest` → `application/manifest+json`），命中不到才回 `index.html`。新增 web 层回归用例断言这些根资源返回正确 Content-Type（非 `text/html`）。此前 FR-45 的 vitest 仅 mock 测 manifest 字段与 SW 注册逻辑，未覆盖内嵌服务器是否真把文件服出，故 bug 被掩盖、真机 curl 才暴露。
+
 ## 0.6.0（2026-06-22）
 
 ### 新增

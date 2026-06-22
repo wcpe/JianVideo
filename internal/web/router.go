@@ -2,9 +2,11 @@ package web
 
 import (
 	"io/fs"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -30,6 +32,23 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		assetsFS, _ := fs.Sub(frontendDist, "frontend/dist/assets")
 		r.StaticFS("/assets", http.FS(assetsFS))
 		r.NoRoute(func(c *gin.Context) {
+			// 非 /api 路径：先尝试命中内嵌 dist 根下的真实文件（PWA 的 sw.js/manifest.webmanifest/
+			// workbox-*.js、favicon 等），命中即按真实 MIME 返回；否则走 SPA 兜底。
+			// 修复：此前根级资源被一律当 SPA 返回 index.html，致 Service Worker 无法注册、manifest 无效，PWA 失效（FR-45）。
+			reqPath := strings.TrimPrefix(c.Request.URL.Path, "/")
+			if reqPath != "" && !strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				if data, err := fs.ReadFile(frontendDist, "frontend/dist/"+reqPath); err == nil {
+					ctype := mime.TypeByExtension(filepath.Ext(reqPath))
+					if filepath.Ext(reqPath) == ".webmanifest" {
+						ctype = "application/manifest+json"
+					}
+					if ctype == "" {
+						ctype = http.DetectContentType(data)
+					}
+					c.Data(http.StatusOK, ctype, data)
+					return
+				}
+			}
 			// SPA 回退：未匹配的路径返回 index.html
 			indexData, err := fs.ReadFile(frontendDist, "frontend/dist/index.html")
 			if err != nil {

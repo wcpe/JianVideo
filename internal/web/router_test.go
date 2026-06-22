@@ -2,10 +2,12 @@ package web
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +47,73 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 	hlsMgr := player.NewHLSManager(t.TempDir())
 
 	return NewRouter(cfg, gormDB, hlsMgr, nil, nil)
+}
+
+// setupTestRouterWithFrontend 同上，但注入桩内嵌前端（含 PWA 根资源），用于静态服务测试。
+func setupTestRouterWithFrontend(t *testing.T, frontendFS fs.FS) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	gormDB, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gormDB.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.User{}, &models.PlaybackSession{}); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
+	}
+	cfg := &config.Config{ServerPort: 8080, JWTSecret: "test-secret", JWTExpiresIn: 72 * time.Hour, DBPath: ":memory:"}
+	return NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), frontendFS, nil)
+}
+
+// TestServesRootPWAAssets PWA 根资源（sw.js/manifest.webmanifest/workbox）按真实 MIME 服出，
+// 而非被 SPA 兜底成 index.html（FR-45 修复回归）。
+func TestServesRootPWAAssets(t *testing.T) {
+	frontendFS := fstest.MapFS{
+		"frontend/dist/index.html":           &fstest.MapFile{Data: []byte("<!doctype html><title>JianVideo</title>")},
+		"frontend/dist/sw.js":                &fstest.MapFile{Data: []byte("self.addEventListener('install',()=>{})")},
+		"frontend/dist/manifest.webmanifest": &fstest.MapFile{Data: []byte(`{"name":"JianVideo"}`)},
+		"frontend/dist/workbox-abc123.js":    &fstest.MapFile{Data: []byte("// workbox")},
+		"frontend/dist/assets/index-xyz.js":  &fstest.MapFile{Data: []byte("// app")},
+	}
+	r := setupTestRouterWithFrontend(t, frontendFS)
+
+	cases := []struct {
+		path       string
+		wantBody   string
+		ctContains string
+		notHTML    bool
+	}{
+		{"/sw.js", "self.addEventListener('install',()=>{})", "javascript", true},
+		{"/manifest.webmanifest", `{"name":"JianVideo"}`, "application/manifest+json", true},
+		{"/workbox-abc123.js", "// workbox", "javascript", true},
+		{"/assets/index-xyz.js", "// app", "javascript", true},
+	}
+	for _, c := range cases {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", c.path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s 期望 200, 得到 %d", c.path, w.Code)
+			continue
+		}
+		if w.Body.String() != c.wantBody {
+			t.Errorf("%s 应返回真实文件内容, 得到 %q", c.path, w.Body.String())
+		}
+		ct := w.Header().Get("Content-Type")
+		if c.notHTML && strings.Contains(ct, "text/html") {
+			t.Errorf("%s 不应是 text/html（PWA 资源被 SPA 兜底了）, 实际 %q", c.path, ct)
+		}
+		if !strings.Contains(ct, c.ctContains) {
+			t.Errorf("%s Content-Type 期望含 %q, 实际 %q", c.path, c.ctContains, ct)
+		}
+	}
+
+	// SPA 路由仍回退到 index.html
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/browse", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("SPA 路由 /browse 应回退 index.html(html), 得到 %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
 }
 
 func TestLogin_Success(t *testing.T) {
