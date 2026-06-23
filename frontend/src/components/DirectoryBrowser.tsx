@@ -1,10 +1,12 @@
-import { useState, useMemo } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge } from '@mantine/core'
+import { useMemo, useEffect, useState } from 'react'
+import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, Checkbox } from '@mantine/core'
 import { IconFolder, IconAlertCircle } from '@tabler/icons-react'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu'
+import { useMultiSelect } from '@/hooks/useMultiSelect'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
 /** 展示方式（FR-33）：列表详情 / 大-中-小图标 */
@@ -27,6 +29,10 @@ interface DirectoryBrowserProps {
   // 展示方式与排序（FR-33），缺省 list / name
   displayMode?: DisplayMode
   sort?: DirSort
+  // 多选与批量删除（FR-69），均可选，缺省退化为纯高亮选择、无右键菜单
+  onSelectionChange?: (ids: number[]) => void
+  onBatchDelete?: (ids: number[]) => void
+  onDeleteOne?: (file: MediaFile) => void
 }
 
 // 各档位的网格列数（图标档）
@@ -52,37 +58,49 @@ export function sortFiles(files: MediaFile[], sort: DirSort): MediaFile[] {
 }
 
 /**
- * 目录浏览 UI（FR-33 资源管理器视图）：面包屑 + 多展示档位 + 排序 + 单选/Shift 多选。
- * 目录恒在文件前、目录按名称排序；双击文件打开详情面板。
+ * 目录浏览 UI（FR-33 资源管理器视图 + FR-69 多选/右键批量）：面包屑 + 多展示档位 + 排序。
+ * 目录恒在文件前、目录按名称排序；双击文件打开详情面板。多选手势复用 useMultiSelect，
+ * 右键弹常用菜单（删除选中/全选/反选/复选框模式）。目录项不参与选择（仅文件可选）。
  */
 export default function DirectoryBrowser({
   breadcrumbs, directories, files, loading, error, customImageExtensions,
   onEnterDir, onBreadcrumbNavigate, onErrorClose, onOpenFile,
   displayMode = 'list', sort = 'name',
+  onSelectionChange, onBatchDelete, onDeleteOne,
 }: DirectoryBrowserProps) {
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
-
   const sortedDirs = useMemo(() => [...directories].sort((a, b) => a.name.localeCompare(b.name)), [directories])
   const sortedFiles = useMemo(() => sortFiles(files, sort), [files, sort])
+  const orderedIds = useMemo(() => sortedFiles.map((f) => f.id), [sortedFiles])
 
-  // 文件单击选择：默认单选；Shift 区间选；Ctrl/Cmd 切换
-  function handleFileClick(index: number, e: React.MouseEvent) {
-    if (e.shiftKey && anchorIndex !== null) {
-      const [lo, hi] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex]
-      const next = new Set<number>()
-      for (let i = lo; i <= hi; i++) next.add(sortedFiles[i].id)
-      setSelectedIds(next)
-    } else if (e.ctrlKey || e.metaKey) {
-      const next = new Set(selectedIds)
-      const id = sortedFiles[index].id
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      setSelectedIds(next)
-      setAnchorIndex(index)
+  const select = useMultiSelect(orderedIds)
+  const { selectedIds } = select
+  const [menu, setMenu] = useState<ContextMenuState | null>(null)
+  // 父组件关心选择（提供任一选择相关回调）时启用右键菜单与复选框模式
+  const selectionEnabled = !!(onSelectionChange || onBatchDelete || onDeleteOne)
+
+  // 选中集变化上抛父组件（升序，便于稳定断言/消费）
+  useEffect(() => {
+    onSelectionChange?.(Array.from(selectedIds).sort((a, b) => a - b))
+    // 仅在选中集变化时上抛
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds])
+
+  // 右键文件卡片：阻止系统菜单，记录光标位置与右键项 id。
+  // 不改动选择集——已有选中则菜单按选中批量操作；无选中则「删除」退化为删该右键项（onDeleteOne）。
+  function handleContextMenu(index: number, e: React.MouseEvent) {
+    if (!selectionEnabled) return // 父组件不关心选择时不接管右键
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, targetId: sortedFiles[index].id })
+  }
+
+  // 「删除选中」：有选中按选中批量删；无选中删右键项
+  function handleMenuDelete(targetId: number) {
+    setMenu(null)
+    if (selectedIds.size > 0) {
+      onBatchDelete?.(Array.from(selectedIds).sort((a, b) => a - b))
     } else {
-      setSelectedIds(new Set([sortedFiles[index].id]))
-      setAnchorIndex(index)
+      const f = sortedFiles.find((x) => x.id === targetId)
+      if (f) onDeleteOne?.(f)
     }
   }
 
@@ -136,12 +154,22 @@ export default function DirectoryBrowser({
                 bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
                 style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
                 className="hover-card"
-                onClick={(e) => handleFileClick(i, e)}
+                onClick={(e) => select.handleItemClick(i, e)}
                 onDoubleClick={() => onOpenFile(file, i)}
+                onContextMenu={(e) => handleContextMenu(i, e)}
                 data-selected={selected || undefined}
               >
                 <Group gap="sm" wrap="nowrap" justify="space-between">
-                  <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }} title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
+                  <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                    {select.checkboxMode && (
+                      <Checkbox
+                        size="xs" checked={selected} readOnly tabIndex={-1}
+                        aria-label={`选择 ${mediaDisplayName(file)}`}
+                        style={{ flexShrink: 0 }}
+                      />
+                    )}
+                    <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }} title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
+                  </Group>
                   <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
                     <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
                     <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
@@ -170,12 +198,20 @@ export default function DirectoryBrowser({
             return (
               <Card key={`file-${file.id}`} withBorder p={displayMode === 'small' ? 4 : 'sm'} radius="md"
                 bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
-                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
+                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined, position: 'relative' }}
                 className="hover-card"
-                onClick={(e) => handleFileClick(i, e)}
+                onClick={(e) => select.handleItemClick(i, e)}
                 onDoubleClick={() => onOpenFile(file, i)}
+                onContextMenu={(e) => handleContextMenu(i, e)}
                 data-selected={selected || undefined}
               >
+                {select.checkboxMode && (
+                  <Checkbox
+                    size="xs" checked={selected} readOnly tabIndex={-1}
+                    aria-label={`选择 ${mediaDisplayName(file)}`}
+                    style={{ position: 'absolute', top: 6, left: 6, zIndex: 1 }}
+                  />
+                )}
                 <Box mb={4}>
                   <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
                 </Box>
@@ -186,6 +222,20 @@ export default function DirectoryBrowser({
             )
           })}
         </SimpleGrid>
+      )}
+
+      {/* 右键常用菜单（FR-69）：父组件关心选择时挂载 */}
+      {selectionEnabled && (
+        <MediaContextMenu
+          state={menu}
+          onClose={() => setMenu(null)}
+          selectedCount={selectedIds.size}
+          checkboxMode={select.checkboxMode}
+          onDelete={handleMenuDelete}
+          onSelectAll={() => { select.selectAll(); setMenu(null) }}
+          onInvert={() => { select.invertSelection(); setMenu(null) }}
+          onToggleCheckboxMode={() => { select.setCheckboxMode(!select.checkboxMode); setMenu(null) }}
+        />
       )}
     </>
   )
