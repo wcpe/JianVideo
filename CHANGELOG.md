@@ -4,7 +4,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布版本
+## 0.10.0（2026-06-23）
 
 ### 新增
 - **时间轴可拖动 scrubber + 浮层预览（FR-68，补齐 FR-32 拖动）**：时间轴右侧新增竖向可拖动时间滑块（`TimelineScrubber`），与当前分组列表（按 granularity 分组、顶部最新/底部最旧）一一对应。拖动时按指针在轨道内的纵向比例经纯函数 `positionToGroupIndex(fraction, count)` 映射到目标分组下标，实时浮层预览该分组日期 + 首项缩略图（复用 `MediaThumbnail` 与 `/api/library/thumbnail/:id`）；松手后调虚拟器 `scrollToIndex` 滚动跳转到对应日期分组。指针事件用 `setPointerCapture` 保证拖出轨道仍跟手；`role="slider"` + 上下方向键移动一个分组并跳转保留键盘可达。空 / 加载 / 错误态不渲染。纯前端交互，无后端改动、无新依赖。
