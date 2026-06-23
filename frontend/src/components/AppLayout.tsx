@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense } from '@tabler/icons-react'
+import { useDisclosure, useHotkeys } from '@mantine/hooks'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
 import UpdateIndicator from './UpdateIndicator'
+import CommandPalette, { type Command } from './CommandPalette'
 
 // 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
 const NAVBAR_WIDTH_EXPANDED = 180
@@ -18,6 +19,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { username, logout } = useAuthStore()
   const navigate = useNavigate()
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false)
+  // 命令面板（FR-74）：全局 Ctrl/Cmd+K 打开、header 入口按钮亦可触发
+  const [paletteOpened, { open: openPalette, close: closePalette }] = useDisclosure(false)
   // 桌面导航收缩态（FR-54）：持久化到 localStorage，刷新后保持；仅影响桌面 Navbar，移动端抽屉不受影响
   const [navCollapsed, toggleNavCollapsed] = useNavCollapsed()
   // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
@@ -59,6 +62,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/duplicates', label: '重复项', icon: IconCopy },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
+  ]
+
+  // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；useHotkeys 默认对匹配事件 preventDefault
+  useHotkeys([['mod+K', openPalette]])
+
+  // 命令清单（FR-74）：跳转类复用 navItems + 开源协议/扫描媒体库/搜索；直接执行类切主题/收展导航/退出登录。
+  // 在此构造以拿到 navigate / toggleColorScheme / toggleNavCollapsed / logout 闭包，注入 CommandPalette 做纯展示。
+  const commands: Command[] = [
+    ...navItems.map((item) => ({
+      id: `nav-${item.path}`,
+      label: item.label,
+      icon: item.icon,
+      run: () => navigate(item.path),
+    })),
+    // 「搜索」与「扫描媒体库」不在面板内直接执行（依赖页面级上下文），仅跳到对应页面承接
+    { id: 'search', label: '搜索', icon: IconSearch, run: () => navigate('/') },
+    { id: 'scan', label: '扫描媒体库', icon: IconRefresh, run: () => navigate('/library-manager') },
+    { id: 'licenses', label: '开源协议', icon: IconLicense, run: () => navigate('/licenses') },
+    { id: 'toggle-theme', label: '切换主题', icon: IconPalette, run: () => toggleColorScheme() },
+    { id: 'toggle-nav', label: '收起/展开导航', icon: IconLayoutSidebarLeftCollapse, run: () => toggleNavCollapsed() },
+    { id: 'logout', label: '退出登录', icon: IconLogout, run: () => { logout(); navigate('/login') } },
   ]
 
   // 单个导航链接。onNavigate 用于移动端点击后关闭抽屉；collapsed 为收缩态——仅渲染图标并以 Tooltip 提示导航名
@@ -146,6 +170,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Group>
 
           <Group gap="sm">
+            {/* 命令面板入口（FR-74）：移动端无物理键盘时点击打开，桌面端 Ctrl/Cmd+K 亦可 */}
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={openPalette}
+              title="命令面板（Ctrl+K）"
+              aria-label="命令面板"
+            >
+              <IconCommand size={18} />
+            </ActionIcon>
             {/* 「更新可用」提示（FR-58）：有新版本时常驻展示，点击跳转系统信息 tab 更新区 */}
             <UpdateIndicator />
             {/* 扫描任务队列指示器（FR-29）：有进行中任务时常驻展示 */}
@@ -211,6 +245,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>
+
+      {/* 全局命令面板（FR-74）：Ctrl/Cmd+K 或 header 入口打开 */}
+      <CommandPalette opened={paletteOpened} onClose={closePalette} commands={commands} />
     </AppShell>
   )
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
@@ -179,5 +179,62 @@ describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
       expect(screen.getAllByText(/0\.3\.0/).length).toBeGreaterThan(0)
     })
     expect(screen.getAllByRole('link', { name: '开源协议' }).length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppLayout 命令面板（FR-74）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  it('默认不渲染命令面板', () => {
+    renderLayout()
+    // 面板输入框（aria-label「命令」）默认不在文档中
+    expect(screen.queryByRole('textbox', { name: '命令' })).toBeNull()
+  })
+
+  it('按 Ctrl+K 打开命令面板', async () => {
+    renderLayout()
+
+    // useHotkeys 监听 document.documentElement 的 keydown，事件须从非输入元素冒泡
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+
+    expect(await screen.findByRole('textbox', { name: '命令' })).toBeInTheDocument()
+  })
+
+  it('点击 header 命令面板按钮打开', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '命令面板' }))
+
+    expect(await screen.findByRole('textbox', { name: '命令' })).toBeInTheDocument()
+  })
+
+  it('命令面板含切换主题命令', async () => {
+    renderLayout()
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    const dialog = await screen.findByRole('dialog')
+
+    // 面板内列出「切换主题」命令（导航命令清单 + 直接执行命令）
+    expect(within(dialog).getByText('切换主题')).toBeInTheDocument()
+  })
+
+  it('命令面板内点击「时间轴」命令触发跳转', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    const dialog = await screen.findByRole('dialog')
+
+    // 输入过滤到「时间轴」后在面板内点击，断言 navigate 被调用到 '/'
+    const input = within(dialog).getByRole('textbox', { name: '命令' })
+    await user.type(input, '时间轴')
+    await user.click(within(dialog).getByText('时间轴'))
+
+    expect(mockNavigate).toHaveBeenCalledWith('/')
   })
 })
