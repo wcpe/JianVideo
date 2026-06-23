@@ -280,7 +280,7 @@ export default function PlayPage() {
       )}
 
       {/* 媒体信息 */}
-      <Paper withBorder p="md" radius="md" bg="dark.7">
+      <Paper withBorder p="md" radius="md" bg="var(--mantine-color-default)">
         <Text fw={600} size="sm" mb="sm">媒体信息</Text>
         <Group gap="md" wrap="wrap">
           <div>

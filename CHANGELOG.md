@@ -4,6 +4,11 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布版本
+
+### 修复
+- **亮色模式下卡片/面板仍为黑底（主题切换不生效）**：存储库卡片、目录浏览卡片、时间线卡片、登录页与播放页媒体信息面板均用 Mantine `bg="dark.7"`，它解析为写死的 `var(--mantine-color-dark-7)` 固定深色 token、不随 colorScheme 切换，故切到亮色模式后仍显深底。改为随主题切换的语义变量：普通卡片/面板背景统一 `var(--mantine-color-default)`，目录浏览选中态由固定深紫 `purple.9` 改为随主题强调色 `var(--mantine-color-purple-light)`（亮暗皆可读），登录页标题 `c="white"` 同步改为品牌色 `purple.4`（不再依赖深底）。
+
 ## 0.9.0（2026-06-23）
 
 ### 新增

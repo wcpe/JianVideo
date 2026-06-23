@@ -77,7 +77,7 @@ function DateGroupRow({
             return (
               <Card
                 key={file.id}
-                withBorder p="sm" radius="md" bg="dark.7"
+                withBorder p="sm" radius="md" bg="var(--mantine-color-default)"
                 style={{ cursor: 'pointer' }}
                 onClick={() => onOpenFile(file)}
                 className="hover-card"

@@ -120,7 +120,7 @@ export default function DirectoryBrowser({
         // 列表（详情行）
         <Stack gap={4}>
           {sortedDirs.map((dir) => (
-            <Card key={`dir-${dir.path}`} withBorder p="xs" radius="sm" bg="dark.7"
+            <Card key={`dir-${dir.path}`} withBorder p="xs" radius="sm" bg="var(--mantine-color-default)"
               style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
               <Group gap="xs" wrap="nowrap">
                 <IconFolder size={18} color="var(--mantine-color-purple-4)" />
@@ -133,7 +133,7 @@ export default function DirectoryBrowser({
             const selected = selectedIds.has(file.id)
             return (
               <Card key={`file-${file.id}`} withBorder p="xs" radius="sm"
-                bg={selected ? 'purple.9' : 'dark.7'}
+                bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
                 style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
                 className="hover-card"
                 onClick={(e) => handleFileClick(i, e)}
@@ -157,7 +157,7 @@ export default function DirectoryBrowser({
         // 图标档（大/中/小）
         <SimpleGrid cols={cols}>
           {sortedDirs.map((dir) => (
-            <Card key={`dir-${dir.path}`} withBorder p="sm" radius="sm" bg="dark.7"
+            <Card key={`dir-${dir.path}`} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)"
               style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
               <Stack gap={4} align="center">
                 <IconFolder size={displayMode === 'small' ? 24 : 40} color="var(--mantine-color-purple-4)" />
@@ -169,7 +169,7 @@ export default function DirectoryBrowser({
             const selected = selectedIds.has(file.id)
             return (
               <Card key={`file-${file.id}`} withBorder p={displayMode === 'small' ? 4 : 'sm'} radius="md"
-                bg={selected ? 'purple.9' : 'dark.7'}
+                bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
                 style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
                 className="hover-card"
                 onClick={(e) => handleFileClick(i, e)}

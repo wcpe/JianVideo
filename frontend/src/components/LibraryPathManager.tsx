@@ -49,7 +49,7 @@ export default function LibraryPathManager({
       ) : (
         <Stack gap={4}>
           {paths.map((p) => (
-            <Card key={p.id} withBorder p="xs" radius="sm" bg="dark.7">
+            <Card key={p.id} withBorder p="xs" radius="sm" bg="var(--mantine-color-default)">
               <Group justify="space-between" wrap="nowrap">
                 <Box
                   style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}

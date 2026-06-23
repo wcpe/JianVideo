@@ -36,8 +36,8 @@ export default function LoginPage() {
   return (
     <Center h="100vh" w="100%">
       <Box w={360} maw="90vw">
-        <Paper withBorder p="xl" radius="md" bg="dark.7">
-          <Title order={2} ta="center" mb={4} c="white">
+        <Paper withBorder p="xl" radius="md" bg="var(--mantine-color-default)">
+          <Title order={2} ta="center" mb={4} c="purple.4">
             JianVideo
           </Title>
           <Text size="sm" c="dimmed" ta="center" mb="lg">
