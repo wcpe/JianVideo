@@ -24,6 +24,10 @@ const (
 	KeyUpdateChannel = "update_channel"
 	// KeyTranscodeCodecPriority 转码首选目标编码优先级（FR-50），值为 JSON 数组（如 ["av1","h265","h264"]）。
 	KeyTranscodeCodecPriority = "transcode_codec_priority"
+	// KeyFFmpegPath ffmpeg 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
+	KeyFFmpegPath = "ffmpeg_path"
+	// KeyFFprobePath ffprobe 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
+	KeyFFprobePath = "ffprobe_path"
 )
 
 // Service 运行期设置业务逻辑。

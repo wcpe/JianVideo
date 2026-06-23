@@ -618,6 +618,34 @@
   ```
 - **说明**：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。**默认读按 ffmpeg 版本持久化的缓存即时返回**（`from_cache:true`），`?force=true` 强制重测覆盖缓存（`from_cache:false`，逐个试编码可能耗时数分钟）。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。结果与 `GET /api/transcode/hwaccel` 同源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
 
+### 查看环境变量（FR-56）
+
+- **方法 / 路径**：`GET /api/system/env`
+- **响应**（200）：
+  ```json
+  {
+    "env": [
+      { "key": "JIANVIDEO_FFMPEG_PATH", "description": "ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH", "sensitive": false, "set": true, "value": "/opt/jianvideo/ffmpeg" },
+      { "key": "JWT_SECRET", "description": "JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）", "sensitive": true, "set": true, "value": "****（已设置）" },
+      { "key": "SMB_MASTER_PASSWORD", "description": "SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用", "sensitive": true, "set": false, "value": "（未设置）" }
+    ]
+  }
+  ```
+- **说明**：只读返回项目已知环境变量清单（涵盖根 config 的 `SERVER_PORT`/`DB_PATH`/`JWT_SECRET` 与 `internal/config` 的 `JIANVIDEO_*` 两套来源）。`set` 表示是否已设置。**敏感项（`JWT_SECRET`、`SMB_MASTER_PASSWORD`）绝不回显明文**——`value` 固定为掩码（已设置 `****（已设置）`、未设置 `（未设置）`），只暴露 `set` 布尔；非敏感项 `value` 为明文。env 为进程级，本端点只查看不修改。
+
+### 检测 FFmpeg 路径（FR-56）
+
+- **方法 / 路径**：`POST /api/system/ffmpeg/detect`
+- **请求**：
+  ```json
+  { "path": "D:/tools/ffmpeg.exe" }
+  ```
+- **响应**（200）：
+  ```json
+  { "ffmpeg_available": true, "ffmpeg_version": "ffmpeg version 6.1.1 ..." }
+  ```
+- **说明**：对指定路径跑 `path -version` 验证是否可用（`path` 可省/空 = 测当前已配置路径）。**仅探测、不改写运行期全局路径**，供用户保存前先验路径。不可用时返回 `ffmpeg_available:false` 且 `ffmpeg_version` 为空串。持久化路径走 `PUT /api/settings`（键 `ffmpeg_path`/`ffprobe_path`），保存后即时应用到运行期。
+
 ### 获取字幕轨道列表
 
 - **方法 / 路径**：`GET /api/play/:id/subtitles`
@@ -702,7 +730,8 @@
   }
   ```
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
-- **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。保存成功后触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。
+- **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。保存成功后触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）。
+- **已知键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）。
 - **错误**：`400` 请求参数错误或 `settings` 为空，`503` 设置服务未启用，`500` 保存失败
 
 ## 分享链接（FR-43）

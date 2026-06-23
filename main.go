@@ -84,10 +84,23 @@ func main() {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
+	// 设置服务（FR-24）：先建好，供下方 ffmpeg 路径持久化设置覆盖与 API 注入复用。
+	settingsSvc := settings.NewService(gormDB)
+
 	// ffmpeg/ffprobe 路径注入：环境变量 → 同目录捆绑版 → PATH（见 ADR-0027）。
 	transcoder.SetFFmpegPath(resolveTool("JIANVIDEO_FFMPEG_PATH", "ffmpeg"))
 	ffprobeBin := resolveTool("JIANVIDEO_FFPROBE_PATH", "ffprobe")
 	transcoder.SetFFprobePath(ffprobeBin)
+	// 持久化设置优先于自动发现（FR-56）：settings 中 ffmpeg_path/ffprobe_path 非空则覆盖。
+	if p, _ := settingsSvc.Get(settings.KeyFFmpegPath); p != "" {
+		transcoder.SetFFmpegPath(p)
+		log.Printf("[INFO] 采用持久化设置的 ffmpeg 路径: %s", p)
+	}
+	if p, _ := settingsSvc.Get(settings.KeyFFprobePath); p != "" {
+		transcoder.SetFFprobePath(p)
+		ffprobeBin = p
+		log.Printf("[INFO] 采用持久化设置的 ffprobe 路径: %s", p)
+	}
 	// 媒体时间提取（FR-31）：library 包独立调用 ffprobe 读视频 creation_time，
 	// 与 transcoder 共用同一解析结果，避免跨包依赖。
 	library.SetFFprobePath(ffprobeBin)
@@ -122,8 +135,8 @@ func main() {
 	defer pbSvc.Stop()
 
 	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
+	// settingsSvc 已在 ffmpeg 路径注入处创建（FR-56），此处复用。
 	libSvc := library.NewService(gormDB)
-	settingsSvc := settings.NewService(gormDB)
 	shareSvc := share.NewService(gormDB)
 
 	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。

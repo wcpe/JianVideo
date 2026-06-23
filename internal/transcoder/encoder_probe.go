@@ -230,3 +230,24 @@ func FFmpegVersion(ctx context.Context) string {
 	}
 	return strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 }
+
+// CheckFFmpegPath 检测指定路径的 ffmpeg 是否可用（FR-56）：跑 `path -version`，
+// 成功则返回 (true, 版本首行)，失败返回 (false, "")。path 为空时检测当前已配置的全局路径。
+// 纯探测、不改写全局状态，供用户保存前先验路径是否可用。
+func CheckFFmpegPath(ctx context.Context, path string) (bool, string) {
+	bin := strings.TrimSpace(path)
+	if bin == "" {
+		bin = ffmpegPath
+	}
+	if bin == "" {
+		return false, ""
+	}
+	verCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(verCtx, bin, "-hide_banner", "-version")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, ""
+	}
+	return true, strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+}

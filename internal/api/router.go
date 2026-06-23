@@ -122,6 +122,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		sys.GET("/info", h.SystemInfo)
 		sys.POST("/codec-test", h.CodecTest)
+		// 环境变量查看（FR-56，只读，敏感脱敏）
+		sys.GET("/env", h.SystemEnv)
+		// FFmpeg 路径检测（FR-56）：保存前先验路径是否可用
+		sys.POST("/ffmpeg/detect", h.DetectFFmpeg)
 		// 远程自更新（FR-46）：检测 / 应用 / 回滚
 		sys.GET("/update/check", h.CheckUpdate)
 		sys.POST("/update/apply", h.ApplyUpdate)

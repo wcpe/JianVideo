@@ -9,6 +9,9 @@ export const SETTING_KEY_RECYCLE_BIN_PATHS = 'recycle_bin_paths'
 export const SETTING_KEY_SCAN_INTERVAL = 'scan_interval'
 // 更新频道：stable=正式版（拉正式 release）/ prerelease=测试版（拉最新预发布 dev）
 export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel'
+// ffmpeg/ffprobe 可执行文件路径（FR-56），与后端 settings 常量一致
+export const SETTING_KEY_FFMPEG_PATH = 'ffmpeg_path'
+export const SETTING_KEY_FFPROBE_PATH = 'ffprobe_path'
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))

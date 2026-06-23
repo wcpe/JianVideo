@@ -372,14 +372,17 @@
 
 - `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速实测能力（per-codec）。
 - `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。默认读 §5.6 持久化缓存即时返回，`?force=true` 强制重测；响应附 `from_cache`/`ffmpeg_version`/`tested_at`。与 §5.6 同源（实测即真源）。
+- `GET /api/system/env`（FR-56）：只读返回项目已知环境变量清单（key/中文用途/是否敏感/是否已设置/展示值），元数据表集中维护于 api 层（涵盖根 config 与 `internal/config` 两套来源）。**敏感项（`JWT_SECRET`、`SMB_MASTER_PASSWORD`）绝不回显明文**——`value` 固定掩码、只暴露 `set` 布尔（安全红线）；非敏感项 `value` 为 `os.Getenv` 明文。env 为进程级，只查看不修改。
+- `POST /api/system/ffmpeg/detect`（FR-56）：对请求体 `path`（空=测当前）跑 `path -version` 验证可用性，基于纯函数 `transcoder.CheckFFmpegPath`（**不改写运行期全局路径**），返回 `{ffmpeg_available, ffmpeg_version}`，供用户保存前先验路径；持久化走 §5.8 的 `ffmpeg_path`/`ffprobe_path` 设置键。
 - 前端在 `/system` 控制台页的「系统信息」tab 展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。控制台页（`ConsolePage`，FR-55）以 Mantine `Tabs` 把「系统信息」与「设置」（§5.8）合并为单页两 tab，tab 状态由 URL query `?tab=system|settings` 控制；`SystemPage`/`SettingsPage` 原样作 tab 内容。
 
 ### 5.8 运行期设置（FR-24）
 
 - 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-0029）。
-- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」等键值，旧 `/settings` 路由重定向至此。
-- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
-- 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。
+- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」「FFmpeg 路径」等键值，旧 `/settings` 路由重定向至此。
+- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`/`update_channel`/`transcode_codec_priority`/`ffmpeg_path`/`ffprobe_path`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
+- **FFmpeg 路径持久化设置（FR-56）**：`ffmpeg_path`/`ffprobe_path` 让 ffmpeg/ffprobe 路径运行期可配置。`main.go` 启动时先 `resolveTool` 注入（环境变量→同目录捆绑版→PATH），随后若设置非空则覆盖（**持久化设置优先于自动发现**）；`PUT /api/settings` 含这两键时落库后即时调 `transcoder.SetFFmpegPath`/`SetFFprobePath`（ffprobe 同步给 `library`）应用到运行期，保存即生效、无需重启（api→transcoder 依赖方向允许）。
+- 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。
 
 ### 5.9 分享链接（FR-43）
 

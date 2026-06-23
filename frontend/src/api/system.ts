@@ -1,4 +1,4 @@
-import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult, EnvVar, FFmpegDetectResult } from '@/types'
 import client from './client'
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -40,6 +40,16 @@ async function realApplyUpdate(channel: string): Promise<void> {
 
 async function realRollbackUpdate(): Promise<void> {
   await client.post('/api/system/update/rollback')
+}
+
+async function realGetEnvVars(): Promise<EnvVar[]> {
+  const res = await client.get<{ env: EnvVar[] }>('/api/system/env')
+  return res.data.env || []
+}
+
+async function realDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
+  const res = await client.post<FFmpegDetectResult>('/api/system/ffmpeg/detect', { path: path ?? '' })
+  return res.data
 }
 
 // ─── Mock API 实现 ──────────────────────────────────
@@ -141,6 +151,26 @@ async function mockRollbackUpdate(): Promise<void> {
   await mockDelay(300)
 }
 
+async function mockGetEnvVars(): Promise<EnvVar[]> {
+  await mockDelay(120)
+  return [
+    { key: 'JIANVIDEO_FFMPEG_PATH', description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH', sensitive: false, set: true, value: '/opt/jianvideo/ffmpeg' },
+    { key: 'JIANVIDEO_DEBUG', description: '设为 1/true 时启用 gin debug 模式（输出调试日志）', sensitive: false, set: false, value: '' },
+    { key: 'JWT_SECRET', description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）', sensitive: true, set: true, value: '****（已设置）' },
+    { key: 'SMB_MASTER_PASSWORD', description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用', sensitive: true, set: false, value: '（未设置）' },
+  ]
+}
+
+async function mockDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
+  await mockDelay(200)
+  // 模拟：含 ffmpeg 字样或空（测当前）视为可用
+  const available = !path || path.toLowerCase().includes('ffmpeg')
+  return {
+    ffmpeg_available: available,
+    ffmpeg_version: available ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers' : '',
+  }
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -161,6 +191,16 @@ export function applyUpdate(channel: string): Promise<void> {
 
 export function rollbackUpdate(): Promise<void> {
   return useMock ? mockRollbackUpdate() : realRollbackUpdate()
+}
+
+// 环境变量查看（FR-56）：只读，敏感项已脱敏
+export function getEnvVars(): Promise<EnvVar[]> {
+  return useMock ? mockGetEnvVars() : realGetEnvVars()
+}
+
+// FFmpeg 路径检测（FR-56）：path 可空 = 测当前已配置路径
+export function detectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
+  return useMock ? mockDetectFFmpeg(path) : realDetectFFmpeg(path)
 }
 
 // pingHealth 探测服务是否在线，用于自更新/回滚重启后轮询恢复。

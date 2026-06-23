@@ -284,6 +284,28 @@ export interface UpdateCheckResult {
 /** 运行期设置键值映射（key → value，值统一为字符串） */
 export type SettingsMap = Record<string, string>
 
+/** 单个环境变量（FR-56）：只读查看，敏感项 value 为掩码、不含明文 */
+export interface EnvVar {
+  /** 环境变量名 */
+  key: string
+  /** 中文用途说明 */
+  description: string
+  /** 是否敏感（敏感项 value 为掩码，绝不回显明文） */
+  sensitive: boolean
+  /** 当前是否已设置（非空） */
+  set: boolean
+  /** 展示值：非敏感为明文，敏感为固定掩码 */
+  value: string
+}
+
+/** FFmpeg 路径检测结果（FR-56） */
+export interface FFmpegDetectResult {
+  /** 指定路径的 ffmpeg 是否可用 */
+  ffmpeg_available: boolean
+  /** 可用时的版本首行，不可用为空串 */
+  ffmpeg_version: string
+}
+
 /** 回收站清理结果统计（FR-26）：成功移动数与失败跳过数 */
 export interface RecycleCleanupResult {
   moved: number

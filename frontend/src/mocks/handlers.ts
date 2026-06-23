@@ -13,6 +13,8 @@ let nextExtensionId = 1
 const settingsStore: Record<string, string> = {
   scan_interval: '3600',
   recycle_bin_paths: '{"D":"D:/.recycle"}',
+  ffmpeg_path: '',
+  ffprobe_path: '',
 }
 
 // 相册（FR-40）内存数据
@@ -526,6 +528,31 @@ export const handlers = [
       from_cache: true,
       ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
       tested_at: '2026-06-23T10:00:00Z',
+    })
+  }),
+
+  // 环境变量查看（FR-56）：只读，敏感项已脱敏（绝不含明文）
+  http.get('*/api/system/env', async () => {
+    await delay(80)
+    return HttpResponse.json({
+      env: [
+        { key: 'JIANVIDEO_FFMPEG_PATH', description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH', sensitive: false, set: true, value: '/opt/jianvideo/ffmpeg' },
+        { key: 'JIANVIDEO_DEBUG', description: '设为 1/true 时启用 gin debug 模式（输出调试日志）', sensitive: false, set: false, value: '' },
+        { key: 'JWT_SECRET', description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）', sensitive: true, set: true, value: '****（已设置）' },
+        { key: 'SMB_MASTER_PASSWORD', description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用', sensitive: true, set: false, value: '（未设置）' },
+      ],
+    })
+  }),
+
+  // FFmpeg 路径检测（FR-56）：含 ffmpeg 字样或空路径视为可用
+  http.post('*/api/system/ffmpeg/detect', async ({ request }) => {
+    await delay(120)
+    const body = await request.json() as { path?: string }
+    const path = body.path || ''
+    const available = !path || path.toLowerCase().includes('ffmpeg')
+    return HttpResponse.json({
+      ffmpeg_available: available,
+      ffmpeg_version: available ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers' : '',
     })
   }),
 
