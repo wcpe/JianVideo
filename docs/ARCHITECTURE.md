@@ -380,9 +380,10 @@
 ### 5.8 运行期设置（FR-24）
 
 - 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-0029）。
-- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」「FFmpeg 路径」等键值，旧 `/settings` 路由重定向至此。
-- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`/`update_channel`/`transcode_codec_priority`/`ffmpeg_path`/`ffprobe_path`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
+- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」「工具路径（ffmpeg/ffprobe/magick）」等键值，旧 `/settings` 路由重定向至此。
+- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`/`update_channel`/`transcode_codec_priority`/`ffmpeg_path`/`ffprobe_path`/`magick_path`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
 - **FFmpeg 路径持久化设置（FR-56）**：`ffmpeg_path`/`ffprobe_path` 让 ffmpeg/ffprobe 路径运行期可配置。`main.go` 启动时先 `resolveTool` 注入（环境变量→同目录捆绑版→PATH），随后若设置非空则覆盖（**持久化设置优先于自动发现**）；`PUT /api/settings` 含这两键时落库后即时调 `transcoder.SetFFmpegPath`/`SetFFprobePath`（ffprobe 同步给 `library`）应用到运行期，保存即生效、无需重启（api→transcoder 依赖方向允许）。
+- **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。
 
 ### 5.9 分享链接（FR-43）

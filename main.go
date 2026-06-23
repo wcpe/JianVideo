@@ -125,6 +125,11 @@ func main() {
 	// magick 路径注入与 HEIC/RAW 转换缓存目录初始化（FR-37，见 ADR）：
 	// 解析顺序与 ffmpeg 一致：环境变量 → 同目录捆绑版 → PATH。
 	library.SetMagickPath(resolveTool("JIANVIDEO_MAGICK_PATH", "magick"))
+	// 持久化设置优先于自动发现（FR-63）：settings 中 magick_path 非空则覆盖。
+	if p, _ := settingsSvc.Get(settings.KeyMagickPath); p != "" {
+		library.SetMagickPath(p)
+		log.Printf("[INFO] 采用持久化设置的 magick 路径: %s", p)
+	}
 	library.InitConvertCacheDir(filepath.Dir(cfg.DBPath))
 	if library.IsMagickAvailable() {
 		log.Printf("[INFO] ImageMagick 可用: %s（HEIC/RAW 将转 JPEG 显示）", library.GetMagickPath())

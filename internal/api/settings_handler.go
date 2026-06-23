@@ -54,6 +54,9 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	// 落库成功后，把 ffmpeg/ffprobe 路径设置应用到转码运行期，保存即生效（FR-56）。
 	applyFFmpegPathSettings(req.Settings)
 
+	// 落库成功后，把 magick 路径设置应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）。
+	applyMagickPathSettings(req.Settings)
+
 	// 通知设置变更，让定时扫描周期等运行期配置即时生效（FR-28）。
 	if h.settingsReload != nil {
 		h.settingsReload()
@@ -78,5 +81,14 @@ func applyFFmpegPathSettings(values map[string]string) {
 	if p, ok := values[settings.KeyFFprobePath]; ok && p != "" {
 		transcoder.SetFFprobePath(p)
 		library.SetFFprobePath(p)
+	}
+}
+
+// applyMagickPathSettings 把本次保存的 magick 路径设置应用到运行期（FR-63）。
+// 仿 applyFFmpegPathSettings：仅当 magick_path 出现且非空时覆盖全局路径，与 main.go 启动注入保持一致。
+// 空串不覆盖（保留自动发现/捆绑版结果），由 library.SetMagickPath 自身的空值守卫保证。
+func applyMagickPathSettings(values map[string]string) {
+	if p, ok := values[settings.KeyMagickPath]; ok && p != "" {
+		library.SetMagickPath(p)
 	}
 }

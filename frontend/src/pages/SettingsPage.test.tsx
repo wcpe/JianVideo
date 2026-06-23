@@ -112,6 +112,30 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('保存 magick 路径走 PUT /api/settings（FR-63）', async () => {
+    const user = userEvent.setup()
+    let putBody: { settings: Record<string, string> } | null = null
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: putBody.settings })
+      }),
+    )
+    renderPage()
+
+    const input = await screen.findByLabelText('Magick 路径')
+    await user.type(input, 'D:/tools/magick.exe')
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      )
+    })
+    expect(putBody).not.toBeNull()
+    expect(putBody!.settings.magick_path).toBe('D:/tools/magick.exe')
+  })
+
   it('保存 ffmpeg 路径走 PUT /api/settings', async () => {
     const user = userEvent.setup()
     let putBody: { settings: Record<string, string> } | null = null

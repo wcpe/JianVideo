@@ -11,17 +11,19 @@ import {
   SETTING_KEY_SCAN_INTERVAL,
   SETTING_KEY_FFMPEG_PATH,
   SETTING_KEY_FFPROBE_PATH,
+  SETTING_KEY_MAGICK_PATH,
 } from '@/api/settings'
 import { getEnvVars, detectFFmpeg } from '@/api/system'
 import { extractErrorMessage } from '@/utils/error'
 import type { EnvVar } from '@/types'
 
-/** 设置页（FR-24/FR-56）：读写运行期键值设置（扫描周期、回收站路径、ffmpeg 路径），并只读查看环境变量 */
+/** 设置页（FR-24/FR-56/FR-63）：读写运行期键值设置（扫描周期、回收站路径、ffmpeg/ffprobe/magick 路径），并只读查看环境变量 */
 export default function SettingsPage() {
   const [scanInterval, setScanInterval] = useState('')
   const [recycleBinPaths, setRecycleBinPaths] = useState('')
   const [ffmpegPath, setFfmpegPath] = useState('')
   const [ffprobePath, setFfprobePath] = useState('')
+  const [magickPath, setMagickPath] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -47,6 +49,7 @@ export default function SettingsPage() {
         setRecycleBinPaths(data[SETTING_KEY_RECYCLE_BIN_PATHS] ?? '')
         setFfmpegPath(data[SETTING_KEY_FFMPEG_PATH] ?? '')
         setFfprobePath(data[SETTING_KEY_FFPROBE_PATH] ?? '')
+        setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '')
       })
       .catch((err) => { if (active) setLoadError(extractErrorMessage(err, '加载设置失败')) })
       .finally(() => { if (active) setLoading(false) })
@@ -73,12 +76,14 @@ export default function SettingsPage() {
         [SETTING_KEY_RECYCLE_BIN_PATHS]: recycleBinPaths,
         [SETTING_KEY_FFMPEG_PATH]: ffmpegPath,
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
+        [SETTING_KEY_MAGICK_PATH]: magickPath,
       })
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '')
       setRecycleBinPaths(updated[SETTING_KEY_RECYCLE_BIN_PATHS] ?? '')
       setFfmpegPath(updated[SETTING_KEY_FFMPEG_PATH] ?? '')
       setFfprobePath(updated[SETTING_KEY_FFPROBE_PATH] ?? '')
+      setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '')
       notifications.show({ title: '保存成功', message: '设置已保存', color: 'green', autoClose: 3000 })
     } catch (err) {
       notifications.show({
@@ -90,7 +95,7 @@ export default function SettingsPage() {
     } finally {
       setSaving(false)
     }
-  }, [scanInterval, recycleBinPaths, ffmpegPath, ffprobePath])
+  }, [scanInterval, recycleBinPaths, ffmpegPath, ffprobePath, magickPath])
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
   const handleDetect = useCallback(async () => {
@@ -150,8 +155,8 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {/* FFmpeg 路径（FR-56）：可配置 + 检测，随上方「保存设置」一并保存 */}
-      <Title order={3}>FFmpeg 路径</Title>
+      {/* 工具路径（FR-56/FR-63）：ffmpeg/ffprobe/magick 可配置，随上方「保存设置」一并保存、保存即生效 */}
+      <Title order={3}>工具路径</Title>
       {loading ? (
         <Skeleton height={180} radius="md" />
       ) : (
@@ -170,6 +175,14 @@ export default function SettingsPage() {
               placeholder="如 D:/tools/ffprobe.exe"
               value={ffprobePath}
               onChange={(e) => setFfprobePath(e.currentTarget.value)}
+            />
+            {/* Magick 路径（FR-63）：HEIC/RAW 转 JPEG 用，随上方「保存设置」一并保存、保存即生效 */}
+            <TextInput
+              label="Magick 路径"
+              description="ImageMagick magick 可执行文件路径，用于 HEIC/RAW 转 JPEG；留空则按环境变量→同目录捆绑版→PATH 自动发现"
+              placeholder="如 D:/tools/magick.exe"
+              value={magickPath}
+              onChange={(e) => setMagickPath(e.currentTarget.value)}
             />
             <Group gap="sm">
               <Button variant="default" onClick={handleDetect} loading={detecting}>

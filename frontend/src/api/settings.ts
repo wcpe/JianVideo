@@ -12,6 +12,8 @@ export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel'
 // ffmpeg/ffprobe 可执行文件路径（FR-56），与后端 settings 常量一致
 export const SETTING_KEY_FFMPEG_PATH = 'ffmpeg_path'
 export const SETTING_KEY_FFPROBE_PATH = 'ffprobe_path'
+// ImageMagick magick 可执行文件路径（FR-63），与后端 settings 常量一致
+export const SETTING_KEY_MAGICK_PATH = 'magick_path'
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))

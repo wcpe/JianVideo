@@ -28,6 +28,8 @@ const (
 	KeyFFmpegPath = "ffmpeg_path"
 	// KeyFFprobePath ffprobe 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
 	KeyFFprobePath = "ffprobe_path"
+	// KeyMagickPath ImageMagick magick 可执行文件路径（FR-63），非空时启动覆盖自动发现并应用到 HEIC/RAW 转换运行期。
+	KeyMagickPath = "magick_path"
 )
 
 // Service 运行期设置业务逻辑。
