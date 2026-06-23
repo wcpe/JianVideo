@@ -594,10 +594,15 @@
     "os": "linux", "arch": "amd64", "num_cpu": 8, "hostname": "nas01",
     "go_version": "go1.22.5",
     "ffmpeg": { "available": true, "path": "/opt/jianvideo/ffmpeg", "version": "ffmpeg version 6.1.1 ..." },
+    "runtime": {
+      "pid": 12345, "work_dir": "/opt/jianvideo", "executable": "/opt/jianvideo/jianvideo",
+      "db_path": "/opt/jianvideo/data/jianvideo.db", "uptime_seconds": 3661,
+      "mem_alloc": 12582912, "mem_sys": 50331648, "num_gc": 7, "gomaxprocs": 8
+    },
     "hwaccel": { "available": [], "preferred": "libx264", "codecs": [], "intel_gpu": false, "intel_gpu_detail": "", "software_fallback": true, "from_cache": false, "ffmpeg_version": "", "tested_at": "" }
   }
   ```
-- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的 per-codec 结构（上例为冷态，未实测）；`app_version` 由构建期 `-ldflags -X main.version` 注入。
+- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的 per-codec 结构（上例为冷态，未实测）；`app_version` 由构建期 `-ldflags -X main.version` 注入。`runtime`（FR-60）为进程与 Go 运行时信息——`pid`/`work_dir`/`executable`（`os` 包）、`db_path`/`uptime_seconds`（由 main 注入数据库路径与启动时刻派生，未注入时分别为空串 / 0）、`mem_alloc`/`mem_sys`/`num_gc`（`runtime.MemStats`，字节）、`gomaxprocs`（`runtime.GOMAXPROCS(0)`）；全部来自标准库，系统级总内存 / 磁盘可用不在此列（需第三方库，范围外）。
 
 ### 编解码器实测
 

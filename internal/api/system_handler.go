@@ -32,7 +32,37 @@ func (h *Handler) SystemInfo(c *gin.Context) {
 			"version":   transcoder.FFmpegVersion(ctx),
 		},
 		"hwaccel": h.hwaccelInfo(ctx),
+		"runtime": h.runtimeInfo(),
 	})
+}
+
+// runtimeInfo 汇总进程与 Go 运行时信息（FR-60），供系统诊断「运行环境」展示。
+// 全部来自标准库（os/runtime），不引外部依赖；系统级总内存/磁盘可用不在此列（需第三方库，范围外）。
+func (h *Handler) runtimeInfo() gin.H {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	// 工作目录与可执行文件路径读取失败不致命，退化为空串（不阻塞诊断展示）。
+	workDir, _ := os.Getwd()
+	executable, _ := os.Executable()
+
+	// 运行时长：未注入启动时刻（零值）时退化为 0，避免返回荒谬的超大值。
+	var uptimeSeconds int64
+	if !h.startTime.IsZero() {
+		uptimeSeconds = int64(time.Since(h.startTime).Seconds())
+	}
+
+	return gin.H{
+		"pid":            os.Getpid(),
+		"work_dir":       workDir,
+		"executable":     executable,
+		"db_path":        h.dbPath,
+		"uptime_seconds": uptimeSeconds,
+		"mem_alloc":      mem.Alloc, // 当前堆上已分配且仍在用的字节数
+		"mem_sys":        mem.Sys,   // 进程向 OS 申请的总字节数
+		"num_gc":         mem.NumGC, // 已完成的 GC 次数
+		"gomaxprocs":     runtime.GOMAXPROCS(0),
+	}
 }
 
 // hwaccelInfo 返回硬件加速能力：注入能力服务时读缓存派生（冷态返回未测，不阻塞），

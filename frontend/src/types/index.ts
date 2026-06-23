@@ -235,6 +235,28 @@ export interface FFmpegInfo {
   version: string
 }
 
+/** 运行环境运行时信息（FR-60）：进程与 Go 运行时层面的诊断字段 */
+export interface RuntimeInfo {
+  /** 进程 PID */
+  pid: number
+  /** 当前工作目录 */
+  work_dir: string
+  /** 可执行文件路径 */
+  executable: string
+  /** SQLite 数据库文件路径 */
+  db_path: string
+  /** 运行时长（秒） */
+  uptime_seconds: number
+  /** 当前堆上已分配且仍在用的字节数 */
+  mem_alloc: number
+  /** 进程向 OS 申请的总字节数 */
+  mem_sys: number
+  /** 已完成的 GC 次数 */
+  num_gc: number
+  /** GOMAXPROCS（最大并行执行的 OS 线程数） */
+  gomaxprocs: number
+}
+
 /** 系统信息 */
 export interface SystemInfo {
   app_version: string
@@ -245,6 +267,8 @@ export interface SystemInfo {
   go_version: string
   ffmpeg: FFmpegInfo
   hwaccel: HWAccelInfo
+  /** 运行环境运行时信息（FR-60） */
+  runtime: RuntimeInfo
 }
 
 /** 单个编码器探测结果 */

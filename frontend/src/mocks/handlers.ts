@@ -471,6 +471,17 @@ export const handlers = [
         path: '/opt/jianvideo/ffmpeg',
         version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
       },
+      runtime: {
+        pid: 12345,
+        work_dir: '/opt/jianvideo',
+        executable: '/opt/jianvideo/jianvideo',
+        db_path: '/opt/jianvideo/data/jianvideo.db',
+        uptime_seconds: 3661,
+        mem_alloc: 12 * 1024 * 1024,
+        mem_sys: 48 * 1024 * 1024,
+        num_gc: 7,
+        gomaxprocs: 8,
+      },
       hwaccel: {
         available: [
           {

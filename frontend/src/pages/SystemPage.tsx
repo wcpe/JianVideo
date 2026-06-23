@@ -36,6 +36,30 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+/** 把字节数格式化为人类可读单位（FR-60 运行时内存展示） */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+/** 把秒数格式化为「Xd Xh Xm Xs」运行时长（FR-60） */
+function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s'
+  const s = Math.floor(seconds)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const parts: string[] = []
+  if (d > 0) parts.push(`${d}d`)
+  if (h > 0) parts.push(`${h}h`)
+  if (m > 0) parts.push(`${m}m`)
+  parts.push(`${sec}s`)
+  return parts.join(' ')
+}
+
 /** 把系统信息与编解码器结果整理为可粘贴的纯文本报告 */
 function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): string {
   const lines: string[] = []
@@ -46,6 +70,17 @@ function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): st
     lines.push(`CPU 核心数: ${info.num_cpu}`)
     lines.push(`主机名: ${info.hostname}`)
     lines.push(`Go 版本: ${info.go_version}`)
+    if (info.runtime) {
+      const rt = info.runtime
+      lines.push(`PID: ${rt.pid}`)
+      lines.push(`运行时长: ${formatUptime(rt.uptime_seconds)}`)
+      lines.push(`工作目录: ${rt.work_dir}`)
+      lines.push(`可执行文件: ${rt.executable}`)
+      lines.push(`数据库路径: ${rt.db_path}`)
+      lines.push(`运行内存: ${formatBytes(rt.mem_alloc)} / ${formatBytes(rt.mem_sys)}（已用/申请）`)
+      lines.push(`GC 次数: ${rt.num_gc}`)
+      lines.push(`GOMAXPROCS: ${rt.gomaxprocs}`)
+    }
     lines.push(`FFmpeg 可用: ${info.ffmpeg.available ? '是' : '否'}`)
     if (info.ffmpeg.available) {
       lines.push(`FFmpeg 路径: ${info.ffmpeg.path}`)
@@ -263,6 +298,18 @@ export default function SystemPage() {
                   <InfoRow label="CPU 核心数" value={info.num_cpu} />
                   <InfoRow label="主机名" value={info.hostname} />
                   <InfoRow label="Go 版本" value={info.go_version} />
+                  {info.runtime && (
+                    <>
+                      <InfoRow label="GOMAXPROCS" value={info.runtime.gomaxprocs} />
+                      <InfoRow label="进程 PID" value={info.runtime.pid} />
+                      <InfoRow label="运行时长" value={formatUptime(info.runtime.uptime_seconds)} />
+                      <InfoRow label="运行内存（已用/申请）" value={`${formatBytes(info.runtime.mem_alloc)} / ${formatBytes(info.runtime.mem_sys)}`} />
+                      <InfoRow label="GC 次数" value={info.runtime.num_gc} />
+                      <InfoRow label="数据库路径" value={info.runtime.db_path || '—'} />
+                      <InfoRow label="工作目录" value={info.runtime.work_dir || '—'} />
+                      <InfoRow label="可执行文件" value={info.runtime.executable || '—'} />
+                    </>
+                  )}
                 </SimpleGrid>
               </Card>
 

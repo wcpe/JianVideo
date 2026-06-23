@@ -55,6 +55,8 @@ func resolveTool(envVar, name string) string {
 }
 
 func main() {
+	// 记录进程启动时刻，供系统诊断「运行环境」计算运行时长（FR-60）。
+	startTime := time.Now()
 	cfg := config.Load()
 
 	// 使用 gorm 打开数据库（同时兼容 db 包的 InitSchema）
@@ -168,7 +170,7 @@ func main() {
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，后台预热。
 	capSvc := transcoder.NewCapabilityService(gormDB)
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

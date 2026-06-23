@@ -55,6 +55,10 @@ type Handler struct {
 	playback *playback.Service
 
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
+
+	// 运行环境信息（FR-60）：由 main 注入，用于系统诊断「运行环境」展示。
+	startTime time.Time // 进程启动时刻，用于计算运行时长；零值表示未注入（运行时长退化为 0）
+	dbPath    string    // SQLite 数据库文件路径，未注入时为空串
 }
 
 // NewHandler 创建处理器。
@@ -71,6 +75,18 @@ func (h *Handler) WithVersion(v string) *Handler {
 // WithSettings 注入运行期设置服务，启用 /api/settings 端点。
 func (h *Handler) WithSettings(svc *settings.Service) *Handler {
 	h.settings = svc
+	return h
+}
+
+// WithStartTime 注入进程启动时刻（FR-60），供系统诊断计算运行时长。
+func (h *Handler) WithStartTime(t time.Time) *Handler {
+	h.startTime = t
+	return h
+}
+
+// WithDBPath 注入 SQLite 数据库文件路径（FR-60），供系统诊断「运行环境」展示。
+func (h *Handler) WithDBPath(path string) *Handler {
+	h.dbPath = path
 	return h
 }
 

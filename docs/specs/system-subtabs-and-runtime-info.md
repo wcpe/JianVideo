@@ -59,7 +59,7 @@
 
 ## 4. 任务拆分
 - [x] FR-59：SystemPage 子 tab + 硬件加速网格 + UpdateIndicator 跳转；vitest 覆盖
-- [ ] FR-60：后端 SystemInfo 字段补齐 + 前端类型与展示；go test 断言新字段
+- [x] FR-60：后端 SystemInfo 字段补齐 + 前端类型与展示；go test 断言新字段
 - [ ] FR-62：force 刷新 + Mantine Modal 确认；vitest 覆盖
 - [ ] FR-63：magick_path settings 键 + apply 钩子 + 设置页可编辑；go test + vitest 覆盖
 - [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG

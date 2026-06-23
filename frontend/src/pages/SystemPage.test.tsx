@@ -49,6 +49,23 @@ describe('SystemPage', () => {
     expect(screen.getByRole('tab', { name: '运行环境' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('运行环境子 tab 展示运行时信息（PID/运行时长/数据库路径等，FR-60）', async () => {
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    // 缺省即运行环境子 tab，运行时字段可见
+    expect(screen.getByText('GOMAXPROCS')).toBeVisible()
+    expect(screen.getByText('进程 PID')).toBeVisible()
+    expect(screen.getByText('12345')).toBeVisible()
+    expect(screen.getByText('运行时长')).toBeVisible()
+    // 3661 秒 = 1h 1m 1s
+    expect(screen.getByText('1h 1m 1s')).toBeVisible()
+    // 数据库路径与运行内存
+    expect(screen.getByText('数据库路径')).toBeVisible()
+    expect(screen.getByText('/opt/jianvideo/data/jianvideo.db')).toBeVisible()
+    expect(screen.getByText('运行内存（已用/申请）')).toBeVisible()
+  })
+
   it('渲染四个子 tab（运行环境/硬件加速/编解码测试/应用更新，FR-59）', async () => {
     renderPage()
     await screen.findByText('0.3.0')
