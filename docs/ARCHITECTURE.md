@@ -222,6 +222,18 @@
 
 公开访问以 token 为唯一凭据，过期/撤销即失效；范围与安全边界见 §5.9。
 
+**媒体健康问题（media_health_issues）（FR-73）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| media_id | INTEGER, INDEX | 关联的媒体文件 ID |
+| issue_type | TEXT, INDEX | 问题类型：`broken`（视频损坏） / `zero_byte`（0 字节） / `missing`（源文件丢失） / `no_thumbnail`（缩略图无法生成） |
+| detail | TEXT | 问题细节（如 ffprobe / 缩略图错误尾部） |
+| checked_at | DATETIME | 本轮巡检判定时刻 |
+
+本表是健康巡检的**只读报告快照**，独立于 `media_files`（不在其上加列）：每轮巡检先清空全表再写入当轮问题，**绝不改写 `media_files.deleted_at`**（软删真源归 FR-25/27）。巡检由独立后台 goroutine + 状态单例（`HealthScanStatus`）驱动、单飞执行，不复用扫描任务队列（见 §5.1、[ADR-0038](adr/0038-media-health-inspection.md)）。
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -231,7 +243,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
@@ -275,6 +287,13 @@
 - 周期来自 `settings.scan_interval`（秒，FR-24 真源），`<=0`/非法视为关闭。调度循环每轮先读周期：关闭则阻塞等待重载/停止（不空转），否则 `time.NewTimer(周期)` 到点触发；等满一个周期才首次触发（不在启动/重启时立即扫，避免扫描风暴）。
 - 触发动作：枚举启用媒体库经 `TaskQueue.EnqueueScheduled` 入队**增量**扫描，逐库跳过禁用库与已有活动（`pending`/`running`）任务的库以防积压。定时只做增量；全量对账经手动 `mode=full` 触发（FR-27）。
 - 热生效：设置页保存 `scan_interval` 后，`PUT /api/settings` 经 Handler 的设置变更回调调用 `ScanScheduler.Reload()` 非阻塞唤醒循环重排，新周期即时生效、无需重启。
+
+### 5.1.4 媒体健康巡检（FR-73）
+
+- `library.HealthService`（`health.go`）后台只读巡检全部未软删媒体，问题写入独立的 `media_health_issues` 表（见 §3）。**不复用 `TaskQueue`**：巡检是单次全局操作、每轮清空重写问题表，语义与「按库排队的扫描任务」不同；改用独立后台 goroutine + 单飞标志 + 状态单例 `HealthScanStatus`（`health_status.go`，结构参照 `ScanStatus`），决策见 [ADR-0038](adr/0038-media-health-inspection.md)。
+- 触发：`POST /api/library/health/scan` 调 `StartScan()` 起一轮后台巡检；已有巡检在跑（`running`）时直接返回不并发第二轮。进度经 `GET /api/library/health/status` 查询（`idle`/`scanning`/`completed`/`error` + `total`/`checked`/`issue_count`），问题清单经 `GET /api/library/health/issues` 查询（附媒体基本信息）。
+- 判定核心 `classifyMediaIssues(mf, checks)` 是无副作用纯函数（外部依赖 ffprobe / 文件系统 / 缩略图生成经函数注入，便于穷举单测），逐项判：0 字节（`file_size==0`）、源文件丢失（`os.Stat` 失败，**排除 `smb://`** 远程路径不误判）、视频损坏（`ProbeVideoHealth` 跑 ffprobe 判可解析性）、缩略图无法生成（`TryGenerateThumbnail` 同步生成捕获错误）。`ProbeVideoHealth` 与 `TryGenerateThumbnail` 是**新增**入口、返回 ok/err，**不改动** `probeVideoMetadata` 的元数据静默降级与异步 `GenerateThumbnail` 的只记日志行为（两者语义不同）。
+- 一致性：每轮巡检在单事务内先清空 `media_health_issues` 再写入当轮快照；**全程只读 `media_files`、绝不改 `deleted_at`**（软删真源归 FR-25/27）。删除问题媒体复用 FR-69 批量软删端点，不在巡检里删除。
 
 ### 5.1.1 缩略图生成
 

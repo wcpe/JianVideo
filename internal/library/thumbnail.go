@@ -131,6 +131,50 @@ func GenerateThumbnail(filePath string) {
 	}
 }
 
+// TryGenerateThumbnail 同步尝试生成缩略图并返回生成结果错误，供健康巡检判定缩略图是否可生成（FR-73）。
+// 与异步 GenerateThumbnail 互不影响：异步路径失败只记日志，本入口把失败作为返回值上抛。
+// 文件不存在 / 不是受支持的缩略图类型 / 生成失败时返回非 nil 错误。
+func TryGenerateThumbnail(filePath string) error {
+	if _, err := os.Stat(filePath); err != nil {
+		return fmt.Errorf("源文件不可访问: %w", err)
+	}
+	if needsMagickConvert(filePath) {
+		outputPath := getThumbnailPath(filePath)
+		return runMagick(buildMagickThumbnailArgs(filePath, outputPath, thumbnailWidth))
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
+		return tryRunThumbnailFFmpeg(buildImageThumbnailArgs(filePath, getThumbnailPath(filePath)))
+	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".m4v", ".flv":
+		return tryRunThumbnailFFmpeg(buildVideoThumbnailArgs(filePath, getThumbnailPath(filePath)))
+	}
+	return fmt.Errorf("不支持的缩略图类型: %s", ext)
+}
+
+// tryRunThumbnailFFmpeg 带超时执行一次 ffmpeg 缩略图命令并返回错误（含超时区分），供同步生成入口复用。
+func tryRunThumbnailFFmpeg(args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
+	defer cancel()
+	if err := runFFmpegThumbnail(ctx, args); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("缩略图生成超时: %w", err)
+		}
+		return err
+	}
+	return nil
+}
+
+// buildImageThumbnailArgs 构造图片缩略图的 ffmpeg 参数（缩放至宽 320）。
+func buildImageThumbnailArgs(filePath, outputPath string) []string {
+	return []string{"-i", filePath, "-vf", "scale=320:-1", "-vframes", "1", "-y", outputPath}
+}
+
+// buildVideoThumbnailArgs 构造视频缩略图的 ffmpeg 参数（取第 2 秒帧、缩放至宽 320）。
+func buildVideoThumbnailArgs(filePath, outputPath string) []string {
+	return []string{"-i", filePath, "-ss", "00:00:02", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath}
+}
+
 // generateMagickThumbnail 用 ImageMagick 为 HEIC/RAW 生成缩略图。
 // magick 不可用或转换失败仅记日志，不阻塞入库（与 ffmpeg 缩略图一致）。
 func generateMagickThumbnail(filePath string) {
@@ -145,7 +189,7 @@ func generateImageThumbnail(filePath string) {
 	// 使用 ffmpeg 缩放图片（比引入 imaging 库更轻量，项目已依赖 ffmpeg）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
-	args := []string{"-i", filePath, "-vf", "scale=320:-1", "-vframes", "1", "-y", outputPath}
+	args := buildImageThumbnailArgs(filePath, outputPath)
 	if err := runFFmpegThumbnail(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 图片缩略图生成超时（已终止 ffmpeg）: %s", filePath)
@@ -161,7 +205,7 @@ func generateVideoThumbnail(filePath string) {
 	// 提取第 2 秒帧（第 1 秒常是黑屏）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
-	args := []string{"-i", filePath, "-ss", "00:00:02", "-vframes", "1", "-vf", "scale=320:-1", "-y", outputPath}
+	args := buildVideoThumbnailArgs(filePath, outputPath)
 	if err := runFFmpegThumbnail(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 视频缩略图生成超时（已终止 ffmpeg）: %s", filePath)

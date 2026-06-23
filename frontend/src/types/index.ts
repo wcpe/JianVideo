@@ -148,6 +148,34 @@ export interface ScanTasksResponse {
   current: ScanTask | null
 }
 
+/** 媒体健康问题类型（FR-73） */
+export type HealthIssueType = 'broken' | 'zero_byte' | 'missing' | 'no_thumbnail'
+
+/** 媒体健康问题项（FR-73）：问题记录 + 附带的媒体基本信息 */
+export interface HealthIssue {
+  id: number
+  media_id: number
+  issue_type: HealthIssueType
+  detail: string
+  checked_at: string
+  /** 以下为巡检接口附带的媒体基本信息，媒体已被删除时可能缺省 */
+  file_name?: string
+  file_path?: string
+  library_id?: number
+  display_name?: string
+}
+
+/** 健康巡检进度状态（FR-73） */
+export interface HealthScanStatus {
+  status: string        // "idle" / "scanning" / "completed" / "error"
+  total: number
+  checked: number
+  issue_count: number
+  error: string
+  started_at: string
+  completed_at: string
+}
+
 /** 媒体库后缀类型 */
 export type MediaExtensionType = 'video' | 'image'
 

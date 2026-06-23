@@ -78,6 +78,11 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/scan/progress", h.ScanProgressSSE)
 		// 扫描任务队列（FR-29）：列任务与当前进行中任务
 		lib.GET("/scan/tasks", h.ListScanTasks)
+
+		// 媒体健康巡检（FR-73）：触发后台巡检、查进度、列问题清单
+		lib.POST("/health/scan", h.StartHealthScan)
+		lib.GET("/health/status", h.HealthStatus)
+		lib.GET("/health/issues", h.HealthIssues)
 	}
 
 	// 相册（FR-40）：相册增删、成员增删与浏览

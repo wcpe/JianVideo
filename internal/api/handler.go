@@ -59,6 +59,9 @@ type Handler struct {
 	// 运行环境信息（FR-60）：由 main 注入，用于系统诊断「运行环境」展示。
 	startTime time.Time // 进程启动时刻，用于计算运行时长；零值表示未注入（运行时长退化为 0）
 	dbPath    string    // SQLite 数据库文件路径，未注入时为空串
+
+	// 媒体健康巡检服务（FR-73）：未注入时健康端点返回 503。
+	health *library.HealthService
 }
 
 // NewHandler 创建处理器。
@@ -87,6 +90,13 @@ func (h *Handler) WithStartTime(t time.Time) *Handler {
 // WithDBPath 注入 SQLite 数据库文件路径（FR-60），供系统诊断「运行环境」展示。
 func (h *Handler) WithDBPath(path string) *Handler {
 	h.dbPath = path
+	return h
+}
+
+// WithHealthService 注入媒体健康巡检服务（FR-73），启用健康巡检与问题清单端点。
+// 未注入时相关端点返回 503，保持无服务环境可用。
+func (h *Handler) WithHealthService(svc *library.HealthService) *Handler {
+	h.health = svc
 	return h
 }
 

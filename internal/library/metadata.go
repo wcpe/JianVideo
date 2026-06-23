@@ -1,6 +1,7 @@
 package library
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -331,6 +332,34 @@ func probeVideoMetadata(path string) videoMetadata {
 		return videoMetadata{}
 	}
 	return parseVideoProbe(output)
+}
+
+// ProbeVideoHealth 用 ffprobe 探测视频是否可解析，供健康巡检判定「损坏」（FR-73）。
+// 仅判定可解析性：ffprobe 退出非零（容器/流损坏、moov 缺失等）时返回非 nil 错误（含 stderr 关键尾部）。
+// 与 probeVideoMetadata 分离、互不影响：后者读元数据、失败静默降级；本入口把失败作为返回值上抛。
+func ProbeVideoHealth(path string) error {
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=nw=1",
+		path,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, getFFprobePath(), args...)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("ffprobe 探测超时: %w", err)
+		}
+		if tail := tailString(stderr.String(), thumbnailStderrTailLimit); tail != "" {
+			return fmt.Errorf("%w; ffprobe stderr: %s", err, tail)
+		}
+		return err
+	}
+	return nil
 }
 
 // parseVideoProbe 解析 ffprobe 的 JSON 输出为视频元数据。

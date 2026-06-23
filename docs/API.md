@@ -438,6 +438,53 @@
   ```
 - **说明**：返回全部扫描任务（按入队时间倒序）与当前进行中任务 `current`（无则 `null`）。`status` 取值 `pending` / `running` / `completed` / `error`，`scan_type` 取值 `full` / `incremental`（当前 worker 统一按全量执行，full/incremental 差异留 FR-27 对接）。队列以 SQLite `scan_tasks` 表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 任务重置为 `pending` 重新入队。当前 `running` 任务的 `scanned_files`/`total_files` 用实时全局扫描状态覆盖，已完成任务返回其持久化进度。前端页眉据此常驻展示进行中任务并可点开看任务列表与各自进度。
 
+### 触发媒体健康巡检（FR-73）
+
+- **方法 / 路径**：`POST /api/library/health/scan`
+- **响应**（200）：`{"status": "scanning"}`，已有巡检在跑时返回 `{"status": "already_running"}`
+- **响应**（503）：未启用健康巡检服务时返回 `{"code": "HEALTH_UNAVAILABLE", ...}`
+- **说明**：触发一轮后台只读巡检，遍历全部未软删媒体逐项判 0 字节 / 源文件丢失（排除 `smb://`）/ 视频损坏（ffprobe）/ 缩略图无法生成，问题写入 `media_health_issues` 表（每轮先清空再写当轮快照）。单飞执行，已有巡检在跑时不并发第二轮。**全程只读、绝不改 `deleted_at`**（软删真源归 FR-25/27）。进度经「健康巡检进度」端点查询，问题清单经「健康问题清单」端点查询。
+
+### 健康巡检进度（FR-73）
+
+- **方法 / 路径**：`GET /api/library/health/status`
+- **响应**（200）：
+  ```json
+  {
+    "status": "completed",
+    "total": 1200,
+    "checked": 1200,
+    "issue_count": 7,
+    "error": "",
+    "started_at": "2026-06-23T20:00:00Z",
+    "completed_at": "2026-06-23T20:01:30Z"
+  }
+  ```
+- **说明**：`status` 取值 `idle` / `scanning` / `completed` / `error`。`total` 为待巡检的未软删媒体总数，`checked` 为已巡检数（巡检中渐增），`issue_count` 为本轮发现的问题数。前端据此渲染进度并在完成后刷新问题清单。
+
+### 健康问题清单（FR-73）
+
+- **方法 / 路径**：`GET /api/library/health/issues`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 3,
+        "media_id": 42,
+        "issue_type": "missing",
+        "detail": "stat D:/v/gone.mp4: no such file or directory",
+        "checked_at": "2026-06-23T20:01:30Z",
+        "file_name": "gone.mp4",
+        "file_path": "D:/v/gone.mp4",
+        "library_id": 1,
+        "display_name": ""
+      }
+    ]
+  }
+  ```
+- **说明**：返回最近一轮巡检的问题清单，按 `issue_type` 再按 `media_id` 排序。`issue_type` 取值 `broken`（视频损坏） / `zero_byte`（0 字节） / `missing`（源文件丢失） / `no_thumbnail`（缩略图无法生成），`detail` 为问题细节（如 ffprobe / 缩略图错误尾部）。每项附带媒体基本信息（`file_name`/`file_path`/`library_id`/`display_name`，媒体已被删除时可能缺省），供前端按类型分组直接展示。删除问题媒体复用「批量软删媒体文件」端点。
+
 ### 列出相册
 
 - **方法 / 路径**：`GET /api/albums`

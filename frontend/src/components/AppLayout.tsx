@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { getSystemInfo } from '@/api/system'
@@ -53,6 +53,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/albums', label: '相册', icon: IconPhoto },
     { path: '/map', label: '地图', icon: IconMapPin },
     { path: '/recycle', label: '回收站', icon: IconTrash },
+    // 问题媒体 / 健康巡检（FR-73）
+    { path: '/inspect', label: '巡检', icon: IconStethoscope },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
   ]
