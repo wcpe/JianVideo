@@ -466,6 +466,32 @@
   }
   ```
 
+### 编码协商（FR-53）
+
+- **方法 / 路径**：`POST /api/play/:id/negotiate`
+- **请求**：客户端上报各高级编码的解码能力（来自前端 `MediaSource.isTypeSupported` 探测）。
+  ```json
+  {"client_caps": {"h265": true, "av1": true, "vp9": false}}
+  ```
+  - 请求体可缺省，缺省视为无高级编码能力（兜底 H.264）。
+- **响应**（200）：播放描述符。后端按「首选优先级（FR-50）∩ 客户端能力 ∩ 实测可产出（FR-49）」协商出实际编码与播放路径。
+  - H.264（含协商不出高级编码的所有情形）→ TS 路径：
+    ```json
+    {"codec": "h264", "path": "ts", "url": "/api/play/hls/1/master"}
+    ```
+  - 高级编码（h265/av1/vp9）→ 后端同步产出 fMP4（FR-51），返回 fMP4 描述符：
+    ```json
+    {
+      "codec": "av1",
+      "path": "fmp4",
+      "url": "/api/play/hls/1/index.m3u8",
+      "mime": "video/mp4; codecs=\"av01.0.05M.08\"",
+      "fallback_url": "/api/play/1/stream"
+    }
+    ```
+- **说明**：`url` 为相对路径，前端绝对化后交自适应播放器（H.264 走 mpegts.js、高级编码走 hls.js 原生 MSE）。非 H.264 时若 fMP4 产出失败，**降级返回 H.264/TS 描述符**（不报错，保证可播）。协商结果（实际编码与路径）记录到内存播放会话。
+- **错误**：`404` 媒体文件不存在。
+
 ### 获取视频流
 
 - **方法 / 路径**：`GET /api/play/stream/:id`

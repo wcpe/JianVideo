@@ -8,9 +8,11 @@ import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
+import { probeClientCapabilities } from '@/utils/codec-capability'
 import * as libApi from '@/api/library'
+import * as playApi from '@/api/play'
 import * as subtitleApi from '@/api/subtitle'
-import type { MediaFile, SubtitleTrack, SubtitleEntry } from '@/types'
+import type { MediaFile, SubtitleTrack, SubtitleEntry, PlaybackDescriptor } from '@/types'
 
 // 双模式改名弹窗类型：显示名（仅库内）/ 真实文件名（磁盘改名）
 type NameEditKind = 'display' | 'real'
@@ -33,6 +35,9 @@ export default function PlayPage() {
   // 播放器 URL / ABR 模式：探测 master.m3u8 是否可用；不可用时降级到 /api/play/:id/stream
   const [playerUrl, setPlayerUrl] = useState<string | null>(null)
   const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null)
+  // 编码协商描述符（FR-53）：协商出高级编码（fMP4）时交自适应播放器；
+  // 协商出 h264 / 协商失败则为 null，沿用下方 master 探测的 H.264/TS 路径（不报错）。
+  const [descriptor, setDescriptor] = useState<PlaybackDescriptor | null>(null)
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
   const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null)
@@ -64,19 +69,37 @@ export default function PlayPage() {
     const toAbsolute = (path: string) => new URL(path, window.location.href).toString()
     const hlsUrl = toAbsolute(`/api/play/hls/${mediaId}/master`)
     const streamUrl = toAbsolute(`/api/play/${mediaId}/stream`)
-    fetch(hlsUrl, { method: 'GET' }).then((resp) => {
-      // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
-      if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
-        setPlayerUrl(hlsUrl)
-        setPlayerIsABR(true)
-      } else {
+
+    // master 探测 → mpegts.js（ABR）或 stream（原生 mp4），既有 H.264/TS 路径不变。
+    const probeMaster = () => {
+      fetch(hlsUrl, { method: 'GET' }).then((resp) => {
+        // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
+        if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
+          setPlayerUrl(hlsUrl)
+          setPlayerIsABR(true)
+        } else {
+          setPlayerUrl(streamUrl)
+          setPlayerIsABR(false)
+        }
+      }).catch(() => {
         setPlayerUrl(streamUrl)
         setPlayerIsABR(false)
-      }
-    }).catch(() => {
-      setPlayerUrl(streamUrl)
-      setPlayerIsABR(false)
-    })
+      })
+    }
+
+    // 端到端编码协商（FR-53）：探测客户端能力 → 请求协商 → 拿描述符。
+    // 协商出高级编码（fMP4）→ 交自适应播放器；协商出 h264 / 协商失败 → 回退既有 master 探测（不报错）。
+    playApi.negotiate(mediaId, probeClientCapabilities())
+      .then((desc) => {
+        if (desc.path === 'fmp4') {
+          setDescriptor(desc)
+          setPlayerUrl(desc.url)
+          setPlayerIsABR(true)
+        } else {
+          probeMaster()
+        }
+      })
+      .catch(() => probeMaster())
   }, [id])
 
   // 选择字幕轨道
@@ -239,10 +262,12 @@ export default function PlayPage() {
         )}
       </Group>
 
-      {/* 播放器：探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video） */}
+      {/* 播放器：协商出 fMP4 时交描述符给自适应播放器（FR-53）；
+          否则探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video）。 */}
       {playerUrl && playerIsABR !== null && (
         <VideoPlayer
           url={playerUrl}
+          descriptor={descriptor ?? undefined}
           autoPlay
           subtitleEntries={subtitleEntries}
           subtitleVisible={subtitleVisible}

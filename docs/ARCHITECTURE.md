@@ -355,6 +355,17 @@
 - **本 FR 复用 ADR**：复用 [ADR-0035](adr/0035-fmp4-mse-playback-path.md)（fMP4/CMAF + 原生 MSE，已明确前端用 hls.js 消费 HLS-fMP4）与 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)（hls.js 作为 HLS 内核），无新 ADR。
 - **端到端边界**：「按客户端能力实际选编码 + 触发后端产 fMP4 + PlayPage 接线 + 会话记录」属 FR-53；本 FR 仅交付能力探测函数 + 播放器按描述符分发 + 不支持回退，PlayPage 的 URL 选择逻辑不变。fMP4 路径前端按 VOD 加载（FR-51 已定不实时追播）。
 
+#### 5.5.2 端到端编码协商（FR-53）
+
+把 FR-49/50/51/52 串通：**播放发起时做一次服务端协商，按「首选优先级 ∩ 客户端能力 ∩ 实测可产出」选出实际输出编码与播放路径**（决策见 [ADR-0036](adr/0036-codec-negotiation.md)）。
+
+- **协商纯函数**（`transcoder.ChosenCodec(priority, clientCaps, producible)`）：返回首选优先级里第一个同时满足「客户端支持」`clientCaps[c]` 且「实测可产出」`producible[c]` 的编码；都不满足兜底 `h264`（恒可用底座，现有 mpegts.js+TS 路径保证可播）。编码标识大小写无关、`hevc`→`h265`。可穷举单测。
+- **协商端点**（`POST /api/play/:id/negotiate`）：请求体携带客户端能力 `{h265,av1,vp9}`（来自 §5.5.1 探测）。读 FR-50 优先级（`settings.TranscodeCodecPriority`）+ FR-49 可产出并集（`capability.Capabilities().Codecs`）+ 客户端能力 → `ChosenCodec`。非 `h264` 同步调 §5.4.1 `PreSliceWithCodec` 产 fMP4，**产出失败降级回 `h264`/TS**（不报错，保证可播）。返回播放描述符 `{codec,path(ts/fmp4),url,mime,fallback_url}`（`BuildNegotiationDescriptor`，URL 相对路径，前端绝对化）。
+- **前端接线**（`PlayPage`）：加载媒体后 `probeClientCapabilities()`（§5.5.1）→ `negotiate` → 协商出 fMP4 则把描述符交 §5.5.1 自适应播放器（hls.js 原生 MSE 播 AV1/HEVC/VP9）；协商出 `h264` / 协商失败则沿用既有 master 探测 → mpegts/mp4 路径（H.264 回退，不报错）。
+- **会话记录实际编码与路径**：`playback.Service.RecordNegotiation` 把协商结果记到内存播放会话（`PlaybackSession.TargetCodec`/`OutputPath` 两字段）。**注**：本项目当前播放会话仅在内存（FR-12 Range 跟踪），不持久化；ARCHITECTURE §3 历史描述的 `transcode_sessions` 持久表代码从未落地，本 FR 不新建该表（避免镀金）。
+- **复用 ADR**：复用 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)（实测真源）、[ADR-0034](adr/0034-configurable-target-codec.md)（可配置目标编码）、[ADR-0035](adr/0035-fmp4-mse-playback-path.md)（fMP4/MSE 路径）、[ADR-0026](adr/0026-abr-adaptive-bitrate.md)（hls.js）；协商点 + 端点契约为本 FR 新增决策。
+- **真机验证**：软件 AV1 端到端——设首选 `["av1","h264"]` + Chrome（支持 AV1）→ 协商出 av1 → 后端 `libsvtav1` 产 fMP4 → hls.js + 原生 MSE 实播（`videoWidth=640` 解码出帧、`readyState=4`、无 error）；H.264 客户端 → 协商出 `h264`/TS 走 mpegts.js。硬件 AV1/QSV/NVENC 端到端待对应硬件。
+
 ### 5.6 硬件加速管理
 
 - 硬件加速能力以**编码器实测**为单一真源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)，取代 ADR-0015）：对各家族 × 各编码（H.264/H.265/AV1/VP9）候选用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`，VAAPI/Vulkan 另带设备初始化），判定「编入 / 试编码成功」。

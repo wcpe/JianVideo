@@ -20,6 +20,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
@@ -49,6 +50,9 @@ type Handler struct {
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，未注入时回退冷态默认
 	capability *transcoder.CapabilityService
+
+	// 播放服务（FR-53）：协商端点记录会话实际编码与路径，未注入时跳过记录
+	playback *playback.Service
 
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 }
@@ -94,6 +98,13 @@ func (h *Handler) WithShareService(svc *share.Service) *Handler {
 // 未注入时硬件加速相关端点回退冷态默认（软件兜底），保证无服务环境可用。
 func (h *Handler) WithCapabilityService(svc *transcoder.CapabilityService) *Handler {
 	h.capability = svc
+	return h
+}
+
+// WithPlayback 注入播放服务，启用协商端点的会话记录（FR-53）。
+// 未注入时协商仍工作，仅不记录会话实际编码与路径。
+func (h *Handler) WithPlayback(svc *playback.Service) *Handler {
+	h.playback = svc
 	return h
 }
 

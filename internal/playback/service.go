@@ -302,6 +302,22 @@ func (s *Service) GetOrCreateSession(mediaID int64, duration float64, fileSize i
 	return sess
 }
 
+// RecordNegotiation 记录本次播放协商出的实际编码与播放路径到会话（FR-53）。
+// 会话不存在则创建；仅写内存会话（与现状一致，不持久化），刷新 UpdatedAt。
+func (s *Service) RecordNegotiation(mediaID int64, codec, outputPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, exists := s.sessions[mediaID]
+	if !exists {
+		sess = &models.PlaybackSession{MediaID: mediaID}
+		s.sessions[mediaID] = sess
+	}
+	sess.TargetCodec = codec
+	sess.OutputPath = outputPath
+	sess.UpdatedAt = time.Now()
+}
+
 func getClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

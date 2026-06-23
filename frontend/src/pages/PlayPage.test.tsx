@@ -9,7 +9,18 @@ import PlayPage from './PlayPage'
 
 // mock VideoPlayer 组件，避免依赖 mpegts.js
 vi.mock('@/components/VideoPlayer', () => ({
-  default: (props: { url?: string; isABR?: boolean; streamType?: string; initialPosition?: number }) => <div data-testid="video-player" data-url={props.url} data-is-abr={String(!!props.isABR)} data-stream-type={props.streamType || ''} data-initial-position={props.initialPosition ?? ''} />,
+  default: (props: { url?: string; isABR?: boolean; streamType?: string; initialPosition?: number; descriptor?: { codec: string; path: string; url: string } }) => (
+    <div
+      data-testid="video-player"
+      data-url={props.url}
+      data-is-abr={String(!!props.isABR)}
+      data-stream-type={props.streamType || ''}
+      data-initial-position={props.initialPosition ?? ''}
+      data-desc-codec={props.descriptor?.codec ?? ''}
+      data-desc-path={props.descriptor?.path ?? ''}
+      data-desc-url={props.descriptor?.url ?? ''}
+    />
+  ),
 }))
 
 function renderPlayPage(route: string) {
@@ -162,6 +173,74 @@ describe('PlayPage', () => {
     const player = await screen.findByTestId('video-player')
     await waitFor(() => {
       expect(player.getAttribute('data-initial-position')).toBe('123.4')
+    })
+  })
+
+  it('协商返回 fMP4 描述符时交自适应播放器（FR-53）', async () => {
+    // 浏览器支持 AV1（桩 MediaSource），后端协商出 av1/fMP4
+    vi.stubGlobal('MediaSource', { isTypeSupported: () => true } as unknown as typeof MediaSource)
+    const captured: { caps?: Record<string, boolean> } = {}
+    server.use(
+      http.get('*/api/library/media/3', () =>
+        HttpResponse.json({
+          id: 3, library_id: 1, file_path: 'D:/V/av1.mkv', file_name: 'av1.mkv',
+          file_size: 0, format: 'mkv', video_codec: 'av1', audio_codec: 'aac',
+          duration: 0, width: 1920, height: 1080, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '',
+        }),
+      ),
+      http.post('*/api/play/3/negotiate', async ({ request }) => {
+        const reqBody = await request.json() as { client_caps?: Record<string, boolean> }
+        captured.caps = reqBody.client_caps
+        return HttpResponse.json({
+          codec: 'av1', path: 'fmp4', url: '/api/play/hls/3/index.m3u8',
+          mime: 'video/mp4; codecs="av01.0.05M.08"', fallback_url: '/api/play/3/stream',
+        })
+      }),
+    )
+
+    renderPlayPage('/play/3')
+
+    const player = await screen.findByTestId('video-player')
+    await waitFor(() => {
+      // 描述符交给播放器，编码/路径正确
+      expect(player.getAttribute('data-desc-codec')).toBe('av1')
+      expect(player.getAttribute('data-desc-path')).toBe('fmp4')
+      expect(player.getAttribute('data-desc-url')).toMatch(/\/api\/play\/hls\/3\/index\.m3u8$/)
+    })
+    // 上报了客户端能力
+    await waitFor(() => expect(captured.caps).toBeTruthy())
+    vi.unstubAllGlobals()
+  })
+
+  it('协商失败时回退 H.264：沿用 master 探测 → stream（不报错）', async () => {
+    server.use(
+      http.get('*/api/library/media/4', () =>
+        HttpResponse.json({
+          id: 4, library_id: 1, file_path: 'D:/V/h264.mp4', file_name: 'h264.mp4',
+          file_size: 0, format: 'mp4', video_codec: 'h264', audio_codec: 'aac',
+          duration: 0, width: 1280, height: 720, bitrate: 0, subtitle_tracks: '',
+          added_at: '', modified_at: '',
+        }),
+      ),
+      // 协商端点 500 失败 → 前端不报错，走既有 master 探测路径
+      http.post('*/api/play/4/negotiate', () =>
+        HttpResponse.json({ code: 'INTERNAL' }, { status: 500 }),
+      ),
+      // master 不可用 → 降级 stream
+      http.get('*/api/play/hls/4/master.m3u8', () =>
+        HttpResponse.json({ code: 'NOT_FOUND' }, { status: 404 }),
+      ),
+    )
+
+    renderPlayPage('/play/4')
+
+    const player = await screen.findByTestId('video-player')
+    await waitFor(() => {
+      const url = player.getAttribute('data-url') || ''
+      expect(url).toMatch(/\/api\/play\/4\/stream$/)
+      // 未走 fMP4 描述符
+      expect(player.getAttribute('data-desc-path')).toBe('')
     })
   })
 })

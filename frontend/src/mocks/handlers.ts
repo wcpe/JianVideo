@@ -250,6 +250,14 @@ export const handlers = [
     return HttpResponse.json({ items })
   }),
 
+  // 编码协商（FR-53）：默认返回 h264/TS 描述符，使既有播放流程沿用 master 探测；
+  // 需要 fMP4 路径的用例在测试中用 server.use 覆盖。
+  http.post('*/api/play/:id/negotiate', async ({ params }) => {
+    await delay(50)
+    const id = Number(params.id)
+    return HttpResponse.json({ codec: 'h264', path: 'ts', url: `/api/play/hls/${id}/master` })
+  }),
+
   http.put('*/api/play/:id/position', async ({ request, params }) => {
     await delay(100)
     const id = Number(params.id)

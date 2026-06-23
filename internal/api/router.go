@@ -103,6 +103,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 续播与观看状态（FR-44）：用户观看位置，区别于 playback 的转码/缓冲进度
 		sub.PUT("/:id/position", h.UpdateWatchPosition)
 		sub.PUT("/:id/watched", h.MarkWatched)
+
+		// 端到端编码协商（FR-53）：客户端上报能力，后端协商实际编码与播放路径
+		sub.POST("/:id/negotiate", h.Negotiate)
 	}
 
 	// SMB 凭据管理

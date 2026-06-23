@@ -137,6 +137,23 @@ func TestGetOrCreateSession_Existing(t *testing.T) {
 	assert.Equal(t, int64(5000), sess1.FileSize)
 }
 
+// TestRecordNegotiation 验证协商结果（实际编码与路径）记到会话（FR-53）。
+func TestRecordNegotiation(t *testing.T) {
+	s := NewService()
+	t.Cleanup(s.Stop)
+
+	// 首次记录：会话不存在则创建
+	s.RecordNegotiation(5, "av1", "fmp4")
+	sess := s.GetOrCreateSession(5, 0, 0)
+	assert.Equal(t, "av1", sess.TargetCodec)
+	assert.Equal(t, "fmp4", sess.OutputPath)
+
+	// 再次记录：同一会话被更新（如重新协商回退 h264）
+	s.RecordNegotiation(5, "h264", "ts")
+	assert.Equal(t, "h264", sess.TargetCodec)
+	assert.Equal(t, "ts", sess.OutputPath)
+}
+
 // TestCleanupExpiredSessions 验证 cleanupExpiredSessions 清除超过 24 小时的旧会话。
 func TestCleanupExpiredSessions(t *testing.T) {
 	s := NewService()
