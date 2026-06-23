@@ -62,11 +62,13 @@ func (s *Service) ListOnThisDay(limit int) ([]models.MediaFile, error) {
 		limit = continueWatchingMaxLimit
 	}
 	now := time.Now()
-	monthDay := now.Format("01-02") // 今天的月-日，对应 strftime('%m-%d')
-	year := now.Format("2006")      // 今年，对应 strftime('%Y')
+	monthDay := now.Format("01-02") // 今天的月-日（本地时区），对应 strftime('%m-%d', ..., 'localtime')
+	year := now.Format("2006")      // 今年（本地时区），对应 strftime('%Y', ..., 'localtime')
 	var items []models.MediaFile
+	// media_time 以 UTC 存储、strftime 默认按 UTC 取值；加 'localtime' 修饰符转本地时区后再取月-日/年，
+	// 与按本地 time.Now() 算出的「今天」口径一致（否则本地午夜后 UTC 仍是前一天，结果整体偏一天）。
 	if err := s.db.
-		Where("media_time IS NOT NULL AND deleted_at IS NULL AND strftime('%m-%d', media_time) = ? AND strftime('%Y', media_time) != ?", monthDay, year).
+		Where("media_time IS NOT NULL AND deleted_at IS NULL AND strftime('%m-%d', media_time, 'localtime') = ? AND strftime('%Y', media_time, 'localtime') != ?", monthDay, year).
 		Order("media_time DESC").
 		Limit(limit).
 		Find(&items).Error; err != nil {
