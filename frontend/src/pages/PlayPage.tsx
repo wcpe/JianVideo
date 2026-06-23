@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
+import ExternalPlayerDialog from '@/components/ExternalPlayerDialog'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
 import { probeClientCapabilities } from '@/utils/codec-capability'
@@ -44,6 +45,8 @@ export default function PlayPage() {
 
   // 分享弹窗开关（FR-43）
   const [shareOpened, setShareOpened] = useState(false)
+  // 外部播放器深链弹窗开关（FR-79）
+  const [extPlayerOpened, setExtPlayerOpened] = useState(false)
   const [nameEditSaving, setNameEditSaving] = useState(false)
 
   useEffect(() => {
@@ -232,6 +235,16 @@ export default function PlayPage() {
           >
             分享
           </Button>
+          {/* 外部播放器深链（FR-79）：生成 VLC/IINA 可打开的免登网络串流地址 */}
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconExternalLink size={14} />}
+            onClick={() => setExtPlayerOpened(true)}
+          >
+            外部播放器
+          </Button>
         </Group>
 
         {/* 字幕选择菜单 */}
@@ -338,6 +351,14 @@ export default function PlayPage() {
         resourceType="media"
         resourceID={media.id}
         title="分享此媒体"
+      />
+
+      {/* 外部播放器深链弹窗（FR-79）：续播点取自 media.last_position */}
+      <ExternalPlayerDialog
+        opened={extPlayerOpened}
+        onClose={() => setExtPlayerOpened(false)}
+        mediaID={media.id}
+        lastPosition={media.last_position}
       />
     </Stack>
   )

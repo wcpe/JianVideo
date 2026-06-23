@@ -4,6 +4,11 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布版本
+
+### 新增
+- **外部播放器深链（FR-79）**：视频播放页头部新增「外部播放器」入口，一键生成 VLC / IINA 等外部播放器可直接消费的免登网络串流地址。站内三路播放（HLS / fMP4 / 直链 `/api/play/:id/stream`）全部需 JWT 鉴权、外部播放器不可用；本功能复用 FR-43 已有的免登分享流端点 `GET /api/share/:token/media/:mediaId/stream`（原文件直链 + Range，非 HLS，不触发匿名转码），故**后端零改动**。点击入口弹窗选有效期（同 FR-43 分享对话框）→ 复用 `createShare('media', id, hours)` 生成 token → 新增纯函数 `buildExternalStreamURL(origin, token, mediaID, lastPosition?)`（`frontend/src/utils/external-player.ts`）拼出**绝对**地址 `{origin}/api/share/{token}/media/{id}/stream`，并在 `last_position` 为有限正数时追加媒体片段续播点 `#t={取整秒}`（FR-44；该 fragment 不发往服务端，由支持 media fragment 的播放器客户端处理）。新增 `ExternalPlayerDialog` 组件（`useClipboard` 复制地址带「已复制」反馈、`window.open` 在浏览器打开、文案指引在 VLC/IINA「打开网络串流」粘贴）。外链免登暴露面与 FR-43 同等（任何持有地址者可只读访问该媒体原文件，有效期由用户创建时选择）。**二维码扫码本期不做**（无 QR 库），留待 FR-78 引入 QR 依赖时合并。纯前端，无后端改动、无新依赖、无新架构决策、无新 ADR；真机用 VLC/IINA 打开外链播放、从续播点起播待真机验。
+
 ## 0.11.0（2026-06-24）
 
 ### 新增
