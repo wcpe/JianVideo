@@ -40,6 +40,11 @@ type MediaFile struct {
 	// 收藏（FR-41）
 	Favorite bool `gorm:"default:false" json:"favorite"`
 
+	// 感知哈希去重（FR-70）：基于缩略图计算的 64 位 dHash，0 表示尚未计算。
+	// 汉明距离 ≤ 阈值的媒体视为近似重复，供「重复项」页聚类清理。
+	// 显式列名 dhash，与去重服务的手写 SQL 条件保持一致。
+	DHash int64 `gorm:"column:dhash;default:0" json:"dhash,omitempty"`
+
 	// 观看状态/续播（FR-44）
 	LastPosition  float64    `gorm:"default:0" json:"last_position"` // 上次播放位置（秒）
 	Watched       bool       `gorm:"default:false" json:"watched"`

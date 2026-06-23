@@ -96,6 +96,7 @@
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
 | favorite | INTEGER | 收藏标记（FR-41），0/1 |
+| dhash | INTEGER | 感知哈希（FR-70）：基于缩略图的 64 位 dHash，0 表示未计算 |
 | last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
 | watched | INTEGER | 是否已看完（FR-44），0/1 |
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
@@ -116,6 +117,8 @@
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
 >
 > 媒体时间与 EXIF（FR-31）：入库点 `CreateMediaFile` 统一富化元数据——图片用 `imagemeta`（纯 Go）提取拍摄时间与相机/镜头/光圈/快门/ISO/GPS，视频用 ffprobe 读 `creation_time`；再按 EXIF → 文件名日期 → 文件创建时间 → 修改时间的降级链定出 `media_time` 与 `media_time_source`。时间轴列表按 `COALESCE(media_time, added_at)` 排序。
+>
+> 感知哈希去重（FR-70）：`dhash` 列存基于缩略图（320 宽 JPEG）的 64 位差分哈希（dHash），由 `library` 模块纯 Go 标准库实现（缩放 9×8 灰度 + 逐行相邻像素差分，不引第三方图像哈希库），抽成纯函数 `computeDHash`/`hammingDistance`/`clusterByHamming` 便于穷举测试。`ComputeMissingDHashes` 为「未软删且 `dhash=0`」的媒体有界并发补算（缩略图缺失先同步生成一次再算，单条失败仅记 WARN 跳过），`dhash=0` 兼作「未计算」哨兵，故二次扫描跳过已算项（幂等；featureless 纯色图哈希恰为 0 会被重算，开销极小、无害）。`FindDuplicateGroups(threshold)` 查「未软删且 `dhash!=0`」的媒体，按汉明距离 ≤ 阈值（默认 10）经并查集聚类为重复组（仅返回 ≥2 项的组，组内/组间稳定有序）。图片与视频都参与（视频用其缩略图单帧，代表性弱，属已知局限）。重复项页选中多余项后复用 FR-69 批量软删（进回收站、可还原），**不新建去重持久表、不持久化「已忽略重复对」**（YAGNI、守真源不变量）。
 
 **媒体后缀配置（media_extensions）**
 

@@ -117,18 +117,39 @@ func GetThumbnailDir() string {
 // GenerateThumbnail 根据文件类型异步生成缩略图。
 // 所有任务统一经固定容量信号量限并发，避免扫描大目录时炸出大量并发进程导致资源耗尽。
 func GenerateThumbnail(filePath string) {
+	job, ok := resolveThumbnailJob(filePath)
+	if !ok {
+		return
+	}
+	submitThumbnail(job)
+}
+
+// generateThumbnailSync 同步生成一次缩略图（不经异步队列、不限并发），
+// 供去重扫描（FR-70）在缩略图缺失时现场补齐后立即读取计算 dHash。
+// 不支持的类型直接返回（与 GenerateThumbnail 的派发一致）。
+func generateThumbnailSync(filePath string) {
+	job, ok := resolveThumbnailJob(filePath)
+	if !ok {
+		return
+	}
+	runThumbnail(job)
+}
+
+// resolveThumbnailJob 按文件类型解析出缩略图任务，类型不支持时返回 ok=false。
+// 抽出供异步（GenerateThumbnail）与同步（generateThumbnailSync）两条路径共用，避免派发逻辑重复。
+func resolveThumbnailJob(filePath string) (thumbnailJob, bool) {
 	// HEIC/RAW 浏览器无法直接渲染，经外部 magick 生成缩略图（FR-37）
 	if needsMagickConvert(filePath) {
-		submitThumbnail(thumbnailJob{filePath: filePath, kind: kindMagick})
-		return
+		return thumbnailJob{filePath: filePath, kind: kindMagick}, true
 	}
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
-		submitThumbnail(thumbnailJob{filePath: filePath, kind: kindImage})
+		return thumbnailJob{filePath: filePath, kind: kindImage}, true
 	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".m4v", ".flv":
-		submitThumbnail(thumbnailJob{filePath: filePath, kind: kindVideo})
+		return thumbnailJob{filePath: filePath, kind: kindVideo}, true
 	}
+	return thumbnailJob{}, false
 }
 
 // TryGenerateThumbnail 同步尝试生成缩略图并返回生成结果错误，供健康巡检判定缩略图是否可生成（FR-73）。
