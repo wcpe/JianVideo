@@ -86,11 +86,11 @@
 | FR-46 | 远程自更新：服务器 UI 鉴权后检测 GitHub releases（正式版=最新正式 release / 测试版=最新预发布 dev，频道持久化于设置），下载对应平台产物并校验 checksum 后替换二进制、自动重启，保留旧二进制可回滚 | P4 | 开发中（后端 internal/update + 前端 UI + 单测完成；正式/测试频道区分已对真实仓库验证检测命中；端到端替换/重启/回滚待真机验） |
 | FR-47 | 正式发布 CI：GitHub Actions 按版本号自动打 tag，windows/linux 原生 runner 构建（前端 embed + 版本注入），创建 GitHub Release（产物 + checksums） | P4 | 计划 |
 | FR-48 | 预发布 CI：GitHub Actions 普通 push 触发多平台构建，发布 prerelease（标 prerelease，上传打包产物） | P4 | 计划 |
-| FR-49 | 硬件加速检测统一为实测真源 + 持久化缓存：以编码器实测（codec-test）作为硬件加速能力唯一真源，结果按 ffmpeg 版本持久化于 SQLite（版本变更失效重测 + 手动重测），`/api/transcode/hwaccel` 与转码选码改读缓存；能力模型重构为 per-codec，补齐 AMD AMF 及全硬件家族（VAAPI/VideoToolbox/Vulkan）与 AV1/HEVC/VP9 探测展示 | P5 | 开发中 |
-| FR-50 | 转码目标编码可配置：服务端持久化「首选目标编码优先级」设置，单/多码率转码管道按所选编码参数化输出（扩展 FR-06 固定 H.264/TS 约束） | P5 | 开发中 |
-| FR-51 | 高级编码 fMP4/CMAF 分片输出：非 H.264 编码经 fMP4/CMAF 分片 + 浏览器原生 MSE 播放路径输出，H.264 维持 mpegts.js+TS 路径不变（新 ADR 扩展播放内核决策） | P5 | 开发中 |
-| FR-52 | 前端客户端能力探测 + 自适应播放器：以 `MediaSource.isTypeSupported` 探测客户端可解码编码，H.264 走 mpegts.js、高级编码走 MSE 播 fMP4，统一自适应播放入口 | P5 | 开发中 |
-| FR-53 | 端到端编码协商：播放发起时按「首选优先级 ∩ 客户端能力 ∩ 硬件可产出」协商实际输出编码与播放路径，含降级兜底，会话记录实际编码与路径 | P5 | 开发中 |
+| FR-49 | 硬件加速检测统一为实测真源 + 持久化缓存：以编码器实测（codec-test）作为硬件加速能力唯一真源，结果按 ffmpeg 版本持久化于 SQLite（版本变更失效重测 + 手动重测），`/api/transcode/hwaccel` 与转码选码改读缓存；能力模型重构为 per-codec，补齐 AMD AMF 及全硬件家族（VAAPI/VideoToolbox/Vulkan）与 AV1/HEVC/VP9 探测展示 | P5 | 已交付@v0.8.0 |
+| FR-50 | 转码目标编码可配置：服务端持久化「首选目标编码优先级」设置，单/多码率转码管道按所选编码参数化输出（扩展 FR-06 固定 H.264/TS 约束） | P5 | 已交付@v0.8.0 |
+| FR-51 | 高级编码 fMP4/CMAF 分片输出：非 H.264 编码经 fMP4/CMAF 分片 + 浏览器原生 MSE 播放路径输出，H.264 维持 mpegts.js+TS 路径不变（新 ADR 扩展播放内核决策） | P5 | 已交付@v0.8.0 |
+| FR-52 | 前端客户端能力探测 + 自适应播放器：以 `MediaSource.isTypeSupported` 探测客户端可解码编码，H.264 走 mpegts.js、高级编码走 MSE 播 fMP4，统一自适应播放入口 | P5 | 已交付@v0.8.0 |
+| FR-53 | 端到端编码协商：播放发起时按「首选优先级 ∩ 客户端能力 ∩ 硬件可产出」协商实际输出编码与播放路径，含降级兜底，会话记录实际编码与路径 | P5 | 已交付@v0.8.0 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
