@@ -121,14 +121,24 @@ describe('AppLayout 收缩导航（FR-54）', () => {
   })
 })
 
-describe('AppLayout 页脚版本与开源协议链接（FR-57）', () => {
+describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
     useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
   })
 
-  it('页脚展示当前版本号（取自系统信息）', async () => {
+  // 桌面 Navbar 用 data-collapsed 标识收缩态，便于断言
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('不再渲染全局页脚（AppShell.Footer 已移除）', () => {
+    renderLayout()
+
+    // Mantine 页脚以 footer 元素呈现；FR-61 移除后文档中不应存在 footer
+    expect(document.querySelector('footer')).toBeNull()
+  })
+
+  it('展开态导航底部展示当前版本号（取自系统信息）', async () => {
     renderLayout()
 
     // 版本来自 MSW 的 /api/system/info（app_version=0.3.0）
@@ -137,10 +147,37 @@ describe('AppLayout 页脚版本与开源协议链接（FR-57）', () => {
     })
   })
 
-  it('页脚提供「开源协议」链接，指向 /licenses', async () => {
+  it('展开态导航底部提供「开源协议」链接，指向 /licenses', async () => {
     renderLayout()
 
     const link = await screen.findByRole('link', { name: '开源协议' })
     expect(link).toHaveAttribute('href', '/licenses')
+  })
+
+  it('收缩态：导航底部仍提供开源协议入口（图标 + Tooltip），无版本号长文本', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    // 收缩态以「开源协议」无障碍标签的链接承载入口（图标态）
+    const link = await screen.findByRole('link', { name: '开源协议' })
+    expect(link).toHaveAttribute('href', '/licenses')
+    // 收缩态不平铺版本号长文本，避免 64px 内截断
+    expect(screen.queryByText(/0\.3\.0/)).not.toBeInTheDocument()
+  })
+
+  it('移动端抽屉底部含版本号与「开源协议」链接', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '导航菜单' }))
+
+    // 抽屉打开后，版本号与协议链接均可见（桌面 navbar 也各一份，故至少一处）
+    await waitFor(() => {
+      expect(screen.getAllByText(/0\.3\.0/).length).toBeGreaterThan(0)
+    })
+    expect(screen.getAllByRole('link', { name: '开源协议' }).length).toBeGreaterThan(0)
   })
 })

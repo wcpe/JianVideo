@@ -9,6 +9,9 @@
 ### 修复
 - **亮色模式下卡片/面板仍为黑底（主题切换不生效）**：存储库卡片、目录浏览卡片、时间线卡片、登录页与播放页媒体信息面板均用 Mantine `bg="dark.7"`，它解析为写死的 `var(--mantine-color-dark-7)` 固定深色 token、不随 colorScheme 切换，故切到亮色模式后仍显深底。改为随主题切换的语义变量：普通卡片/面板背景统一 `var(--mantine-color-default)`，目录浏览选中态由固定深紫 `purple.9` 改为随主题强调色 `var(--mantine-color-purple-light)`（亮暗皆可读），登录页标题 `c="white"` 同步改为品牌色 `purple.4`（不再依赖深底）。
 
+### 变更
+- **版本号与开源协议入口移入导航、移除页脚（FR-61）**：全局布局（`AppLayout`）移除 FR-57 的全局页脚（`AppShell.Footer` 与 `AppShell` 的 `footer` prop），把「版本号（取自 `GET /api/system/info` 的 `app_version`，拉取失败仍静默不显、不阻塞布局）+「开源协议」链接（→ `/licenses`）」改放左侧导航底部、置于 FR-54 收缩/展开按钮上方。桌面展开态平铺「JianVideo v{版本}」文本与协议链接；收缩态（64px）改用 `IconLicense` 图标 + Mantine `Tooltip`（hover 同时展示版本号与「开源协议」）承载入口，避免文字截断。原页脚在移动端可见，移除后于移动端抽屉（`Drawer`）底部同样补回版本号与协议链接（点击关闭抽屉）。纯前端布局重组，取代 FR-57 的页脚展示形态，无后端改动、无新依赖、无新 ADR。
+
 ## 0.9.0（2026-06-23）
 
 ### 新增

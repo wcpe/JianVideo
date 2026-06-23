@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { getSystemInfo } from '@/api/system'
@@ -23,15 +23,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
   const { toggleColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
-  // 页脚版本号（FR-57）：取自系统信息；失败静默不显，不阻塞布局
+  // 导航底部版本号（FR-61）：取自系统信息；失败静默不显，不阻塞布局
   const [appVersion, setAppVersion] = useState('')
 
-  // 拉取应用版本用于页脚展示；失败仅静默（页脚版本缺省，不影响其余布局）
+  // 拉取应用版本用于导航底部展示；失败仅静默（版本缺省，不影响其余布局）
   useEffect(() => {
     let active = true
     getSystemInfo()
       .then((info) => { if (active) setAppVersion(info.app_version) })
-      .catch(() => { /* 版本拉取失败不阻塞页面，页脚不显版本即可 */ })
+      .catch(() => { /* 版本拉取失败不阻塞页面，不显版本即可 */ })
     return () => { active = false }
   }, [])
 
@@ -86,11 +86,38 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     )
   }
 
+  // 版本号 + 「开源协议」入口（FR-61）：取代原页脚展示。
+  // collapsed 收缩态仅渲染协议图标 + Tooltip（含版本号），避免 64px 内文字截断；
+  // onNavigate 用于移动端抽屉点击后关闭抽屉。
+  const versionLabel = `JianVideo${appVersion ? ` v${appVersion}` : ''}`
+  const renderVersionLicense = (collapsed = false, onNavigate?: () => void) => {
+    if (collapsed) {
+      // 收缩态：图标态协议入口，hover 出 Tooltip 同时展示版本号与「开源协议」
+      return (
+        <Group justify="center" mb="xs">
+          <Tooltip label={`${versionLabel} · 开源协议`} position="right" withArrow>
+            <Link to="/licenses" aria-label="开源协议" style={{ textDecoration: 'none' }}>
+              <IconLicense size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />
+            </Link>
+          </Tooltip>
+        </Group>
+      )
+    }
+    // 展开态：版本号文本 + 「开源协议」链接
+    return (
+      <Group justify="space-between" mb="xs" px={4}>
+        <Text size="xs" c="dimmed">{versionLabel}</Text>
+        <Link to="/licenses" onClick={onNavigate} style={{ textDecoration: 'none' }}>
+          <Text size="xs" c="dimmed">开源协议</Text>
+        </Link>
+      </Group>
+    )
+  }
+
   return (
     <AppShell
       header={{ height: 56 }}
       navbar={{ width: navCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
-      footer={{ height: 36 }}
       padding="md"
     >
       <AppShell.Header>
@@ -154,6 +181,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       >
         <Stack gap="xs">
           {navItems.map((item) => renderNavLink(item, () => handleNavigate(item.path)))}
+          {/* 版本号 + 「开源协议」入口（FR-61）：原页脚在移动端可见，移除后于抽屉底部补回 */}
+          {renderVersionLicense(false, closeDrawer)}
         </Stack>
       </Drawer>
 
@@ -161,6 +190,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Stack gap="xs" style={{ flex: 1 }}>
           {navItems.map((item) => renderNavLink(item, undefined, navCollapsed))}
         </Stack>
+        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于收缩按钮上方，适配收缩态 */}
+        {renderVersionLicense(navCollapsed)}
         {/* 收缩 / 展开切换按钮（FR-54）：置于 navbar 底部，随状态切换图标与无障碍标签 */}
         <Group justify={navCollapsed ? 'center' : 'flex-end'} mt="xs">
           <ActionIcon
@@ -176,18 +207,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>
-
-      {/* 全局页脚（FR-57）：左侧版本号 + 右侧「开源协议」链接，桌面与移动端均可见 */}
-      <AppShell.Footer p="xs">
-        <Group justify="space-between" h="100%" px="md">
-          <Text size="xs" c="dimmed">
-            JianVideo{appVersion ? ` v${appVersion}` : ''}
-          </Text>
-          <Link to="/licenses" style={{ textDecoration: 'none' }}>
-            <Text size="xs" c="dimmed">开源协议</Text>
-          </Link>
-        </Group>
-      </AppShell.Footer>
     </AppShell>
   )
 }
