@@ -51,6 +51,9 @@ export interface MediaFile {
   gps_lon?: number
 }
 
+/** 感知哈希去重重复组（FR-70）：一组互为近似重复的媒体，至少 2 项 */
+export type DuplicateGroup = MediaFile[]
+
 /** 标签（FR-41） */
 export interface Tag {
   id: number

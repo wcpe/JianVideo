@@ -11,6 +11,7 @@ import BrowsePage from './pages/BrowsePage'
 import AlbumsPage from './pages/AlbumsPage'
 import RecyclePage from './pages/RecyclePage'
 import InspectPage from './pages/InspectPage'
+import DuplicatesPage from './pages/DuplicatesPage'
 import PlayPage from './pages/PlayPage'
 import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
@@ -39,6 +40,8 @@ export default function App() {
           <Route path="/recycle" element={<ProtectedRoute><AppLayout><RecyclePage /></AppLayout></ProtectedRoute>} />
           {/* 问题媒体 / 健康巡检页（FR-73） */}
           <Route path="/inspect" element={<ProtectedRoute><AppLayout><InspectPage /></AppLayout></ProtectedRoute>} />
+          {/* 感知哈希去重「重复项」页（FR-70） */}
+          <Route path="/duplicates" element={<ProtectedRoute><AppLayout><DuplicatesPage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           {/* 系统信息与设置合并为单页两 tab（FR-55）：/system 进控制台页 */}
           <Route path="/system" element={<ProtectedRoute><AppLayout><ConsolePage /></AppLayout></ProtectedRoute>} />

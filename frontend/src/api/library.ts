@@ -1,4 +1,4 @@
-import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, ScanMode, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, ScanTask, ScanTasksResponse, Tag, RecycleCleanupResult } from '@/types'
+import type { LibraryPath, MediaFile, MediaListResponse, ScanResponse, ScanMode, BrowseResponse, MediaExtension, MediaExtensionType, ScanStatus, ScanTask, ScanTasksResponse, Tag, RecycleCleanupResult, DuplicateGroup } from '@/types'
 
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -144,6 +144,20 @@ async function realDeleteMediaFile(id: number): Promise<void> {
 async function realBatchDeleteMediaFiles(ids: number[]): Promise<number> {
   const res = await client.post<{ deleted: number }>('/api/library/media/batch-delete', { ids })
   return res.data.deleted
+}
+
+// ─── 感知哈希去重（FR-70）────────────────────────────
+
+// 触发去重扫描：为缺 dHash 的媒体计算哈希，返回本次新算条数。
+async function realScanDuplicates(): Promise<number> {
+  const res = await client.post<{ computed: number }>('/api/library/duplicates/scan')
+  return res.data.computed
+}
+
+// 查询重复组：返回按汉明距离聚类、各 ≥2 项的近似重复组。
+async function realGetDuplicateGroups(): Promise<DuplicateGroup[]> {
+  const res = await client.get<{ groups: DuplicateGroup[] }>('/api/library/duplicates')
+  return res.data.groups
 }
 
 async function realRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
@@ -400,6 +414,30 @@ async function mockBatchDeleteMediaFiles(ids: number[]): Promise<number> {
   return deleted
 }
 
+// ─── 感知哈希去重 mock（FR-70）──────────────────────
+
+// mock 扫描：无真实哈希计算，恒返回 0（重复组由 mockGetDuplicateGroups 按代理规则现算）。
+async function mockScanDuplicates(): Promise<number> {
+  await mockDelay(300)
+  return 0
+}
+
+// mock 重复组：以 file_size 作为「内容相同」的代理，把未软删、同尺寸且 ≥2 个的媒体聚为一组。
+async function mockGetDuplicateGroups(): Promise<DuplicateGroup[]> {
+  await mockDelay(200)
+  const alive = mockMediaFiles.filter(m => !mockDeletedIds.has(m.id))
+  const bySize = new Map<number, MediaFile[]>()
+  for (const m of alive) {
+    const arr = bySize.get(m.file_size) ?? []
+    arr.push(m)
+    bySize.set(m.file_size, arr)
+  }
+  return Array.from(bySize.values())
+    .filter(g => g.length >= 2)
+    .map(g => [...g].sort((a, b) => a.id - b.id))
+    .sort((a, b) => a[0].id - b[0].id)
+}
+
 async function mockGetRecycleMediaFiles(): Promise<MediaFile[]> {
   await mockDelay(150)
   return mockMediaFiles.filter(m => mockDeletedIds.has(m.id))
@@ -566,6 +604,9 @@ export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id)
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
 // 批量软删（FR-69）
 export function batchDeleteMediaFiles(ids: number[]) { return useMock ? mockBatchDeleteMediaFiles(ids) : realBatchDeleteMediaFiles(ids) }
+// 感知哈希去重（FR-70）
+export function scanDuplicates() { return useMock ? mockScanDuplicates() : realScanDuplicates() }
+export function getDuplicateGroups() { return useMock ? mockGetDuplicateGroups() : realGetDuplicateGroups() }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
 export function updateDisplayName(id: number, displayName: string) { return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName) }
 // 软删除与回收站（FR-25）
