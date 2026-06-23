@@ -372,12 +372,12 @@
 
 - `GET /api/system/info`：返回 OS/架构/CPU 数/主机名/Go 版本/应用版本（构建期 `-ldflags -X main.version` 注入）、ffmpeg 可用性与版本，并复用 §5.6 的硬件加速实测能力（per-codec）。
 - `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。默认读 §5.6 持久化缓存即时返回，`?force=true` 强制重测；响应附 `from_cache`/`ffmpeg_version`/`tested_at`。与 §5.6 同源（实测即真源）。
-- 前端 `/system` 页展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。
+- 前端在 `/system` 控制台页的「系统信息」tab 展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。控制台页（`ConsolePage`，FR-55）以 Mantine `Tabs` 把「系统信息」与「设置」（§5.8）合并为单页两 tab，tab 状态由 URL query `?tab=system|settings` 控制；`SystemPage`/`SettingsPage` 原样作 tab 内容。
 
 ### 5.8 运行期设置（FR-24）
 
 - 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-0029）。
-- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端 `/settings` 页读写「每盘符回收站路径」「扫描周期」等键值。
+- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」等键值，旧 `/settings` 路由重定向至此。
 - 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。
 

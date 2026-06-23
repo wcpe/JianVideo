@@ -11,8 +11,7 @@ import BrowsePage from './pages/BrowsePage'
 import AlbumsPage from './pages/AlbumsPage'
 import RecyclePage from './pages/RecyclePage'
 import PlayPage from './pages/PlayPage'
-import SystemPage from './pages/SystemPage'
-import SettingsPage from './pages/SettingsPage'
+import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
 import MapPage from './pages/MapPage'
 import '@mantine/core/styles.css'
@@ -37,8 +36,10 @@ export default function App() {
           <Route path="/map" element={<ProtectedRoute><AppLayout><MapPage /></AppLayout></ProtectedRoute>} />
           <Route path="/recycle" element={<ProtectedRoute><AppLayout><RecyclePage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/system" element={<ProtectedRoute><AppLayout><SystemPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
+          {/* 系统信息与设置合并为单页两 tab（FR-55）：/system 进控制台页 */}
+          <Route path="/system" element={<ProtectedRoute><AppLayout><ConsolePage /></AppLayout></ProtectedRoute>} />
+          {/* 旧 /settings 链接重定向到控制台页的设置 tab，避免死链 */}
+          <Route path="/settings" element={<Navigate to="/system?tab=settings" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

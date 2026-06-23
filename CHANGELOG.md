@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 新增
+- **系统信息与设置合并为单页 + 顶部 tab（FR-55）**：参考宝塔面板，把原「系统信息」（`/system`）与「设置」（`/settings`）两个独立页面、两个左侧导航项合并为同一控制台页（`ConsolePage`）的两个顶部 tab。tab 以 Mantine `Tabs` 承载、状态由 URL query `?tab=system|settings` 控制（缺省系统信息），便于深链；`/system` 路由进控制台页、旧 `/settings` 重定向到 `?tab=settings`（不留死链），左侧导航两项合并为一个「系统」入口。纯前端重组，`SystemPage`/`SettingsPage` 原样作 tab 内容、既有内容与交互不变。
+
 ### 修复
 - **自更新「检查更新」直连 GitHub 慢导致超时、无缓存、发布说明非 markdown 渲染（FR-46）**：①「检查更新」此前前端 axios 15s 全局超时叠加后端 15s context，国内直连 GitHub 常 >15s，前端先报 `timeout of 15000ms exceeded`——改为前端对 update 检查单请求超时放宽到 60s（全局 15s 不动）、后端 context 与服务的 http.Client（30s）对齐到 30s，并把检查失败的用户提示改为友好文案（后端日志记原始错误，不向用户回显裸超时串）。② 检测无缓存每次必请求 GitHub——`update.Service` 增并发安全的按频道 TTL 缓存（10 分钟），命中返回副本；新增 `force` 形参支持手动强制重测；fetch 出错时优雅降级（非 force 且有历史缓存即返回上次结果，避免一次网络抖动即失败）。③ 发布说明（GitHub Release body 的 markdown 原文）此前以纯文本 `pre-wrap` 展示——改用 react-markdown + remark-gfm 渲染（外链强制 `target=_blank`/`rel=noopener noreferrer`）。
 
