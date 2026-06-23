@@ -6,6 +6,7 @@ import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import { groupMediaByDate } from '@/utils/timeline'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import TimelineScrubber from '@/components/TimelineScrubber'
 import type { MediaFile } from '@/types'
 import type { DateGroup, TimelineGranularity } from '@/utils/timeline'
 
@@ -210,6 +211,11 @@ export default function TimelineView({
     <>
       {/* 虚拟化容器：高度撑满全部日期组总高，内部按虚拟项绝对定位 */}
       <Box ref={listRef} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
+        {/* 可拖动时间 scrubber（FR-68）：拖动浮层预览、松手滚动跳转到目标分组 */}
+        <TimelineScrubber
+          groups={groups}
+          onSeek={(index) => virtualizer.scrollToIndex(index, { align: 'start' })}
+        />
         {virtualItems.map((virtualItem) => {
           const group = groups[virtualItem.index]
           return (

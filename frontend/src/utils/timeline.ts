@@ -61,6 +61,21 @@ function pickValidDate(...candidates: (string | null | undefined)[]): string {
   return ''
 }
 
+/**
+ * 把 scrubber 指针纵向比例映射到目标分组下标（FR-68）。
+ * - fraction：指针在轨道内的纵向比例，0=顶部=最新分组、1=底部=最旧分组；超界先钳制到 [0,1]。
+ * - groupCount：分组总数；<=0 返回 0。
+ * - 把 [0,1] 均分成 groupCount 段，返回所落段下标，钳制到 [0, groupCount-1]。
+ * 纯函数，无副作用。
+ */
+export function positionToGroupIndex(fraction: number, groupCount: number): number {
+  if (groupCount <= 0) return 0
+  const clamped = Math.min(1, Math.max(0, fraction))
+  const index = Math.floor(clamped * groupCount)
+  // fraction=1 时 floor 结果会等于 groupCount，需钳到最后一段
+  return Math.min(groupCount - 1, index)
+}
+
 /** 日期组排序：有效日期倒序，“未知日期”始终最后 */
 function compareDateGroup(a: DateGroup, b: DateGroup): number {
   if (a.date === UNKNOWN_DATE) return 1

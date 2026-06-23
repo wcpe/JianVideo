@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **时间轴可拖动 scrubber + 浮层预览（FR-68，补齐 FR-32 拖动）**：时间轴右侧新增竖向可拖动时间滑块（`TimelineScrubber`），与当前分组列表（按 granularity 分组、顶部最新/底部最旧）一一对应。拖动时按指针在轨道内的纵向比例经纯函数 `positionToGroupIndex(fraction, count)` 映射到目标分组下标，实时浮层预览该分组日期 + 首项缩略图（复用 `MediaThumbnail` 与 `/api/library/thumbnail/:id`）；松手后调虚拟器 `scrollToIndex` 滚动跳转到对应日期分组。指针事件用 `setPointerCapture` 保证拖出轨道仍跟手；`role="slider"` + 上下方向键移动一个分组并跳转保留键盘可达。空 / 加载 / 错误态不渲染。纯前端交互，无后端改动、无新依赖。
 - **时间轴刷新按钮（FR-67）**：时间轴页标题右侧新增手动「刷新」按钮（`ActionIcon` + `Tooltip`），点击调用累积分页 hook 的 `reload()` 重载首页数据（`append=false` 回到第一页重新累积）；加载期间按钮显示加载态。便于在不刷新整页的情况下拉取最新入库媒体。纯前端，无后端改动、无新依赖。
 
 ### 修复

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupMediaByDate } from './timeline'
+import { groupMediaByDate, positionToGroupIndex } from './timeline'
 import type { MediaFile } from '@/types'
 
 /** 构造测试用媒体文件，仅关心 id 与 added_at */
@@ -111,5 +111,41 @@ describe('groupMediaByDate', () => {
     f.modified_at = 'bad'
     const groups = groupMediaByDate([f])
     expect(groups[0].date).toBe('未知日期')
+  })
+})
+
+// FR-68 scrubber 位置 → 目标分组映射
+describe('positionToGroupIndex', () => {
+  it('顶部比例 0 映射到第一组（最新）', () => {
+    expect(positionToGroupIndex(0, 5)).toBe(0)
+  })
+
+  it('底部比例 1 映射到最后一组（最旧）', () => {
+    expect(positionToGroupIndex(1, 5)).toBe(4)
+  })
+
+  it('中间比例落在对应均分段', () => {
+    // 5 组均分 [0,1) → 每段 0.2：0.5 落第 3 段（下标 2）
+    expect(positionToGroupIndex(0.5, 5)).toBe(2)
+    // 0.25 落第 2 段（下标 1）
+    expect(positionToGroupIndex(0.25, 5)).toBe(1)
+    // 0.85 落第 5 段（下标 4）
+    expect(positionToGroupIndex(0.85, 5)).toBe(4)
+  })
+
+  it('越界比例钳制到 [0, count-1]', () => {
+    expect(positionToGroupIndex(-0.3, 5)).toBe(0)
+    expect(positionToGroupIndex(1.7, 5)).toBe(4)
+  })
+
+  it('单组始终返回 0', () => {
+    expect(positionToGroupIndex(0, 1)).toBe(0)
+    expect(positionToGroupIndex(0.9, 1)).toBe(0)
+    expect(positionToGroupIndex(1, 1)).toBe(0)
+  })
+
+  it('空组（count<=0）返回 0', () => {
+    expect(positionToGroupIndex(0.5, 0)).toBe(0)
+    expect(positionToGroupIndex(0.5, -2)).toBe(0)
   })
 })
