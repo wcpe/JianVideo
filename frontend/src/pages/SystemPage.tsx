@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
-  TypographyStylesProvider,
+  TypographyStylesProvider, Tabs,
 } from '@mantine/core'
 import { useClipboard } from '@mantine/hooks'
-import { IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp } from '@tabler/icons-react'
+import {
+  IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp,
+  IconDeviceDesktop, IconCpu, IconTestPipe, IconCloudDownload,
+} from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
@@ -14,6 +18,13 @@ import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
 
 // 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
 const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂时不可用，请稍后重试'
+
+// 子 tab 取值（FR-59）：运行环境 / 硬件加速 / 编解码测试 / 应用更新；URL query `sys` 缺省或非法落回运行环境。
+const SUB_TAB_ENV = 'env'
+const SUB_TAB_HWACCEL = 'hwaccel'
+const SUB_TAB_CODEC = 'codec'
+const SUB_TAB_UPDATE = 'update'
+const SUB_TABS = [SUB_TAB_ENV, SUB_TAB_HWACCEL, SUB_TAB_CODEC, SUB_TAB_UPDATE]
 
 /** 单行信息项：左侧标签 + 右侧值 */
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -90,6 +101,19 @@ export default function SystemPage() {
   const [codecError, setCodecError] = useState<string | null>(null)
   const [codecLoading, setCodecLoading] = useState(false)
   const clipboard = useClipboard({ timeout: 2000 })
+
+  // 子 tab 由 URL query `sys` 控制（FR-59），缺省/非法落回运行环境，便于页眉精确跳转与深链。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawSub = searchParams.get('sys')
+  const activeSubTab = rawSub && SUB_TABS.includes(rawSub) ? rawSub : SUB_TAB_ENV
+  // 切子 tab 时仅改写 `sys`，函数式更新保留外层 `tab=system` 等已有 query；replace 避免历史堆叠。
+  const handleSubTabChange = useCallback((value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('sys', value ?? SUB_TAB_ENV)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   // 自更新（FR-46）
   const [channel, setChannel] = useState<'stable' | 'prerelease'>('stable')
@@ -214,109 +238,145 @@ export default function SystemPage() {
         </Alert>
       )}
 
-      {loading ? (
-        <Skeleton height={320} radius="md" />
-      ) : info ? (
-        <>
-          {/* 运行环境 */}
-          <Card withBorder padding="md" radius="md">
-            <Title order={4} mb="sm">运行环境</Title>
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
-              <InfoRow label="应用版本" value={info.app_version} />
-              <InfoRow label="操作系统" value={`${info.os}/${info.arch}`} />
-              <InfoRow label="CPU 核心数" value={info.num_cpu} />
-              <InfoRow label="主机名" value={info.hostname} />
-              <InfoRow label="Go 版本" value={info.go_version} />
-            </SimpleGrid>
-          </Card>
+      {/* 子 tab（FR-59）：拆为运行环境(含 FFmpeg)/硬件加速/编解码测试/应用更新，消除长滚动；
+          keepMounted={false} 仅渲染当前面板，状态由 URL query `sys` 控制（便于页眉精确跳转与深链）。 */}
+      <Tabs value={activeSubTab} onChange={handleSubTabChange} keepMounted={false}>
+        <Tabs.List mb="md">
+          <Tabs.Tab value={SUB_TAB_ENV} leftSection={<IconDeviceDesktop size={16} />}>运行环境</Tabs.Tab>
+          <Tabs.Tab value={SUB_TAB_HWACCEL} leftSection={<IconCpu size={16} />}>硬件加速</Tabs.Tab>
+          <Tabs.Tab value={SUB_TAB_CODEC} leftSection={<IconTestPipe size={16} />}>编解码测试</Tabs.Tab>
+          <Tabs.Tab value={SUB_TAB_UPDATE} leftSection={<IconCloudDownload size={16} />}>应用更新</Tabs.Tab>
+        </Tabs.List>
 
-          {/* FFmpeg */}
-          <Card withBorder padding="md" radius="md">
-            <Group justify="space-between" mb="sm">
-              <Title order={4}>FFmpeg</Title>
-              <Badge color={info.ffmpeg.available ? 'green' : 'red'}>
-                {info.ffmpeg.available ? '可用' : '不可用'}
-              </Badge>
-            </Group>
-            {info.ffmpeg.available ? (
-              <Stack gap="xs">
-                <InfoRow label="路径" value={info.ffmpeg.path} />
-                <InfoRow label="版本" value={info.ffmpeg.version} />
-              </Stack>
-            ) : (
-              <Text size="sm" c="dimmed">未检测到 FFmpeg，转码相关功能不可用。</Text>
-            )}
-          </Card>
+        {/* 运行环境子 tab：运行环境信息 + FFmpeg */}
+        <Tabs.Panel value={SUB_TAB_ENV}>
+          {loading ? (
+            <Skeleton height={320} radius="md" />
+          ) : info ? (
+            <Stack gap="md">
+              {/* 运行环境 */}
+              <Card withBorder padding="md" radius="md">
+                <Title order={4} mb="sm">运行环境</Title>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+                  <InfoRow label="应用版本" value={info.app_version} />
+                  <InfoRow label="操作系统" value={`${info.os}/${info.arch}`} />
+                  <InfoRow label="CPU 核心数" value={info.num_cpu} />
+                  <InfoRow label="主机名" value={info.hostname} />
+                  <InfoRow label="Go 版本" value={info.go_version} />
+                </SimpleGrid>
+              </Card>
 
-          {/* 硬件加速 */}
-          <Card withBorder padding="md" radius="md">
-            <Title order={4} mb="sm">硬件加速</Title>
-            <Stack gap="xs">
-              <InfoRow label="首选编码器" value={info.hwaccel.preferred || '无（使用软件编码）'} />
-              {/* 系统可输出编码并集（codecs），按编码逐个展示 */}
-              <Group gap="xs" align="center">
-                <Text size="sm" c="dimmed">可输出编码</Text>
-                {info.hwaccel.codecs.length === 0 ? (
-                  <Text size="sm" c="dimmed">无</Text>
+              {/* FFmpeg */}
+              <Card withBorder padding="md" radius="md">
+                <Group justify="space-between" mb="sm">
+                  <Title order={4}>FFmpeg</Title>
+                  <Badge color={info.ffmpeg.available ? 'green' : 'red'}>
+                    {info.ffmpeg.available ? '可用' : '不可用'}
+                  </Badge>
+                </Group>
+                {info.ffmpeg.available ? (
+                  <Stack gap="xs">
+                    <InfoRow label="路径" value={info.ffmpeg.path} />
+                    <InfoRow label="版本" value={info.ffmpeg.version} />
+                  </Stack>
                 ) : (
-                  info.hwaccel.codecs.map((c) => (
-                    <Badge key={c} variant="light" color="green">{c}</Badge>
-                  ))
+                  <Text size="sm" c="dimmed">未检测到 FFmpeg，转码相关功能不可用。</Text>
                 )}
-              </Group>
-              <Group gap="xs">
-                {info.hwaccel.software_fallback && (
-                  <Badge variant="light" color="yellow">软件回退</Badge>
-                )}
-                {info.hwaccel.intel_gpu && (
-                  <Badge variant="light" color="blue">Intel GPU</Badge>
-                )}
-              </Group>
-              {/* 实测来源（缓存/实测 + 时间） */}
-              <Text size="xs" c="dimmed">
-                {info.hwaccel.tested_at
-                  ? `${info.hwaccel.from_cache ? '结果来自缓存，实测于' : '实测于'} ${info.hwaccel.tested_at}`
-                  : '尚未实测硬件加速能力'}
-              </Text>
-              {info.hwaccel.available.length === 0 ? (
-                <Text size="sm" c="dimmed">未检测到可用的硬件加速。</Text>
-              ) : (
-                info.hwaccel.available.map((cap) => (
-                  <Card key={cap.family} withBorder padding="xs" radius="sm" bg="var(--mantine-color-default-hover)">
-                    <Group justify="space-between" mb={4}>
-                      <Text size="sm" fw={600}>{cap.name}</Text>
-                      <Badge size="sm" color={cap.available ? 'green' : 'red'}>
-                        {cap.available ? '可用' : '不可用'}
-                      </Badge>
-                    </Group>
-                    {cap.device_type && (
-                      <Text size="xs" c="dimmed" mb={4}>设备类型 {cap.device_type}</Text>
-                    )}
-                    {/* 逐 codec 展示：编码格式 + 编码器名 + 试编码结果 */}
-                    <Stack gap={4}>
-                      {cap.codecs.map((c) => (
-                        <Group key={c.encoder} gap="xs" wrap="nowrap">
-                          <Badge size="xs" variant="outline" color="gray">{c.codec}</Badge>
-                          <Code>{c.encoder}</Code>
-                          <Badge size="xs" color={c.tested_ok ? 'green' : 'red'}>
-                            {c.tested_ok ? '✓ 试编码成功' : '✗ 试编码失败'}
+              </Card>
+            </Stack>
+          ) : null}
+        </Tabs.Panel>
+
+        {/* 硬件加速子 tab */}
+        <Tabs.Panel value={SUB_TAB_HWACCEL}>
+          {loading ? (
+            <Skeleton height={320} radius="md" />
+          ) : info ? (
+            <Card withBorder padding="md" radius="md">
+              <Title order={4} mb="sm">硬件加速</Title>
+              <Stack gap="xs">
+                <InfoRow label="首选编码器" value={info.hwaccel.preferred || '无（使用软件编码）'} />
+                {/* 系统可输出编码并集（codecs），按编码逐个展示 */}
+                <Group gap="xs" align="center">
+                  <Text size="sm" c="dimmed">可输出编码</Text>
+                  {info.hwaccel.codecs.length === 0 ? (
+                    <Text size="sm" c="dimmed">无</Text>
+                  ) : (
+                    info.hwaccel.codecs.map((c) => (
+                      <Badge key={c} variant="light" color="green">{c}</Badge>
+                    ))
+                  )}
+                </Group>
+                <Group gap="xs">
+                  {info.hwaccel.software_fallback && (
+                    <Badge variant="light" color="yellow">软件回退</Badge>
+                  )}
+                  {info.hwaccel.intel_gpu && (
+                    <Badge variant="light" color="blue">Intel GPU</Badge>
+                  )}
+                </Group>
+                {/* 实测来源（缓存/实测 + 时间） */}
+                <Text size="xs" c="dimmed">
+                  {info.hwaccel.tested_at
+                    ? `${info.hwaccel.from_cache ? '结果来自缓存，实测于' : '实测于'} ${info.hwaccel.tested_at}`
+                    : '尚未实测硬件加速能力'}
+                </Text>
+                {info.hwaccel.available.length === 0 ? (
+                  <Text size="sm" c="dimmed">未检测到可用的硬件加速。</Text>
+                ) : (
+                  /* per-family 卡片一行 2-3 列网格展示（FR-59），提升信息密度 */
+                  <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="xs">
+                    {info.hwaccel.available.map((cap) => (
+                      <Card key={cap.family} withBorder padding="xs" radius="sm" bg="var(--mantine-color-default-hover)">
+                        <Group justify="space-between" mb={4}>
+                          <Text size="sm" fw={600}>{cap.name}</Text>
+                          <Badge size="sm" color={cap.available ? 'green' : 'red'}>
+                            {cap.available ? '可用' : '不可用'}
                           </Badge>
                         </Group>
-                      ))}
-                    </Stack>
-                  </Card>
-                ))
-              )}
-            </Stack>
-          </Card>
-        </>
-      ) : null}
+                        {cap.device_type && (
+                          <Text size="xs" c="dimmed" mb={4}>设备类型 {cap.device_type}</Text>
+                        )}
+                        {/* 逐 codec 展示：编码格式 + 编码器名 + 试编码结果 */}
+                        <Stack gap={4}>
+                          {cap.codecs.map((c) => (
+                            <Group key={c.encoder} gap="xs" wrap="nowrap">
+                              <Badge size="xs" variant="outline" color="gray">{c.codec}</Badge>
+                              <Code>{c.encoder}</Code>
+                              <Badge size="xs" color={c.tested_ok ? 'green' : 'red'}>
+                                {c.tested_ok ? '✓ 试编码成功' : '✗ 试编码失败'}
+                              </Badge>
+                            </Group>
+                          ))}
+                        </Stack>
+                      </Card>
+                    ))}
+                  </SimpleGrid>
+                )}
+              </Stack>
+            </Card>
+          ) : null}
+        </Tabs.Panel>
 
-      {/* 应用更新（FR-46）；id=update 供页眉「更新可用」提示锚点定位（FR-58）*/}
-      <Card id="update" withBorder padding="md" radius="md">
-        <Group justify="space-between" mb="sm">
-          <Title order={4}>应用更新</Title>
-          <Group gap="xs">
+        {/* 编解码测试子 tab */}
+        <Tabs.Panel value={SUB_TAB_CODEC}>
+          <CodecTestCard
+            info={info}
+            codec={codec}
+            codecError={codecError}
+            codecLoading={codecLoading}
+            copied={clipboard.copied}
+            onTest={handleCodecTest}
+            onCopy={handleCopy}
+          />
+        </Tabs.Panel>
+
+        {/* 应用更新子 tab（FR-46）；id=update 兜底锚点（页眉精确跳转改为选中本子 tab，FR-59）*/}
+        <Tabs.Panel value={SUB_TAB_UPDATE}>
+          <Card id="update" withBorder padding="md" radius="md">
+            <Group justify="space-between" mb="sm">
+              <Title order={4}>应用更新</Title>
+              <Group gap="xs">
             <SegmentedControl
               size="xs"
               value={channel}
@@ -391,41 +451,57 @@ export default function SystemPage() {
               </Button>
             </Group>
           </Stack>
-        ) : (
-          !updateError && (
-            <Text size="sm" c="dimmed">选择频道后点击「检查更新」，从 GitHub Releases 检测新版本。</Text>
-          )
-        )}
-      </Card>
+            ) : (
+              !updateError && (
+                <Text size="sm" c="dimmed">选择频道后点击「检查更新」，从 GitHub Releases 检测新版本。</Text>
+              )
+            )}
+          </Card>
+        </Tabs.Panel>
+      </Tabs>
+    </Stack>
+  )
+}
 
-      {/* 编解码器测试 */}
-      <Card withBorder padding="md" radius="md">
-        <Group justify="space-between" mb="sm">
-          <Title order={4}>编解码器测试</Title>
-          <Group gap="xs">
-            <Button color="purple" onClick={() => handleCodecTest(false)} loading={codecLoading}>
-              测试编解码器
-            </Button>
-            <Button
-              variant="light"
-              color="purple"
-              leftSection={<IconRefresh size={16} />}
-              onClick={() => handleCodecTest(true)}
-              loading={codecLoading}
-            >
-              重新测试
-            </Button>
-            <Button
-              variant="light"
-              color={clipboard.copied ? 'green' : 'gray'}
-              leftSection={clipboard.copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-              onClick={handleCopy}
-              disabled={!info && !codec}
-            >
-              {clipboard.copied ? '已复制' : '复制结果'}
-            </Button>
-          </Group>
+/** 编解码测试卡片：抽出供「编解码测试」子 tab 渲染（FR-59 拆 tab 后内容不变） */
+function CodecTestCard(props: {
+  info: SystemInfo | null
+  codec: CodecTestResult | null
+  codecError: string | null
+  codecLoading: boolean
+  copied: boolean
+  onTest: (force: boolean) => void
+  onCopy: () => void
+}) {
+  const { info, codec, codecError, codecLoading, copied, onTest, onCopy } = props
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Group justify="space-between" mb="sm">
+        <Title order={4}>编解码器测试</Title>
+        <Group gap="xs">
+          <Button color="purple" onClick={() => onTest(false)} loading={codecLoading}>
+            测试编解码器
+          </Button>
+          <Button
+            variant="light"
+            color="purple"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => onTest(true)}
+            loading={codecLoading}
+          >
+            重新测试
+          </Button>
+          <Button
+            variant="light"
+            color={copied ? 'green' : 'gray'}
+            leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+            onClick={onCopy}
+            disabled={!info && !codec}
+          >
+            {copied ? '已复制' : '复制结果'}
+          </Button>
         </Group>
+      </Group>
 
         {codecError && (
           <Alert icon={<IconAlertCircle size={16} />} color="red" title="测试失败" mb="sm">
@@ -486,10 +562,9 @@ export default function SystemPage() {
           </Box>
         )}
 
-        {!codec && !codecError && (
-          <Text size="sm" c="dimmed">点击「测试编解码器」检测各编码器是否可用。</Text>
-        )}
-      </Card>
-    </Stack>
+      {!codec && !codecError && (
+        <Text size="sm" c="dimmed">点击「测试编解码器」检测各编码器是否可用。</Text>
+      )}
+    </Card>
   )
 }

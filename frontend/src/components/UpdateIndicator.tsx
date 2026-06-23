@@ -6,13 +6,14 @@ import { IconArrowUpCircle } from '@tabler/icons-react'
 import { checkUpdate } from '@/api/system'
 import { getSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 
-// 点击指示器跳转目标：系统信息 tab 的应用更新区（锚点 #update 由 SystemPage 卡片提供，尽力滚动定位）
-const UPDATE_ROUTE = '/system?tab=system#update'
+// 点击指示器跳转目标：系统信息 tab 的「应用更新」子 tab（FR-59 归真 FR-58）。
+// SystemPage 读 query `sys=update` 自动选中应用更新子 tab，精确定位、无需锚点滚动。
+const UPDATE_ROUTE = '/system?tab=system&sys=update'
 
 /**
  * 页眉「更新可用」提示（FR-58）。
  * 挂载时按持久化频道调一次 FR-46 的更新检查端点（非 force，命中后端 TTL 缓存即廉价返回），
- * 仅当结果为「有更新」时常驻展示提示；点击跳转到系统信息 tab 的应用更新区。
+ * 仅当结果为「有更新」时常驻展示提示；点击精确跳转到系统信息 tab 的「应用更新」子 tab。
  * 检查失败 / 无更新一律不展示，失败静默（复用 FR-46 优雅降级语义），不打扰、不阻塞页眉其余渲染。
  */
 export default function UpdateIndicator() {

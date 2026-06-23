@@ -46,9 +46,10 @@ describe('ConsolePage', () => {
     renderPage()
     // 系统信息 tab 选中
     expect(screen.getByRole('tab', { name: '系统信息' })).toHaveAttribute('aria-selected', 'true')
-    // SystemPage 内容渲染：应用更新 / 编解码器测试区块标题
-    expect(await screen.findByText('应用更新')).toBeVisible()
-    expect(screen.getByText('编解码器测试')).toBeVisible()
+    // SystemPage 内容渲染：标题 + 四个子 tab（FR-59 拆子 tab 后内容按子 tab 分布）
+    expect(await screen.findByText('系统诊断')).toBeVisible()
+    expect(screen.getByRole('tab', { name: '运行环境' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: '应用更新' })).toBeVisible()
   })
 
   it('点击「设置」tab 切换、URL query 变为 tab=settings 并展示设置项', async () => {

@@ -72,10 +72,10 @@ describe('UpdateIndicator 页眉「更新可用」提示（FR-58）', () => {
     // 非 force 调用（命中后端 TTL 缓存即廉价返回）
     expect(mockCheckUpdate).toHaveBeenCalledWith('stable', false)
 
-    // 点击跳转到系统信息 tab 的更新区（带锚点）
+    // 点击精确跳转到系统信息 tab 的「应用更新」子 tab（FR-59 归真 FR-58）
     const user = userEvent.setup()
     await user.click(btn)
-    expect(mockNavigate).toHaveBeenCalledWith('/system?tab=system#update')
+    expect(mockNavigate).toHaveBeenCalledWith('/system?tab=system&sys=update')
   })
 
   it('检查返回「无更新」：不渲染提示，不影响其余布局', async () => {

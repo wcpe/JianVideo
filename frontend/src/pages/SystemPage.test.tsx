@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
 import { http, HttpResponse } from 'msw'
 import SystemPage from './SystemPage'
@@ -10,11 +10,19 @@ import { server } from '@/mocks/beforeAll'
 // 复制功能依赖 navigator.clipboard，jsdom 默认缺失，这里注入可断言的 mock
 const writeText = vi.fn().mockResolvedValue(undefined)
 
-function renderPage() {
+// 把 MemoryRouter 的内存路由 search 暴露到 DOM，供断言子 tab 的 URL query 同步（FR-59）
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="location-search">{location.search}</div>
+}
+
+// 在指定初始 URL 下渲染系统页（默认进运行环境子 tab，FR-59）
+function renderPage(initialPath = '/system') {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={['/system']}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <SystemPage />
+        <LocationProbe />
       </MemoryRouter>
     </MantineProvider>,
   )
@@ -30,18 +38,61 @@ describe('SystemPage', () => {
     })
   })
 
-  it('渲染系统信息（含应用版本）', async () => {
+  it('渲染系统信息（含应用版本，缺省进运行环境子 tab）', async () => {
     renderPage()
     await waitFor(() => {
       expect(screen.getByText('0.3.0')).toBeVisible()
     })
     expect(screen.getByText('系统诊断')).toBeVisible()
     expect(screen.getByText('go1.22.5')).toBeVisible()
+    // 缺省选中「运行环境」子 tab
+    expect(screen.getByRole('tab', { name: '运行环境' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('渲染四个子 tab（运行环境/硬件加速/编解码测试/应用更新，FR-59）', async () => {
+    renderPage()
+    await screen.findByText('0.3.0')
+    for (const name of ['运行环境', '硬件加速', '编解码测试', '应用更新']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('切换子 tab 后 URL query sys 同步更新（保留外层 tab=system，FR-59）', async () => {
+    const user = userEvent.setup()
+    renderPage('/system?tab=system')
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '应用更新' })).toHaveAttribute('aria-selected', 'true')
+    })
+    // URL query 已同步，且保留外层 tab=system（函数式更新不丢失既有 query）
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sys=update')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=system')
+  })
+
+  it('以 ?sys=update 进入时直接选中应用更新子 tab（FR-59 页眉精确跳转）', async () => {
+    renderPage('/system?tab=system&sys=update')
+
+    // 直接选中「应用更新」子 tab，无需手动点击；应用更新区内容可见（检查更新按钮）
+    expect(screen.getByRole('tab', { name: '应用更新' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('button', { name: '检查更新' })).toBeVisible()
+  })
+
+  it('非法 sys query 落回运行环境子 tab（FR-59）', async () => {
+    renderPage('/system?sys=bogus')
+    await screen.findByText('0.3.0')
+    expect(screen.getByRole('tab', { name: '运行环境' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('渲染硬件加速卡片的 per-codec 能力与可输出编码', async () => {
+    const user = userEvent.setup()
     renderPage()
     await screen.findByText('0.3.0')
+
+    // 切到「硬件加速」子 tab
+    await user.click(screen.getByRole('tab', { name: '硬件加速' }))
 
     // 家族显示名
     expect(await screen.findByText('AMD AMF')).toBeVisible()
@@ -62,6 +113,8 @@ describe('SystemPage', () => {
     // 等系统信息加载完成
     await screen.findByText('0.3.0')
 
+    // 切到「编解码测试」子 tab
+    await user.click(screen.getByRole('tab', { name: '编解码测试' }))
     await user.click(screen.getByRole('button', { name: '测试编解码器' }))
 
     // libx264 成功行出现（结果表内 Code 渲染）
@@ -95,6 +148,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「编解码测试」子 tab
+    await user.click(screen.getByRole('tab', { name: '编解码测试' }))
     const rerunBtn = screen.getByRole('button', { name: '重新测试' })
     expect(rerunBtn).toBeVisible()
     await user.click(rerunBtn)
@@ -117,6 +172,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「编解码测试」子 tab
+    await user.click(screen.getByRole('tab', { name: '编解码测试' }))
     await user.click(screen.getByRole('button', { name: '测试编解码器' }))
 
     await waitFor(() => {
@@ -129,6 +186,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0') // 系统信息加载完成
 
+    // 切到「应用更新」子 tab
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
     await user.click(screen.getByRole('button', { name: '检查更新' }))
 
     await waitFor(() => {
@@ -159,6 +218,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「应用更新」子 tab
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
     await user.click(screen.getByRole('button', { name: '检查更新' }))
 
     // markdown 渲染出标题 / 列表 / 加粗 / 外链（外链安全打开新标签页）
@@ -187,6 +248,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「应用更新」子 tab
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
     await user.click(screen.getByRole('button', { name: '检查更新' }))
 
     await waitFor(() => {
@@ -202,6 +265,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「应用更新」子 tab
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
     // 切到「测试版」频道（Mantine SegmentedControl 点标签文本）
     await user.click(screen.getByText('测试版'))
     await user.click(screen.getByRole('button', { name: '检查更新' }))
@@ -218,6 +283,8 @@ describe('SystemPage', () => {
     renderPage()
     await screen.findByText('0.3.0')
 
+    // 切到「编解码测试」子 tab（复制结果按钮所在）
+    await user.click(screen.getByRole('tab', { name: '编解码测试' }))
     await user.click(screen.getByRole('button', { name: '复制结果' }))
 
     await waitFor(() => {
