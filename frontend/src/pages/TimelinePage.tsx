@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
-import { Stack, Title, TextInput, Group, SegmentedControl, Text } from '@mantine/core'
+import { Stack, Title, TextInput, Group, SegmentedControl, Text, ActionIcon, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconSearch } from '@tabler/icons-react'
+import { IconSearch, IconRefresh } from '@tabler/icons-react'
 import { useLibraryPaths } from '@/hooks/useLibraryPaths'
 import { useInfiniteMedia } from '@/hooks/useInfiniteMedia'
 import { useScanProgress } from '@/hooks/useScanProgress'
@@ -53,7 +53,21 @@ export default function TimelinePage() {
 
   return (
     <Stack gap="md">
-      <Title order={2}>时间轴</Title>
+      <Group justify="space-between" align="center">
+        <Title order={2}>时间轴</Title>
+        {/* 手动刷新（FR-67）：重载首页数据 */}
+        <Tooltip label="刷新">
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="刷新"
+            loading={infinite.loading}
+            onClick={() => infinite.reload()}
+          >
+            <IconRefresh size={18} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
 
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
       <ContinueWatching />

@@ -99,6 +99,31 @@ describe('TimelinePage', () => {
     expect(mkvThumb).toHaveAttribute('src', '/api/library/thumbnail/201')
   })
 
+  it('点击刷新按钮重载首页数据（FR-67）', async () => {
+    let requestCount = 0
+    server.use(
+      http.get('*/api/library/media', () => {
+        requestCount += 1
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    // 首屏会发起一次请求
+    await waitFor(() => {
+      expect(requestCount).toBe(1)
+    })
+
+    // 点击刷新按钮应再次发起首页请求
+    await user.click(screen.getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => {
+      expect(requestCount).toBe(2)
+    })
+  })
+
   it('图片点击打开预览弹窗且不跳转播放页', async () => {
     server.use(
       http.get('*/api/library/media', () => HttpResponse.json({
