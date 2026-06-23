@@ -34,9 +34,11 @@ describe('卡片/面板背景随主题切换，不写死深色（亮色模式黑
           paths={[libPath()]}
           loading={false} scanLoading={{}} newPath="" addingPath={false}
           extensionInputs={{}} extensionTypes={{}} extensionLoading={{}}
+          extensionsByLibrary={{}}
           onNewPathChange={() => {}} onAddPath={() => {}} onDeletePath={() => {}}
           onScan={() => {}} onBrowsePath={() => {}} onExtensionInputChange={() => {}}
           onExtensionTypeChange={() => {}} onAddExtension={() => {}}
+          onDeleteExtension={() => {}}
         />
       </MantineProvider>,
     )

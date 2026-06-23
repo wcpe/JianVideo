@@ -208,6 +208,16 @@ async function realListMediaExtensions(libraryID: number): Promise<MediaExtensio
   return res.data.items
 }
 
+async function realDeleteMediaExtension(libraryID: number, extension: string): Promise<void> {
+  try {
+    await client.delete('/api/library/extensions', {
+      params: { library_id: libraryID, extension },
+    })
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '删除后缀失败'), { cause: err })
+  }
+}
+
 // ─── Mock API 实现 ──────────────────────────────────
 
 async function mockGetLibraryPaths(): Promise<LibraryPath[]> {
@@ -444,6 +454,14 @@ async function mockListMediaExtensions(libraryID: number): Promise<MediaExtensio
   return mockExtensions.filter(ext => ext.library_id === libraryID)
 }
 
+async function mockDeleteMediaExtension(libraryID: number, extension: string): Promise<void> {
+  await mockDelay(100)
+  const normalized = extension.trim().toLowerCase().replace(/^\./, '')
+  const idx = mockExtensions.findIndex(ext => ext.library_id === libraryID && ext.extension === normalized)
+  if (idx === -1) throw new Error('自定义后缀不存在')
+  mockExtensions.splice(idx, 1)
+}
+
 async function mockBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
   await mockDelay(150)
   // 聚合虚拟根（FR-66）：列出所有启用库作为顶层目录、各项携带 library_id
@@ -545,3 +563,4 @@ export function markWatched(id: number) { return useMock ? mockMarkWatched(id) :
 export function getContinueWatching(limit = 12) { return useMock ? mockGetContinueWatching(limit) : realGetContinueWatching(limit) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }
+export function deleteMediaExtension(libraryID: number, extension: string) { return useMock ? mockDeleteMediaExtension(libraryID, extension) : realDeleteMediaExtension(libraryID, extension) }

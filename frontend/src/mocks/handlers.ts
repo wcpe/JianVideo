@@ -345,6 +345,20 @@ export const handlers = [
     return new HttpResponse(null, { status: 201 })
   }),
 
+  // 删除自定义后缀（FR-64）：内置不可删、删不存在返回 400
+  http.delete('*/api/library/extensions', async ({ request }) => {
+    await delay(100)
+    const url = new URL(request.url)
+    const libraryID = Number(url.searchParams.get('library_id') || '0')
+    const extension = (url.searchParams.get('extension') || '').trim().toLowerCase().replace(/^\./, '')
+    const idx = mediaExtensions.findIndex(ext => ext.library_id === libraryID && ext.extension === extension && ext.is_builtin === 0)
+    if (idx === -1) {
+      return HttpResponse.json({ code: 'DELETE_EXTENSION_FAILED', message: '自定义后缀不存在' }, { status: 400 })
+    }
+    mediaExtensions.splice(idx, 1)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   http.delete('*/api/library/media/:id', async ({ params }) => {
     await delay(200)
     const id = Number(params.id)

@@ -782,6 +782,26 @@ func (h *Handler) AddMediaExtension(c *gin.Context) {
 	c.Status(http.StatusCreated)
 }
 
+// DeleteMediaExtension DELETE /api/library/extensions
+// 删除媒体库自定义后缀（FR-64）：内置后缀不可删，删除不存在的后缀返回 400。
+func (h *Handler) DeleteMediaExtension(c *gin.Context) {
+	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
+	if err != nil || libraryID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
+		return
+	}
+	extension := c.Query("extension")
+	if extension == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_EXTENSION", "message": "extension 不能为空"})
+		return
+	}
+	if err := h.library.DeleteMediaExtension(libraryID, extension); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "DELETE_EXTENSION_FAILED", "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // GetSubtitles 返回媒体文件的外挂字幕轨道列表。
 // GET /api/play/:id/subtitles
 func (h *Handler) GetSubtitles(c *gin.Context) {

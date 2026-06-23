@@ -611,6 +611,43 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 	}
 }
 
+// TestDeleteMediaExtension 删除自定义后缀（FR-64）：只删自定义、内置不可删、删不存在报错。
+func TestDeleteMediaExtension(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "后缀删除")
+
+	if err := svc.AddMediaExtension(lp.ID, ".foo", "video"); err != nil {
+		t.Fatalf("添加自定义后缀失败: %v", err)
+	}
+
+	// 删除自定义后缀成功，后续不再识别
+	if err := svc.DeleteMediaExtension(lp.ID, ".foo"); err != nil {
+		t.Fatalf("删除自定义后缀失败: %v", err)
+	}
+	if svc.IsMediaFileForLibrary(lp.ID, "x.foo") {
+		t.Fatal("删除后自定义后缀不应再被识别")
+	}
+	items, _ := svc.ListMediaExtensions(lp.ID)
+	for _, item := range items {
+		if item.Extension == "foo" && item.IsBuiltIn == 0 {
+			t.Fatal("删除后列表不应再含该自定义后缀")
+		}
+	}
+
+	// 删除不存在的自定义后缀报错
+	if err := svc.DeleteMediaExtension(lp.ID, ".nope"); err == nil {
+		t.Fatal("删除不存在的自定义后缀应报错")
+	}
+
+	// 删除内置后缀被拒绝，且内置仍可识别
+	if err := svc.DeleteMediaExtension(lp.ID, ".mp4"); err == nil {
+		t.Fatal("删除内置后缀应被拒绝")
+	}
+	if !svc.IsMediaFileForLibrary(lp.ID, "x.mp4") {
+		t.Fatal("内置后缀不应因尝试删除而失效")
+	}
+}
+
 func TestRenameMediaFile(t *testing.T) {
 	svc, _ := newTestService(t)
 	dir := t.TempDir()

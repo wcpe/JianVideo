@@ -550,6 +550,52 @@ func TestMediaExtensionsAPI(t *testing.T) {
 	}
 }
 
+// TestDeleteMediaExtension_API 删除自定义后缀端点（FR-64）：删自定义 204、删内置/不存在 400。
+func TestDeleteMediaExtension_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	lp, err := svc.CreateLibraryPath(filepath.ToSlash(t.TempDir()), "local", "后缀删除")
+	if err != nil {
+		t.Fatalf("创建媒体库目录失败: %v", err)
+	}
+	if err := svc.AddMediaExtension(lp.ID, ".foo", "image"); err != nil {
+		t.Fatalf("添加自定义后缀失败: %v", err)
+	}
+
+	libParam := strconv.FormatInt(lp.ID, 10)
+
+	// 删除自定义后缀 → 204
+	req := httptest.NewRequest("DELETE", "/api/library/extensions?library_id="+libParam+"&extension=.foo", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("删除自定义后缀期望 204, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// 删除后列表不再含 foo
+	req = httptest.NewRequest("GET", "/api/library/extensions?library_id="+libParam, nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if strings.Contains(w.Body.String(), `"extension":"foo"`) {
+		t.Fatalf("删除后列表不应含 foo, body: %s", w.Body.String())
+	}
+
+	// 删内置后缀 → 400
+	req = httptest.NewRequest("DELETE", "/api/library/extensions?library_id="+libParam+"&extension=.mp4", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("删除内置后缀期望 400, 实际 %d", w.Code)
+	}
+
+	// 删不存在后缀 → 400
+	req = httptest.NewRequest("DELETE", "/api/library/extensions?library_id="+libParam+"&extension=.nope", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("删除不存在后缀期望 400, 实际 %d", w.Code)
+	}
+}
+
 // TestBrowseDirectory_AggregateRoot_API 聚合虚拟根端点（FR-66）：
 // parent_path=__root__ 时不强制 library_id，返回所有启用库作为顶层目录项。
 func TestBrowseDirectory_AggregateRoot_API(t *testing.T) {

@@ -36,12 +36,14 @@ export default function LibraryManagerPage() {
       <LibraryPathManager paths={paths.paths} loading={paths.loading} scanLoading={paths.scanLoading}
         newPath={paths.newPath} addingPath={paths.addingPath} extensionInputs={paths.extensionInputs}
         extensionTypes={paths.extensionTypes} extensionLoading={paths.extensionLoading}
+        extensionsByLibrary={paths.extensionsByLibrary}
         onNewPathChange={paths.setNewPath} onAddPath={paths.handleAddPath}
         onDeletePath={(p) => setDelPath({ opened: true, path: p, loading: false })}
         onScan={(id, mode) => paths.handleScan(id, mode)} onBrowsePath={handleOpenLibrary}
         onExtensionInputChange={(id, v) => paths.setExtensionInputs(p => ({ ...p, [id]: v }))}
         onExtensionTypeChange={(id, t) => paths.setExtensionTypes(p => ({ ...p, [id]: t }))}
-        onAddExtension={paths.handleAddExtension} />
+        onAddExtension={paths.handleAddExtension}
+        onDeleteExtension={paths.handleDeleteExtension} />
       {progress?.status === 'scanning' && (
         <Box>
           <Text size="sm" c="dimmed" mb={4}>

@@ -962,6 +962,30 @@ func (s *Service) AddMediaExtension(libraryID int64, extension, mediaType string
 	return s.db.Where(models.MediaExtension{LibraryID: libraryID, Extension: ext}).Attrs(item).FirstOrCreate(&item).Error
 }
 
+// DeleteMediaExtension 删除媒体库自定义后缀（FR-64）：仅删自定义后缀，内置后缀不可删，
+// 删除不存在的自定义后缀返回错误。
+func (s *Service) DeleteMediaExtension(libraryID int64, extension string) error {
+	ext := normalizeExtension(extension)
+	if libraryID <= 0 {
+		return fmt.Errorf("媒体库 ID 无效")
+	}
+	if ext == "" {
+		return fmt.Errorf("后缀格式不支持")
+	}
+	if _, ok := builtInMediaExtensions[ext]; ok {
+		return fmt.Errorf("内置后缀不可删除")
+	}
+
+	result := s.db.Where("library_id = ? AND extension = ?", libraryID, ext).Delete(&models.MediaExtension{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("自定义后缀不存在")
+	}
+	return nil
+}
+
 // IsMediaFile 判断文件是否为内置支持的媒体文件。
 func (s *Service) IsMediaFile(path string) bool {
 	_, ok := mediaTypeByExtension(normalizeExtension(filepath.Ext(path)))

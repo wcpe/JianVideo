@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { notifications } from '@mantine/notifications'
 import * as libApi from '@/api/library'
-import type { LibraryPath, MediaExtensionType, ScanMode } from '@/types'
+import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types'
 
 export function useLibraryPaths(
   onPathsChanged?: () => void,
@@ -16,6 +16,8 @@ export function useLibraryPaths(
   const [extensionTypes, setExtensionTypes] = useState<Record<number, MediaExtensionType>>({})
   const [extensionLoading, setExtensionLoading] = useState<Record<number, boolean>>({})
   const [customImageExtensions, setCustomImageExtensions] = useState<Record<number, string[]>>({})
+  // 各库完整后缀列表（内置 + 自定义），供后缀管理 UI 列出与删除（FR-64）
+  const [extensionsByLibrary, setExtensionsByLibrary] = useState<Record<number, MediaExtension[]>>({})
 
   const loadExtensionPolicies = useCallback(async (items: LibraryPath[], replace = true) => {
     const entries = await Promise.all(items.map(async (path) => {
@@ -24,13 +26,15 @@ export function useLibraryPaths(
         const imageExts = extensions
           .filter(ext => ext.type === 'image')
           .map(ext => ext.extension.toLowerCase().replace(/^\./, ''))
-        return [path.id, imageExts] as const
+        return [path.id, { imageExts, all: extensions }] as const
       } catch {
-        return [path.id, []] as const
+        return [path.id, { imageExts: [] as string[], all: [] as MediaExtension[] }] as const
       }
     }))
-    const next = Object.fromEntries(entries)
-    setCustomImageExtensions(prev => (replace ? next : { ...prev, ...next }))
+    const imageNext = Object.fromEntries(entries.map(([id, v]) => [id, v.imageExts]))
+    const allNext = Object.fromEntries(entries.map(([id, v]) => [id, v.all]))
+    setCustomImageExtensions(prev => (replace ? imageNext : { ...prev, ...imageNext }))
+    setExtensionsByLibrary(prev => (replace ? allNext : { ...prev, ...allNext }))
   }, [])
 
   const loadPaths = useCallback(async () => {
@@ -114,6 +118,18 @@ export function useLibraryPaths(
     }
   }, [extensionInputs, extensionTypes, loadExtensionPolicies])
 
+  // 删除自定义后缀（FR-64）：仅自定义可删，内置由 UI 禁用删除入口。
+  const handleDeleteExtension = useCallback(async (path: LibraryPath, extension: string) => {
+    try {
+      await libApi.deleteMediaExtension(path.id, extension)
+      await loadExtensionPolicies([path], false)
+      notifications.show({ title: '后缀已删除', message: `${extension} 已从 "${path.label || path.path}" 移除`, color: 'green', autoClose: 3000 })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除后缀失败'
+      notifications.show({ title: '删除失败', message, color: 'red', autoClose: 3000 })
+    }
+  }, [loadExtensionPolicies])
+
   return {
     // 状态
     paths,
@@ -125,6 +141,7 @@ export function useLibraryPaths(
     extensionTypes,
     extensionLoading,
     customImageExtensions,
+    extensionsByLibrary,
     // setter
     setNewPath,
     setExtensionInputs,
@@ -135,5 +152,6 @@ export function useLibraryPaths(
     handleDeletePath,
     handleScan,
     handleAddExtension,
+    handleDeleteExtension,
   }
 }

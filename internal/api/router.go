@@ -59,6 +59,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/extensions", h.ListMediaExtensions)
 		lib.POST("/extensions", h.AddMediaExtension)
+		lib.DELETE("/extensions", h.DeleteMediaExtension)
 
 		lib.GET("/browse", h.BrowseDirectory)
 

@@ -124,6 +124,81 @@ describe('LibraryManagerPage', () => {
     })
   })
 
+  it('列出该库后缀，内置标识不可删、自定义可删（FR-64）', async () => {
+    server.use(
+      http.get('*/api/library/extensions', () => HttpResponse.json({
+        items: [
+          { id: 1, library_id: 1, extension: 'mp4', type: 'video', is_builtin: 1, created_at: '2025-01-01T00:00:00Z' },
+          { id: 2, library_id: 1, extension: 'foo', type: 'video', is_builtin: 0, created_at: '2025-01-01T00:00:00Z' },
+        ],
+      })),
+    )
+
+    renderPage()
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    // 内置后缀展示「内置」标识、无删除按钮；自定义后缀有删除按钮
+    await waitFor(() => {
+      expect(within(card).getByText(/mp4（内置）/)).toBeVisible()
+    })
+    expect(within(card).queryByLabelText('删除后缀 mp4')).toBeNull()
+    expect(within(card).getByLabelText('删除后缀 foo')).toBeVisible()
+  })
+
+  it('删除自定义后缀走 DELETE /api/library/extensions（FR-64）', async () => {
+    let deleted: { library_id: string | null; extension: string | null } | null = null
+    server.use(
+      http.get('*/api/library/extensions', () => HttpResponse.json({
+        items: [
+          { id: 2, library_id: 1, extension: 'foo', type: 'video', is_builtin: 0, created_at: '2025-01-01T00:00:00Z' },
+        ],
+      })),
+      http.delete('*/api/library/extensions', ({ request }) => {
+        const url = new URL(request.url)
+        deleted = { library_id: url.searchParams.get('library_id'), extension: url.searchParams.get('extension') }
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    await user.click(await within(card).findByLabelText('删除后缀 foo'))
+
+    await waitFor(() => {
+      expect(deleted).toEqual({ library_id: '1', extension: 'foo' })
+    })
+  })
+
+  it('后缀筛选「视频/图片/全部」切换显示对应类型（FR-64）', async () => {
+    server.use(
+      http.get('*/api/library/extensions', () => HttpResponse.json({
+        items: [
+          { id: 1, library_id: 1, extension: 'mp4', type: 'video', is_builtin: 1, created_at: '2025-01-01T00:00:00Z' },
+          { id: 2, library_id: 1, extension: 'jpg', type: 'image', is_builtin: 1, created_at: '2025-01-01T00:00:00Z' },
+        ],
+      })),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    // 全部：两类都显示
+    await waitFor(() => {
+      expect(within(card).getByText(/mp4（内置）/)).toBeVisible()
+      expect(within(card).getByText(/jpg（内置）/)).toBeVisible()
+    })
+
+    // 切到「图片」：仅显示图片后缀
+    await user.click(within(card).getByRole('radio', { name: '图片' }))
+    await waitFor(() => {
+      expect(within(card).queryByText(/mp4（内置）/)).toBeNull()
+      expect(within(card).getByText(/jpg（内置）/)).toBeVisible()
+    })
+  })
+
   it('重复点击添加目录只提交一次', async () => {
     let createCount = 0
     server.use(
