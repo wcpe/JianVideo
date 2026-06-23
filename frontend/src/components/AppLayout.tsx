@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
+import UpdateIndicator from './UpdateIndicator'
 
 // 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
 const NAVBAR_WIDTH_EXPANDED = 180
@@ -114,6 +115,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Group>
 
           <Group gap="sm">
+            {/* 「更新可用」提示（FR-58）：有新版本时常驻展示，点击跳转系统信息 tab 更新区 */}
+            <UpdateIndicator />
             {/* 扫描任务队列指示器（FR-29）：有进行中任务时常驻展示 */}
             <ScanTaskIndicator />
             <Text size="sm" c="dimmed">{username}</Text>

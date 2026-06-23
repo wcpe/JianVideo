@@ -312,8 +312,8 @@ export default function SystemPage() {
         </>
       ) : null}
 
-      {/* 应用更新（FR-46）*/}
-      <Card withBorder padding="md" radius="md">
+      {/* 应用更新（FR-46）；id=update 供页眉「更新可用」提示锚点定位（FR-58）*/}
+      <Card id="update" withBorder padding="md" radius="md">
         <Group justify="space-between" mb="sm">
           <Title order={4}>应用更新</Title>
           <Group gap="xs">
