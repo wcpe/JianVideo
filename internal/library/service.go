@@ -277,6 +277,31 @@ func (s *Service) DeleteMediaFile(id int64) error {
 	return nil
 }
 
+// BatchDeleteMediaFiles 批量软删媒体文件（FR-69）。
+// 复用 FR-25 软删语义：在单事务内对所有有效 id 一次 UPDATE 置 deleted_at，不动磁盘源文件。
+// 跳过不存在 / 已软删的 id（不计入返回值、不报错）；空列表为 no-op 返回 0。返回实际软删条数。
+func (s *Service) BatchDeleteMediaFiles(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	var affected int64
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.MediaFile{}).
+			Where("id IN ? AND deleted_at IS NULL", ids).
+			Update("deleted_at", now)
+		if result.Error != nil {
+			return result.Error
+		}
+		affected = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
 // ListDeletedMediaFiles 列出全部已软删的媒体文件（回收站，FR-25），按软删时间倒序。
 func (s *Service) ListDeletedMediaFiles() ([]models.MediaFile, error) {
 	var items []models.MediaFile

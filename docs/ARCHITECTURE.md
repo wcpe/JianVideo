@@ -111,7 +111,7 @@
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 >
-> 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。
+> 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内对 `id IN (?) AND deleted_at IS NULL` 一次 `UPDATE` 置 `deleted_at`，复用单条软删语义、跳过不存在/已软删 id，返回受影响行数；供时间轴与目录浏览的列表多选批量删除（进回收站、可还原）消费。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
 >
@@ -231,7 +231,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、软删除/回收站与还原（FR-25）、回收站清理（FR-26） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |

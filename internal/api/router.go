@@ -42,6 +42,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.PUT("/media/:id/display-name", h.UpdateDisplayName)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
 
+		// 批量软删（FR-69）：单事务对多个 media_id 复用软删，进回收站
+		lib.POST("/media/batch-delete", h.BatchDeleteMediaFiles)
+
 		// 软删除与回收站（FR-25）：列出已软删项、还原
 		lib.GET("/recycle", h.ListRecycleMediaFiles)
 		lib.POST("/media/:id/restore", h.RestoreMediaFile)

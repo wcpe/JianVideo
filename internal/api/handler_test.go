@@ -206,6 +206,62 @@ func TestDeleteMediaFile_API(t *testing.T) {
 	}
 }
 
+func TestBatchDeleteMediaFiles_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	a, _ := svc.CreateMediaFile(1, "/tmp/a.mp4", 512)
+	b, _ := svc.CreateMediaFile(1, "/tmp/b.mp4", 512)
+	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 512)
+
+	body := `{"ids":[` + strconv.FormatInt(a.ID, 10) + `,` + strconv.FormatInt(b.ID, 10) + `]}`
+	req := httptest.NewRequest("POST", "/api/library/media/batch-delete", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Deleted int64 `json:"deleted"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Deleted != 2 {
+		t.Fatalf("应软删 2 条, 实得 %d", resp.Deleted)
+	}
+
+	// a、b 进回收站，keep 仍在常规列表
+	items, _, _ := svc.ListMediaFilesFiltered(library.MediaFilter{LibraryID: 1}, 1, 20)
+	if len(items) != 1 || items[0].ID != keep.ID {
+		t.Fatalf("常规列表应仅含未删项, 实得 %d 条", len(items))
+	}
+}
+
+func TestBatchDeleteMediaFiles_EmptyIDs_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/library/media/batch-delete", bytes.NewBufferString(`{"ids":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("空列表期望 200, 实际 %d", w.Code)
+	}
+}
+
+func TestBatchDeleteMediaFiles_InvalidBody_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("POST", "/api/library/media/batch-delete", bytes.NewBufferString(`not-json`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法 body 期望 400, 实际 %d", w.Code)
+	}
+}
+
 func TestListRecycleMediaFiles_API(t *testing.T) {
 	router, svc := setupTestRouter(t)
 	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 512)

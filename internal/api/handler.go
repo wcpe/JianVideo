@@ -306,6 +306,26 @@ func (h *Handler) DeleteMediaFile(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// BatchDeleteMediaFiles POST /api/library/media/batch-delete
+// 批量软删媒体文件（FR-69）：body {ids:[...]}，单事务内复用 FR-25 软删（仅置 deleted_at、不动磁盘），
+// 跳过不存在/已软删 id。返回实际软删条数。
+func (h *Handler) BatchDeleteMediaFiles(c *gin.Context) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
+		return
+	}
+
+	deleted, err := h.library.BatchDeleteMediaFiles(req.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "DELETE_FAILED", "message": "批量删除失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted})
+}
+
 // ListRecycleMediaFiles GET /api/library/recycle
 // 列出回收站内全部已软删的媒体文件（FR-25）。
 func (h *Handler) ListRecycleMediaFiles(c *gin.Context) {

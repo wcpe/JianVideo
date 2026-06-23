@@ -355,6 +355,76 @@ func TestDeleteMediaFile_NotFound(t *testing.T) {
 	}
 }
 
+// TestBatchDeleteMediaFiles 批量软删（FR-69）：多个 id 一次软删进回收站，记录仍在、deleted_at 被置上。
+func TestBatchDeleteMediaFiles(t *testing.T) {
+	svc, gdb := newTestService(t)
+
+	a, _ := svc.CreateMediaFile(1, "/tmp/a.mp4", 1024)
+	b, _ := svc.CreateMediaFile(1, "/tmp/b.mp4", 1024)
+	keep, _ := svc.CreateMediaFile(1, "/tmp/keep.mp4", 1024)
+
+	n, err := svc.BatchDeleteMediaFiles([]int64{a.ID, b.ID})
+	if err != nil {
+		t.Fatalf("批量软删失败: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("应软删 2 条, 实得 %d", n)
+	}
+
+	// 软删项进回收站、记录仍在
+	deleted, _ := svc.ListDeletedMediaFiles()
+	if len(deleted) != 2 {
+		t.Fatalf("回收站应含 2 条软删项, 实得 %d", len(deleted))
+	}
+	var got models.MediaFile
+	if err := gdb.First(&got, a.ID).Error; err != nil {
+		t.Fatalf("软删后记录应仍存在: %v", err)
+	}
+	if got.DeletedAt == nil {
+		t.Fatal("软删后 deleted_at 应被置上")
+	}
+
+	// 未删项仍在常规列表
+	items, total, _ := svc.ListMediaFilesFiltered(MediaFilter{LibraryID: 1}, 1, 20)
+	if total != 1 || len(items) != 1 || items[0].ID != keep.ID {
+		t.Fatalf("常规列表应仅含未删项, 实得 total=%d", total)
+	}
+}
+
+// TestBatchDeleteMediaFiles_EmptyIDs 空 id 列表为 no-op，返回 0、不报错。
+func TestBatchDeleteMediaFiles_EmptyIDs(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	n, err := svc.BatchDeleteMediaFiles(nil)
+	if err != nil {
+		t.Fatalf("空列表不应报错: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("空列表应软删 0 条, 实得 %d", n)
+	}
+}
+
+// TestBatchDeleteMediaFiles_SkipsInvalidAndDeleted 含不存在/已软删 id 时跳过不报错、仅计有效软删数。
+func TestBatchDeleteMediaFiles_SkipsInvalidAndDeleted(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	a, _ := svc.CreateMediaFile(1, "/tmp/a.mp4", 1024)
+	already, _ := svc.CreateMediaFile(1, "/tmp/already.mp4", 1024)
+	// already 先单独软删
+	if err := svc.DeleteMediaFile(already.ID); err != nil {
+		t.Fatalf("预置软删失败: %v", err)
+	}
+
+	// 混入不存在 id 99999 与已软删 id already.ID，仅 a 应被软删
+	n, err := svc.BatchDeleteMediaFiles([]int64{a.ID, 99999, already.ID})
+	if err != nil {
+		t.Fatalf("含非法/已软删 id 不应报错: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("应仅软删 1 条有效项, 实得 %d", n)
+	}
+}
+
 func TestCreateMediaFile_EmptyPath(t *testing.T) {
 	svc, _ := newTestService(t)
 
