@@ -124,6 +124,32 @@ describe('LibraryManagerPage', () => {
     })
   })
 
+  it('存储库卡片以网格布局渲染，既有交互不回归（FR-65）', async () => {
+    server.use(
+      http.get('*/api/library/paths', () => HttpResponse.json({
+        items: [
+          { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T12:00:00Z', media_count: 3 },
+          { id: 2, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-01T12:00:00Z', media_count: 5 },
+        ],
+      })),
+    )
+
+    const { container } = renderPage()
+
+    // 两个库卡片都渲染，且容器为 Mantine SimpleGrid（网格布局，非单列 Stack）
+    await screen.findByText('电影')
+    await screen.findByText('动漫')
+    const grid = container.querySelector('.mantine-SimpleGrid-root')
+    expect(grid).not.toBeNull()
+    expect(grid?.querySelectorAll('.mantine-Card-root').length).toBe(2)
+
+    // 既有交互不回归：浏览/增量更新/全量扫描/删除按钮仍在
+    expect(screen.getAllByRole('button', { name: '浏览' }).length).toBe(2)
+    expect(screen.getAllByRole('button', { name: '增量更新' }).length).toBe(2)
+    expect(screen.getAllByRole('button', { name: '全量扫描' }).length).toBe(2)
+    expect(screen.getByLabelText('删除目录 电影')).toBeVisible()
+  })
+
   it('列出该库后缀，内置标识不可删、自定义可删（FR-64）', async () => {
     server.use(
       http.get('*/api/library/extensions', () => HttpResponse.json({

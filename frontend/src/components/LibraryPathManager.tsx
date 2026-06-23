@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Stack, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge, SegmentedControl } from '@mantine/core'
+import { SimpleGrid, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge, SegmentedControl } from '@mantine/core'
 import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader, IconListSearch, IconX } from '@tabler/icons-react'
 import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types'
 
@@ -58,38 +58,41 @@ export default function LibraryPathManager({
       {loading ? <Skeleton height={40} /> : paths.length === 0 ? (
         <Text c="dimmed" size="sm">暂无目录，请添加</Text>
       ) : (
-        <Stack gap={4}>
+        // 存储库卡片网格（FR-65）：一行 2-3 个，窄列下卡内信息与操作纵向堆叠避免拥挤
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
           {paths.map((p) => {
             const filter = extFilters[p.id] || 'all'
             const exts = extensionsByLibrary[p.id] || []
             const visibleExts = filter === 'all' ? exts : exts.filter((e) => e.type === filter)
             return (
-            <Card key={p.id} withBorder p="xs" radius="sm" bg="var(--mantine-color-default)">
-              <Group justify="space-between" wrap="nowrap">
-                <Box
-                  style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
-                  onClick={() => onBrowsePath(p)}
-                  role="button"
-                  aria-label={`打开 ${p.label || p.path} 目录`}
-                >
-                  <Group gap={6} wrap="nowrap">
-                    <IconFolder size={14} color="var(--mantine-color-purple-4)" />
-                    <Text size="sm" truncate>{p.label || p.path}</Text>
-                    <Badge size="xs" variant="light" color="purple">{p.media_count ?? 0} 个媒体</Badge>
-                  </Group>
-                  <Text size="xs" c="dimmed" truncate>{p.path}</Text>
-                </Box>
-                <Group gap={4} wrap="nowrap">
-                  <Button size="xs" variant="subtle" color="blue" leftSection={<IconEye size={12} />}
-                    onClick={() => onBrowsePath(p)}>浏览</Button>
-                  <Button size="xs" variant="subtle" color="purple" leftSection={<IconRefresh size={12} />}
-                    onClick={() => onScan(p.id, 'incremental')} loading={scanLoading[p.id]}>增量更新</Button>
-                  <Button size="xs" variant="subtle" color="purple" leftSection={<IconListSearch size={12} />}
-                    onClick={() => onScan(p.id, 'full')} loading={scanLoading[p.id]}>全量扫描</Button>
-                  <ActionIcon size="sm" variant="subtle" color="red" onClick={() => onDeletePath(p)}>
-                    <IconTrash size={14} />
-                  </ActionIcon>
+            <Card key={p.id} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)">
+              {/* 库信息：占整行、可点进浏览 */}
+              <Box
+                style={{ minWidth: 0, cursor: 'pointer' }}
+                onClick={() => onBrowsePath(p)}
+                role="button"
+                aria-label={`打开 ${p.label || p.path} 目录`}
+              >
+                <Group gap={6} wrap="nowrap">
+                  <IconFolder size={14} color="var(--mantine-color-purple-4)" />
+                  <Text size="sm" truncate>{p.label || p.path}</Text>
+                  <Badge size="xs" variant="light" color="purple">{p.media_count ?? 0} 个媒体</Badge>
                 </Group>
+                <Text size="xs" c="dimmed" truncate>{p.path}</Text>
+              </Box>
+
+              {/* 操作按钮：纵向堆叠在信息下方、窄列可换行不拥挤 */}
+              <Group gap={4} mt="xs" wrap="wrap">
+                <Button size="xs" variant="subtle" color="blue" leftSection={<IconEye size={12} />}
+                  onClick={() => onBrowsePath(p)}>浏览</Button>
+                <Button size="xs" variant="subtle" color="purple" leftSection={<IconRefresh size={12} />}
+                  onClick={() => onScan(p.id, 'incremental')} loading={scanLoading[p.id]}>增量更新</Button>
+                <Button size="xs" variant="subtle" color="purple" leftSection={<IconListSearch size={12} />}
+                  onClick={() => onScan(p.id, 'full')} loading={scanLoading[p.id]}>全量扫描</Button>
+                <ActionIcon size="sm" variant="subtle" color="red"
+                  aria-label={`删除目录 ${p.label || p.path}`} onClick={() => onDeletePath(p)}>
+                  <IconTrash size={14} />
+                </ActionIcon>
               </Group>
 
               {/* 后缀管理（FR-64）：视频/图片/全部 筛选 + 列出（内置不可删 / 自定义可删） */}
@@ -145,7 +148,7 @@ export default function LibraryPathManager({
             </Card>
             )
           })}
-        </Stack>
+        </SimpleGrid>
       )}
     </Box>
   )
