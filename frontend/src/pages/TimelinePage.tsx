@@ -10,6 +10,7 @@ import MediaFilterBar from '@/components/MediaFilterBar'
 import MediaQueryFilters from '@/components/MediaQueryFilters'
 import ContinueWatching from '@/components/ContinueWatching'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
+import ConfirmModal from '@/components/ConfirmModal'
 import { extractErrorMessage } from '@/utils/error'
 import * as libApi from '@/api/library'
 import type { TimelineGranularity } from '@/utils/timeline'
@@ -29,6 +30,9 @@ export default function TimelinePage() {
   const [timeTo, setTimeTo] = useState('')
   // 时间轴缩放粒度（FR-32）：按媒体时间组织，日/月/年缩放
   const [granularity, setGranularity] = useState<TimelineGranularity>('day')
+  // 批量删除（FR-69）：待确认删除 id 列表（非空即弹确认框）+ 删除进行中
+  const [pendingDelete, setPendingDelete] = useState<number[]>([])
+  const [deleting, setDeleting] = useState(false)
   const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo, sort: 'media_time' })
   const paths = useLibraryPaths(undefined)
   const exts = paths.customImageExtensions
@@ -50,6 +54,21 @@ export default function TimelinePage() {
       notifications.show({ color: 'red', message: extractErrorMessage(err, '更新收藏失败') })
     }
   }, [infinite])
+
+  // 执行批量软删（FR-69）：确认后调端点，成功刷新 + 关闭确认框
+  const confirmDelete = useCallback(async () => {
+    setDeleting(true)
+    try {
+      const n = await libApi.batchDeleteMediaFiles(pendingDelete)
+      notifications.show({ color: 'green', message: `已删除 ${n} 项到回收站` })
+      setPendingDelete([])
+      infinite.reload()
+    } catch (err) {
+      notifications.show({ color: 'red', message: extractErrorMessage(err, '批量删除失败') })
+    } finally {
+      setDeleting(false)
+    }
+  }, [pendingDelete, infinite])
 
   return (
     <Stack gap="md">
@@ -129,6 +148,8 @@ export default function TimelinePage() {
         hasMore={infinite.hasMore}
         loadingMore={infinite.loading && infinite.items.length > 0}
         granularity={granularity}
+        onBatchDelete={(ids) => setPendingDelete(ids)}
+        onDeleteOne={(f) => setPendingDelete([f.id])}
       />
 
       <MediaDetailPanel
@@ -136,6 +157,17 @@ export default function TimelinePage() {
         initialIndex={detailIndex}
         onClose={() => setDetailIndex(null)}
         customImageExtensions={exts}
+      />
+
+      {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}
+      <ConfirmModal
+        opened={pendingDelete.length > 0}
+        title="删除媒体"
+        message={`确定删除选中的 ${pendingDelete.length} 项？删除后进入回收站，可在回收站还原。`}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete([])}
+        loading={deleting}
       />
     </Stack>
   )
