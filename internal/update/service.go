@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,10 @@ const (
 	defaultOwner   = "wcpe"
 	defaultRepo    = "JianVideo"
 )
+
+// cacheTTL 更新检测结果的缓存有效期：TTL 内重复检测直接走缓存，不再请求 GitHub，
+// 缓解国内直连 GitHub 慢导致的前端超时。
+const cacheTTL = 10 * time.Minute
 
 // Channel 更新频道。
 type Channel string
@@ -50,12 +55,22 @@ type CheckResult struct {
 	AssetName  string  `json:"asset_name"`
 }
 
+// cachedCheck 一条按频道缓存的检测结果及其写入时间。
+type cachedCheck struct {
+	res *CheckResult
+	at  time.Time
+}
+
 // Service 自更新服务。baseURL/owner/repo/client 可注入，便于单测以 httptest 替换 GitHub。
+// mu/cache 实现按频道的 TTL 缓存，并发安全。
 type Service struct {
 	baseURL string
 	owner   string
 	repo    string
 	client  *http.Client
+
+	mu    sync.Mutex
+	cache map[Channel]cachedCheck
 }
 
 // NewService 创建指向公开仓库的自更新服务。
@@ -65,6 +80,7 @@ func NewService() *Service {
 		owner:   defaultOwner,
 		repo:    defaultRepo,
 		client:  &http.Client{Timeout: 30 * time.Second},
+		cache:   map[Channel]cachedCheck{},
 	}
 }
 
@@ -83,8 +99,35 @@ func (s *Service) resolveTarget(ctx context.Context, ch Channel) (rel *Release, 
 }
 
 // Check 按频道检测是否有可应用的更新。
-func (s *Service) Check(ctx context.Context, current, channel string) (*CheckResult, error) {
+// force=false 时优先命中 TTL 缓存；缓存未过期直接返回副本，不请求 GitHub。
+// fetch 出错时优雅降级：非 force 且存在历史缓存（即便已过期）则返回该缓存（nil err），
+// 仅在无缓存或 force 时才把错误上抛。
+func (s *Service) Check(ctx context.Context, current, channel string, force bool) (*CheckResult, error) {
 	ch := normalizeChannel(channel)
+
+	if !force {
+		if res, ok := s.cachedFresh(ch); ok {
+			return res, nil
+		}
+	}
+
+	res, err := s.fetchCheck(ctx, current, ch)
+	if err != nil {
+		// 降级：非 force 且有历史缓存（含过期）→ 用上次结果，避免一次网络抖动就让用户看到失败
+		if !force {
+			if stale, ok := s.cachedAny(ch); ok {
+				return stale, nil
+			}
+		}
+		return nil, err
+	}
+
+	s.storeCache(ch, res)
+	return res, nil
+}
+
+// fetchCheck 实际请求 GitHub 并组装检测结果（不读写缓存）。
+func (s *Service) fetchCheck(ctx context.Context, current string, ch Channel) (*CheckResult, error) {
 	rel, bin, _, err := s.resolveTarget(ctx, ch)
 	if err != nil {
 		return nil, err
@@ -101,6 +144,45 @@ func (s *Service) Check(ctx context.Context, current, channel string) (*CheckRes
 	// 有更新需同时满足：按频道判定有更新 且 该平台有可下载产物
 	res.HasUpdate = bin != nil && hasUpdate(latest, current, ch)
 	return res, nil
+}
+
+// cachedFresh 返回未过期的缓存副本（命中且在 TTL 内时 ok=true）。
+func (s *Service) cachedFresh(ch Channel) (*CheckResult, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.cache[ch]
+	if !ok || time.Since(c.at) >= cacheTTL {
+		return nil, false
+	}
+	return copyResult(c.res), true
+}
+
+// cachedAny 返回任意历史缓存副本（不论是否过期，命中即 ok=true），供降级使用。
+func (s *Service) cachedAny(ch Channel) (*CheckResult, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.cache[ch]
+	if !ok {
+		return nil, false
+	}
+	return copyResult(c.res), true
+}
+
+// storeCache 写入/刷新某频道的缓存。
+func (s *Service) storeCache(ch Channel, res *CheckResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache[ch] = cachedCheck{res: copyResult(res), at: time.Now()}
+}
+
+// copyResult 返回 CheckResult 的浅拷贝；CheckResult 全为值字段，浅拷贝即深拷贝，
+// 用于让缓存对外只暴露副本，外部改动不污染缓存。
+func copyResult(r *CheckResult) *CheckResult {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	return &c
 }
 
 // hasUpdate 判断目标版本相对当前版本是否应提示更新。

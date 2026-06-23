@@ -24,13 +24,18 @@ async function realRunCodecTest(force?: boolean): Promise<CodecTestResult> {
   return res.data
 }
 
-async function realCheckUpdate(channel: string): Promise<UpdateCheckResult> {
-  const res = await client.get<UpdateCheckResult>('/api/system/update/check', { params: { channel } })
+async function realCheckUpdate(channel: string, force = false): Promise<UpdateCheckResult> {
+  // 检查更新需直连 GitHub，国内常较慢；单请求超时放宽到 60s（覆盖全局 15s），避免前端先于后端超时。
+  const res = await client.get<UpdateCheckResult>('/api/system/update/check', {
+    params: { channel, ...(force ? { force: 'true' } : {}) },
+    timeout: 60000,
+  })
   return res.data
 }
 
 async function realApplyUpdate(channel: string): Promise<void> {
-  await client.post('/api/system/update/apply', { channel })
+  // 更新会触发下载替换，给较长单请求超时以防慢网络下前端提前超时。
+  await client.post('/api/system/update/apply', { channel }, { timeout: 60000 })
 }
 
 async function realRollbackUpdate(): Promise<void> {
@@ -113,7 +118,7 @@ async function mockRunCodecTest(_force?: boolean): Promise<CodecTestResult> {
   }
 }
 
-async function mockCheckUpdate(channel: string): Promise<UpdateCheckResult> {
+async function mockCheckUpdate(channel: string, _force = false): Promise<UpdateCheckResult> {
   await mockDelay(200)
   const prerelease = channel === 'prerelease'
   return {
@@ -146,8 +151,8 @@ export function runCodecTest(force?: boolean): Promise<CodecTestResult> {
   return useMock ? mockRunCodecTest(force) : realRunCodecTest(force)
 }
 
-export function checkUpdate(channel: string): Promise<UpdateCheckResult> {
-  return useMock ? mockCheckUpdate(channel) : realCheckUpdate(channel)
+export function checkUpdate(channel: string, force = false): Promise<UpdateCheckResult> {
+  return useMock ? mockCheckUpdate(channel, force) : realCheckUpdate(channel, force)
 }
 
 export function applyUpdate(channel: string): Promise<void> {

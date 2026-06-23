@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 修复
+- **自更新「检查更新」直连 GitHub 慢导致超时、无缓存、发布说明非 markdown 渲染（FR-46）**：①「检查更新」此前前端 axios 15s 全局超时叠加后端 15s context，国内直连 GitHub 常 >15s，前端先报 `timeout of 15000ms exceeded`——改为前端对 update 检查单请求超时放宽到 60s（全局 15s 不动）、后端 context 与服务的 http.Client（30s）对齐到 30s，并把检查失败的用户提示改为友好文案（后端日志记原始错误，不向用户回显裸超时串）。② 检测无缓存每次必请求 GitHub——`update.Service` 增并发安全的按频道 TTL 缓存（10 分钟），命中返回副本；新增 `force` 形参支持手动强制重测；fetch 出错时优雅降级（非 force 且有历史缓存即返回上次结果，避免一次网络抖动即失败）。③ 发布说明（GitHub Release body 的 markdown 原文）此前以纯文本 `pre-wrap` 展示——改用 react-markdown + remark-gfm 渲染（外链强制 `target=_blank`/`rel=noopener noreferrer`）。
+
 ### 变更
 - **修正两处预存在 ARCHITECTURE 文档漂移**（非代码变更）：§1「FFmpeg 经 CGO（csnewman/ffmpeg-go）调用」改为「FFmpeg/FFprobe 外部进程 `os/exec`、CGO 仅用于 SQLite 驱动与 `-tags ffmpeg` 可选硬件检测」（与 §5.3/§5.6 一致，`go.mod` 实无 `ffmpeg-go`）；§3 移除从未落地的幻影 `transcode_sessions` 表，改为如实描述内存播放会话（`playback.Service`，含 FR-53 的 `target_codec`/`output_path`），并同步修正 `.claude/rules/architecture-invariants.md` §3 同一真源条目（见 [ADR-0036](docs/adr/0036-codec-negotiation.md)）。
 

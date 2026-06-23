@@ -25,15 +25,22 @@ func (h *Handler) resolveUpdateChannel(explicit string) string {
 	return "stable"
 }
 
-// CheckUpdate GET /api/system/update/check?channel=stable|prerelease
-// 检测 GitHub Releases 是否有可应用的新版本（FR-46）。channel 省略时用持久化设置。
+// CheckUpdate GET /api/system/update/check?channel=stable|prerelease&force=true
+// 检测 GitHub Releases 是否有可应用的新版本（FR-46）。channel 省略时用持久化设置；
+// force=true 跳过 TTL 缓存强制重新检测。
+// 超时设 30s 与 update 服务的 http.Client（30s）对齐，给国内直连 GitHub 的慢请求留时间。
 func (h *Handler) CheckUpdate(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	force := c.Query("force") == "true"
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	res, err := h.updateSvc.Check(ctx, h.versionOrDefault(), h.resolveUpdateChannel(c.Query("channel")))
+	res, err := h.updateSvc.Check(ctx, h.versionOrDefault(), h.resolveUpdateChannel(c.Query("channel")), force)
 	if err != nil {
+		// 记录原始错误便于排查，但不向用户回显裸超时/底层错误，给出友好提示。
 		log.Printf("[WARN] 检查更新失败: %v", err)
-		c.JSON(http.StatusBadGateway, gin.H{"code": "UPDATE_CHECK_FAILED", "message": "检查更新失败：" + err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{
+			"code":    "UPDATE_CHECK_FAILED",
+			"message": "检查更新失败：网络不可达或 GitHub 暂时不可用，请稍后重试",
+		})
 		return
 	}
 	c.JSON(http.StatusOK, res)

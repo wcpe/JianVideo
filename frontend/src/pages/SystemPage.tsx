@@ -1,13 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
+  TypographyStylesProvider,
 } from '@mantine/core'
 import { useClipboard } from '@mantine/hooks'
 import { IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp } from '@tabler/icons-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
+
+// 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
+const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂时不可用，请稍后重试'
 
 /** 单行信息项：左侧标签 + 右侧值 */
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -60,6 +66,19 @@ function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): st
     }
   }
   return lines.join('\n')
+}
+
+/**
+ * 提取检查更新失败的展示文案：
+ * 优先用后端返回的友好 message（如「网络不可达或 GitHub 暂时不可用」）；
+ * 无响应（超时/网络异常，axios message 形如「timeout of 60000ms exceeded」）时用固定兜底，避免回显裸串。
+ */
+function updateCheckErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const resp = (err as { response?: { data?: { message?: string } } }).response
+    if (resp?.data?.message) return resp.data.message
+  }
+  return UPDATE_CHECK_FALLBACK
 }
 
 /** 系统诊断页：展示运行环境、FFmpeg/硬件加速信息，并支持编解码器测试 */
@@ -126,9 +145,11 @@ export default function SystemPage() {
     setUpdateError(null)
     setUpdateInfo(null)
     try {
-      setUpdateInfo(await systemApi.checkUpdate(channel))
+      // 默认走后端 TTL 缓存（force 为 false），命中即时返回，缓解直连 GitHub 慢导致的超时
+      setUpdateInfo(await systemApi.checkUpdate(channel, false))
     } catch (err) {
-      setUpdateError(extractErrorMessage(err, '检查更新失败'))
+      // 仅采用后端返回的友好 message；无响应（超时/网络异常）时用固定兜底，不回显裸 axios 串
+      setUpdateError(updateCheckErrorMessage(err))
     } finally {
       setUpdateChecking(false)
     }
@@ -335,7 +356,19 @@ export default function SystemPage() {
             </Group>
             {updateInfo.notes && (
               <Box style={{ maxHeight: 160, overflowY: 'auto' }}>
-                <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>{updateInfo.notes}</Text>
+                {/* 发布说明为 GitHub Release 的 markdown 原文，经 react-markdown 渲染；外链强制安全新标签页打开 */}
+                <TypographyStylesProvider>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ node: _node, ...props }) => (
+                        <a {...props} target="_blank" rel="noopener noreferrer" />
+                      ),
+                    }}
+                  >
+                    {updateInfo.notes}
+                  </ReactMarkdown>
+                </TypographyStylesProvider>
               </Box>
             )}
             <Group gap="xs">

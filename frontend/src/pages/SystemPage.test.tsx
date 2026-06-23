@@ -139,6 +139,64 @@ describe('SystemPage', () => {
     expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
   })
 
+  it('发布说明经 markdown 渲染出标题/列表/加粗/安全外链（FR-46）', async () => {
+    server.use(
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json({
+          current: '0.3.0',
+          latest: 'v0.6.3',
+          has_update: true,
+          tag: 'v0.6.3',
+          prerelease: false,
+          channel: 'stable',
+          notes: '## 更新要点\n\n- 修复 **超时** 问题\n- 详见 [发布页](https://example.com/release)',
+          asset_name: 'jianvideo-linux-amd64',
+        }),
+      ),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+
+    // markdown 渲染出标题 / 列表 / 加粗 / 外链（外链安全打开新标签页）
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '更新要点' })).toBeVisible()
+    })
+    expect(screen.getByText('超时').tagName).toBe('STRONG')
+    expect(screen.getAllByRole('listitem').length).toBeGreaterThan(0)
+    const link = screen.getByRole('link', { name: '发布页' })
+    expect(link).toHaveAttribute('href', 'https://example.com/release')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('检查更新失败时展示友好提示而非裸 timeout 串（FR-46）', async () => {
+    server.use(
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json(
+          { code: 'UPDATE_CHECK_FAILED', message: '检查更新失败：网络不可达或 GitHub 暂时不可用，请稍后重试' },
+          { status: 502 },
+        ),
+      ),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('更新出错')).toBeVisible()
+    })
+    expect(screen.getByText(/网络不可达或 GitHub 暂时不可用/)).toBeVisible()
+    // 不应出现裸 axios 超时串
+    expect(screen.queryByText(/timeout of/i)).toBeNull()
+  })
+
   it('切换到测试版后检查更新走预发布频道（FR-46）', async () => {
     const user = userEvent.setup()
     renderPage()

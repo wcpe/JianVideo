@@ -29,7 +29,7 @@ func mockService(t *testing.T, releases func(base string) []Release, binContent,
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	base = srv.URL
-	return &Service{baseURL: srv.URL, owner: "wcpe", repo: "JianVideo", client: srv.Client()}
+	return &Service{baseURL: srv.URL, owner: "wcpe", repo: "JianVideo", client: srv.Client(), cache: map[Channel]cachedCheck{}}
 }
 
 // oneStableRelease 构造单个含当前平台产物 + 校验和的正式 release。
@@ -49,7 +49,7 @@ func oneStableRelease(tag string) func(base string) []Release {
 
 func TestCheck_StableHasUpdate(t *testing.T) {
 	s := mockService(t, oneStableRelease("v9.9.9"), "", "")
-	res, err := s.Check(context.Background(), "0.6.2", "stable")
+	res, err := s.Check(context.Background(), "0.6.2", "stable", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestCheck_StableHasUpdate(t *testing.T) {
 
 func TestCheck_NoUpdateWhenSameVersion(t *testing.T) {
 	s := mockService(t, oneStableRelease("v0.6.2"), "", "")
-	res, err := s.Check(context.Background(), "0.6.2", "stable")
+	res, err := s.Check(context.Background(), "0.6.2", "stable", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +82,11 @@ func TestCheck_StableSkipsPrerelease(t *testing.T) {
 	s := mockService(t, releases, "", "")
 
 	// 稳定频道跳过预发布，选中较旧的 v0.6.1 → 无更新
-	if res, _ := s.Check(context.Background(), "0.6.2", "stable"); res.HasUpdate || res.Latest != "v0.6.1" {
+	if res, _ := s.Check(context.Background(), "0.6.2", "stable", false); res.HasUpdate || res.Latest != "v0.6.1" {
 		t.Errorf("稳定频道应选 v0.6.1 且无更新，得到 %+v", res)
 	}
 	// 预发布频道取最新 v9.9.9 → 有更新
-	if res, _ := s.Check(context.Background(), "0.6.2", "prerelease"); !res.HasUpdate || res.Latest != "v9.9.9" {
+	if res, _ := s.Check(context.Background(), "0.6.2", "prerelease", false); !res.HasUpdate || res.Latest != "v9.9.9" {
 		t.Errorf("预发布频道应选 v9.9.9 且有更新，得到 %+v", res)
 	}
 }
@@ -131,7 +131,7 @@ func TestCheck_PrereleaseSelectsDevNotNewestStable(t *testing.T) {
 	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
 
 	// 测试版：选 dev，latest 取内嵌版本，相对正式版 0.7.0 视为有更新（可切换）
-	res, err := s.Check(context.Background(), "0.7.0", "prerelease")
+	res, err := s.Check(context.Background(), "0.7.0", "prerelease", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestCheck_PrereleaseSelectsDevNotNewestStable(t *testing.T) {
 		t.Fatalf("测试版应选 dev 内嵌版本且有更新，得到 %+v", res)
 	}
 	// 正式版：仍选 v0.7.0，当前即 0.7.0 → 无更新
-	st, _ := s.Check(context.Background(), "0.7.0", "stable")
+	st, _ := s.Check(context.Background(), "0.7.0", "stable", false)
 	if st.Latest != "v0.7.0" || st.HasUpdate {
 		t.Errorf("正式版应选 v0.7.0 且无更新，得到 %+v", st)
 	}
@@ -148,7 +148,7 @@ func TestCheck_PrereleaseSelectsDevNotNewestStable(t *testing.T) {
 // TestCheck_PrereleaseSameDevNoUpdate 已在最新 dev 时测试版不应再提示更新。
 func TestCheck_PrereleaseSameDevNoUpdate(t *testing.T) {
 	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
-	res, _ := s.Check(context.Background(), "0.7.0-dev.abc1234", "prerelease")
+	res, _ := s.Check(context.Background(), "0.7.0-dev.abc1234", "prerelease", false)
 	if res.HasUpdate {
 		t.Errorf("已在最新 dev 不应提示更新，得到 %+v", res)
 	}
