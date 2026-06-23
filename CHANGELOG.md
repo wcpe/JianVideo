@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 变更
+- **修正两处预存在 ARCHITECTURE 文档漂移**（非代码变更）：§1「FFmpeg 经 CGO（csnewman/ffmpeg-go）调用」改为「FFmpeg/FFprobe 外部进程 `os/exec`、CGO 仅用于 SQLite 驱动与 `-tags ffmpeg` 可选硬件检测」（与 §5.3/§5.6 一致，`go.mod` 实无 `ffmpeg-go`）；§3 移除从未落地的幻影 `transcode_sessions` 表，改为如实描述内存播放会话（`playback.Service`，含 FR-53 的 `target_codec`/`output_path`），并同步修正 `.claude/rules/architecture-invariants.md` §3 同一真源条目（见 [ADR-0036](docs/adr/0036-codec-negotiation.md)）。
+
 ## 0.8.0（2026-06-23）
 
 ### 新增

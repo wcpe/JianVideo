@@ -11,7 +11,7 @@
 - 前端编译产物通过 `go:embed` 内嵌于 Go 二进制，Web 服务器由 Go 统一承载。
 - 不依赖外部数据库服务，元数据使用 SQLite（WAL 模式）本地存储。
 - 不依赖外部消息队列、缓存或容器编排。
-- FFmpeg 通过 CGO 绑定（csnewman/ffmpeg-go）直接调用 libavcodec/libavformat/libavutil/libswscale C API，编译时需链接 FFmpeg 开发库（libavcodec-dev 等）。
+- FFmpeg / FFprobe 作为**外部进程**调用（`os/exec`），转码与探测本身不经 CGO、不内嵌编解码逻辑（见 §5.3）；CGO 仅用于 SQLite 驱动（`mattn/go-sqlite3`）与 `-tags ffmpeg` 构建下可选的硬件编码器检测（`avcodec_find_encoder_by_name`，见 §5.6）。
 - 支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan）与软件编码，按 per-codec（H.264/H.265/AV1/VP9）逐编码实测能力（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
 - 硬件加速能力以编码器实测为单一真源，结果按 ffmpeg 版本持久化于 SQLite（启动后台预热、可手动重测），通过 `GET /api/transcode/hwaccel` 接口暴露。
 
@@ -130,17 +130,11 @@
 
 唯一键为 `(library_id, extension)`。删除 `library_paths` 时，服务层在同一事务中删除该目录关联的 `media_files` 与自定义 `media_extensions`。
 
-**转码会话（transcode_sessions）**
+**播放 / 转码会话（内存，非持久化表）**
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| id | INTEGER PK | 自增主键 |
-| media_id | INTEGER FK | 关联媒体文件 |
-| pid | INTEGER | FFmpeg 进程 PID |
-| output_url | TEXT | HLS 播放 URL |
-| status | TEXT | 状态：running/stopped/error |
-| hw_accel | TEXT | 使用的硬件加速类型 |
-| created_at | DATETIME | 创建时间 |
+播放会话**不落库**——由 `playback.Service` 以内存 map（`sessions[media_id]`，`sync.RWMutex` 保护）维护，进程重启即丢失（[ADR-0036](adr/0036-codec-negotiation.md)：避免镀金、不新建持久表）。会话结构 `models.PlaybackSession` 字段：播放位置（`current_position`）/ 时长 / 文件大小 / 缓冲区间（`buffered_ranges`），以及 FR-53 协商出的 `target_codec`（h264/h265/av1/vp9）与 `output_path`（ts/fmp4）。
+
+> 注：早期文档曾描述持久表 `transcode_sessions`（pid/status/hw_accel 等），但该表从未落地（不在 `main.go` AutoMigrate 列表）；会话以上述内存形式为单一真源。
 
 **用户（users）**
 

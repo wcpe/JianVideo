@@ -23,7 +23,7 @@
 
 - 媒体库目录注册信息以 SQLite `library_paths` 表为唯一真源。
 - 媒体文件元数据以 SQLite `media_files` 表为唯一真源，禁止以文件系统状态覆盖数据库记录。
-- 转码会话状态以 `transcode_sessions` 表为准，FFmpeg 进程状态须与数据库状态一致。
+- 转码 / 播放会话状态以 `playback.Service` 的内存会话（key=media_id）为单一真源、不落持久表（见 [ADR-0036](../../docs/adr/0036-codec-negotiation.md)）；FFmpeg 进程由 transcoder 在进程内管理，进程重启会话即丢失。
 - 前端静态资源以 `frontend/dist/` 编译产物为准，`go:embed` 内嵌后即为运行时真源。
 - 版本号以根目录 `VERSION` 文件为唯一真源。
 
