@@ -4,7 +4,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布版本
+## 0.9.0（2026-06-23）
 
 ### 新增
 - **可收缩左侧导航（FR-54）**：桌面端左侧导航栏支持「收缩为图标态 ↔ 展开」切换。展开 180px（图标 + 文字）、收缩 64px（仅图标，hover 出 Mantine `Tooltip` 提示导航名以保可用性）；切换按钮置于 navbar 底部、随状态切换图标与无障碍标签（「收起导航」/「展开导航」）。收缩状态持久化到 localStorage（键 `jianvideo-nav-collapsed`），刷新后保持。`AppShell` 的 navbar 宽度受收缩态控制，未引新依赖。移动端（< sm 断点）的汉堡 + 抽屉导航行为完全不变（抽屉内固定展开渲染、与收缩态隔离）。
