@@ -50,6 +50,31 @@ func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
 	return s.GetMediaFileByID(id)
 }
 
+// ListOnThisDay 查询「往年同一天」拍摄的媒体（FR-72「那年今日」），供首页回忆区块展示。
+// 命中条件：media_time 非空、未软删，且其月-日等于服务器本地「今天」的月-日、年份不等于今年。
+// 「今天」按服务器本地时间算，避免时区/客户端分歧；不回退 added_at（避免混入入库时间噪声）。
+// 结果按 media_time 倒序（最近年份在前），limit 小于 1 时回退默认值、超上限收敛到上限。
+func (s *Service) ListOnThisDay(limit int) ([]models.MediaFile, error) {
+	if limit < 1 {
+		limit = 12
+	}
+	if limit > continueWatchingMaxLimit {
+		limit = continueWatchingMaxLimit
+	}
+	now := time.Now()
+	monthDay := now.Format("01-02") // 今天的月-日，对应 strftime('%m-%d')
+	year := now.Format("2006")      // 今年，对应 strftime('%Y')
+	var items []models.MediaFile
+	if err := s.db.
+		Where("media_time IS NOT NULL AND deleted_at IS NULL AND strftime('%m-%d', media_time) = ? AND strftime('%Y', media_time) != ?", monthDay, year).
+		Order("media_time DESC").
+		Limit(limit).
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // ListContinueWatching 查询「有进度且未看完」的媒体（FR-44），按最近观看时间倒序，
 // 供首页「继续观看」区块展示。排除已删除（deleted_at 非空）记录。
 // limit 小于 1 时回退默认值，超过上限时收敛到上限。

@@ -70,3 +70,18 @@ func (h *Handler) ContinueWatching(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
+
+// OnThisDay GET /api/library/on-this-day?limit=N
+// 返回「往年同一天」拍摄的媒体列表（FR-72「那年今日」，按 media_time 倒序），供首页回忆区块展示。
+func (h *Handler) OnThisDay(c *gin.Context) {
+	limit := 12
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	items, err := h.library.ListOnThisDay(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}

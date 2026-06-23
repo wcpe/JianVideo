@@ -125,6 +125,12 @@ async function realGetContinueWatching(limit = 12): Promise<MediaFile[]> {
   return res.data.items
 }
 
+// 那年今日（FR-72）：拉取往年同一天拍摄的媒体回忆列表。
+async function realGetOnThisDay(limit = 12): Promise<MediaFile[]> {
+  const res = await client.get<{ items: MediaFile[] }>('/api/library/on-this-day', { params: { limit } })
+  return res.data.items
+}
+
 async function realGetMediaFile(id: number): Promise<MediaFile> {
   const res = await client.get(`/api/library/media/${id}`)
   return res.data
@@ -348,6 +354,23 @@ async function mockGetContinueWatching(limit = 12): Promise<MediaFile[]> {
   return mockMediaFiles
     .filter(m => (m.last_position ?? 0) > 0 && !m.watched)
     .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
+    .slice(0, limit)
+}
+
+// 那年今日（FR-72）：挑出 media_time 命中「今天月-日」但年份不等于今年的媒体，按 media_time 倒序。
+async function mockGetOnThisDay(limit = 12): Promise<MediaFile[]> {
+  await mockDelay(100)
+  const now = new Date()
+  const monthDay = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const thisYear = now.getFullYear()
+  return mockMediaFiles
+    .filter(m => {
+      if (!m.media_time) return false
+      const d = new Date(m.media_time)
+      const md = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      return md === monthDay && d.getFullYear() !== thisYear
+    })
+    .sort((a, b) => (b.media_time ?? '').localeCompare(a.media_time ?? ''))
     .slice(0, limit)
 }
 
@@ -582,6 +605,8 @@ export function removeMediaTag(mediaID: number, tagID: number) { return useMock 
 export function updateWatchPosition(id: number, position: number) { return useMock ? mockUpdateWatchPosition(id, position) : realUpdateWatchPosition(id, position) }
 export function markWatched(id: number) { return useMock ? mockMarkWatched(id) : realMarkWatched(id) }
 export function getContinueWatching(limit = 12) { return useMock ? mockGetContinueWatching(limit) : realGetContinueWatching(limit) }
+// 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
+export function getOnThisDay(limit = 12) { return useMock ? mockGetOnThisDay(limit) : realGetOnThisDay(limit) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }
 export function deleteMediaExtension(libraryID: number, extension: string) { return useMock ? mockDeleteMediaExtension(libraryID, extension) : realDeleteMediaExtension(libraryID, extension) }

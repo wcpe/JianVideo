@@ -69,6 +69,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 继续观看（FR-44）：有进度且未看完的媒体列表
 		lib.GET("/continue-watching", h.ContinueWatching)
 
+		// 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
+		lib.GET("/on-this-day", h.OnThisDay)
+
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
 		lib.POST("/scan/:id", h.ScanLibrary)

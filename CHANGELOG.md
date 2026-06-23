@@ -8,6 +8,7 @@
 
 ### 新增
 - **GPS 旅程轨迹视图（FR-76，扩 FR-39）**：照片地图（`/map`）在原带 GPS 照片散点基础上叠加按「天」聚合的旅程轨迹折线，让用户看出「这一天去了哪、怎么走的」。地图数据拉取改带 `sort:'media_time_asc'`（后端按 `COALESCE(media_time, added_at) ASC` 升序返回，后端无改动）；新增纯函数 `buildDayTracks(files)`（`frontend/src/utils/gpsTrack.ts`）——过滤含有效 GPS 坐标（经纬度均存在且非 0,0 空岛）的点，复用 `groupMediaByDate(files,'day')` 按天分组，丢弃当天点数 < 2 的天（无法连线），按日期升序输出 `{date, positions, color}[]`，颜色按下标循环取自固定调色板 `TRACK_COLORS`。`MapPage` 据此渲染若干 `<Polyline>` 折线层（react-leaflet 5.0.0 已含 Polyline，**不引新依赖**），不同天不同颜色以便区分；新增「轨迹模式」`Switch`（默认开）控制折线显隐，散点 `Marker` 与弹窗保持不变。空数据 / 单点的天不画线、不报错。复用 [ADR-0031](docs/adr/0031-photo-map-leaflet.md) 既定技术栈（leaflet + react-leaflet + OSM），纯前端展示层增强，无后端改动、无新依赖、无新 ADR。OSM 瓦片联网与真实 EXIF GPS 沿用 FR-39 既有真机维度限制。
+- **「那年今日」回忆流（FR-72）**：时间轴首页在「继续观看」旁新增平级「那年今日」回忆区块，自动挑出往年同一天拍摄的媒体并以「X 年前的今天」横向卡片流展示，点击进入播放页。后端新增 `GET /api/library/on-this-day?limit=N`（默认 12、上限 50），`library.ListOnThisDay` 以服务器本地时间取「今天」的月-日与年份，用 SQLite `strftime('%m-%d', media_time)` 与 `strftime('%Y', media_time)` 命中「往年同月日」——仅 `media_time` 非空（不回退入库时间，避免噪声）、未软删，按 `media_time` 倒序（最近年份在前）。前端新增 `OnThisDay` 组件（复用 `MediaThumbnail` + `mediaDisplayName`，每项按 `media_time` 年份与今年差标注「X 年前的今天」，回忆为空时整块不渲染）与 `getOnThisDay` api（real/mock 双实现）。无新数据模型、无新架构决策、无新 ADR、无新依赖。
 
 ## 0.10.0（2026-06-23）
 

@@ -9,6 +9,7 @@ import TimelineView from '@/components/TimelineView'
 import MediaFilterBar from '@/components/MediaFilterBar'
 import MediaQueryFilters from '@/components/MediaQueryFilters'
 import ContinueWatching from '@/components/ContinueWatching'
+import OnThisDay from '@/components/OnThisDay'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import ConfirmModal from '@/components/ConfirmModal'
 import { extractErrorMessage } from '@/utils/error'
@@ -90,6 +91,9 @@ export default function TimelinePage() {
 
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
       <ContinueWatching />
+
+      {/* 那年今日（FR-72）：往年同一天拍摄的媒体回忆，空列表时自动隐藏 */}
+      <OnThisDay />
 
       {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词） */}
       <TextInput
