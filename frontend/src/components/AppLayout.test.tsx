@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
@@ -118,5 +118,29 @@ describe('AppLayout 收缩导航（FR-54）', () => {
     // 点开抽屉后导航名文字可见（抽屉内固定展开，不受收缩态影响）
     await user.click(burger)
     expect(screen.getAllByText('时间轴').length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppLayout 页脚版本与开源协议链接（FR-57）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  it('页脚展示当前版本号（取自系统信息）', async () => {
+    renderLayout()
+
+    // 版本来自 MSW 的 /api/system/info（app_version=0.3.0）
+    await waitFor(() => {
+      expect(screen.getByText(/0\.3\.0/)).toBeInTheDocument()
+    })
+  })
+
+  it('页脚提供「开源协议」链接，指向 /licenses', async () => {
+    renderLayout()
+
+    const link = await screen.findByRole('link', { name: '开源协议' })
+    expect(link).toHaveAttribute('href', '/licenses')
   })
 })

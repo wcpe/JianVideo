@@ -1,9 +1,11 @@
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
+import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
 
 // 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
@@ -20,6 +22,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
   const { toggleColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
+  // 页脚版本号（FR-57）：取自系统信息；失败静默不显，不阻塞布局
+  const [appVersion, setAppVersion] = useState('')
+
+  // 拉取应用版本用于页脚展示；失败仅静默（页脚版本缺省，不影响其余布局）
+  useEffect(() => {
+    let active = true
+    getSystemInfo()
+      .then((info) => { if (active) setAppVersion(info.app_version) })
+      .catch(() => { /* 版本拉取失败不阻塞页面，页脚不显版本即可 */ })
+    return () => { active = false }
+  }, [])
 
   const handleLogout = async () => {
     await logout()
@@ -76,6 +89,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <AppShell
       header={{ height: 56 }}
       navbar={{ width: navCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
+      footer={{ height: 36 }}
       padding="md"
     >
       <AppShell.Header>
@@ -159,6 +173,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>
+
+      {/* 全局页脚（FR-57）：左侧版本号 + 右侧「开源协议」链接，桌面与移动端均可见 */}
+      <AppShell.Footer p="xs">
+        <Group justify="space-between" h="100%" px="md">
+          <Text size="xs" c="dimmed">
+            JianVideo{appVersion ? ` v${appVersion}` : ''}
+          </Text>
+          <Link to="/licenses" style={{ textDecoration: 'none' }}>
+            <Text size="xs" c="dimmed">开源协议</Text>
+          </Link>
+        </Group>
+      </AppShell.Footer>
     </AppShell>
   )
 }

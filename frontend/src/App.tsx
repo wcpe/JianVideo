@@ -14,6 +14,7 @@ import PlayPage from './pages/PlayPage'
 import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
 import MapPage from './pages/MapPage'
+import LicensesPage from './pages/LicensesPage'
 import '@mantine/core/styles.css'
 import './index.css'
 
@@ -40,6 +41,8 @@ export default function App() {
           <Route path="/system" element={<ProtectedRoute><AppLayout><ConsolePage /></AppLayout></ProtectedRoute>} />
           {/* 旧 /settings 链接重定向到控制台页的设置 tab，避免死链 */}
           <Route path="/settings" element={<Navigate to="/system?tab=settings" replace />} />
+          {/* 开源协议页（FR-57）：页脚「开源协议」链接进入 */}
+          <Route path="/licenses" element={<ProtectedRoute><AppLayout><LicensesPage /></AppLayout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

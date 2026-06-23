@@ -399,6 +399,7 @@
 - **数据库**：SQLite WAL 模式，数据库文件位于配置目录。
 - **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
 - **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。
+- **开源协议页（FR-57）**：全局页脚（`AppShell.Footer`）显示当前版本（取自 `GET /api/system/info` 的 `app_version`）+「开源协议」链接 → `/licenses`（`LicensesPage`，受保护路由）。协议清单 `frontend/src/data/licenses.json` 由 `frontend/scripts/gen-licenses.mjs` **构建期生成**（`npm run gen:licenses`）：前端全部生产依赖经 `license-checker` 取协议全文、后端 `go.mod` 直接依赖（剔除 `// indirect`）尽力从本机 Go module cache 读全文（读不到给 `pkg.go.dev?tab=licenses` 外链）、项目自身读根 `LICENSE`（MIT）。JSON 入库、随 `dist/` go:embed 内嵌，**页面直接 import、运行时不联网**。
 - **PWA**：经 `vite-plugin-pwa` 产出 `manifest.webmanifest` + Service Worker，支持「添加到主屏」与离线应用壳；Service Worker 仅预缓存壳静态资源，`/api`/媒体流运行时走网络（见 [ADR-0028](adr/0028-mobile-pwa.md)）。
 - **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
 - **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。

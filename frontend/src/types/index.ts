@@ -346,3 +346,53 @@ export interface PlaybackDescriptor {
   /** 客户端不支持目标编码时的 H.264/TS 回退源（缺省则展示不支持提示，由 FR-53 提供真实回退源） */
   fallbackUrl?: string
 }
+
+/** 项目自身协议信息（FR-57）：开源协议页顶部展示 */
+export interface ProjectLicense {
+  /** 项目名 */
+  name: string
+  /** 协议标识（如 MIT） */
+  license: string
+  /** 作者 / 版权方 */
+  author: string
+  /** 协议全文 */
+  text: string
+}
+
+/** 前端依赖的协议信息（FR-57）：均可拿到全文 */
+export interface FrontendLicense {
+  /** 包名 */
+  name: string
+  /** 版本号 */
+  version: string
+  /** 协议标识 */
+  license: string
+  /** 作者 / 发布者，未知为空串 */
+  author: string
+  /** 协议全文，未知为空串 */
+  text: string
+}
+
+/** 后端依赖的协议信息（FR-57）：全文尽力而为，拿不到给 pkg.go.dev 链接 */
+export interface BackendLicense {
+  /** module 路径 */
+  name: string
+  /** 版本号 */
+  version: string
+  /** 协议标识，未知为空串 */
+  license: string
+  /** 协议全文，从本机 module cache 读到则有、否则为空串 */
+  text?: string
+  /** 无全文时的 pkg.go.dev 协议页外链 */
+  url?: string
+}
+
+/** 开源协议清单（FR-57）：构建期生成、嵌入仓库、运行时不联网 */
+export interface LicensesData {
+  /** 项目自身 */
+  project: ProjectLicense
+  /** 前端生产依赖 */
+  frontend: FrontendLicense[]
+  /** 后端 go.mod 直接依赖 */
+  backend: BackendLicense[]
+}
