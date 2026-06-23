@@ -95,4 +95,21 @@ describe('groupMediaByDate', () => {
     expect(groups.map((g) => g.date)).toEqual(['2025', '2024'])
     expect(groups[1].files.map((x) => x.id)).toEqual([2, 3])
   })
+
+  // FR-68 缩放健壮性：媒体时间降级链 media_time → added_at → modified_at
+  it('media_time 与 added_at 均无效时回退 modified_at（不归未知日期）', () => {
+    const f = makeFile(1, 'not-a-date') // added_at 非法
+    f.media_time = '' // 空字符串视为缺失
+    f.modified_at = '2022-05-06T03:00:00Z' // 有效的修改时间
+    const groups = groupMediaByDate([f])
+    expect(groups[0].date).toBe('2022-05-06')
+  })
+
+  it('三个时间源全部缺失/非法才归入“未知日期”', () => {
+    const f = makeFile(1, '')
+    f.media_time = null
+    f.modified_at = 'bad'
+    const groups = groupMediaByDate([f])
+    expect(groups[0].date).toBe('未知日期')
+  })
 })

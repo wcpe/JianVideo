@@ -124,6 +124,54 @@ describe('TimelinePage', () => {
     })
   })
 
+  it('切换缩放粒度（日/月/年）改变日期轴分组（FR-32 缺陷复现）', async () => {
+    // 两条同年同月不同日的媒体，带 media_time：
+    // 日粒度 → 两组（07-01 / 07-20）；月粒度 → 一组（07）；年粒度 → 一组（2023）
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({
+        items: [
+          {
+            id: 301, library_id: 1,
+            file_path: 'D:\\Photos\\a.jpg', file_name: 'a.jpg',
+            file_size: 1000, format: 'jpg',
+            video_codec: '', audio_codec: '', duration: 0,
+            width: 100, height: 100, bitrate: 0, subtitle_tracks: '',
+            added_at: '2020-01-01T00:00:00Z', modified_at: '2020-01-01T00:00:00Z',
+            media_time: '2023-07-20T10:00:00Z',
+          },
+          {
+            id: 302, library_id: 1,
+            file_path: 'D:\\Photos\\b.jpg', file_name: 'b.jpg',
+            file_size: 1000, format: 'jpg',
+            video_codec: '', audio_codec: '', duration: 0,
+            width: 100, height: 100, bitrate: 0, subtitle_tracks: '',
+            added_at: '2020-01-01T00:00:00Z', modified_at: '2020-01-01T00:00:00Z',
+            media_time: '2023-07-01T08:00:00Z',
+          },
+        ],
+        total: 2, page: 1, page_size: 20,
+      })),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    // 默认日粒度：两个不同日的日期轴主标签 07-20 / 07-01
+    await screen.findByText('07-20')
+    expect(screen.getByText('07-01')).toBeInTheDocument()
+
+    // 切到月粒度：合并为单组，主标签为月份 07，且不再出现日级标签
+    await user.click(screen.getByRole('radio', { name: '月' }))
+    await screen.findByText('07')
+    expect(screen.queryByText('07-20')).not.toBeInTheDocument()
+    expect(screen.queryByText('07-01')).not.toBeInTheDocument()
+
+    // 切到年粒度：主标签为年份 2023，且不再出现月级标签 07
+    await user.click(screen.getByRole('radio', { name: '年' }))
+    await screen.findByText('2023')
+    expect(screen.queryByText('07')).not.toBeInTheDocument()
+  })
+
   it('图片点击打开预览弹窗且不跳转播放页', async () => {
     server.use(
       http.get('*/api/library/media', () => HttpResponse.json({

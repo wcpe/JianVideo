@@ -10,6 +10,7 @@
 - **时间轴刷新按钮（FR-67）**：时间轴页标题右侧新增手动「刷新」按钮（`ActionIcon` + `Tooltip`），点击调用累积分页 hook 的 `reload()` 重载首页数据（`append=false` 回到第一页重新累积）；加载期间按钮显示加载态。便于在不刷新整页的情况下拉取最新入库媒体。纯前端，无后端改动、无新依赖。
 
 ### 修复
+- **时间轴缩放在缺 media_time 的旧数据上看不出变化（FR-32）**：复现确认缩放逻辑本身正确——有 `media_time` 时切日/月/年分组端到端正常生效（已加页面级测试覆盖）；问题根因在数据层：缺 `media_time` 的旧记录此前仅回退 `added_at`（同一次扫描入库的记录 `added_at` 多为同一天），导致日/月/年都塌缩成单组、视觉上「缩放无效」。将分组时间源降级链由 `media_time → added_at` 扩为 `media_time → added_at → modified_at`，取首个有效 `YYYY-MM-DD`；当某源缺失或格式非法时不再过早归入「未知日期」，而是继续尝试后续源，提升常见旧数据下的缩放可见性。纯前端 `utils/timeline.ts` 改动。
 - **亮色模式下卡片/面板仍为黑底（主题切换不生效）**：存储库卡片、目录浏览卡片、时间线卡片、登录页与播放页媒体信息面板均用 Mantine `bg="dark.7"`，它解析为写死的 `var(--mantine-color-dark-7)` 固定深色 token、不随 colorScheme 切换，故切到亮色模式后仍显深底。改为随主题切换的语义变量：普通卡片/面板背景统一 `var(--mantine-color-default)`，目录浏览选中态由固定深紫 `purple.9` 改为随主题强调色 `var(--mantine-color-purple-light)`（亮暗皆可读），登录页标题 `c="white"` 同步改为品牌色 `purple.4`（不再依赖深底）。
 
 ### 变更

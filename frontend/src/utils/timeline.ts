@@ -14,9 +14,9 @@ const UNKNOWN_DATE = '未知日期'
 
 /**
  * 按时间对媒体文件分组（FR-32）。
- * - 时间源优先 media_time（FR-31 媒体时间），缺失回退 added_at。
+ * - 时间源按降级链 media_time（FR-31 媒体时间）→ added_at → modified_at 取第一个有效日期。
  * - 粒度 granularity 决定分组键：day=YYYY-MM-DD / month=YYYY-MM / year=YYYY（缩放）。
- * - 空值或格式非法归入“未知日期”组（始终最后）；组按键倒序。
+ * - 三个时间源全部缺失/格式非法才归入“未知日期”组（始终最后）；组按键倒序。
  * - 组内保持输入顺序（调用方已按 media_time 倒序）。
  */
 export function groupMediaByDate(files: MediaFile[], granularity: TimelineGranularity = 'day'): DateGroup[] {
@@ -35,13 +35,11 @@ export function groupMediaByDate(files: MediaFile[], granularity: TimelineGranul
     .sort(compareDateGroup)
 }
 
-/** 按粒度提取日期键；时间源 media_time 优先、回退 added_at；非法返回“未知日期” */
+/** 按粒度提取日期键；时间源按 media_time → added_at → modified_at 降级取首个有效日期；皆非法返回“未知日期” */
 function extractDateKey(file: MediaFile, granularity: TimelineGranularity): string {
-  const raw = file.media_time || file.added_at
-  if (!raw || raw.length < 10) return UNKNOWN_DATE
-  const date = raw.slice(0, 10)
-  // 校验 YYYY-MM-DD 形态，避免把脏数据当成有效日期
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return UNKNOWN_DATE
+  // 降级链：依次尝试媒体时间、入库时间、修改时间，取第一个解析出有效 YYYY-MM-DD 的源
+  const date = pickValidDate(file.media_time, file.added_at, file.modified_at)
+  if (!date) return UNKNOWN_DATE
   switch (granularity) {
     case 'year':
       return date.slice(0, 4) // YYYY
@@ -50,6 +48,17 @@ function extractDateKey(file: MediaFile, granularity: TimelineGranularity): stri
     default:
       return date // YYYY-MM-DD
   }
+}
+
+/** 从候选时间串中取第一个有效的日期（YYYY-MM-DD 前缀），无则返回空串 */
+function pickValidDate(...candidates: (string | null | undefined)[]): string {
+  for (const raw of candidates) {
+    if (!raw || raw.length < 10) continue
+    const date = raw.slice(0, 10)
+    // 校验 YYYY-MM-DD 形态，避免把脏数据当成有效日期
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date
+  }
+  return ''
 }
 
 /** 日期组排序：有效日期倒序，“未知日期”始终最后 */
