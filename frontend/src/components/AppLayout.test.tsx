@@ -53,3 +53,70 @@ describe('AppLayout 主题切换', () => {
     expect(toggle).toBeInTheDocument()
   })
 })
+
+describe('AppLayout 收缩导航（FR-54）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  // 桌面 Navbar 用 data-collapsed 标识收缩态，便于断言
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('默认展开：导航名文字可见、navbar 非收缩态', () => {
+    renderLayout()
+
+    // 展开态导航名文字可见（侧边栏 + 抽屉各一份，至少一处）
+    expect(screen.getAllByText('时间轴').length).toBeGreaterThan(0)
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'false')
+    // 默认应提供「收起导航」按钮
+    expect(screen.getByRole('button', { name: '收起导航' })).toBeInTheDocument()
+  })
+
+  it('点切换按钮进入收缩态：navbar 收缩、桌面导航名文字隐藏、按钮 aria 切换', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    // 收缩态切换按钮变为「展开导航」
+    expect(screen.getByRole('button', { name: '展开导航' })).toBeInTheDocument()
+    // 桌面侧边栏导航名文字隐藏；移动端抽屉默认关闭不渲染，故文字应完全不在文档中
+    expect(screen.queryByText('时间轴')).not.toBeInTheDocument()
+  })
+
+  it('收缩后写入 localStorage', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('1')
+  })
+
+  it('预置 localStorage 收缩值，mount 后初始即为收缩态', () => {
+    localStorage.setItem('jianvideo-nav-collapsed', '1')
+
+    renderLayout()
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.getByRole('button', { name: '展开导航' })).toBeInTheDocument()
+    expect(screen.queryByText('时间轴')).not.toBeInTheDocument()
+  })
+
+  it('移动端汉堡按钮与抽屉行为不受收缩影响（回归）', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('jianvideo-nav-collapsed', '1')
+    renderLayout()
+
+    // 汉堡按钮始终存在
+    const burger = screen.getByRole('button', { name: '导航菜单' })
+    expect(burger).toBeInTheDocument()
+
+    // 点开抽屉后导航名文字可见（抽屉内固定展开，不受收缩态影响）
+    await user.click(burger)
+    expect(screen.getAllByText('时间轴').length).toBeGreaterThan(0)
+  })
+})

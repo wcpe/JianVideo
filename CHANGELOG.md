@@ -7,6 +7,7 @@
 ## 未发布版本
 
 ### 新增
+- **可收缩左侧导航（FR-54）**：桌面端左侧导航栏支持「收缩为图标态 ↔ 展开」切换。展开 180px（图标 + 文字）、收缩 64px（仅图标，hover 出 Mantine `Tooltip` 提示导航名以保可用性）；切换按钮置于 navbar 底部、随状态切换图标与无障碍标签（「收起导航」/「展开导航」）。收缩状态持久化到 localStorage（键 `jianvideo-nav-collapsed`），刷新后保持。`AppShell` 的 navbar 宽度受收缩态控制，未引新依赖。移动端（< sm 断点）的汉堡 + 抽屉导航行为完全不变（抽屉内固定展开渲染、与收缩态隔离）。
 - **系统信息与设置合并为单页 + 顶部 tab（FR-55）**：参考宝塔面板，把原「系统信息」（`/system`）与「设置」（`/settings`）两个独立页面、两个左侧导航项合并为同一控制台页（`ConsolePage`）的两个顶部 tab。tab 以 Mantine `Tabs` 承载、状态由 URL query `?tab=system|settings` 控制（缺省系统信息），便于深链；`/system` 路由进控制台页、旧 `/settings` 重定向到 `?tab=settings`（不留死链），左侧导航两项合并为一个「系统」入口。纯前端重组，`SystemPage`/`SettingsPage` 原样作 tab 内容、既有内容与交互不变。
 
 ### 修复

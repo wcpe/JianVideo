@@ -1,15 +1,22 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
+import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
+import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import ScanTaskIndicator from './ScanTaskIndicator'
+
+// 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
+const NAVBAR_WIDTH_EXPANDED = 180
+const NAVBAR_WIDTH_COLLAPSED = 64
 
 /** 全局布局 — Mantine AppShell */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { username, logout } = useAuthStore()
   const navigate = useNavigate()
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false)
+  // 桌面导航收缩态（FR-54）：持久化到 localStorage，刷新后保持；仅影响桌面 Navbar，移动端抽屉不受影响
+  const [navCollapsed, toggleNavCollapsed] = useNavCollapsed()
   // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
   const { toggleColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
@@ -36,20 +43,39 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
   ]
 
-  // 单个导航链接，onNavigate 用于移动端点击后关闭抽屉
-  const renderNavLink = ({ path, label, icon: Icon }: (typeof navItems)[number], onNavigate?: () => void) => (
-    <Link key={path} to={path} onClick={onNavigate} style={{ textDecoration: 'none' }}>
-      <Group gap={8} p="xs" style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}>
-        <Icon size={16} />
-        <Text size="sm">{label}</Text>
-      </Group>
-    </Link>
-  )
+  // 单个导航链接。onNavigate 用于移动端点击后关闭抽屉；collapsed 为收缩态——仅渲染图标并以 Tooltip 提示导航名
+  const renderNavLink = (
+    { path, label, icon: Icon }: (typeof navItems)[number],
+    onNavigate?: () => void,
+    collapsed = false,
+  ) => {
+    const link = (
+      <Link key={path} to={path} onClick={onNavigate} style={{ textDecoration: 'none' }}>
+        <Group
+          gap={8}
+          p="xs"
+          justify={collapsed ? 'center' : undefined}
+          style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}
+        >
+          <Icon size={16} />
+          {!collapsed && <Text size="sm">{label}</Text>}
+        </Group>
+      </Link>
+    )
+    // 收缩态文字隐藏，hover 出 Tooltip（label=导航名）以保可用性
+    return collapsed ? (
+      <Tooltip key={path} label={label} position="right" withArrow>
+        {link}
+      </Tooltip>
+    ) : (
+      link
+    )
+  }
 
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: 180, breakpoint: 'sm' }}
+      navbar={{ width: navCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
       padding="md"
     >
       <AppShell.Header>
@@ -114,10 +140,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Stack>
       </Drawer>
 
-      <AppShell.Navbar p="xs" visibleFrom="sm">
-        <Stack gap="xs">
-          {navItems.map((item) => renderNavLink(item))}
+      <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={navCollapsed}>
+        <Stack gap="xs" style={{ flex: 1 }}>
+          {navItems.map((item) => renderNavLink(item, undefined, navCollapsed))}
         </Stack>
+        {/* 收缩 / 展开切换按钮（FR-54）：置于 navbar 底部，随状态切换图标与无障碍标签 */}
+        <Group justify={navCollapsed ? 'center' : 'flex-end'} mt="xs">
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            onClick={toggleNavCollapsed}
+            title={navCollapsed ? '展开导航' : '收起导航'}
+            aria-label={navCollapsed ? '展开导航' : '收起导航'}
+          >
+            {navCollapsed ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
+          </ActionIcon>
+        </Group>
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>
