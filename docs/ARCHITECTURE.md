@@ -394,6 +394,11 @@
 - **公开播放的安全边界**：免登视频播放只走 `playback.StreamFile`（渐进式原文件 + Range），**不**把 ffmpeg 转码/HLS 管线开放给匿名访客（防资源滥用/DoS）；需转码才能在浏览器播放的格式可下载原文件。`smb://` 不支持。
 - 资源存在性与范围判定在 api 层用 `library` 完成，`share` 服务不依赖 `library`，保持无跨模块耦合。
 
+### 5.10 照片地图与旅程轨迹（FR-39 / FR-76）
+
+- **照片地图（FR-39，[ADR-0031](adr/0031-photo-map-leaflet.md)）**：前端页 `MapPage`（`/map`）用 leaflet + react-leaflet + OSM 在线瓦片展示带 GPS 的照片地理分布。数据经 `getMediaFiles({has_gps:true,...})` 分页累积拉取地理标记子集（后端 `has_gps` 筛选 `gps_lat != 0 OR gps_lon != 0`），逐点打 `Marker`、弹窗显示缩略图与名称。瓦片显示依赖联网，属真机/在线维度。
+- **旅程轨迹（FR-76，扩 FR-39，无新 ADR）**：纯前端展示层增强，复用既定技术栈、不改后端、不引依赖。拉取时加 `sort:'media_time_asc'`（后端按 `COALESCE(media_time, added_at) ASC` 返回升序）；纯函数 `buildDayTracks(files)`（`frontend/src/utils/gpsTrack.ts`）过滤有效 GPS 点、复用 `groupMediaByDate(files,'day')` 按天分组、丢弃点数 < 2 的天、按日期升序输出 `{date,positions,color}[]`（颜色按下标循环取 `TRACK_COLORS`）。`MapPage` 据此渲染若干 `Polyline` 折线层叠加在散点上，「轨迹模式」`Switch`（默认开）控制折线显隐，散点 `Marker` 始终渲染。轨迹按「天」朴素聚合（同一天≈同一行程），更细的行程切分属后续增强、不在本期。
+
 ## 6. 部署
 
 - **运行形态**：单个可执行文件，内嵌前端静态资源。
