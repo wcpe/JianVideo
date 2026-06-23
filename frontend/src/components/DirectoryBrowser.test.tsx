@@ -16,7 +16,7 @@ function file(over: Partial<MediaFile>): MediaFile {
 
 function renderBrowser(opts: {
   files: MediaFile[]; dirs?: DirInfo[]; displayMode?: DisplayMode; sort?: DirSort
-  onOpenFile?: (f: MediaFile, i: number) => void; onEnterDir?: (p: string) => void
+  onOpenFile?: (f: MediaFile, i: number) => void; onEnterDir?: (dir: DirInfo) => void
 }) {
   return render(
     <MantineProvider>
