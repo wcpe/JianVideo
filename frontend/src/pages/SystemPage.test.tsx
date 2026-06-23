@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -293,6 +293,161 @@ describe('SystemPage', () => {
       expect(screen.getByText('v0.6.3-dev.abc1234')).toBeVisible()
     })
     expect(screen.getByText('预发布')).toBeVisible()
+  })
+
+  it('「检查更新」默认走缓存（不带 force query，FR-62）', async () => {
+    const user = userEvent.setup()
+    let forceParam: string | null = 'unset'
+    server.use(
+      http.get('*/api/system/update/check', ({ request }) => {
+        forceParam = new URL(request.url).searchParams.get('force')
+        return HttpResponse.json({
+          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+        })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('v0.6.3')).toBeVisible()
+    })
+    // 默认走缓存：请求不带 force（缺省 null）
+    expect(forceParam).toBeNull()
+  })
+
+  it('「获取更新」强制刷新走 force=true（FR-62）', async () => {
+    const user = userEvent.setup()
+    let forceParam: string | null = null
+    server.use(
+      http.get('*/api/system/update/check', ({ request }) => {
+        forceParam = new URL(request.url).searchParams.get('force')
+        return HttpResponse.json({
+          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+        })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    const forceBtn = screen.getByRole('button', { name: '获取更新' })
+    expect(forceBtn).toBeVisible()
+    await user.click(forceBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('v0.6.3')).toBeVisible()
+    })
+    // 强制刷新绕缓存：请求带 force=true
+    expect(forceParam).toBe('true')
+  })
+
+  it('点「立即更新并重启」弹 Mantine 模态框，确认才触发更新（FR-62）', async () => {
+    const user = userEvent.setup()
+    let applyCalled = false
+    server.use(
+      http.post('*/api/system/update/apply', () => {
+        applyCalled = true
+        return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+    })
+
+    await user.click(screen.getByRole('button', { name: /立即更新并重启/ }))
+
+    // 弹出 Mantine 确认模态框（含确认版本文案），此刻尚未触发更新请求
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeVisible()
+    expect(applyCalled).toBe(false)
+
+    // 模态框内点「确认」才触发更新
+    await user.click(within(dialog).getByRole('button', { name: '确认更新' }))
+    await waitFor(() => {
+      expect(applyCalled).toBe(true)
+    })
+  })
+
+  it('更新确认模态框点「取消」不触发更新（FR-62）', async () => {
+    const user = userEvent.setup()
+    let applyCalled = false
+    server.use(
+      http.post('*/api/system/update/apply', () => {
+        applyCalled = true
+        return HttpResponse.json({ status: 'updating', message: '' })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+    })
+
+    await user.click(screen.getByRole('button', { name: /立即更新并重启/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    // 模态框关闭、未触发更新请求
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    expect(applyCalled).toBe(false)
+  })
+
+  it('点「回滚到上一版」弹模态框，确认触发回滚、取消不触发（FR-62）', async () => {
+    const user = userEvent.setup()
+    let rollbackCalled = false
+    server.use(
+      http.post('*/api/system/update/rollback', () => {
+        rollbackCalled = true
+        return HttpResponse.json({ status: 'rolling_back', message: '' })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    // 回滚按钮位于检查结果区，先检查更新使其渲染
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /回滚到上一版/ })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: /回滚到上一版/ }))
+
+    // 先取消：不触发回滚
+    let dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+    expect(rollbackCalled).toBe(false)
+
+    // 再确认：触发回滚
+    await user.click(screen.getByRole('button', { name: /回滚到上一版/ }))
+    dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(rollbackCalled).toBe(true)
+    })
   })
 
   it('点击「复制结果」后写入剪贴板并显示已复制反馈', async () => {

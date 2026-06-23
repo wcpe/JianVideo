@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
-  TypographyStylesProvider, Tabs,
+  TypographyStylesProvider, Tabs, Modal,
 } from '@mantine/core'
-import { useClipboard } from '@mantine/hooks'
+import { useClipboard, useDisclosure } from '@mantine/hooks'
 import {
   IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp,
-  IconDeviceDesktop, IconCpu, IconTestPipe, IconCloudDownload,
+  IconDeviceDesktop, IconCpu, IconTestPipe, IconCloudDownload, IconCloudUp,
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -157,6 +157,9 @@ export default function SystemPage() {
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false) // 应用/回滚中（含重启等待）
   const [restartMsg, setRestartMsg] = useState<string | null>(null)
+  // 更新/回滚二次确认模态框（FR-62 替代原生 window.confirm）
+  const [applyModalOpened, applyModal] = useDisclosure(false)
+  const [rollbackModalOpened, rollbackModal] = useDisclosure(false)
 
   // 挂载时加载系统信息
   useEffect(() => {
@@ -199,13 +202,14 @@ export default function SystemPage() {
     clipboard.copy(buildReport(info, codec))
   }, [clipboard, info, codec])
 
-  const handleCheckUpdate = useCallback(async () => {
+  // 「检查更新」默认走缓存（force 为 false），「获取更新」强制绕缓存重查（force 为 true，FR-62）
+  const handleCheckUpdate = useCallback(async (force: boolean) => {
     setUpdateChecking(true)
     setUpdateError(null)
     setUpdateInfo(null)
     try {
       // 默认走后端 TTL 缓存（force 为 false），命中即时返回，缓解直连 GitHub 慢导致的超时
-      setUpdateInfo(await systemApi.checkUpdate(channel, false))
+      setUpdateInfo(await systemApi.checkUpdate(channel, force))
     } catch (err) {
       // 仅采用后端返回的友好 message；无响应（超时/网络异常）时用固定兜底，不回显裸 axios 串
       setUpdateError(updateCheckErrorMessage(err))
@@ -237,8 +241,9 @@ export default function SystemPage() {
     setRestartMsg(`${action}已触发，但等待重启超时，请手动检查服务状态。`)
   }, [])
 
+  // 由更新确认模态框「确认」触发：关模态框后执行更新并等待重启（FR-62）
   const handleApplyUpdate = useCallback(async () => {
-    if (!window.confirm(`确定更新到 ${updateInfo?.tag}？更新后服务将自动重启。`)) return
+    applyModal.close()
     setUpdateBusy(true)
     setUpdateError(null)
     try {
@@ -248,10 +253,11 @@ export default function SystemPage() {
       setUpdateError(extractErrorMessage(err, '更新失败'))
       setUpdateBusy(false)
     }
-  }, [channel, updateInfo, waitForRestart])
+  }, [channel, applyModal, waitForRestart])
 
+  // 由回滚确认模态框「确认」触发：关模态框后执行回滚并等待重启（FR-62）
   const handleRollback = useCallback(async () => {
-    if (!window.confirm('确定回滚到上一版本？服务将自动重启。')) return
+    rollbackModal.close()
     setUpdateBusy(true)
     setUpdateError(null)
     try {
@@ -261,7 +267,7 @@ export default function SystemPage() {
       setUpdateError(extractErrorMessage(err, '回滚失败'))
       setUpdateBusy(false)
     }
-  }, [waitForRestart])
+  }, [rollbackModal, waitForRestart])
 
   return (
     <Stack gap="md">
@@ -431,15 +437,26 @@ export default function SystemPage() {
               data={[{ label: '正式版', value: 'stable' }, { label: '测试版', value: 'prerelease' }]}
               disabled={updateBusy}
             />
+            {/* 「检查更新」默认走缓存命中即时返回；「获取更新」强制绕缓存重查 GitHub（FR-62，仿编解码测试双钮模式） */}
             <Button
               variant="light"
               color="purple"
               leftSection={<IconRefresh size={16} />}
-              onClick={handleCheckUpdate}
+              onClick={() => handleCheckUpdate(false)}
               loading={updateChecking}
               disabled={updateBusy}
             >
               检查更新
+            </Button>
+            <Button
+              variant="light"
+              color="purple"
+              leftSection={<IconCloudUp size={16} />}
+              onClick={() => handleCheckUpdate(true)}
+              loading={updateChecking}
+              disabled={updateBusy}
+            >
+              获取更新
             </Button>
           </Group>
         </Group>
@@ -482,7 +499,7 @@ export default function SystemPage() {
               <Button
                 color="purple"
                 leftSection={<IconDownload size={16} />}
-                onClick={handleApplyUpdate}
+                onClick={applyModal.open}
                 loading={updateBusy}
                 disabled={!updateInfo.has_update}
               >
@@ -491,7 +508,7 @@ export default function SystemPage() {
               <Button
                 variant="default"
                 leftSection={<IconArrowBackUp size={16} />}
-                onClick={handleRollback}
+                onClick={rollbackModal.open}
                 disabled={updateBusy}
               >
                 回滚到上一版
@@ -500,10 +517,36 @@ export default function SystemPage() {
           </Stack>
             ) : (
               !updateError && (
-                <Text size="sm" c="dimmed">选择频道后点击「检查更新」，从 GitHub Releases 检测新版本。</Text>
+                <Text size="sm" c="dimmed">选择频道后点击「检查更新」（默认走缓存）或「获取更新」（强制重查），从 GitHub Releases 检测新版本。</Text>
               )
             )}
           </Card>
+
+          {/* 更新确认模态框（FR-62 替代原生 window.confirm）：点「确认更新」才触发更新 */}
+          <Modal opened={applyModalOpened} onClose={applyModal.close} title="确认更新" centered>
+            <Stack gap="md">
+              <Text size="sm">确定更新到 {updateInfo?.tag}？更新后服务将自动重启。</Text>
+              <Group justify="flex-end" gap="xs">
+                <Button variant="default" onClick={applyModal.close}>取消</Button>
+                <Button color="purple" leftSection={<IconDownload size={16} />} onClick={handleApplyUpdate}>
+                  确认更新
+                </Button>
+              </Group>
+            </Stack>
+          </Modal>
+
+          {/* 回滚确认模态框（FR-62 替代原生 window.confirm）：点「确认回滚」才触发回滚 */}
+          <Modal opened={rollbackModalOpened} onClose={rollbackModal.close} title="确认回滚" centered>
+            <Stack gap="md">
+              <Text size="sm">确定回滚到上一版本？服务将自动重启。</Text>
+              <Group justify="flex-end" gap="xs">
+                <Button variant="default" onClick={rollbackModal.close}>取消</Button>
+                <Button color="red" leftSection={<IconArrowBackUp size={16} />} onClick={handleRollback}>
+                  确认回滚
+                </Button>
+              </Group>
+            </Stack>
+          </Modal>
         </Tabs.Panel>
       </Tabs>
     </Stack>
