@@ -304,3 +304,23 @@ export interface SubtitleEntry {
   end: number
   text: string
 }
+
+/**
+ * 播放描述符（FR-52）：自适应播放器据此分发到对应内核。
+ *
+ * - `ts`：H.264/TS（mpegts.js，含 master.m3u8 ABR），追播路径不变。
+ * - `fmp4`：高级编码（H.265/AV1/VP9）HLS-fMP4 清单，走 hls.js 原生 MSE（仅 VOD）。
+ * - `mp4`：原文件直出，浏览器原生 video。
+ *
+ * 端到端「按客户端能力选编码 + 触发后端产 fMP4」的协商属 FR-53。
+ */
+export interface PlaybackDescriptor {
+  /** 目标视频编码（h264/h265/av1/vp9），用于 fmp4 路径前的客户端能力校验 */
+  codec: string
+  /** 清单 / 流 URL（fmp4 为 index.m3u8，ts 为流地址，mp4 为原文件地址） */
+  url: string
+  /** 播放路径 */
+  path: 'ts' | 'fmp4' | 'mp4'
+  /** 客户端不支持目标编码时的 H.264/TS 回退源（缺省则展示不支持提示，由 FR-53 提供真实回退源） */
+  fallbackUrl?: string
+}

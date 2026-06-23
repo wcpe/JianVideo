@@ -347,6 +347,14 @@
 - 前端 hls.js 动态 import，自动选择最佳码率；不支持 hls.js 时回退 mpegts.js。
 - 详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
 
+#### 5.5.1 前端客户端能力探测 + 自适应播放器（FR-52）
+
+- **客户端能力探测**（`frontend/src/utils/codec-capability.ts`，纯函数）：以 `MediaSource.isTypeSupported` 探测本浏览器在 fMP4 容器下可解码哪些高级编码。`codecMIME(codec)` 给出与后端 `FMP4CodecMIME`（§5.4.1）字节级一致的 MSE codec MIME 串（H.265 `hvc1.1.6.L93.B0` / AV1 `av01.0.05M.08` / VP9 `vp09.00.10.08`，真源在后端，前端为消费副本）；`isCodecSupported(codec)` 归类单编码（无 MIME 串 / 无 `MediaSource` 时 false）；`probeClientCapabilities()` 返回 `{h265,av1,vp9}` 能力描述，供 FR-53 协商上报。
+- **自适应播放器**（`VideoPlayer` 扩展）：新增可选「播放描述符」入参 `PlaybackDescriptor{codec,url,path,fallbackUrl?}`，纯函数 `resolveDescriptor` 按 `path` 分发到对应内核——`ts`（H.264，含 master.m3u8 ABR）走现有 mpegts.js / hls.js-ABR 分支（**追播路径与实现一字不动**）；`fmp4`（H.265/AV1/VP9）走 hls.js 原生 fMP4+MSE 加载 `index.m3u8`（hls.js 原生支持 fMP4 分片，复用 §5.5 同一 HLS 内核）；`mp4` 走原生 video。**缺省描述符时行为与现状字节级一致**（现有调用方零改动）。
+- **不支持回退**：分发到 fmp4 前先 `isCodecSupported(codec)` 校验，为 false 时——有 `fallbackUrl` 则回退按 TS 路径加载（mpegts.js，不抛 Network Error）；无回退源则展示「当前浏览器不支持该视频编码」提示而非报错。
+- **本 FR 复用 ADR**：复用 [ADR-0035](adr/0035-fmp4-mse-playback-path.md)（fMP4/CMAF + 原生 MSE，已明确前端用 hls.js 消费 HLS-fMP4）与 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)（hls.js 作为 HLS 内核），无新 ADR。
+- **端到端边界**：「按客户端能力实际选编码 + 触发后端产 fMP4 + PlayPage 接线 + 会话记录」属 FR-53；本 FR 仅交付能力探测函数 + 播放器按描述符分发 + 不支持回退，PlayPage 的 URL 选择逻辑不变。fMP4 路径前端按 VOD 加载（FR-51 已定不实时追播）。
+
 ### 5.6 硬件加速管理
 
 - 硬件加速能力以**编码器实测**为单一真源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)，取代 ADR-0015）：对各家族 × 各编码（H.264/H.265/AV1/VP9）候选用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`，VAAPI/Vulkan 另带设备初始化），判定「编入 / 试编码成功」。

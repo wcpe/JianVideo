@@ -3,11 +3,17 @@ import { Text, Box, ActionIcon, Slider } from '@mantine/core'
 import { IconPlayerPlay, IconPlayerPause, IconVolume, IconVolumeOff } from '@tabler/icons-react'
 import mpegts from 'mpegts.js'
 import type Hls from 'hls.js'
-import type { SubtitleEntry } from '@/types'
+import type { SubtitleEntry, PlaybackDescriptor } from '@/types'
+import { isCodecSupported } from '@/utils/codec-capability'
 
 interface VideoPlayerProps {
-  /** 流 URL（支持 master.m3u8 触发 ABR 模式） */
+  /** 流 URL（支持 master.m3u8 触发 ABR 模式）。传入 descriptor 时由其覆盖。 */
   url: string
+  /**
+   * 播放描述符（FR-52）：按目标编码 + 路径分发到对应内核。
+   * 缺省时保持现有 url/isABR/streamType 行为不变（现有调用方零改动）。
+   */
+  descriptor?: PlaybackDescriptor
   /** 自动播放 */
   autoPlay?: boolean
   /** 解析后的字幕条目列表 */
@@ -42,6 +48,49 @@ const POSITION_REPORT_INTERVAL = 10
 // 「看完」判定：剩余时长小于该秒数即视为已看完（FR-44）
 const WATCHED_REMAINING_THRESHOLD = 15
 
+/** 解析后的有效播放输入（FR-52）。 */
+interface ResolvedPlayback {
+  url: string
+  /** 是否 ABR（hls.js）；undefined 时由 url 是否 master.m3u8 推断 */
+  isABR?: boolean
+  streamType: 'mpegts' | 'mp4'
+  /** 目标编码客户端不支持且无回退源：不初始化内核，展示提示 */
+  unsupported: boolean
+}
+
+/**
+ * 解析播放描述符为有效播放输入（纯函数，FR-52）。
+ *
+ * - 无描述符：沿用现有 url/isABR/streamType 入参，行为不变。
+ * - `ts` / `mp4` 路径：直接映射到现有 mpegts.js / 原生 video 分支。
+ * - `fmp4` 路径：先 isCodecSupported 校验客户端能力——支持则走 hls.js（fMP4，按 ABR 模式
+ *   加载 index.m3u8）；不支持则回退 fallbackUrl（按 TS 路径），无回退源则标记 unsupported。
+ */
+function resolveDescriptor(
+  descriptor: PlaybackDescriptor | undefined,
+  fallback: { url: string; isABR?: boolean; streamType: 'mpegts' | 'mp4' },
+): ResolvedPlayback {
+  if (!descriptor) {
+    return { url: fallback.url, isABR: fallback.isABR, streamType: fallback.streamType, unsupported: false }
+  }
+  if (descriptor.path === 'mp4') {
+    return { url: descriptor.url, isABR: false, streamType: 'mp4', unsupported: false }
+  }
+  if (descriptor.path === 'fmp4') {
+    if (isCodecSupported(descriptor.codec)) {
+      // hls.js 原生支持 fMP4 分片，按 ABR 模式加载 HLS-fMP4 清单
+      return { url: descriptor.url, isABR: true, streamType: 'mpegts', unsupported: false }
+    }
+    // 客户端不支持目标编码：回退 H.264/TS 源；无回退源则标记不可播
+    if (descriptor.fallbackUrl) {
+      return { url: descriptor.fallbackUrl, isABR: undefined, streamType: 'mpegts', unsupported: false }
+    }
+    return { url: descriptor.url, isABR: undefined, streamType: 'mpegts', unsupported: true }
+  }
+  // ts 路径：等价现有 mpegts.js / hls.js-ABR 分支（由 url 是否 master.m3u8 推断）
+  return { url: descriptor.url, isABR: undefined, streamType: 'mpegts', unsupported: false }
+}
+
 /**
  * 视频播放组件
  *
@@ -50,6 +99,7 @@ const WATCHED_REMAINING_THRESHOLD = 15
  */
 export default function VideoPlayer({
   url,
+  descriptor,
   autoPlay = true,
   subtitleEntries,
   subtitleVisible = false,
@@ -83,8 +133,13 @@ export default function VideoPlayer({
   // 末端缓冲等待（FR-18）：mpegts.js ERROR 或 video stalled 时进入等待，1s 后自动重载
   const [isWaiting, setIsWaiting] = useState(false)
 
+  // FR-52：解析播放描述符为有效播放输入（url / 是否 ABR / 流类型）。
+  // 缺省描述符时直接沿用现有入参，行为不变；fmp4 路径前先做客户端能力校验，
+  // 不支持时回退 fallbackUrl（按 TS 路径加载），无回退源则标记为不可播。
+  const resolved = resolveDescriptor(descriptor, { url, isABR: isABRProp, streamType })
+
   // 判断是否为 ABR 模式
-  const isABR = isABRProp ?? url.endsWith('master.m3u8')
+  const isABR = resolved.isABR ?? resolved.url.endsWith('master.m3u8')
 
   const destroyMpegtsPlayer = useCallback(() => {
     const player = mpegtsPlayerRef.current
@@ -152,22 +207,27 @@ export default function VideoPlayer({
 
   // 挂载 / URL 变化
   useEffect(() => {
-    if (streamType === 'mp4' && videoRef.current) {
+    // FR-52：目标编码不受支持且无回退源 → 不初始化任一内核，仅展示提示（不抛 Network Error）。
+    if (resolved.unsupported) {
       destroyMpegtsPlayer(); void destroyHlsPlayer()
-      videoRef.current.src = url
+      return
+    }
+    if (resolved.streamType === 'mp4' && videoRef.current) {
+      destroyMpegtsPlayer(); void destroyHlsPlayer()
+      videoRef.current.src = resolved.url
       if (autoPlay) void videoRef.current.play()?.catch?.(() => setAutoPlayBlocked(true))
       return () => { if (videoRef.current) videoRef.current.removeAttribute('src') }
     }
-    if (isABR) void initHlsPlayer(url); else initMpegtsPlayer(url)
+    if (isABR) void initHlsPlayer(resolved.url); else initMpegtsPlayer(resolved.url)
     return () => { void destroyHlsPlayer(); destroyMpegtsPlayer() }
-  }, [url, isABR, streamType, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
+  }, [resolved.url, resolved.streamType, resolved.unsupported, isABR, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
 
   // FR-44：URL 变化（切换媒体）时重置续播 / 上报 / 看完的一次性标志
   useEffect(() => {
     hasSeekedRef.current = false
     lastReportRef.current = 0
     endedReportedRef.current = false
-  }, [url])
+  }, [resolved.url])
 
   // 续播定位（FR-44）：媒体可定位后 seek 到上次位置一次。
   // 接近片尾的位置不回跳（剩余小于阈值时忽略），避免「看完」后又跳回末尾。
@@ -256,6 +316,12 @@ export default function VideoPlayer({
     <Box style={{ display: 'flex', flexDirection: 'column', width: '100%', backgroundColor: 'black', borderRadius: 'var(--mantine-radius-lg)', overflow: 'hidden' }}>
       <Box style={{ position: 'relative', width: '100%', aspectRatio: '16/9', backgroundColor: 'black' }}>
         <video ref={videoRef} style={{ width: '100%', height: '100%', backgroundColor: 'black' }} playsInline />
+        {/* FR-52：目标编码不受支持且无回退源时的提示（不抛 Network Error） */}
+        {resolved.unsupported && (
+          <Box role="alert" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: '0 1rem' }}>
+            <Text c="white" size="sm" ta="center">当前浏览器不支持该视频编码，无法播放</Text>
+          </Box>
+        )}
         {autoPlayBlocked && !isPlaying && (
           <Box style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} onClick={togglePlay}>
             <Text c="white" size="lg">点击播放</Text>
