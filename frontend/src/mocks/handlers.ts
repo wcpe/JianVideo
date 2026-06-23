@@ -367,6 +367,20 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // 批量软删（FR-69）：把存在且未软删的 id 批量加入回收站，返回实际软删条数
+  http.post('*/api/library/media/batch-delete', async ({ request }) => {
+    await delay(200)
+    const body = (await request.json()) as { ids?: number[] }
+    let deleted = 0
+    for (const id of body.ids ?? []) {
+      if (mediaFiles.some(m => m.id === id) && !deletedMediaIds.has(id)) {
+        deletedMediaIds.add(id)
+        deleted++
+      }
+    }
+    return HttpResponse.json({ deleted })
+  }),
+
   // ─── 软删除与回收站（FR-25）──────────────────────────
 
   http.get('*/api/library/recycle', async () => {

@@ -134,6 +134,12 @@ async function realDeleteMediaFile(id: number): Promise<void> {
   await client.delete(`/api/library/media/${id}`)
 }
 
+// 批量软删（FR-69）：一次请求软删多个媒体，返回实际软删条数。
+async function realBatchDeleteMediaFiles(ids: number[]): Promise<number> {
+  const res = await client.post<{ deleted: number }>('/api/library/media/batch-delete', { ids })
+  return res.data.deleted
+}
+
 async function realRenameMediaFile(id: number, newName: string): Promise<MediaFile> {
   const res = await client.put<MediaFile>(`/api/library/media/${id}/rename`, { new_name: newName })
   return res.data
@@ -358,6 +364,19 @@ async function mockDeleteMediaFile(id: number): Promise<void> {
   if (mockMediaFiles.some(m => m.id === id)) mockDeletedIds.add(id)
 }
 
+// 批量软删 mock（FR-69）：把存在且未软删的 id 批量加入回收站，返回实际软删条数。
+async function mockBatchDeleteMediaFiles(ids: number[]): Promise<number> {
+  await mockDelay(150)
+  let deleted = 0
+  for (const id of ids) {
+    if (mockMediaFiles.some(m => m.id === id) && !mockDeletedIds.has(id)) {
+      mockDeletedIds.add(id)
+      deleted++
+    }
+  }
+  return deleted
+}
+
 async function mockGetRecycleMediaFiles(): Promise<MediaFile[]> {
   await mockDelay(150)
   return mockMediaFiles.filter(m => mockDeletedIds.has(m.id))
@@ -522,6 +541,8 @@ export function deleteLibraryPath(id: number) { return useMock ? mockDeleteLibra
 export function getMediaFiles(params?: MediaListParams) { return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params) }
 export function getMediaFile(id: number) { return useMock ? mockGetMediaFile(id) : realGetMediaFile(id) }
 export function deleteMediaFile(id: number) { return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id) }
+// 批量软删（FR-69）
+export function batchDeleteMediaFiles(ids: number[]) { return useMock ? mockBatchDeleteMediaFiles(ids) : realBatchDeleteMediaFiles(ids) }
 export function renameMediaFile(id: number, newName: string) { return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName) }
 export function updateDisplayName(id: number, displayName: string) { return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName) }
 // 软删除与回收站（FR-25）
