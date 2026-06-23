@@ -37,6 +37,8 @@ export interface MediaFile {
   watched?: boolean
   /** 最近一次观看时间（FR-44），旧数据可能缺省 */
   last_watched_at?: string | null
+  /** 观看次数（FR-75）：每看完一次 +1，旧数据可能缺省 */
+  view_count?: number
 
   /** 媒体时间与 EXIF（FR-31 提取、FR-38 展示），旧数据可能缺省 */
   media_time?: string | null
@@ -177,6 +179,42 @@ export interface HealthScanStatus {
   error: string
   started_at: string
   completed_at: string
+}
+
+/** 观看时间线的一天（FR-75）：本地日期 YYYY-MM-DD 与当天观看媒体数 */
+export interface TimelineBucket {
+  date: string
+  count: number
+}
+
+/** 某存储库的已看媒体数（FR-75） */
+export interface LibraryWatchCount {
+  library_id: number
+  label: string
+  watched: number
+}
+
+/** 某容器格式的已看媒体数（FR-75） */
+export interface FormatWatchCount {
+  format: string
+  watched: number
+}
+
+/** 观看统计聚合（FR-75）：各维度均仅统计未软删媒体 */
+export interface WatchStats {
+  total: number
+  watched: number
+  unwatched: number
+  /** 最近观看时间线（按天，倒序） */
+  recent_timeline: TimelineBucket[]
+  /** 续播位置分布（10 档，下标 0=0-10%…9=90-100%） */
+  position_heatmap: number[]
+  /** 各存储库已看分布 */
+  by_library: LibraryWatchCount[]
+  /** 各格式已看分布 */
+  by_format: FormatWatchCount[]
+  /** 观看次数 Top N */
+  top_viewed: MediaFile[]
 }
 
 /** 媒体库后缀类型 */

@@ -100,6 +100,7 @@
 | last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
 | watched | INTEGER | 是否已看完（FR-44），0/1 |
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
+| view_count | INTEGER | 观看次数（FR-75）：每「看完」一次 +1，位置上报不计数，供观看统计聚合 |
 | display_name | TEXT | 系统内显示名（FR-30），空则回退 `file_name` |
 | deleted_at | DATETIME, INDEX | 软删时间（FR-25）；非空表示已进回收站，源文件不动 |
 | media_time | DATETIME, INDEX | 媒体时间（FR-31），多层降级解析，供时间轴排序 |
@@ -111,6 +112,8 @@
 > 注：本表列出 `media_files` 与当前已实现能力相关的字段。
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
+>
+> 观看热力与统计（FR-75）：`view_count` 列由 `MarkWatched` 在置 `watched`/清零续播位置的**同一次 UPDATE** 内用 `view_count + 1` 原子自增——「看完计一次」，位置上报（`UpdateWatchPosition`）不计数，避免约 10s 一次的位置上报重复累加。`library.GetWatchStats()` 纯查询/聚合现有列（全程 `deleted_at IS NULL`）产出已看/未看计数、最近观看时间线（`last_watched_at` 按本地时区 `strftime` 天分桶）、续播位置热力（`last_position/duration` 比例分 10 档，`duration>0`）、各库/各格式已看分布、观看次数 Top N，经 `GET /api/library/stats` 返回，供观看统计页（`/stats`）自建（无图表库）可视化。不新建观看明细表（YAGNI、守真源不变量），统计是 `media_files` 现有列的只读派生。
 >
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内对 `id IN (?) AND deleted_at IS NULL` 一次 `UPDATE` 置 `deleted_at`，复用单条软删语义、跳过不存在/已软删 id，返回受影响行数；供时间轴与目录浏览的列表多选批量删除（进回收站、可还原）消费。
 >

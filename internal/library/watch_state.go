@@ -33,13 +33,15 @@ func (s *Service) UpdateWatchPosition(id int64, position float64) (*models.Media
 }
 
 // MarkWatched 标记媒体已看完（FR-44）：置 watched=true 并清零续播位置（已看完不再续播），
-// 同时刷新最近观看时间。媒体不存在返回 gorm.ErrRecordNotFound。
+// 同时刷新最近观看时间、观看次数 +1（FR-75，看完计一次）。媒体不存在返回 gorm.ErrRecordNotFound。
+// 计数与状态更新在同一次 UPDATE 内原子完成；位置上报（UpdateWatchPosition）不计数，避免重复累加。
 func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
 	now := time.Now()
 	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Updates(map[string]any{
 		"watched":         true,
 		"last_position":   0,
 		"last_watched_at": now,
+		"view_count":      gorm.Expr("view_count + 1"),
 	})
 	if result.Error != nil {
 		return nil, result.Error

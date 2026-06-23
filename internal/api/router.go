@@ -76,6 +76,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
 		lib.GET("/on-this-day", h.OnThisDay)
 
+		// 观看热力与统计（FR-75）：已看/未看、最近观看时间线、续播位置热力、各库/类型分布、观看次数 Top N
+		lib.GET("/stats", h.WatchStats)
+
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
 		lib.POST("/scan/:id", h.ScanLibrary)

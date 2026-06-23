@@ -12,6 +12,7 @@ import AlbumsPage from './pages/AlbumsPage'
 import RecyclePage from './pages/RecyclePage'
 import InspectPage from './pages/InspectPage'
 import DuplicatesPage from './pages/DuplicatesPage'
+import StatsPage from './pages/StatsPage'
 import PlayPage from './pages/PlayPage'
 import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
@@ -42,6 +43,8 @@ export default function App() {
           <Route path="/inspect" element={<ProtectedRoute><AppLayout><InspectPage /></AppLayout></ProtectedRoute>} />
           {/* 感知哈希去重「重复项」页（FR-70） */}
           <Route path="/duplicates" element={<ProtectedRoute><AppLayout><DuplicatesPage /></AppLayout></ProtectedRoute>} />
+          {/* 观看热力与统计页（FR-75） */}
+          <Route path="/stats" element={<ProtectedRoute><AppLayout><StatsPage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           {/* 系统信息与设置合并为单页两 tab（FR-55）：/system 进控制台页 */}
           <Route path="/system" element={<ProtectedRoute><AppLayout><ConsolePage /></AppLayout></ProtectedRoute>} />

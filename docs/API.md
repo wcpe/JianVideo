@@ -222,6 +222,25 @@
   ```
 - **说明**：返回「往年同一天」拍摄的媒体——`media_time` 非空、未软删，且其月-日等于服务器本地「今天」的月-日、年份不等于今年，按 `media_time` 倒序，供首页「那年今日」回忆区块展示。
 
+### 观看统计（FR-75）
+
+- **方法 / 路径**：`GET /api/library/stats`
+- **查询参数**：无
+- **响应**（200）：
+  ```json
+  {
+    "total": 42,
+    "watched": 18,
+    "unwatched": 24,
+    "recent_timeline": [{"date": "2026-06-24", "count": 5}],
+    "position_heatmap": [3, 1, 0, 2, 1, 4, 0, 1, 2, 6],
+    "by_library": [{"library_id": 1, "label": "电影", "watched": 12}],
+    "by_format": [{"format": "mp4", "watched": 11}],
+    "top_viewed": [{"id": 11, "file_name": "热门片.mp4", "view_count": 5}]
+  }
+  ```
+- **说明**：聚合观看统计，各维度均仅统计未软删媒体。`watched`/`unwatched` 为看完/未看完计数；`recent_timeline` 按 `last_watched_at` 本地时区天分桶（倒序、最近 30 天有观看的天）；`position_heatmap` 为续播进度（`last_position/duration`，`duration>0`）落入 10 档（下标 0=0-10%…9=90-100%）的媒体数；`by_library`/`by_format` 为各库/各格式已看媒体数；`top_viewed` 为观看次数（`view_count`，看完一次 +1）Top 10。供观看统计页（`/stats`）展示。
+
 ### 重命名媒体文件
 
 - **方法 / 路径**：`PUT /api/library/media/:id/rename`

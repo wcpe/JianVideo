@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { getSystemInfo } from '@/api/system'
@@ -60,6 +60,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/inspect', label: '巡检', icon: IconStethoscope },
     // 感知哈希去重（FR-70）：检出近似重复媒体、批量清理候选
     { path: '/duplicates', label: '重复项', icon: IconCopy },
+    // 观看热力与统计（FR-75）：观看次数、续播位置热力、最近观看时间线
+    { path: '/stats', label: '统计', icon: IconChartBar },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
   ]
