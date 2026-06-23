@@ -248,6 +248,7 @@
 - `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
 - 前端 Tab 切换（时间轴 | 文件目录），媒体库目录卡片提供“浏览”入口，面包屑导航 + 文件列表复用现有卡片样式
 - 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量），不内嵌媒体文件列表；点击卡片携 `library_id` + 起始 `path` 跳转 `/browse` 定位到该库根目录。`GET /api/library/paths` 每项附带 `media_count`（按 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
+- **聚合虚拟根（FR-66，[ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时进入聚合根分支——忽略 `library_id`，列出所有启用库作为顶层目录项（`DirInfo.library_id` 填该库 ID、`name`=label、`path`=库 path），面包屑单段 `{name:"全部存储库", path:"__root__"}`；其余 `parent_path` 走原单库前缀逻辑不变。前端目录浏览页（`/browse`）默认进虚拟根列全部库、点库携 `library_id` 下钻、面包屑可回根；带 `library_id`+`path` 深链则直接进该库（向后兼容）。库列表真源仍是 `library_paths`、媒体真源仍是 `media_files`，聚合根不新增持久状态
 
 ## 5. 关键机制
 

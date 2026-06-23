@@ -44,17 +44,18 @@ export default function BrowsePage() {
 
   const filterActive = !!(search.trim() || mediaType || sizeMin || timeFrom || timeTo)
 
-  // 带库定位查询参数（library_id + path）时优先用其初始化；否则回退首个库根目录
+  // 带库定位查询参数（library_id + path）时直接进该库浏览；否则以聚合虚拟根初始化（FR-66）
   useEffect(() => {
-    if (browse.browseLibraryID) return
     const libraryID = Number(searchParams.get('library_id'))
     const path = searchParams.get('path')
     if (libraryID > 0 && path) {
-      browse.initIfNeeded(libraryID, path)
-    } else if (paths.paths.length > 0) {
-      browse.initIfNeeded(paths.paths[0].id, paths.paths[0].path)
+      browse.handleBrowsePath(libraryID, path)
+    } else {
+      browse.initRoot()
     }
-  }, [paths.paths, browse.browseLibraryID, searchParams])
+    // 仅依查询参数初始化一次（hook 内部以 initialized 守卫防重复）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // 筛选生效时按当前目录路径（前缀，递归）查媒体接口（消费 FR-35），否则清空
   useEffect(() => {

@@ -52,6 +52,11 @@ const (
 	ScanModeFull = "full"
 )
 
+// BrowseRootMarker 目录浏览聚合虚拟根标记（FR-66）。
+// parent_path 取此哨兵值时进入聚合根分支：忽略 library_id，列出所有启用库作为顶层目录。
+// 真实文件路径不含该串，故不与任何实际目录冲突。
+const BrowseRootMarker = "__root__"
+
 // NormalizeScanMode 规范化扫描模式：仅 full 视为全量，其余（含空串/非法值）按增量。
 // 供端点解析查询参数时回退，保证向后兼容。
 func NormalizeScanMode(mode string) string {
@@ -422,7 +427,14 @@ func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath stri
 
 // BrowseDirectory 浏览指定目录下的子目录和媒体文件。
 // 通过 file_path 前缀匹配一次查询所有文件，Go 层按第一级子目录分组。
+// 聚合虚拟根（FR-66）：parentPath==BrowseRootMarker 时忽略 libraryID，
+// 列出所有启用库作为顶层目录（见 ADR-0037）。
 func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error) {
+	// 聚合虚拟根分支：列出所有启用库作为顶层目录，各项携带 library_id
+	if parentPath == BrowseRootMarker {
+		return s.browseAggregateRoot()
+	}
+
 	// 统一路径分隔符为 /，防止 Windows filepath.Clean 把 / 转成 \
 	parentPath = strings.ReplaceAll(parentPath, `\`, `/`)
 	// 规范化路径，防止路径遍历
@@ -478,6 +490,35 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 		Breadcrumbs: breadcrumbs,
 		Directories: dirs,
 		Files:       files,
+	}, nil
+}
+
+// browseAggregateRoot 构建聚合虚拟根响应（FR-66）：
+// 列出所有启用库作为顶层目录项（name=label/回退 path、path=库 path、library_id=库 ID），
+// 面包屑为单段虚拟根，顶层不含文件。
+func (s *Service) browseAggregateRoot() (*models.BrowseResponse, error) {
+	var paths []models.LibraryPath
+	if err := s.db.Where("enabled = ?", 1).Order("id").Find(&paths).Error; err != nil {
+		return nil, err
+	}
+
+	dirs := make([]models.DirInfo, 0, len(paths))
+	for _, lp := range paths {
+		name := lp.Label
+		if name == "" {
+			name = lp.Path
+		}
+		dirs = append(dirs, models.DirInfo{
+			Name:      name,
+			Path:      lp.Path,
+			LibraryID: lp.ID,
+		})
+	}
+
+	return &models.BrowseResponse{
+		Breadcrumbs: []models.BreadcrumbItem{{Name: "全部存储库", Path: BrowseRootMarker}},
+		Directories: dirs,
+		Files:       make([]models.MediaFile, 0),
 	}, nil
 }
 

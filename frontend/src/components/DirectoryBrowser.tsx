@@ -19,7 +19,7 @@ interface DirectoryBrowserProps {
   loading: boolean
   error: string | null
   customImageExtensions: Record<number, string[]>
-  onEnterDir: (path: string) => void
+  onEnterDir: (dir: DirInfo) => void
   onBreadcrumbNavigate: (path: string) => void
   onErrorClose: () => void
   /** 双击文件触发打开（FR-33）；参数为该文件在排序后 files 中的下标 */
@@ -121,7 +121,7 @@ export default function DirectoryBrowser({
         <Stack gap={4}>
           {sortedDirs.map((dir) => (
             <Card key={`dir-${dir.path}`} withBorder p="xs" radius="sm" bg="var(--mantine-color-default)"
-              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
+              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir)}>
               <Group gap="xs" wrap="nowrap">
                 <IconFolder size={18} color="var(--mantine-color-purple-4)" />
                 <Text size="sm">{dir.name}</Text>
@@ -158,7 +158,7 @@ export default function DirectoryBrowser({
         <SimpleGrid cols={cols}>
           {sortedDirs.map((dir) => (
             <Card key={`dir-${dir.path}`} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)"
-              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir.path)}>
+              style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir)}>
               <Stack gap={4} align="center">
                 <IconFolder size={displayMode === 'small' ? 24 : 40} color="var(--mantine-color-purple-4)" />
                 <Text size="xs" truncate w="100%" ta="center">{dir.name}</Text>

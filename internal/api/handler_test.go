@@ -550,6 +550,46 @@ func TestMediaExtensionsAPI(t *testing.T) {
 	}
 }
 
+// TestBrowseDirectory_AggregateRoot_API 聚合虚拟根端点（FR-66）：
+// parent_path=__root__ 时不强制 library_id，返回所有启用库作为顶层目录项。
+func TestBrowseDirectory_AggregateRoot_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	lp1, err := svc.CreateLibraryPath(filepath.ToSlash(t.TempDir()), "local", "电影库")
+	if err != nil {
+		t.Fatalf("创建库1失败: %v", err)
+	}
+	lp2, err := svc.CreateLibraryPath(filepath.ToSlash(t.TempDir()), "local", "动漫库")
+	if err != nil {
+		t.Fatalf("创建库2失败: %v", err)
+	}
+
+	// 不带 library_id，仅 parent_path=__root__
+	req := httptest.NewRequest("GET", "/api/library/browse?parent_path="+library.BrowseRootMarker, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("聚合根浏览期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var resp models.BrowseResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v, body: %s", err, w.Body.String())
+	}
+	if len(resp.Directories) != 2 {
+		t.Fatalf("聚合根期望 2 个库目录, 实际 %d", len(resp.Directories))
+	}
+	ids := map[int64]bool{}
+	for _, d := range resp.Directories {
+		if d.LibraryID == 0 {
+			t.Fatalf("聚合根库目录项应携带 library_id, 实际 %+v", d)
+		}
+		ids[d.LibraryID] = true
+	}
+	if !ids[lp1.ID] || !ids[lp2.ID] {
+		t.Fatalf("聚合根应包含两个库 ID, 实际 %+v", ids)
+	}
+}
+
 func TestRenameMediaFile_API(t *testing.T) {
 	router, svc := setupTestRouter(t)
 	dir := t.TempDir()

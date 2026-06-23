@@ -38,15 +38,20 @@ describe('BrowsePage', () => {
     vi.clearAllMocks()
   })
 
-  it('目录初始化使用完整媒体库路径', async () => {
+  it('无库定位参数时以聚合虚拟根初始化并列出所有存储库（FR-66）', async () => {
     let requestedParentPath: string | null = null
+    let requestedLibraryID: string | null = null
     server.use(
       http.get('*/api/library/browse', ({ request }) => {
         const url = new URL(request.url)
         requestedParentPath = url.searchParams.get('parent_path')
+        requestedLibraryID = url.searchParams.get('library_id')
         return HttpResponse.json({
-          breadcrumbs: [{ name: '电影', path: 'D:\\Videos\\Movies' }],
-          directories: [],
+          breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
+          directories: [
+            { name: '电影库', path: 'D:\\Videos\\Movies', library_id: 1 },
+            { name: '动漫库', path: 'D:\\Videos\\Anime', library_id: 2 },
+          ],
           files: [],
         })
       }),
@@ -54,8 +59,46 @@ describe('BrowsePage', () => {
 
     renderPage()
 
+    // 初始请求走聚合虚拟根，不带 library_id
     await waitFor(() => {
-      expect(requestedParentPath).toBe('D:\\Videos\\Movies')
+      expect(requestedParentPath).toBe('__root__')
+      expect(requestedLibraryID).toBeNull()
+    })
+    // 根层列出所有库
+    expect(await screen.findByText('电影库')).toBeVisible()
+    expect(await screen.findByText('动漫库')).toBeVisible()
+  })
+
+  it('根层点击某库下钻进入该库树，带上对应 library_id（FR-66）', async () => {
+    const requests: { libraryID: string | null; parentPath: string | null }[] = []
+    server.use(
+      http.get('*/api/library/browse', ({ request }) => {
+        const url = new URL(request.url)
+        const parentPath = url.searchParams.get('parent_path')
+        requests.push({ libraryID: url.searchParams.get('library_id'), parentPath })
+        if (parentPath === '__root__') {
+          return HttpResponse.json({
+            breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
+            directories: [{ name: '动漫库', path: 'D:\\Videos\\Anime', library_id: 5 }],
+            files: [],
+          })
+        }
+        return HttpResponse.json({
+          breadcrumbs: [{ name: '全部存储库', path: '__root__' }, { name: '动漫库', path: 'D:\\Videos\\Anime' }],
+          directories: [], files: [],
+        })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    // 点击根层的库目录卡片
+    await user.click(await screen.findByText('动漫库'))
+
+    // 下钻请求带 library_id=5 与该库路径
+    await waitFor(() => {
+      expect(requests.some(r => r.libraryID === '5' && r.parentPath === 'D:\\Videos\\Anime')).toBe(true)
     })
   })
 
@@ -103,7 +146,8 @@ describe('BrowsePage', () => {
       }),
     )
 
-    renderPage()
+    // 带库定位参数直接进库（筛选需库上下文，FR-66 根层无库）
+    renderPage(`/browse?library_id=1&path=${encodeURIComponent('D:\\Videos\\Movies')}`)
     // 等目录初始化（面包屑出现）
     await screen.findByText('电影')
 

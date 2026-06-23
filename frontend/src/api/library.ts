@@ -183,9 +183,10 @@ async function realGetScanTasks(): Promise<ScanTasksResponse> {
 
 async function realBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
   try {
-    const res = await client.get<BrowseResponse>('/api/library/browse', {
-      params: { library_id: libraryID, parent_path: parentPath },
-    })
+    // 聚合虚拟根（FR-66）：parent_path=__root__ 时不带 library_id，后端忽略
+    const params: { parent_path: string; library_id?: number } = { parent_path: parentPath }
+    if (libraryID > 0) params.library_id = libraryID
+    const res = await client.get<BrowseResponse>('/api/library/browse', { params })
     return res.data
   } catch (err) {
     throw new Error(getApiErrorMessage(err, '加载目录内容失败，请重试'), { cause: err })
@@ -445,6 +446,16 @@ async function mockListMediaExtensions(libraryID: number): Promise<MediaExtensio
 
 async function mockBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
   await mockDelay(150)
+  // 聚合虚拟根（FR-66）：列出所有启用库作为顶层目录、各项携带 library_id
+  if (parentPath === '__root__') {
+    return {
+      breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
+      directories: mockPaths
+        .filter(p => p.enabled)
+        .map(p => ({ name: p.label || p.path, path: p.path, library_id: p.id })),
+      files: [],
+    }
+  }
   // 从 mockMediaFiles 中筛选匹配前缀的文件
   const prefix = parentPath.replace(/\\/g, '/') + '/'
   const allFiles = mockMediaFiles.filter(m => {

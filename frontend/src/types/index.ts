@@ -171,6 +171,8 @@ export interface BreadcrumbItem {
 export interface DirInfo {
   name: string
   path: string
+  /** 仅聚合虚拟根（FR-66）的库目录项填充，标识点进去用哪个媒体库 */
+  library_id?: number
 }
 
 /** 目录浏览响应 */

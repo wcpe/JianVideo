@@ -795,3 +795,75 @@ func TestListLibraryPathViews_EmptyLibraryCountsZero(t *testing.T) {
 		t.Fatalf("空库媒体数量应为 0, 实际 %d", views[0].MediaCount)
 	}
 }
+
+// TestBrowseDirectory_AggregateRoot 聚合虚拟根（FR-66）：parent_path=__root__ 时
+// 列出所有启用库作为顶层目录、各项携带 library_id，禁用库不列。
+func TestBrowseDirectory_AggregateRoot(t *testing.T) {
+	svc, db := newTestService(t)
+
+	lp1, _ := svc.CreateLibraryPath(t.TempDir(), "local", "电影库")
+	lp2, _ := svc.CreateLibraryPath(t.TempDir(), "local", "动漫库")
+	lp3, _ := svc.CreateLibraryPath(t.TempDir(), "local", "已禁用库")
+	// 直接禁用第三个库
+	if err := db.Model(&models.LibraryPath{}).Where("id = ?", lp3.ID).Update("enabled", 0).Error; err != nil {
+		t.Fatalf("禁用库失败: %v", err)
+	}
+
+	// library_id 传 0（聚合根忽略 library_id）
+	resp, err := svc.BrowseDirectory(0, BrowseRootMarker)
+	if err != nil {
+		t.Fatalf("聚合根浏览失败: %v", err)
+	}
+
+	// 仅返回 2 个启用库作为顶层目录，禁用库不列
+	if len(resp.Directories) != 2 {
+		t.Fatalf("聚合根期望 2 个启用库目录, 实际 %d: %+v", len(resp.Directories), resp.Directories)
+	}
+	if len(resp.Files) != 0 {
+		t.Fatalf("聚合根顶层不应有文件, 实际 %d", len(resp.Files))
+	}
+	// 各目录项携带对应 library_id 与 label
+	byID := map[int64]models.DirInfo{}
+	for _, d := range resp.Directories {
+		byID[d.LibraryID] = d
+	}
+	if d, ok := byID[lp1.ID]; !ok || d.Name != "电影库" {
+		t.Fatalf("聚合根缺电影库或 name 不符: %+v", byID)
+	}
+	if d, ok := byID[lp2.ID]; !ok || d.Name != "动漫库" {
+		t.Fatalf("聚合根缺动漫库或 name 不符: %+v", byID)
+	}
+	if _, ok := byID[lp3.ID]; ok {
+		t.Fatal("聚合根不应包含已禁用库")
+	}
+	// 面包屑单段虚拟根
+	if len(resp.Breadcrumbs) != 1 || resp.Breadcrumbs[0].Path != BrowseRootMarker {
+		t.Fatalf("聚合根面包屑应为单段虚拟根, 实际 %+v", resp.Breadcrumbs)
+	}
+}
+
+// TestBrowseDirectory_SingleLibraryUnchanged 单库下钻分支（FR-66 不回归）：
+// 带 library_id + 真实 parent_path 时仍按原前缀聚合逻辑返回子目录与文件。
+func TestBrowseDirectory_SingleLibraryUnchanged(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "电影库")
+
+	base := strings.ReplaceAll(lp.Path, `\`, `/`)
+	_, _ = svc.CreateMediaFile(lp.ID, base+"/动作片/a.mp4", 1)
+	_, _ = svc.CreateMediaFile(lp.ID, base+"/b.mp4", 1)
+
+	resp, err := svc.BrowseDirectory(lp.ID, base)
+	if err != nil {
+		t.Fatalf("单库浏览失败: %v", err)
+	}
+	if len(resp.Directories) != 1 || resp.Directories[0].Name != "动作片" {
+		t.Fatalf("单库应列出子目录 动作片, 实际 %+v", resp.Directories)
+	}
+	// 子目录项不应携带 library_id（仅聚合根项填充）
+	if resp.Directories[0].LibraryID != 0 {
+		t.Fatalf("单库子目录项不应携带 library_id, 实际 %d", resp.Directories[0].LibraryID)
+	}
+	if len(resp.Files) != 1 || filepath.Base(resp.Files[0].FilePath) != "b.mp4" {
+		t.Fatalf("单库应列出直接文件 b.mp4, 实际 %+v", resp.Files)
+	}
+}

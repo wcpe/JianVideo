@@ -100,9 +100,20 @@
 
 - **方法 / 路径**：`GET /api/library/browse`
 - **查询参数**：
-  - `library_id`：媒体库 ID（必填）
-  - `parent_path`：父目录路径（必填）
-- **响应**（200）：
+  - `library_id`：媒体库 ID（`parent_path` 非虚拟根时必填）
+  - `parent_path`：父目录路径（必填）。取哨兵值 `__root__` 时进入**聚合虚拟根**（FR-66）：忽略 `library_id`，列出所有启用存储库作为顶层目录项
+- **聚合虚拟根响应**（200，`parent_path=__root__`）：每个 `directories` 项额外携带 `library_id`（标识点进去用哪个库），面包屑为单段 `{"name":"全部存储库","path":"__root__"}`，`files` 为空：
+  ```json
+  {
+    "breadcrumbs": [{"name": "全部存储库", "path": "__root__"}],
+    "directories": [
+      {"name": "电影库", "path": "D:/Videos/Movies", "library_id": 1},
+      {"name": "动漫库", "path": "D:/Videos/Anime", "library_id": 2}
+    ],
+    "files": []
+  }
+  ```
+- **单库响应**（200）：
   ```json
   {
     "breadcrumbs": [

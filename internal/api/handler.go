@@ -432,16 +432,21 @@ func (h *Handler) UpdateDisplayName(c *gin.Context) {
 
 // BrowseDirectory GET /api/library/browse
 func (h *Handler) BrowseDirectory(c *gin.Context) {
-	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
-	if err != nil || libraryID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
-		return
-	}
-
 	parentPath := c.Query("parent_path")
 	if parentPath == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARENT_PATH", "message": "parent_path 不能为空"})
 		return
+	}
+
+	// 聚合虚拟根（FR-66）：parent_path 为虚拟根标记时忽略 library_id，列出所有启用库
+	var libraryID int64
+	if parentPath != library.BrowseRootMarker {
+		id, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
+		if err != nil || id <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
+			return
+		}
+		libraryID = id
 	}
 
 	resp, err := h.library.BrowseDirectory(libraryID, parentPath)

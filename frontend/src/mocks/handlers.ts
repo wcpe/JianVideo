@@ -391,6 +391,17 @@ export const handlers = [
     const libraryID = Number(url.searchParams.get('library_id') || '0')
     const parentPath = url.searchParams.get('parent_path') || '/'
 
+    // 聚合虚拟根（FR-66）：列出所有启用库作为顶层目录、各项携带 library_id
+    if (parentPath === '__root__') {
+      return HttpResponse.json({
+        breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
+        directories: paths
+          .filter(p => p.enabled)
+          .map(p => ({ name: p.label || p.path, path: p.path, library_id: p.id })),
+        files: [],
+      })
+    }
+
     const prefix = parentPath.replace(/\\/g, '/') + '/'
     const allFiles = mediaFiles.filter(m => {
       const fp = m.file_path.replace(/\\/g, '/')
