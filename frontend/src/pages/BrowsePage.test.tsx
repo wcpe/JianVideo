@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
@@ -173,5 +173,51 @@ describe('BrowsePage', () => {
     await waitFor(() => {
       expect(screen.getByText('目录无法访问')).toBeVisible()
     })
+  })
+})
+
+describe('BrowsePage 移动端筛选折叠（FR-86）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    server.use(
+      http.get('*/api/library/paths', () => HttpResponse.json({
+        items: [{ id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T00:00:00Z' }],
+      })),
+      http.get('*/api/library/browse', () => HttpResponse.json({
+        breadcrumbs: [{ name: '电影', path: 'D:\\Videos\\Movies' }], directories: [], files: [],
+      })),
+      http.get('*/api/library/media', () => HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })),
+    )
+  })
+
+  it('提供「筛选」抽屉触发器，搜索框常驻在抽屉之外', async () => {
+    renderPage(`/browse?library_id=1&path=${encodeURIComponent('D:\\Videos\\Movies')}`)
+    await screen.findByText('电影')
+
+    expect(screen.getByPlaceholderText(/在当前目录下搜索/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '筛选' })).toBeInTheDocument()
+    // 默认抽屉关闭，无弹层
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('点「筛选」展开抽屉后，抽屉内选择类型「图片」仍透传 type=image', async () => {
+    let mediaType: string | null = null
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        mediaType = new URL(request.url).searchParams.get('type')
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage(`/browse?library_id=1&path=${encodeURIComponent('D:\\Videos\\Movies')}`)
+    await screen.findByText('电影')
+
+    // 打开筛选抽屉，在抽屉内选择类型「图片」
+    await user.click(screen.getByRole('button', { name: '筛选' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('radio', { name: '图片' }))
+
+    await waitFor(() => expect(mediaType).toBe('image'), { timeout: 2000 })
   })
 })

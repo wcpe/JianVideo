@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Stack, Title, Group, SegmentedControl, NativeSelect, Text, TextInput, Loader } from '@mantine/core'
+import { Stack, Title, Group, SegmentedControl, NativeSelect, Text, TextInput, Loader, Button, Drawer, Box } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { IconSearch } from '@tabler/icons-react'
+import { IconSearch, IconFilter } from '@tabler/icons-react'
 import { useLibraryPaths } from '@/hooks/useLibraryPaths'
 import { useDirectoryBrowse } from '@/hooks/useDirectoryBrowse'
 import DirectoryBrowser, { sortFiles, type DisplayMode, type DirSort } from '@/components/DirectoryBrowser'
@@ -41,6 +42,8 @@ export default function BrowsePage() {
   // 批量删除（FR-69）：待确认删除的 id 列表（非空即弹确认框）+ 删除进行中
   const [pendingDelete, setPendingDelete] = useState<number[]>([])
   const [deleting, setDeleting] = useState(false)
+  // 移动端筛选抽屉开合（FR-86）：窄屏将结构化筛选收进抽屉，搜索框常驻
+  const [filterDrawerOpened, filterDrawer] = useDisclosure(false)
 
   // 搜索防抖 400ms
   useEffect(() => {
@@ -124,20 +127,55 @@ export default function BrowsePage() {
     <Stack gap="md">
       <Title order={2}>目录浏览</Title>
 
-      {/* 搜索 + 筛选（FR-36，消费 FR-35 引擎，按当前目录递归筛选） */}
-      <TextInput
-        placeholder="在当前目录下搜索：文件名，或 ext:jpg type:image size:>10mb"
-        leftSection={<IconSearch size={14} />}
-        value={searchInput}
-        onChange={(e) => setSearchInput(e.currentTarget.value)}
-        size="sm"
-      />
-      <MediaQueryFilters
-        mediaType={mediaType} onMediaTypeChange={setMediaType}
-        sizeMin={sizeMin} onSizeMinChange={setSizeMin}
-        timeFrom={timeFrom} onTimeFromChange={setTimeFrom}
-        timeTo={timeTo} onTimeToChange={setTimeTo}
-      />
+      {/* 搜索 + 筛选（FR-36，消费 FR-35 引擎，按当前目录递归筛选）：搜索框移动端亦常驻（FR-86） */}
+      <Group gap="xs" align="center" wrap="nowrap">
+        <TextInput
+          placeholder="在当前目录下搜索：文件名，或 ext:jpg type:image size:>10mb"
+          leftSection={<IconSearch size={14} />}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.currentTarget.value)}
+          size="sm"
+          style={{ flex: 1 }}
+        />
+        {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
+        <Button
+          variant="default"
+          size="sm"
+          leftSection={<IconFilter size={16} />}
+          onClick={filterDrawer.open}
+          hiddenFrom="sm"
+        >
+          筛选
+        </Button>
+      </Group>
+
+      {/* 桌面端结构化筛选内联铺开（FR-86）：窄屏隐藏，改由抽屉承载 */}
+      <Box visibleFrom="sm">
+        <MediaQueryFilters
+          mediaType={mediaType} onMediaTypeChange={setMediaType}
+          sizeMin={sizeMin} onSizeMinChange={setSizeMin}
+          timeFrom={timeFrom} onTimeFromChange={setTimeFrom}
+          timeTo={timeTo} onTimeToChange={setTimeTo}
+        />
+      </Box>
+
+      {/* 移动端筛选抽屉（FR-86）：承载与桌面同一套受控结构化筛选 */}
+      <Drawer
+        opened={filterDrawerOpened}
+        onClose={filterDrawer.close}
+        title="筛选"
+        position="right"
+        padding="md"
+        hiddenFrom="sm"
+        closeButtonProps={{ 'aria-label': '关闭筛选' }}
+      >
+        <MediaQueryFilters
+          mediaType={mediaType} onMediaTypeChange={setMediaType}
+          sizeMin={sizeMin} onSizeMinChange={setSizeMin}
+          timeFrom={timeFrom} onTimeFromChange={setTimeFrom}
+          timeTo={timeTo} onTimeToChange={setTimeTo}
+        />
+      </Drawer>
 
       {/* 展示方式 + 排序（FR-33） */}
       <Group gap="md" align="center">
