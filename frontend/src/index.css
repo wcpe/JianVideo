@@ -11,11 +11,23 @@ body {
   min-height: 100vh;
   /* 用随主题切换的页面背景变量，亮色模式不残留深底 */
   background: var(--mantine-color-body);
+  /* 亮暗主题切换时平滑过渡背景/文字色（约 150ms）：只列这两个属性，
+     不对全部属性过渡，以防大面积重绘的性能开销与闪烁（FR-84） */
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
   /* PWA standalone 全屏壳：适配刘海/圆角安全区，内容不被遮挡 */
   padding-top: env(safe-area-inset-top, 0);
   padding-left: env(safe-area-inset-left, 0);
   padding-right: env(safe-area-inset-right, 0);
   padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 无障碍兜底：用户开启「减少动态效果」时禁用主题切换过渡（FR-84） */
+@media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none;
+  }
 }
 
 #root {

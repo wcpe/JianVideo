@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { MantineProvider, localStorageColorSchemeManager } from '@mantine/core'
+import { appTheme, themeCssVariablesResolver } from './theme'
 import { Notifications } from '@mantine/notifications'
 import AppLayout from './components/AppLayout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -27,7 +28,12 @@ const colorSchemeManager = localStorageColorSchemeManager({ key: 'jianvideo-colo
 
 export default function App() {
   return (
-    <MantineProvider defaultColorScheme="dark" colorSchemeManager={colorSchemeManager}>
+    <MantineProvider
+      theme={appTheme}
+      cssVariablesResolver={themeCssVariablesResolver}
+      defaultColorScheme="dark"
+      colorSchemeManager={colorSchemeManager}
+    >
       <Notifications position="top-right" />
       <BrowserRouter>
         <Routes>
