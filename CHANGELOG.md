@@ -6,6 +6,9 @@
 
 ## 未发布版本
 
+### 变更
+- **归真 FR-47/48 发布 CI 文档漂移**（仅文档）：`.github/workflows/release.yml`（FR-47 正式发布：tag 推送触发多平台原生构建 + 创建正式 Release）与 `prerelease.yml`（FR-48 预发布：push main 触发滚动 dev 预发布）实际早已实现并自 v0.7.0 起持续产出各平台二进制 + checksums（自更新检测真机时确认产物存在），PRD 却仍标「计划」。据实归真为「已交付@v0.7.0」，消除漂移（不改 CI 文件本身）。
+
 ### 修复
 - **自更新下载大产物被 30s 整体超时掐断（FR-46）**：检测与下载共用 `Timeout=30s` 的 `http.Client`，下载几十 MB 二进制产物时被 client 的整体超时掐断（报 `context deadline exceeded (Client.Timeout)`，handler 给的 5min context 被架空）。`update.Service` 新增下载专用 client（**不设整体 Timeout、靠调用方 context 控制**），检测仍用 30s client。真机验证：旧版 0.12.0 端到端正确检测到正式频道 v0.13.0 有更新（识别平台产物 `jianvideo-windows-amd64.exe`）；下载改靠 context 后不再被 30s 掐断（本机网络无法访问 GitHub releases 下载 CDN、下载速率为 0，完整「下载→替换→重启」待可访问该 CDN 的环境真机复验）。
 
