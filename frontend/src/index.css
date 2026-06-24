@@ -94,6 +94,33 @@ body {
   min-height: 100vh;
 }
 
+/* 键盘焦点可见环（FR-97 无障碍）：仅键盘聚焦（:focus-visible）时为可交互元素
+   显示清晰焦点环，复用 FR-93 品牌紫主色 token（不写死 hex）。FR-92 已设
+   focusRing:'auto'（Mantine box-shadow 焦点环）；这里用 outline 在全站统一兜底，
+   outline 不占布局、不被祖先 overflow 裁切，与 Mantine 焦点环并行不冲突。 */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--mantine-color-purple-6);
+  outline-offset: 2px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+/* 鼠标点击（非键盘）不残留焦点环：去掉 :focus 但非 :focus-visible 时的默认 outline */
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+[role='button']:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+[tabindex]:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* 移动端触控优化：去掉点击高亮、用 manipulation 消除双击缩放延迟 */
 @media (pointer: coarse) {
   button,
@@ -101,5 +128,12 @@ body {
   [role='button'] {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+  }
+  /* 触控目标 ≥44px（FR-97 无障碍）：移动端把图标按钮（ActionIcon）最小点击区
+     放大到 44px，避免相邻图标按钮（收藏/删除/导航等）误触；仅设最小尺寸，
+     不改视觉图标大小与桌面端布局。 */
+  .mantine-ActionIcon-root {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

@@ -28,10 +28,13 @@ const SUB_TABS = [SUB_TAB_ENV, SUB_TAB_HWACCEL, SUB_TAB_CODEC, SUB_TAB_UPDATE]
 
 /** 单行信息项：左侧标签 + 右侧值 */
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  // 长路径等文本值补 title 全文提示（FR-97 可读性）：值为字符串时把原文挂到 title，
+  // 鼠标悬停可见完整内容（如数据库/FFmpeg 路径），非字符串（如徽标节点）不挂。
+  const titleText = typeof value === 'string' ? value : undefined
   return (
     <Group justify="space-between" gap="sm" wrap="nowrap">
       <Text size="sm" c="dimmed">{label}</Text>
-      <Text size="sm" ta="right" style={{ wordBreak: 'break-all' }}>{value}</Text>
+      <Text size="sm" ta="right" style={{ wordBreak: 'break-all' }} title={titleText}>{value}</Text>
     </Group>
   )
 }
