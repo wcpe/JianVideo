@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wcpe/JianVideo/internal/netproxy"
 )
 
 // 仓库与 API 默认值（公开仓库标识，非敏感）。
@@ -77,14 +79,21 @@ type Service struct {
 }
 
 // NewService 创建指向公开仓库的自更新服务。
+// 两个 client 的 Transport 均接 netproxy.ProxyFunc（FR-80），使检测与下载都经可热更的出站代理：
+// 代理为空时直连，与原行为一致；各自 Timeout 语义保持不变（检测 30s、下载无整体超时靠 context）。
 func NewService() *Service {
 	return &Service{
 		baseURL: defaultBaseURL,
 		owner:   defaultOwner,
 		repo:    defaultRepo,
-		client:         &http.Client{Timeout: 30 * time.Second},
-		downloadClient: &http.Client{}, // 无整体超时：下载大产物靠 context（handler 给 5min）控制
-		cache:          map[Channel]cachedCheck{},
+		client: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{Proxy: netproxy.ProxyFunc},
+		},
+		downloadClient: &http.Client{ // 无整体超时：下载大产物靠 context（handler 给 5min）控制
+			Transport: &http.Transport{Proxy: netproxy.ProxyFunc},
+		},
+		cache: map[Channel]cachedCheck{},
 	}
 }
 

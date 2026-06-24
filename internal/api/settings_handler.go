@@ -1,11 +1,13 @@
 package api
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
@@ -57,6 +59,9 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	// 落库成功后，把 magick 路径设置应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）。
 	applyMagickPathSettings(req.Settings)
 
+	// 落库成功后，把网络代理设置应用到后端出站 HTTP 运行期，保存即生效（FR-80）。
+	applyNetworkProxySettings(req.Settings)
+
 	// 通知设置变更，让定时扫描周期等运行期配置即时生效（FR-28）。
 	if h.settingsReload != nil {
 		h.settingsReload()
@@ -90,5 +95,17 @@ func applyFFmpegPathSettings(values map[string]string) {
 func applyMagickPathSettings(values map[string]string) {
 	if p, ok := values[settings.KeyMagickPath]; ok && p != "" {
 		library.SetMagickPath(p)
+	}
+}
+
+// applyNetworkProxySettings 把本次保存的网络代理设置应用到后端出站 HTTP 运行期（FR-80）。
+// 仅当 network_proxy 键出现时处理：空串清空走直连、非空设置代理；
+// 非法 URL 仅记 WARN、不阻断整体保存（落库已成功），与 SetProxy 的「非法不覆盖」语义配合，
+// 保留既有运行期代理不被坏值打乱。SetProxy 自身做 URL 校验与原子更新（并发安全）。
+func applyNetworkProxySettings(values map[string]string) {
+	if p, ok := values[settings.KeyNetworkProxy]; ok {
+		if err := netproxy.SetProxy(p); err != nil {
+			log.Printf("[WARN] 网络代理设置无效，保留既有出站代理: %v", err)
+		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/db"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/settings"
@@ -139,6 +140,16 @@ func main() {
 		log.Printf("[INFO] ImageMagick 可用: %s（HEIC/RAW 将转 JPEG 显示）", library.GetMagickPath())
 	} else {
 		log.Printf("[WARN] ImageMagick 不可用（%s），HEIC/RAW 图片将无法显示", library.GetMagickPath())
+	}
+
+	// 后端出站网络代理注入（FR-80）：settings 中 network_proxy 非空则设为出站代理，空=直连。
+	// 非法 URL 仅记 WARN、不阻断启动；自更新等后端外部 HTTP 出站经此代理（解决直连 GitHub 不可达）。
+	if p, _ := settingsSvc.Get(settings.KeyNetworkProxy); p != "" {
+		if err := netproxy.SetProxy(p); err != nil {
+			log.Printf("[WARN] 持久化网络代理设置无效，忽略并走直连: %v", err)
+		} else {
+			log.Printf("[INFO] 采用持久化设置的出站网络代理: %s", netproxy.Raw())
+		}
 	}
 
 	// 播放服务：用于在 HLS 不可用时提供 /api/play/:id/stream 降级路径

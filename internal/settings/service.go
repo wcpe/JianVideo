@@ -30,6 +30,8 @@ const (
 	KeyFFprobePath = "ffprobe_path"
 	// KeyMagickPath ImageMagick magick 可执行文件路径（FR-63），非空时启动覆盖自动发现并应用到 HEIC/RAW 转换运行期。
 	KeyMagickPath = "magick_path"
+	// KeyNetworkProxy 后端出站网络代理 URL（FR-80），空=直连；保存即生效，后端外部 HTTP 出站经此代理。
+	KeyNetworkProxy = "network_proxy"
 )
 
 // Service 运行期设置业务逻辑。

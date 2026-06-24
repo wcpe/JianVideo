@@ -136,6 +136,30 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.magick_path).toBe('D:/tools/magick.exe')
   })
 
+  it('保存网络代理走 PUT /api/settings（FR-80）', async () => {
+    const user = userEvent.setup()
+    let putBody: { settings: Record<string, string> } | null = null
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: putBody.settings })
+      }),
+    )
+    renderPage()
+
+    const input = await screen.findByLabelText('网络代理')
+    await user.type(input, 'socks5://127.0.0.1:1080')
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      )
+    })
+    expect(putBody).not.toBeNull()
+    expect(putBody!.settings.network_proxy).toBe('socks5://127.0.0.1:1080')
+  })
+
   it('保存 ffmpeg 路径走 PUT /api/settings', async () => {
     const user = userEvent.setup()
     let putBody: { settings: Record<string, string> } | null = null

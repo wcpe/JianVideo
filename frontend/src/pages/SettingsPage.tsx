@@ -12,6 +12,7 @@ import {
   SETTING_KEY_FFMPEG_PATH,
   SETTING_KEY_FFPROBE_PATH,
   SETTING_KEY_MAGICK_PATH,
+  SETTING_KEY_NETWORK_PROXY,
 } from '@/api/settings'
 import { getEnvVars, detectFFmpeg } from '@/api/system'
 import { extractErrorMessage } from '@/utils/error'
@@ -24,6 +25,7 @@ export default function SettingsPage() {
   const [ffmpegPath, setFfmpegPath] = useState('')
   const [ffprobePath, setFfprobePath] = useState('')
   const [magickPath, setMagickPath] = useState('')
+  const [networkProxy, setNetworkProxy] = useState('')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -50,6 +52,7 @@ export default function SettingsPage() {
         setFfmpegPath(data[SETTING_KEY_FFMPEG_PATH] ?? '')
         setFfprobePath(data[SETTING_KEY_FFPROBE_PATH] ?? '')
         setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '')
+        setNetworkProxy(data[SETTING_KEY_NETWORK_PROXY] ?? '')
       })
       .catch((err) => { if (active) setLoadError(extractErrorMessage(err, '加载设置失败')) })
       .finally(() => { if (active) setLoading(false) })
@@ -77,6 +80,7 @@ export default function SettingsPage() {
         [SETTING_KEY_FFMPEG_PATH]: ffmpegPath,
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
         [SETTING_KEY_MAGICK_PATH]: magickPath,
+        [SETTING_KEY_NETWORK_PROXY]: networkProxy,
       })
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '')
@@ -84,6 +88,7 @@ export default function SettingsPage() {
       setFfmpegPath(updated[SETTING_KEY_FFMPEG_PATH] ?? '')
       setFfprobePath(updated[SETTING_KEY_FFPROBE_PATH] ?? '')
       setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '')
+      setNetworkProxy(updated[SETTING_KEY_NETWORK_PROXY] ?? '')
       notifications.show({ title: '保存成功', message: '设置已保存', color: 'green', autoClose: 3000 })
     } catch (err) {
       notifications.show({
@@ -95,7 +100,7 @@ export default function SettingsPage() {
     } finally {
       setSaving(false)
     }
-  }, [scanInterval, recycleBinPaths, ffmpegPath, ffprobePath, magickPath])
+  }, [scanInterval, recycleBinPaths, ffmpegPath, ffprobePath, magickPath, networkProxy])
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
   const handleDetect = useCallback(async () => {
@@ -144,6 +149,14 @@ export default function SettingsPage() {
               onChange={(e) => setRecycleBinPaths(e.currentTarget.value)}
               autosize
               minRows={2}
+            />
+            {/* 网络代理（FR-80）：用于自更新等后端外部网络访问，空=直连；随「保存设置」一并保存、保存即生效 */}
+            <TextInput
+              label="网络代理"
+              description="用于自更新等后端外部网络访问；留空则直连。支持 http/https/socks5"
+              placeholder="如 http://host:port 或 socks5://host:port"
+              value={networkProxy}
+              onChange={(e) => setNetworkProxy(e.currentTarget.value)}
             />
             <Text size="xs" c="dimmed">
               设置保存到数据库，运行期可改、重启后保留。
