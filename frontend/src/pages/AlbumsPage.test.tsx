@@ -144,6 +144,37 @@ describe('AlbumsPage', () => {
     })
   })
 
+  it('无相册时渲染统一空态（FR-98）', async () => {
+    server.use(
+      http.get('*/api/albums', () => HttpResponse.json({ items: [] })),
+    )
+    renderPage()
+    // 空态标题 + 接入 EmptyState 容器
+    expect(await screen.findByText('还没有相册')).toBeVisible()
+    const empties = screen.getAllByTestId('empty-state')
+    expect(empties.length).toBeGreaterThan(0)
+  })
+
+  it('加载相册失败时渲染插画+重试空态（FR-98）', async () => {
+    server.use(
+      http.get('*/api/albums', () => new HttpResponse(null, { status: 500 })),
+    )
+    renderPage()
+    expect(await screen.findByText('加载相册失败')).toBeVisible()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+
+  it('首屏加载相册列表时渲染骨架屏（FR-98）', async () => {
+    // 让 /api/albums 挂起不结算，保持 loading
+    server.use(
+      http.get('*/api/albums', () => new Promise(() => {})),
+    )
+    const { container } = renderPage()
+    await waitFor(() => {
+      expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument()
+    })
+  })
+
   it('在相册内从媒体库加入媒体', async () => {
     let addPayload: { media_id?: number } | null = null
     server.use(

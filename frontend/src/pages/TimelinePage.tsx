@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { Stack, Title, TextInput, Group, SegmentedControl, Text, ActionIcon, Tooltip, Button, Drawer, Box } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -52,6 +52,23 @@ export default function TimelinePage() {
     const i = infinite.items.findIndex(x => x.id === f.id)
     if (i >= 0) setDetailIndex(i)
   }, [infinite.items])
+
+  // 搜索/筛选是否生效（FR-98）：用于区分「无结果」与「空库」空态
+  const filterActive = useMemo(
+    () => !!(infinite.searchInput.trim() || favorite || tagId || mediaType || sizeMin || timeFrom || timeTo),
+    [infinite.searchInput, favorite, tagId, mediaType, sizeMin, timeFrom, timeTo],
+  )
+
+  // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
+  const clearFilters = useCallback(() => {
+    infinite.setSearchInput('')
+    setFavorite(false)
+    setTagId(0)
+    setMediaType('')
+    setSizeMin(0)
+    setTimeFrom('')
+    setTimeTo('')
+  }, [infinite])
 
   // 切换收藏（FR-41）：调用接口后刷新列表
   const handleToggleFavorite = useCallback(async (f: MediaFile) => {
@@ -193,6 +210,8 @@ export default function TimelinePage() {
         hasMore={infinite.hasMore}
         loadingMore={infinite.loading && infinite.items.length > 0}
         granularity={granularity}
+        filtered={filterActive}
+        onClearFilter={clearFilters}
         onBatchDelete={(ids) => setPendingDelete(ids)}
         onDeleteOne={(f) => setPendingDelete([f.id])}
         onBatchAddToAlbum={batch.openAddToAlbum}

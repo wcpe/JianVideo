@@ -131,3 +131,38 @@ describe('DirectoryBrowser 资源管理器视图（FR-33）', () => {
     expect(screen.getByRole('img', { name: '图.jpg' }).getAttribute('src')).toContain('/api/library/thumbnail/7')
   })
 })
+
+describe('DirectoryBrowser 空态区分（FR-98）', () => {
+  function renderEmpty(props: Partial<React.ComponentProps<typeof DirectoryBrowser>> = {}) {
+    return render(
+      <MantineProvider>
+        <DirectoryBrowser
+          breadcrumbs={[]} directories={[]} files={[]}
+          loading={false} error={null} customImageExtensions={{}}
+          onEnterDir={() => {}} onBreadcrumbNavigate={() => {}}
+          onErrorClose={() => {}} onOpenFile={() => {}}
+          {...props}
+        />
+      </MantineProvider>,
+    )
+  }
+
+  it('无筛选且 0 结果渲染「空目录」空态', () => {
+    renderEmpty()
+    expect(screen.getByText('此目录暂无内容')).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配的媒体')).toBeNull()
+  })
+
+  it('有筛选且 0 结果渲染「无匹配结果」空态 + 清除筛选 CTA', async () => {
+    const onClearFilter = vi.fn()
+    renderEmpty({ filtered: true, onClearFilter })
+    expect(screen.getByText('没有匹配的媒体')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '清除筛选' }))
+    expect(onClearFilter).toHaveBeenCalledTimes(1)
+  })
+
+  it('加载态渲染骨架屏', () => {
+    const { container } = renderEmpty({ loading: true })
+    expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument()
+  })
+})

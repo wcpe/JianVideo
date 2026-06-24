@@ -58,6 +58,16 @@ export default function BrowsePage() {
 
   const filterActive = !!(search.trim() || mediaType || sizeMin || timeFrom || timeTo)
 
+  // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
+  const clearFilters = useCallback(() => {
+    setSearchInput('')
+    setSearch('')
+    setMediaType('')
+    setSizeMin(0)
+    setTimeFrom('')
+    setTimeTo('')
+  }, [])
+
   // 带库定位查询参数（library_id + path）时直接进该库浏览；否则以聚合虚拟根初始化（FR-66）
   useEffect(() => {
     const libraryID = Number(searchParams.get('library_id'))
@@ -225,6 +235,7 @@ export default function BrowsePage() {
           onErrorClose={() => {}}
           onOpenFile={(_, index) => setDetailIndex(index)}
           displayMode={displayMode} sort={sort}
+          filtered onClearFilter={clearFilters}
           onBatchDelete={(ids) => setPendingDelete(ids)}
           onDeleteOne={(f) => setPendingDelete([f.id])}
           onBatchAddToAlbum={batch.openAddToAlbum}

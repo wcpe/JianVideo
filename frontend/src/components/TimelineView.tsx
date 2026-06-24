@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { SimpleGrid, Card, Text, Group, Box, Badge, Skeleton, Alert, Stack, Loader, Center, ActionIcon, Checkbox } from '@mantine/core'
-import { IconFolder, IconAlertCircle, IconStar, IconStarFilled } from '@tabler/icons-react'
+import { IconFolder, IconAlertCircle, IconStar, IconStarFilled, IconSearchOff } from '@tabler/icons-react'
+import EmptyState from '@/components/EmptyState'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
@@ -42,6 +43,10 @@ interface TimelineViewProps {
   loadingMore?: boolean
   // 分组粒度（FR-32 缩放）：日 / 月 / 年，默认日
   granularity?: TimelineGranularity
+  // 搜索/筛选生效标记（FR-98）：为真时 0 结果显示「无匹配结果」而非「空库」
+  filtered?: boolean
+  // 清除筛选回调（FR-98）：无结果态「清除筛选」CTA，传入才渲染
+  onClearFilter?: () => void
   // 多选与批量删除（FR-69），均可选；传入任一即启用选择手势与右键菜单
   onSelectionChange?: (ids: number[]) => void
   onBatchDelete?: (ids: number[]) => void
@@ -181,6 +186,8 @@ export default function TimelineView({
   hasMore,
   loadingMore,
   granularity = 'day',
+  filtered = false,
+  onClearFilter,
   onSelectionChange,
   onBatchDelete,
   onDeleteOne,
@@ -311,13 +318,20 @@ export default function TimelineView({
   }
 
   if (mediaFiles.length === 0) {
-    return (
-      <Box py="xl" ta="center">
-        <Box mb="sm" style={{ textAlign: 'center' }}>
-          <IconFolder size={48} color="var(--mantine-color-dimmed)" />
-        </Box>
-        <Text c="dimmed">暂无媒体文件</Text>
-      </Box>
+    // 区分「搜索/筛选无结果」与「空库」（FR-98）：前者给清除筛选引导
+    return filtered ? (
+      <EmptyState
+        icon={<IconSearchOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+        title="没有匹配的媒体"
+        description="当前搜索或筛选条件下没有结果，换个条件或清除筛选试试。"
+        action={onClearFilter ? { label: '清除筛选', onClick: onClearFilter } : undefined}
+      />
+    ) : (
+      <EmptyState
+        icon={<IconFolder size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+        title="暂无媒体文件"
+        description="在「存储库管理」添加目录并扫描后，媒体会在此按时间轴展示。"
+      />
     )
   }
 

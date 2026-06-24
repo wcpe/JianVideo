@@ -1,6 +1,7 @@
 import { useMemo, useEffect, useState } from 'react'
 import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, Checkbox } from '@mantine/core'
-import { IconFolder, IconAlertCircle } from '@tabler/icons-react'
+import { IconFolder, IconAlertCircle, IconSearchOff } from '@tabler/icons-react'
+import EmptyState from '@/components/EmptyState'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
@@ -29,6 +30,10 @@ interface DirectoryBrowserProps {
   // 展示方式与排序（FR-33），缺省 list / name
   displayMode?: DisplayMode
   sort?: DirSort
+  // 搜索/筛选生效标记（FR-98）：为真时 0 结果显示「无匹配结果」而非「空目录」
+  filtered?: boolean
+  // 清除筛选回调（FR-98）：无结果态「清除筛选」CTA，传入才渲染
+  onClearFilter?: () => void
   // 多选与批量删除（FR-69），均可选，缺省退化为纯高亮选择、无右键菜单
   onSelectionChange?: (ids: number[]) => void
   onBatchDelete?: (ids: number[]) => void
@@ -70,6 +75,7 @@ export default function DirectoryBrowser({
   breadcrumbs, directories, files, loading, error, customImageExtensions,
   onEnterDir, onBreadcrumbNavigate, onErrorClose, onOpenFile,
   displayMode = 'list', sort = 'name',
+  filtered = false, onClearFilter,
   onSelectionChange, onBatchDelete, onDeleteOne,
   onBatchAddToAlbum, onBatchAddTag, onBatchDownload,
 }: DirectoryBrowserProps) {
@@ -143,12 +149,21 @@ export default function DirectoryBrowser({
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={60} radius="md" />)}
         </SimpleGrid>
       ) : sortedDirs.length === 0 && sortedFiles.length === 0 ? (
-        <Box py="xl" ta="center">
-          <Box mb="sm" style={{ textAlign: 'center' }}>
-            <IconFolder size={48} color="var(--mantine-color-dimmed)" />
-          </Box>
-          <Text c="dimmed">此目录暂无内容</Text>
-        </Box>
+        // 区分「搜索/筛选无结果」与「空目录」（FR-98）：前者给清除筛选引导
+        filtered ? (
+          <EmptyState
+            icon={<IconSearchOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+            title="没有匹配的媒体"
+            description="当前搜索或筛选条件下没有结果，换个条件或清除筛选试试。"
+            action={onClearFilter ? { label: '清除筛选', onClick: onClearFilter } : undefined}
+          />
+        ) : (
+          <EmptyState
+            icon={<IconFolder size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+            title="此目录暂无内容"
+            description="这个目录下没有可显示的子目录或媒体文件。"
+          />
+        )
       ) : isList ? (
         // 列表（详情行）
         <Stack gap={4}>

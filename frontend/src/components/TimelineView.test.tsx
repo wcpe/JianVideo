@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MantineProvider } from '@mantine/core'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import TimelineView from './TimelineView'
@@ -55,5 +56,47 @@ describe('TimelineView 滚动加载', () => {
     renderView({ onLoadMore, hasMore: false })
     if (ioCb) ioCb([{ isIntersecting: true }])
     expect(onLoadMore).not.toHaveBeenCalled()
+  })
+})
+
+describe('TimelineView 空态区分（FR-98）', () => {
+  beforeEach(() => {
+    ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO
+  })
+
+  it('无筛选且 0 结果渲染「空库」空态', () => {
+    render(
+      <MantineProvider>
+        <TimelineView mediaFiles={[]} loading={false} error={null}
+          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}} />
+      </MantineProvider>,
+    )
+    expect(screen.getByText('暂无媒体文件')).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配的媒体')).toBeNull()
+  })
+
+  it('有筛选且 0 结果渲染「无匹配结果」空态 + 清除筛选 CTA', async () => {
+    const onClearFilter = vi.fn()
+    render(
+      <MantineProvider>
+        <TimelineView mediaFiles={[]} loading={false} error={null}
+          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}}
+          filtered onClearFilter={onClearFilter} />
+      </MantineProvider>,
+    )
+    expect(screen.getByText('没有匹配的媒体')).toBeInTheDocument()
+    const btn = screen.getByRole('button', { name: '清除筛选' })
+    await userEvent.click(btn)
+    expect(onClearFilter).toHaveBeenCalledTimes(1)
+  })
+
+  it('首屏加载渲染骨架屏', () => {
+    const { container } = render(
+      <MantineProvider>
+        <TimelineView mediaFiles={[]} loading error={null}
+          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}} />
+      </MantineProvider>,
+    )
+    expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument()
   })
 })

@@ -55,9 +55,27 @@ describe('MapPage 照片地图（FR-39）', () => {
 
   it('无 GPS 照片时显示空状态而非地图', async () => {
     mockGetMediaFiles.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
-    renderPage()
+    const { container } = renderPage()
     expect(await screen.findByText(/暂无带 GPS 定位的照片/)).toBeInTheDocument()
     expect(screen.queryByTestId('map')).not.toBeInTheDocument()
+    // 接入统一 EmptyState（FR-98）：空态容器存在
+    expect(container.querySelector('[data-testid="empty-state"]')).toBeInTheDocument()
+  })
+
+  it('首屏加载时渲染骨架屏（FR-98）', () => {
+    // 返回永不结算的 Promise，保持 loading 态
+    mockGetMediaFiles.mockReturnValue(new Promise<MediaListResponse>(() => {}))
+    const { container } = renderPage()
+    // Mantine Skeleton 渲染为 mantine-Skeleton-root
+    expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument()
+    expect(screen.queryByTestId('map')).not.toBeInTheDocument()
+  })
+
+  it('加载失败时显示插画+重试空态（FR-98）', async () => {
+    mockGetMediaFiles.mockRejectedValue(new Error('boom'))
+    renderPage()
+    expect(await screen.findByText('加载照片地图失败')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 })
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Stack, Title, Text, Loader, Center, Box, Group, Switch } from '@mantine/core'
+import { Stack, Title, Box, Group, Switch, Skeleton } from '@mantine/core'
+import { IconMapPin, IconAlertTriangle } from '@tabler/icons-react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -9,6 +10,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 import * as libApi from '@/api/library'
 import { mediaDisplayName } from '@/utils/media'
 import { buildDayTracks } from '@/utils/gpsTrack'
+import EmptyState from '@/components/EmptyState'
 import type { MediaFile } from '@/types'
 
 // 修复打包后 leaflet 默认 marker 图标路径丢失（经 Vite 资源 URL 重新指向）
@@ -35,26 +37,28 @@ export default function MapPage() {
   const [error, setError] = useState('')
   // 轨迹模式（FR-76）：开=散点 + 按天折线轨迹（默认开），关=仅散点
   const [showTracks, setShowTracks] = useState(true)
+  // 重载触发器（FR-98）：加载失败时点「重试」自增以重新拉取
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let active = true
+    setLoading(true)
+    setError('')
     fetchAllGeotagged()
       .then((m) => { if (active) setMedia(m) })
       .catch(() => { if (active) setError('加载照片地图失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [])
+  }, [reloadKey])
 
   // 按天聚合的旅程轨迹（FR-76）：仅在媒体变化时重算
   const tracks = useMemo(() => buildDayTracks(media), [media])
-
-  if (loading) return <Center h="60vh"><Loader color="purple" /></Center>
 
   return (
     <Stack gap="md">
       <Group justify="space-between" align="center">
         <Title order={2}>照片地图</Title>
-        {media.length > 0 && (
+        {!loading && !error && media.length > 0 && (
           <Switch
             label="轨迹模式"
             checked={showTracks}
@@ -62,9 +66,24 @@ export default function MapPage() {
           />
         )}
       </Group>
-      {error && <Text c="red">{error}</Text>}
-      {media.length === 0 ? (
-        <Text c="dimmed">暂无带 GPS 定位的照片。扫描含 GPS EXIF 的照片后将在此显示。</Text>
+      {loading ? (
+        // 首屏加载骨架屏（FR-98）：替代地图区空白闪现
+        <Skeleton height="70vh" radius="md" />
+      ) : error ? (
+        // 加载失败态（FR-98）：插画 + 重试
+        <EmptyState
+          icon={<IconAlertTriangle size={72} stroke={1.2} style={{ color: 'var(--mantine-color-red-5)', opacity: 0.8 }} />}
+          title="加载照片地图失败"
+          description="可能是网络或服务暂时不可用，请稍后重试。"
+          action={{ label: '重试', onClick: () => setReloadKey((k) => k + 1) }}
+        />
+      ) : media.length === 0 ? (
+        // 无带 GPS 照片空态（FR-98）
+        <EmptyState
+          icon={<IconMapPin size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="暂无带 GPS 定位的照片"
+          description="扫描含 GPS EXIF 的照片后，它们的拍摄位置将在此地图上显示。"
+        />
       ) : (
         <Box style={{ height: '70vh', borderRadius: 8, overflow: 'hidden' }}>
           <MapContainer center={[media[0].gps_lat ?? 0, media[0].gps_lon ?? 0]} zoom={4} style={{ height: '100%', width: '100%' }} scrollWheelZoom>

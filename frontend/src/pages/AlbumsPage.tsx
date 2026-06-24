@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Stack, Title, Group, Button, Card, Text, SimpleGrid, Modal, TextInput, Textarea,
-  ActionIcon, Loader, Center, Box, Anchor,
+  ActionIcon, Box, Anchor, Skeleton,
 } from '@mantine/core'
-import { notifications } from '@mantine/notifications'
-import { IconPhoto, IconTrash, IconPlus, IconArrowLeft, IconShare } from '@tabler/icons-react'
+import { IconPhoto, IconTrash, IconPlus, IconArrowLeft, IconShare, IconPhotoOff, IconAlertTriangle } from '@tabler/icons-react'
 import ShareDialog from '@/components/ShareDialog'
 import * as albumApi from '@/api/albums'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
+import EmptyState from '@/components/EmptyState'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import PageBreadcrumbs from '@/components/PageBreadcrumbs'
+import { notifyError } from '@/utils/notify'
 import { mediaDisplayName } from '@/utils/media'
 import type { Album, MediaFile } from '@/types'
 
@@ -21,6 +22,8 @@ const initDelAlbum = { opened: false, album: null as Album | null, loading: fals
 export default function AlbumsPage() {
   const [albums, setAlbums] = useState<Album[]>([])
   const [loading, setLoading] = useState(false)
+  // 列表加载失败标记（FR-98）：非空即渲染「插画 + 重试」错误态
+  const [loadError, setLoadError] = useState(false)
   const [selected, setSelected] = useState<Album | null>(null)
   const [create, setCreate] = useState<typeof initCreate>(initCreate)
   const [delAlbum, setDelAlbum] = useState<typeof initDelAlbum>(initDelAlbum)
@@ -29,10 +32,12 @@ export default function AlbumsPage() {
 
   const loadAlbums = useCallback(async () => {
     setLoading(true)
+    setLoadError(false)
     try {
       setAlbums(await albumApi.listAlbums())
     } catch (err) {
-      notifications.show({ title: '加载失败', message: err instanceof Error ? err.message : '无法加载相册', color: 'red', autoClose: 3000 })
+      setLoadError(true)
+      notifyError(err instanceof Error ? err.message : '无法加载相册', '加载失败')
     } finally {
       setLoading(false)
     }
@@ -49,7 +54,7 @@ export default function AlbumsPage() {
       setCreate(initCreate)
       await loadAlbums()
     } catch (err) {
-      notifications.show({ title: '创建失败', message: err instanceof Error ? err.message : '创建相册失败', color: 'red', autoClose: 3000 })
+      notifyError(err instanceof Error ? err.message : '创建相册失败', '创建失败')
       setCreate(c => ({ ...c, loading: false }))
     }
   }, [create.name, create.description, loadAlbums])
@@ -89,9 +94,26 @@ export default function AlbumsPage() {
       </Group>
 
       {loading && albums.length === 0 ? (
-        <Center py="xl"><Loader color="purple" /></Center>
+        // 首屏加载骨架屏（FR-98）：以卡片占位替代空白闪现
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} height={92} radius="md" />)}
+        </SimpleGrid>
+      ) : loadError ? (
+        // 加载失败态（FR-98）：插画 + 重试
+        <EmptyState
+          icon={<IconAlertTriangle size={72} stroke={1.2} style={{ color: 'var(--mantine-color-red-5)', opacity: 0.8 }} />}
+          title="加载相册失败"
+          description="可能是网络或服务暂时不可用，请稍后重试。"
+          action={{ label: '重试', onClick: () => loadAlbums() }}
+        />
       ) : albums.length === 0 ? (
-        <Text c="dimmed">还没有相册，点击「新建相册」创建第一个吧。</Text>
+        // 空相册列表（FR-98）：引导新建第一个相册
+        <EmptyState
+          icon={<IconPhotoOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="还没有相册"
+          description="相册可以把跨目录的照片和视频归到一起，点击下方按钮创建第一个。"
+          action={{ label: '新建第一个相册', leftIcon: <IconPlus size={16} />, onClick: () => setCreate({ ...initCreate, opened: true }) }}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
           {albums.map(album => (
@@ -164,7 +186,7 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
     try {
       setItems(await albumApi.listAlbumItems(album.id))
     } catch (err) {
-      notifications.show({ title: '加载失败', message: err instanceof Error ? err.message : '无法加载相册内容', color: 'red', autoClose: 3000 })
+      notifyError(err instanceof Error ? err.message : '无法加载相册内容', '加载失败')
     } finally {
       setLoading(false)
     }
@@ -177,7 +199,7 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
       await albumApi.removeAlbumItem(album.id, media.id)
       await loadItems()
     } catch (err) {
-      notifications.show({ title: '移出失败', message: err instanceof Error ? err.message : '移出媒体失败', color: 'red', autoClose: 3000 })
+      notifyError(err instanceof Error ? err.message : '移出媒体失败', '移出失败')
     }
   }, [album.id, loadItems])
 
@@ -210,9 +232,18 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
       {album.description && <Text c="dimmed">{album.description}</Text>}
 
       {loading && items.length === 0 ? (
-        <Center py="xl"><Loader color="purple" /></Center>
+        // 首屏加载骨架屏（FR-98）
+        <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} height={180} radius="md" />)}
+        </SimpleGrid>
       ) : items.length === 0 ? (
-        <Text c="dimmed">这个相册还没有媒体，点击「加入媒体」从媒体库添加。</Text>
+        // 空相册详情（FR-98）：引导加入媒体
+        <EmptyState
+          icon={<IconPhotoOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="这个相册还没有媒体"
+          description="从媒体库挑选照片或视频加入相册，集中收藏与分享。"
+          action={{ label: '从媒体库加入', leftIcon: <IconPlus size={16} />, onClick: () => setPickerOpened(true) }}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
           {items.map(media => (
@@ -261,7 +292,7 @@ function MediaPickerModal({
     setLoading(true)
     libApi.getMediaFiles({ page: 1, page_size: 50 })
       .then(res => setCandidates(res.items))
-      .catch(err => notifications.show({ title: '加载失败', message: err instanceof Error ? err.message : '无法加载媒体库', color: 'red', autoClose: 3000 }))
+      .catch(err => notifyError(err instanceof Error ? err.message : '无法加载媒体库', '加载失败'))
       .finally(() => setLoading(false))
   }, [opened])
 
@@ -271,7 +302,7 @@ function MediaPickerModal({
       await albumApi.addAlbumItem(albumID, media.id)
       onAdded()
     } catch (err) {
-      notifications.show({ title: '加入失败', message: err instanceof Error ? err.message : '加入相册失败', color: 'red', autoClose: 3000 })
+      notifyError(err instanceof Error ? err.message : '加入相册失败', '加入失败')
     } finally {
       setAddingID(null)
     }
@@ -282,9 +313,12 @@ function MediaPickerModal({
   return (
     <Modal opened={opened} onClose={onClose} title="加入媒体" centered size="lg">
       {loading ? (
-        <Center py="xl"><Loader color="purple" /></Center>
+        // 加载骨架屏（FR-98）：以行占位替代空白
+        <Stack gap={6}>
+          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={28} radius="sm" />)}
+        </Stack>
       ) : candidates.length === 0 ? (
-        <Text c="dimmed">媒体库中没有可加入的媒体。</Text>
+        <Text c="dimmed" ta="center" py="md">媒体库中没有可加入的媒体。</Text>
       ) : (
         <Stack gap={4} mah={420} style={{ overflowY: 'auto' }}>
           {candidates.map(media => {
