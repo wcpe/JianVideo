@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MantineProvider } from '@mantine/core'
 import { MemoryRouter } from 'react-router-dom'
@@ -89,7 +89,7 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     expect(within(dialog2).queryByRole('link', { name: /在外部地图打开/ })).not.toBeInTheDocument()
   })
 
-  it('上一项/下一项在已加载列表内切换并在端点夹紧', async () => {
+  it('上一项/下一项在已加载列表内切换并到端点环绕（FR-105）', async () => {
     const user = userEvent.setup()
     const files = [
       mediaFile({ id: 1, file_name: '第一张.jpg' }),
@@ -98,13 +98,104 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     renderPanel(files, 0)
     const dialog = await screen.findByRole('dialog')
 
-    // 起始第一项：上一项禁用
-    expect(within(dialog).getByRole('button', { name: '上一项' })).toBeDisabled()
+    // 起始第一项：环绕导航下上一项不再禁用
+    expect(within(dialog).getByRole('button', { name: '上一项' })).not.toBeDisabled()
     expect(within(dialog).getByRole('img', { name: '第一张.jpg' })).toBeInTheDocument()
 
-    // 下一项 → 第二张，且下一项按钮在末项禁用
+    // 下一项 → 第二张（末项）
     await user.click(within(dialog).getByRole('button', { name: '下一项' }))
     expect(await within(dialog).findByRole('img', { name: '第二张.jpg' })).toHaveAttribute('src', '/api/library/media/2/raw')
-    expect(within(dialog).getByRole('button', { name: '下一项' })).toBeDisabled()
+
+    // 末项再点下一项 → 环绕回第一张
+    await user.click(within(dialog).getByRole('button', { name: '下一项' }))
+    expect(await within(dialog).findByRole('img', { name: '第一张.jpg' })).toHaveAttribute('src', '/api/library/media/1/raw')
+  })
+
+  it('首项点上一项环绕到末项（FR-105）', async () => {
+    const user = userEvent.setup()
+    const files = [
+      mediaFile({ id: 1, file_name: '第一张.jpg' }),
+      mediaFile({ id: 2, file_name: '第二张.jpg' }),
+      mediaFile({ id: 3, file_name: '第三张.jpg' }),
+    ]
+    renderPanel(files, 0)
+    const dialog = await screen.findByRole('dialog')
+    // 首项上一项 → 环绕到末项（第三张）
+    await user.click(within(dialog).getByRole('button', { name: '上一项' }))
+    expect(await within(dialog).findByRole('img', { name: '第三张.jpg' })).toHaveAttribute('src', '/api/library/media/3/raw')
+  })
+
+  it('标题区显示位置计数「当前 / 总数」（FR-105）', async () => {
+    const files = [
+      mediaFile({ id: 1, file_name: 'a.jpg' }),
+      mediaFile({ id: 2, file_name: 'b.jpg' }),
+      mediaFile({ id: 3, file_name: 'c.jpg' }),
+    ]
+    renderPanel(files, 1)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('2 / 3')).toBeInTheDocument()
+  })
+
+  it('双击在 1×↔2× 间切换缩放（FR-105）', async () => {
+    const user = userEvent.setup()
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0)
+    const dialog = await screen.findByRole('dialog')
+    const img = within(dialog).getByRole('img', { name: '风景.jpg' })
+    expect(img.style.transform).toContain('scale(1)')
+    await user.dblClick(img)
+    expect(img.style.transform).toContain('scale(2)')
+    await user.dblClick(img)
+    expect(img.style.transform).toContain('scale(1)')
+  })
+
+  it('放大后拖拽改变平移量 translate（FR-105）', async () => {
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0)
+    const dialog = await screen.findByRole('dialog')
+    const img = within(dialog).getByRole('img', { name: '风景.jpg' }) as HTMLElement
+    // 先双击放大到 2×，使拖拽生效
+    await userEvent.setup().dblClick(img)
+    expect(img.style.transform).toContain('scale(2)')
+    // 模拟拖拽：mousedown → mousemove → mouseup
+    fireEvent.mouseDown(img, { clientX: 100, clientY: 100 })
+    fireEvent.mouseMove(window, { clientX: 160, clientY: 140 })
+    fireEvent.mouseUp(window)
+    expect(img.style.transform).toMatch(/translate\((?!0px, 0px)/)
+  })
+
+  it('右旋按钮改变 transform 含 rotate（FR-105）', async () => {
+    const user = userEvent.setup()
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0)
+    const dialog = await screen.findByRole('dialog')
+    const img = within(dialog).getByRole('img', { name: '风景.jpg' })
+    expect(img.style.transform).toContain('rotate(0deg)')
+    await user.click(within(dialog).getByRole('button', { name: '向右旋转' }))
+    expect(img.style.transform).toContain('rotate(90deg)')
+  })
+
+  it('切换项时触发相邻原图预加载（FR-105）', async () => {
+    const created: string[] = []
+    const realCreate = document.createElement.bind(document)
+    // 拦截 createElement('img') 记录 src 赋值，验证相邻预取
+    const spy = vi.spyOn(document, 'createElement').mockImplementation((tag: string, ...rest: unknown[]) => {
+      const el = realCreate(tag as 'img', ...(rest as []))
+      if (tag === 'img') {
+        Object.defineProperty(el, 'src', { set: (v: string) => created.push(v), get: () => '' })
+      }
+      return el
+    })
+    try {
+      const files = [
+        mediaFile({ id: 1, file_name: 'a.jpg' }),
+        mediaFile({ id: 2, file_name: 'b.jpg' }),
+        mediaFile({ id: 3, file_name: 'c.jpg' }),
+      ]
+      renderPanel(files, 1)
+      await screen.findByRole('dialog')
+      // 中间项应预取前后相邻原图
+      expect(created.some(s => s.includes('/api/library/media/1/raw'))).toBe(true)
+      expect(created.some(s => s.includes('/api/library/media/3/raw'))).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
