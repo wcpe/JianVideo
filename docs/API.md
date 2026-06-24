@@ -708,6 +708,39 @@
   ```
 - **说明**：`available` 为各硬件/软件家族的 per-codec 实测能力，家族 `available` = 至少一编码 `tested_ok`；`preferred` 为转码默认 H.264 编码器（保证 mpegts.js 可播）；`codecs` 为系统可输出编码并集；`from_cache`/`ffmpeg_version`/`tested_at` 标示实测来源；冷态（从未实测）`available` 为空、`preferred` 为 `libx264`、`tested_at` 为空。
 
+### 列出转码预设（FR-77）
+
+- **方法 / 路径**：`GET /api/transcode/presets`
+- **响应**（200）：`{ "items": [ { "id", "name", "codec", "width", "height", "created_at", "updated_at" } ] }`，按创建时间倒序。`width`/`height` 为 `0` 表示沿用源分辨率。未注入预设服务返回 `503`。
+
+### 创建转码预设（FR-77）
+
+- **方法 / 路径**：`POST /api/transcode/presets`
+- **请求体**：`{ "name": "1080p HEVC", "codec": "h265", "width": 1920, "height": 1080 }`。`codec` 取 `h264`/`h265`/`av1`/`vp9`（`hevc` 视为 `h265`）。
+- **响应**：`201` 返回创建的预设；空名 / 不支持编码 / 负分辨率返回 `400`（`code=INVALID_PRESET`）。
+
+### 更新转码预设（FR-77）
+
+- **方法 / 路径**：`PUT /api/transcode/presets/:id`
+- **请求体**：同创建。**响应**：`200` 返回更新后的预设；预设不存在 `404`、校验失败 `400`。
+
+### 删除转码预设（FR-77）
+
+- **方法 / 路径**：`DELETE /api/transcode/presets/:id`
+- **响应**：`204`；预设不存在 `404`。已预生成的切片缓存不受影响。
+
+### 加入预生成队列（FR-77）
+
+- **方法 / 路径**：`POST /api/transcode/tasks`
+- **请求体**：`{ "media_id": 42, "preset_id": 1 }`。
+- **响应**（200）：`{ "status": "queued", "task_id": 7 }`。按预设快照编码入预生成队列、单 worker 串行预转码切片预热首播。媒体或预设不存在返回 `404`；未注入预生成服务返回 `503`。
+
+### 列出预生成任务（FR-77）
+
+- **方法 / 路径**：`GET /api/transcode/tasks?status=`
+- **查询参数**：`status`（可选）取 `pending`/`running`/`completed`/`error`，非空时仅返回该状态任务。
+- **响应**（200）：`{ "tasks": [ { "id", "media_id", "preset_id", "codec", "width", "height", "status", "error", "created_at", "started_at", "completed_at" } ] }`，按入队时间倒序。
+
 ### 系统信息
 
 - **方法 / 路径**：`GET /api/system/info`

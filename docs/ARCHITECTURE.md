@@ -50,7 +50,7 @@
 | `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
-| `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找） | → `db` |
+| `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
@@ -240,6 +240,35 @@
 
 本表是健康巡检的**只读报告快照**，独立于 `media_files`（不在其上加列）：每轮巡检先清空全表再写入当轮问题，**绝不改写 `media_files.deleted_at`**（软删真源归 FR-25/27）。巡检由独立后台 goroutine + 状态单例（`HealthScanStatus`）驱动、单飞执行，不复用扫描任务队列（见 §5.1、[ADR-0038](adr/0038-media-health-inspection.md)）。
 
+**转码预设（transcode_presets）（FR-77）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| name | TEXT | 预设名 |
+| codec | TEXT | 目标编码：`h264` / `h265` / `av1` / `vp9`（管线可参数化输出编码） |
+| width | INTEGER | 目标宽度，`0` 表示沿用源宽 |
+| height | INTEGER | 目标高度，`0` 表示沿用源高 |
+| created_at / updated_at | DATETIME | 创建 / 更新时间 |
+
+预设为可复用的转码模板。MVP 仅含编码与分辨率维度，不含 bitrate / 多码率档位。注意：本期 `width/height` 仅作预设定义元数据落库与展示，预生成执行只按 `codec` 预热切片、不进 ffmpeg 缩放参数（现有 `PreSliceWithCodec` 不支持任意缩放，见 §5、[ADR-0039](adr/0039-transcode-pregeneration-queue.md)）。
+
+**转码预生成任务（transcode_tasks）（FR-77）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| media_id | INTEGER, INDEX | 待预生成的媒体文件 ID |
+| preset_id | INTEGER, INDEX | 来源预设 ID |
+| codec / width / height | TEXT / INTEGER | 入队时刻预设的快照（任务执行不强依赖预设此后是否被改/删） |
+| status | TEXT, INDEX | 任务状态：`pending` / `running` / `completed` / `error` |
+| error | TEXT | 出错信息（status=error 时） |
+| created_at | DATETIME | 入队时间 |
+| started_at | DATETIME NULL | 开始执行时间 |
+| completed_at | DATETIME NULL | 结束时间 |
+
+预生成队列以本表为持久化真源、单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+
 ## 4. 接口
 
 对外接口为 RESTful HTTP API，前端通过 `go:embed` 内嵌的静态资源提供。详细契约见 `docs/API.md`。
@@ -252,7 +281,7 @@
 | 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
-| 转码 | `/api/transcode` | 转码状态查询、硬件加速能力查询 |
+| 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD 与预生成队列入队/列任务（FR-77） |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期键值设置读取与批量写入 |
 | 分享管理 | `/api/shares` | 创建/列出/撤销分享链接（鉴权后，FR-43） |
@@ -385,6 +414,16 @@
 - **会话记录实际编码与路径**：`playback.Service.RecordNegotiation` 把协商结果记到内存播放会话（`PlaybackSession.TargetCodec`/`OutputPath` 两字段）。**注**：本项目当前播放会话仅在内存（FR-12 Range 跟踪），不持久化；ARCHITECTURE §3 历史描述的 `transcode_sessions` 持久表代码从未落地，本 FR 不新建该表（避免镀金）。
 - **复用 ADR**：复用 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)（实测真源）、[ADR-0034](adr/0034-configurable-target-codec.md)（可配置目标编码）、[ADR-0035](adr/0035-fmp4-mse-playback-path.md)（fMP4/MSE 路径）、[ADR-0026](adr/0026-abr-adaptive-bitrate.md)（hls.js）；协商点 + 端点契约为本 FR 新增决策。
 - **真机验证**：软件 AV1 端到端——设首选 `["av1","h264"]` + Chrome（支持 AV1）→ 协商出 av1 → 后端 `libsvtav1` 产 fMP4 → hls.js + 原生 MSE 实播（`videoWidth=640` 解码出帧、`readyState=4`、无 error）；H.264 客户端 → 协商出 `h264`/TS 走 mpegts.js。硬件 AV1/QSV/NVENC 端到端待对应硬件。
+
+#### 5.5.3 转码预设与预生成队列（FR-77）
+
+把「按需首播切片」前移为「手动预热」：用户定义可复用预设（编码 + 分辨率），把媒体加入预生成队列后台串行预转码，产出切片缓存到 `hlsDir/{mediaID}/`，消除首播冷启动等待。决策见 [ADR-0039](adr/0039-transcode-pregeneration-queue.md)。
+
+- **预设存储**（`transcoder.PresetStore`，`preset_store.go`）：`transcode_presets` 表的 CRUD + 校验。编码白名单复用 §5.3 `CodecOutputParams`（h264/h265/av1/vp9，`hevc` 归一化为 `h265`）；空名 / 不支持编码 / 负分辨率整体拒绝不落库。职责单一，不承载队列/转码。
+- **预生成队列**（`transcoder.PregenQueue`，`pregen_queue.go`）：**完整复用 FR-29 任务队列范式**——以 `transcode_tasks` 表为持久化真源、单 worker goroutine 串行执行、条件信号唤醒不空转、`RecoverRunning()` 重启把残留 `running` 重置为 `pending` 重新入队。落 transcoder 包以保持依赖单向（exec 直接调本包 `PreSliceWithCodec`，无需反向依赖 library）。任务入队时快照预设 `codec/width/height`，使执行不强依赖预设此后是否被改/删。
+- **执行**：exec 函数经注入（便于单测替身）。`main.go` 生产实现为闭包：按 `media_id` 经 `library.GetMediaFileByID` 反查媒体路径，再调 §5.4.1 `PreSliceWithCodec(ctx, mediaID, path, w, h, codec, hlsMgr, hlsDir)` 同步切片（已存在切片则复用）。
+- **`width/height` 局限**：现有 `PreSliceWithCodec` 不支持任意分辨率缩放（TS 路径按源分辨率选码率档位、fMP4 路径不缩放），故本期预设 `width/height` 仅落库为元数据、不进 ffmpeg 缩放参数。真正缩放需扩 `PreSliceWithCodec`，另立 FR（见 ADR-0039 后果）。
+- **接线**：预设 CRUD `GET/POST/PUT/DELETE /api/transcode/presets`、入队 `POST /api/transcode/tasks{media_id,preset_id}`、列任务 `GET /api/transcode/tasks?status=`（见 §4）。前端转码预设页 `/transcode`（列/建/改/删 + 轮询任务列表）+ 播放页「加入预生成」入口（`PregenDialog` 选预设入队）。
 
 ### 5.6 硬件加速管理
 
