@@ -411,6 +411,18 @@ export interface UpdateCheckResult {
   asset_name: string
 }
 
+// 自更新下载进度（FR-90）：前端轮询 GET /api/system/update/progress 展示进度条
+export interface UpdateProgress {
+  /** 进度阶段：idle 空闲 / downloading 下载中 / verifying 校验中 / done 完成 / failed 失败 */
+  state: 'idle' | 'downloading' | 'verifying' | 'done' | 'failed'
+  /** 已下载字节数 */
+  downloaded: number
+  /** 总字节数（0 表示未知，此时 percent 为 0、退化为展示已下载字节） */
+  total: number
+  /** 下载百分比 0-100（total=0 时为 0） */
+  percent: number
+}
+
 /** 运行期设置键值映射（key → value，值统一为字符串） */
 export type SettingsMap = Record<string, string>
 

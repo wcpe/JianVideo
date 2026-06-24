@@ -76,6 +76,9 @@ type Service struct {
 
 	mu    sync.Mutex
 	cache map[Channel]cachedCheck
+
+	// progress 自更新下载进度单例（FR-90）：下载链路写、进度端点读，并发安全；不落库。
+	progress progressTracker
 }
 
 // NewService 创建指向公开仓库的自更新服务。
@@ -246,26 +249,34 @@ func (s *Service) Apply(ctx context.Context, current, channel string) error {
 	if err != nil {
 		return err
 	}
-	tmpBin, err := downloadToTemp(ctx, s.dlClient(), bin.URL, dir, bin.Name)
+	// 开始一次新下载：进度清零并置下载态；任一步失败均标记 failed 供前端展示重试入口（FR-90）。
+	s.resetProgress()
+	tmpBin, err := downloadToTemp(ctx, s.dlClient(), bin.URL, dir, bin.Name, s.setProgressDownloading)
 	if err != nil {
+		s.setProgressFailed()
 		os.RemoveAll(dir)
 		return err
 	}
+	s.setProgressVerifying()
 	sumsText, err := downloadText(ctx, s.dlClient(), sums.URL)
 	if err != nil {
+		s.setProgressFailed()
 		os.RemoveAll(dir)
 		return err
 	}
 	ok, err := verifyChecksum(tmpBin, bin.Name, sumsText)
 	if err != nil {
+		s.setProgressFailed()
 		os.RemoveAll(dir)
 		return err
 	}
 	if !ok {
+		s.setProgressFailed()
 		os.RemoveAll(dir)
 		return fmt.Errorf("校验和不匹配，拒绝替换")
 	}
 	// 替换成功将触发进程重启；临时二进制已移走，残余临时目录由系统回收。
+	s.setProgressDone()
 	return replaceAndRestart(tmpBin)
 }
 

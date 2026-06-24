@@ -808,6 +808,15 @@
   ```
 - **说明**：对指定路径跑 `path -version` 验证是否可用（`path` 可省/空 = 测当前已配置路径）。**仅探测、不改写运行期全局路径**，供用户保存前先验路径。不可用时返回 `ffmpeg_available:false` 且 `ffmpeg_version` 为空串。持久化路径走 `PUT /api/settings`（键 `ffmpeg_path`/`ffprobe_path`），保存后即时应用到运行期。
 
+### 自更新下载进度（FR-90）
+
+- **方法 / 路径**：`GET /api/system/update/progress`
+- **响应**（200）：
+  ```json
+  { "state": "downloading", "downloaded": 6291456, "total": 12582912, "percent": 50 }
+  ```
+- **说明**：供前端在自更新（`POST /api/system/update/apply`，FR-46）进行中轮询展示下载进度条。`state` 取 `idle`（空闲，未在更新）/`downloading`（下载二进制中）/`verifying`（校验 sha256 中）/`done`（替换已触发，进程即将重启）/`failed`（下载或校验失败）。`downloaded`/`total` 为字节数，`total` 取响应 `Content-Length`，**为 0 表示总字节未知**（响应无 `Content-Length`），此时 `percent` 为 0、前端退化为展示已下载字节。进度为**进程内单例**（互斥量保护、不落库，自更新本就用户显式触发、单次互斥），无外部依赖恒可用；服务重启后归零为 `idle`。鉴权随 `/api/*` 的 APIGuard。
+
 ### 获取字幕轨道列表
 
 - **方法 / 路径**：`GET /api/play/:id/subtitles`

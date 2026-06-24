@@ -66,6 +66,13 @@ func (h *Handler) ApplyUpdate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "updating", "message": "更新已应用，服务即将重启"})
 }
 
+// UpdateProgress GET /api/system/update/progress
+// 返回自更新下载进度（FR-90）：{state, downloaded, total, percent}，供前端轮询展示进度条。
+// 进度为进程内单例，无外部依赖恒可用；空闲时返回 state=idle。
+func (h *Handler) UpdateProgress(c *gin.Context) {
+	c.JSON(http.StatusOK, h.updateSvc.Progress())
+}
+
 // RollbackUpdate POST /api/system/update/rollback
 // 回滚到上一版二进制并重启（FR-46）。
 func (h *Handler) RollbackUpdate(c *gin.Context) {

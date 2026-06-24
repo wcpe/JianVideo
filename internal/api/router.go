@@ -160,6 +160,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sys.GET("/update/check", h.CheckUpdate)
 		sys.POST("/update/apply", h.ApplyUpdate)
 		sys.POST("/update/rollback", h.RollbackUpdate)
+		// 自更新下载进度轮询（FR-90）
+		sys.GET("/update/progress", h.UpdateProgress)
 	}
 
 	// 运行期设置（FR-24）：键值读写

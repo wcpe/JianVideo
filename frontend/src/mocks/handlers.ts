@@ -630,6 +630,16 @@ export const handlers = [
     await delay(100)
     return HttpResponse.json({ status: 'rolling_back', message: '已回滚到上一版本，服务即将重启' })
   }),
+  // 自更新下载进度（FR-90）
+  http.get('*/api/system/update/progress', async () => {
+    await delay(50)
+    return HttpResponse.json({
+      state: 'downloading',
+      downloaded: 6 * 1024 * 1024,
+      total: 12 * 1024 * 1024,
+      percent: 50,
+    })
+  }),
 
   // ─── 运行期设置 ────────────────────────────────────────
 

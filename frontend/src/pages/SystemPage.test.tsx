@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse, delay } from 'msw'
 import SystemPage from './SystemPage'
 import { server } from '@/mocks/beforeAll'
 
@@ -447,6 +447,81 @@ describe('SystemPage', () => {
     await user.click(within(dialog).getByRole('button', { name: '确认回滚' }))
     await waitFor(() => {
       expect(rollbackCalled).toBe(true)
+    })
+  })
+
+  it('更新进行中轮询进度端点并展示下载进度条与百分比（FR-90）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      // apply 故意挂起一会儿，让进度轮询有机会渲染进度条
+      http.post('*/api/system/update/apply', async () => {
+        await delay(1200)
+        return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' })
+      }),
+      http.get('*/api/system/update/progress', () =>
+        HttpResponse.json({ state: 'downloading', downloaded: 6 * 1024 * 1024, total: 12 * 1024 * 1024, percent: 50 }),
+      ),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: /立即更新并重启/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认更新' }))
+
+    // 轮询进度端点后展示进度条与百分比 + 已下载/总字节
+    await waitFor(() => {
+      expect(screen.getByText('下载中…')).toBeVisible()
+    })
+    expect(screen.getByText(/50%/)).toBeVisible()
+    // 进度条（Mantine Progress 渲染 role=progressbar）存在且值为 50
+    const bar = screen.getByRole('progressbar')
+    expect(bar).toHaveAttribute('aria-valuenow', '50')
+  })
+
+  it('更新失败后展示「重试」按钮，点击重新触发更新（FR-90）', async () => {
+    const user = userEvent.setup()
+    let applyCalls = 0
+    server.use(
+      http.post('*/api/system/update/apply', () => {
+        applyCalls++
+        // 首次失败、重试成功
+        if (applyCalls === 1) {
+          return HttpResponse.json({ code: 'UPDATE_FAILED', message: '更新失败：下载中断' }, { status: 500 })
+        }
+        return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' })
+      }),
+    )
+
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: /立即更新并重启/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认更新' }))
+
+    // 失败后出现错误提示与「重试」按钮
+    await waitFor(() => {
+      expect(screen.getByText('更新出错')).toBeVisible()
+    })
+    const retryBtn = await screen.findByRole('button', { name: '重试' })
+    expect(retryBtn).toBeVisible()
+
+    // 点「重试」直接重新触发 apply（无需再弹模态框）
+    await user.click(retryBtn)
+    await waitFor(() => {
+      expect(applyCalls).toBe(2)
     })
   })
 

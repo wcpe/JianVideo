@@ -12,8 +12,31 @@ import (
 // maxChecksumsBytes 校验和清单的读取上限，防异常大响应。
 const maxChecksumsBytes = 64 * 1024
 
+// progressFunc 下载进度回调（FR-90）：downloaded 为累计已下载字节，total 为总字节（0 表示未知）。
+type progressFunc func(downloaded, total int64)
+
+// countingWriter 包装目标 io.Writer，每写入一批字节后回调上报累计进度（FR-90）。
+// total 取自响应 Content-Length（≤0 时视为未知、以 0 上报）。
+type countingWriter struct {
+	w          io.Writer
+	total      int64
+	downloaded int64
+	onProgress progressFunc
+}
+
+// Write 透传写入并累计已下载字节，再回调进度。
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.downloaded += int64(n)
+	if cw.onProgress != nil {
+		cw.onProgress(cw.downloaded, cw.total)
+	}
+	return n, err
+}
+
 // downloadToTemp 流式下载 url 到 dir 下名为 name 的文件，返回落地路径。
-func downloadToTemp(ctx context.Context, client *http.Client, url, dir, name string) (string, error) {
+// onProgress 非 nil 时按字节累进上报「已下载 / 总字节」（FR-90，total 取 Content-Length，未知报 0）。
+func downloadToTemp(ctx context.Context, client *http.Client, url, dir, name string, onProgress progressFunc) (string, error) {
 	resp, err := httpGet(ctx, client, url)
 	if err != nil {
 		return "", err
@@ -25,7 +48,13 @@ func downloadToTemp(ctx context.Context, client *http.Client, url, dir, name str
 		return "", err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Content-Length 未知时 resp.ContentLength 为 -1，归一化为 0（不确定态）
+	total := resp.ContentLength
+	if total < 0 {
+		total = 0
+	}
+	dstWriter := &countingWriter{w: f, total: total, onProgress: onProgress}
+	if _, err := io.Copy(dstWriter, resp.Body); err != nil {
 		return "", fmt.Errorf("写入下载文件失败: %w", err)
 	}
 	return dst, nil

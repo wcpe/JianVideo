@@ -1,4 +1,4 @@
-import type { SystemInfo, CodecTestResult, UpdateCheckResult, EnvVar, FFmpegDetectResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress, EnvVar, FFmpegDetectResult } from '@/types'
 import client from './client'
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -40,6 +40,12 @@ async function realApplyUpdate(channel: string): Promise<void> {
 
 async function realRollbackUpdate(): Promise<void> {
   await client.post('/api/system/update/rollback')
+}
+
+async function realGetUpdateProgress(): Promise<UpdateProgress> {
+  // 进度轮询：短超时即可，进度端点为进程内单例读取、恒快速返回
+  const res = await client.get<UpdateProgress>('/api/system/update/progress', { timeout: 5000 })
+  return res.data
 }
 
 async function realGetEnvVars(): Promise<EnvVar[]> {
@@ -162,6 +168,11 @@ async function mockRollbackUpdate(): Promise<void> {
   await mockDelay(300)
 }
 
+async function mockGetUpdateProgress(): Promise<UpdateProgress> {
+  await mockDelay(80)
+  return { state: 'downloading', downloaded: 6 * 1024 * 1024, total: 12 * 1024 * 1024, percent: 50 }
+}
+
 async function mockGetEnvVars(): Promise<EnvVar[]> {
   await mockDelay(120)
   return [
@@ -202,6 +213,11 @@ export function applyUpdate(channel: string): Promise<void> {
 
 export function rollbackUpdate(): Promise<void> {
   return useMock ? mockRollbackUpdate() : realRollbackUpdate()
+}
+
+// 自更新下载进度（FR-90）：更新进行中前端轮询展示进度条
+export function getUpdateProgress(): Promise<UpdateProgress> {
+  return useMock ? mockGetUpdateProgress() : realGetUpdateProgress()
 }
 
 // 环境变量查看（FR-56）：只读，敏感项已脱敏

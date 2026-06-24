@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
-  TypographyStylesProvider, Tabs, Modal,
+  TypographyStylesProvider, Tabs, Modal, Progress,
 } from '@mantine/core'
 import { useClipboard, useDisclosure } from '@mantine/hooks'
 import {
@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
-import type { SystemInfo, CodecTestResult, UpdateCheckResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types'
 
 // 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
 const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂时不可用，请稍后重试'
@@ -157,6 +157,10 @@ export default function SystemPage() {
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false) // 应用/回滚中（含重启等待）
   const [restartMsg, setRestartMsg] = useState<string | null>(null)
+  // 自更新下载进度（FR-90）：轮询进度端点展示进度条；applyFailed 用于在更新失败时显式提供「重试」入口
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null)
+  const [applyFailed, setApplyFailed] = useState(false)
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   // 更新/回滚二次确认模态框（FR-62 替代原生 window.confirm）
   const [applyModalOpened, applyModal] = useDisclosure(false)
   const [rollbackModalOpened, rollbackModal] = useDisclosure(false)
@@ -241,19 +245,57 @@ export default function SystemPage() {
     setRestartMsg(`${action}已触发，但等待重启超时，请手动检查服务状态。`)
   }, [])
 
-  // 由更新确认模态框「确认」触发：关模态框后执行更新并等待重启（FR-62）
-  const handleApplyUpdate = useCallback(async () => {
-    applyModal.close()
+  // stopProgressPoll 停止下载进度轮询（FR-90）。
+  const stopProgressPoll = useCallback(() => {
+    if (progressTimer.current) {
+      clearInterval(progressTimer.current)
+      progressTimer.current = null
+    }
+  }, [])
+
+  // startProgressPoll 启动下载进度轮询（FR-90）：每 ~800ms 拉一次进度，进入校验/完成或重启等待后由调用方停。
+  const startProgressPoll = useCallback(() => {
+    stopProgressPoll()
+    progressTimer.current = setInterval(() => {
+      systemApi.getUpdateProgress()
+        .then((p) => setUpdateProgress(p))
+        .catch(() => { /* 进度拉取失败不打断更新流程，下次轮询继续 */ })
+    }, 800)
+  }, [stopProgressPoll])
+
+  // 组件卸载时清理进度轮询定时器，避免泄漏
+  useEffect(() => stopProgressPoll, [stopProgressPoll])
+
+  // runApply 执行更新：轮询下载进度、apply 成功后等待重启；失败标记 applyFailed 以展示「重试」入口（FR-90）。
+  // 由更新确认模态框「确认」与失败后「重试」按钮共用。
+  const runApply = useCallback(async () => {
     setUpdateBusy(true)
     setUpdateError(null)
+    setApplyFailed(false)
+    setUpdateProgress(null)
+    startProgressPoll()
     try {
       await systemApi.applyUpdate(channel)
+      stopProgressPoll()
       await waitForRestart('更新')
     } catch (err) {
+      stopProgressPoll()
       setUpdateError(extractErrorMessage(err, '更新失败'))
+      setApplyFailed(true)
       setUpdateBusy(false)
     }
-  }, [channel, applyModal, waitForRestart])
+  }, [channel, startProgressPoll, stopProgressPoll, waitForRestart])
+
+  // 由更新确认模态框「确认」触发：关模态框后执行更新（FR-62 + FR-90 进度/重试）
+  const handleApplyUpdate = useCallback(() => {
+    applyModal.close()
+    void runApply()
+  }, [applyModal, runApply])
+
+  // 由失败后「重试」按钮触发：用户已在首次确认过，直接重试更新（FR-90）
+  const handleRetryApply = useCallback(() => {
+    void runApply()
+  }, [runApply])
 
   // 由回滚确认模态框「确认」触发：关模态框后执行回滚并等待重启（FR-62）
   const handleRollback = useCallback(async () => {
@@ -463,8 +505,44 @@ export default function SystemPage() {
 
         {updateError && (
           <Alert icon={<IconAlertCircle size={16} />} color="red" title="更新出错" mb="sm">
-            {updateError}
+            <Stack gap="xs">
+              <Text size="sm">{updateError}</Text>
+              {/* 更新（下载/校验）失败后显式「重试」入口（FR-90）：用户已确认过，直接重试不再弹模态框 */}
+              {applyFailed && (
+                <Group>
+                  <Button
+                    size="xs"
+                    color="purple"
+                    leftSection={<IconRefresh size={14} />}
+                    onClick={handleRetryApply}
+                    loading={updateBusy}
+                  >
+                    重试
+                  </Button>
+                </Group>
+              )}
+            </Stack>
           </Alert>
+        )}
+        {/* 更新进行中展示下载进度条（FR-90）：total 已知按百分比，未知则展示已下载字节 + 不确定态 */}
+        {updateBusy && updateProgress && (updateProgress.state === 'downloading' || updateProgress.state === 'verifying') && (
+          <Box mb="sm">
+            <Group justify="space-between" mb={4}>
+              <Text size="sm" c="dimmed">
+                {updateProgress.state === 'verifying' ? '校验中…' : '下载中…'}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {updateProgress.total > 0
+                  ? `${updateProgress.percent}%（${formatBytes(updateProgress.downloaded)} / ${formatBytes(updateProgress.total)}）`
+                  : `已下载 ${formatBytes(updateProgress.downloaded)}`}
+              </Text>
+            </Group>
+            <Progress
+              value={updateProgress.total > 0 ? updateProgress.percent : 100}
+              animated={updateProgress.total <= 0 || updateProgress.state === 'verifying'}
+              color="purple"
+            />
+          </Box>
         )}
         {restartMsg && <Alert color="blue" mb="sm">{restartMsg}</Alert>}
 
