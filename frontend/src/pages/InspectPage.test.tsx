@@ -155,6 +155,21 @@ describe('InspectPage', () => {
     })
   })
 
+  it('问题项用统一 MediaRow 渲染（勾选 + 标题 + 详情副标题，无缩略图，FR-101）', async () => {
+    server.use(
+      http.get('*/api/library/health/status', () => HttpResponse.json(completedStatus)),
+      http.get('*/api/library/health/issues', () => HttpResponse.json({
+        items: [makeIssue(1, 11, 'broken', '坏了.mp4', '解码失败')],
+      })),
+    )
+    renderPage()
+    const card = (await screen.findByText('坏了.mp4')).closest('.mantine-Card-root') as HTMLElement
+    // 行内含勾选框与详情副标题；问题项无缩略图（源文件可能丢失）
+    expect(within(card).getByRole('checkbox', { name: /坏了\.mp4/ })).toBeInTheDocument()
+    expect(within(card).getByText('解码失败')).toBeVisible()
+    expect(within(card).queryByRole('img')).toBeNull()
+  })
+
   it('巡检进行中展示进度', async () => {
     server.use(
       http.get('*/api/library/health/status', () => HttpResponse.json({ ...idleStatus, status: 'scanning', total: 10, checked: 4 })),

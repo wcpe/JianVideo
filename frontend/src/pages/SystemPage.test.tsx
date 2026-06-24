@@ -66,6 +66,22 @@ describe('SystemPage', () => {
     expect(screen.getByText('运行内存（已用/申请）')).toBeVisible()
   })
 
+  it('键值为定宽两列：label 定宽、路径/版本值用 monospace（FR-101）', async () => {
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    // 数据库路径值用等宽字体（monospace token）
+    const dbPath = screen.getByText('/opt/jianvideo/data/jianvideo.db')
+    expect(dbPath.style.fontFamily).toContain('monospace')
+    // 其 label 列定宽（紧凑两列，不再 space-between 拉满）
+    const label = screen.getByText('数据库路径')
+    expect(label.style.width).toBe('120px')
+    expect(label.style.flexShrink).toBe('0')
+
+    // Go 版本（版本号）也用 monospace
+    expect(screen.getByText('go1.22.5').style.fontFamily).toContain('monospace')
+  })
+
   it('渲染四个子 tab（运行环境/硬件加速/编解码测试/应用更新，FR-59）', async () => {
     renderPage()
     await screen.findByText('0.3.0')

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Stack, Title, Group, Card, Text, SimpleGrid, Button, Loader, Center, Checkbox, Paper, Badge } from '@mantine/core'
+import { Stack, Title, Group, Text, Button, Loader, Center, Paper, Badge } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconTrash, IconScan, IconCopyOff } from '@tabler/icons-react'
 import * as libApi from '@/api/library'
-import MediaThumbnail from '@/components/MediaThumbnail'
+import MediaRow from '@/components/MediaRow'
 import EmptyState from '@/components/EmptyState'
 import type { DuplicateGroup } from '@/types'
 
@@ -113,23 +113,20 @@ export default function DuplicatesPage() {
                 <Badge variant="light" color="purple">第 {gi + 1} 组</Badge>
                 <Text size="sm" c="dimmed">{group.length} 项相似</Text>
               </Group>
-              <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+              <Stack gap="xs">
                 {group.map(media => (
-                  <Card key={media.id} withBorder padding="xs" radius="md" className="mantine-Card-root">
-                    <Card.Section>
-                      <MediaThumbnail mediaID={media.id} fileName={media.file_name} />
-                    </Card.Section>
-                    <Group justify="space-between" mt="xs" wrap="nowrap">
-                      <Checkbox
-                        checked={selected.has(media.id)}
-                        onChange={() => toggle(media.id)}
-                        aria-label={`选择 ${media.file_name}`}
-                      />
-                      <Text size="sm" truncate title={media.file_name} style={{ flex: 1 }}>{media.file_name}</Text>
-                    </Group>
-                  </Card>
+                  <MediaRow
+                    key={media.id}
+                    mediaID={media.id}
+                    thumbFileName={media.file_name}
+                    title={media.file_name}
+                    selectable
+                    selected={selected.has(media.id)}
+                    onToggle={() => toggle(media.id)}
+                    checkboxLabel={`选择 ${media.file_name}`}
+                  />
                 ))}
-              </SimpleGrid>
+              </Stack>
             </Paper>
           ))}
         </Stack>

@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Stack, Title, Group, Card, Text, SimpleGrid, Button, Loader, Center } from '@mantine/core'
+import { Stack, Title, Group, Text, Button, Loader, Center } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconArrowBackUp, IconTrash } from '@tabler/icons-react'
 import type { AxiosError } from 'axios'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
-import MediaThumbnail from '@/components/MediaThumbnail'
+import MediaRow from '@/components/MediaRow'
 import EmptyState from '@/components/EmptyState'
 import type { MediaFile } from '@/types'
 
@@ -95,24 +95,24 @@ export default function RecyclePage() {
           description="被软删的媒体会出现在这里，源文件仍在磁盘可随时还原。当前没有待还原的媒体。"
         />
       ) : (
-        <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+        <Stack gap="xs">
           {items.map(media => (
-            <Card key={media.id} withBorder padding="xs" radius="md" className="mantine-Card-root">
-              <Card.Section>
-                <MediaThumbnail mediaID={media.id} fileName={media.file_name} />
-              </Card.Section>
-              <Group justify="space-between" mt="xs" wrap="nowrap">
-                <Text size="sm" truncate title={media.file_name}>{media.file_name}</Text>
+            <MediaRow
+              key={media.id}
+              mediaID={media.id}
+              thumbFileName={media.file_name}
+              title={media.file_name}
+              actions={
                 <Button size="compact-xs" variant="light" color="purple"
                   leftSection={<IconArrowBackUp size={14} />}
                   loading={restoringID === media.id}
                   onClick={() => handleRestore(media)}>
                   还原
                 </Button>
-              </Group>
-            </Card>
+              }
+            />
           ))}
-        </SimpleGrid>
+        </Stack>
       )}
 
       <ConfirmModal

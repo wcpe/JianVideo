@@ -26,15 +26,34 @@ const SUB_TAB_CODEC = 'codec'
 const SUB_TAB_UPDATE = 'update'
 const SUB_TABS = [SUB_TAB_ENV, SUB_TAB_HWACCEL, SUB_TAB_CODEC, SUB_TAB_UPDATE]
 
-/** 单行信息项：左侧标签 + 右侧值 */
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  // 长路径等文本值补 title 全文提示（FR-97 可读性）：值为字符串时把原文挂到 title，
-  // 鼠标悬停可见完整内容（如数据库/FFmpeg 路径），非字符串（如徽标节点）不挂。
+/**
+ * 单行信息项（FR-101 重排）：定宽 label 列 + 紧贴其后的 value 列的紧凑两列。
+ * 此前用 Group justify="space-between" 把 label/value 左右拉满，中间留巨大空隙、长路径换行难读；
+ * 改为 label 定宽（flex-shrink:0）、value 紧随，键值成对易读。
+ * mono 为真时 value 用等宽字体（路径/版本号/PID 等），并截断 + title 挂全文（保留 FR-97 悬停提示）。
+ */
+function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  // 长路径等文本值补 title 全文提示（FR-97 可读性）：值为字符串时把原文挂到 title，非字符串（如徽标节点）不挂。
   const titleText = typeof value === 'string' ? value : undefined
   return (
-    <Group justify="space-between" gap="sm" wrap="nowrap">
-      <Text size="sm" c="dimmed">{label}</Text>
-      <Text size="sm" ta="right" style={{ wordBreak: 'break-all' }} title={titleText}>{value}</Text>
+    <Group gap="sm" wrap="nowrap" align="flex-start">
+      <Text size="sm" c="dimmed" style={{ width: 120, flexShrink: 0 }}>{label}</Text>
+      <Text
+        size="sm"
+        title={titleText}
+        style={{
+          minWidth: 0,
+          flex: 1,
+          // 等宽值（路径/版本/PID）截断、悬停看全文；普通值允许换行不撑破。
+          fontFamily: mono ? 'var(--mantine-font-family-monospace)' : undefined,
+          overflow: mono ? 'hidden' : undefined,
+          textOverflow: mono ? 'ellipsis' : undefined,
+          whiteSpace: mono ? 'nowrap' : undefined,
+          wordBreak: mono ? undefined : 'break-all',
+        }}
+      >
+        {value}
+      </Text>
     </Group>
   )
 }
@@ -344,21 +363,21 @@ export default function SystemPage() {
               <Card withBorder padding="md" radius="md">
                 <Title order={4} mb="sm">运行环境</Title>
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
-                  <InfoRow label="应用版本" value={info.app_version} />
-                  <InfoRow label="操作系统" value={`${info.os}/${info.arch}`} />
-                  <InfoRow label="CPU 核心数" value={info.num_cpu} />
-                  <InfoRow label="主机名" value={info.hostname} />
-                  <InfoRow label="Go 版本" value={info.go_version} />
+                  <InfoRow label="应用版本" value={info.app_version} mono />
+                  <InfoRow label="操作系统" value={`${info.os}/${info.arch}`} mono />
+                  <InfoRow label="CPU 核心数" value={info.num_cpu} mono />
+                  <InfoRow label="主机名" value={info.hostname} mono />
+                  <InfoRow label="Go 版本" value={info.go_version} mono />
                   {info.runtime && (
                     <>
-                      <InfoRow label="GOMAXPROCS" value={info.runtime.gomaxprocs} />
-                      <InfoRow label="进程 PID" value={info.runtime.pid} />
+                      <InfoRow label="GOMAXPROCS" value={info.runtime.gomaxprocs} mono />
+                      <InfoRow label="进程 PID" value={info.runtime.pid} mono />
                       <InfoRow label="运行时长" value={formatUptime(info.runtime.uptime_seconds)} />
                       <InfoRow label="运行内存（已用/申请）" value={`${formatBytes(info.runtime.mem_alloc)} / ${formatBytes(info.runtime.mem_sys)}`} />
-                      <InfoRow label="GC 次数" value={info.runtime.num_gc} />
-                      <InfoRow label="数据库路径" value={info.runtime.db_path || '—'} />
-                      <InfoRow label="工作目录" value={info.runtime.work_dir || '—'} />
-                      <InfoRow label="可执行文件" value={info.runtime.executable || '—'} />
+                      <InfoRow label="GC 次数" value={info.runtime.num_gc} mono />
+                      <InfoRow label="数据库路径" value={info.runtime.db_path || '—'} mono />
+                      <InfoRow label="工作目录" value={info.runtime.work_dir || '—'} mono />
+                      <InfoRow label="可执行文件" value={info.runtime.executable || '—'} mono />
                     </>
                   )}
                 </SimpleGrid>
@@ -374,8 +393,8 @@ export default function SystemPage() {
                 </Group>
                 {info.ffmpeg.available ? (
                   <Stack gap="xs">
-                    <InfoRow label="路径" value={info.ffmpeg.path} />
-                    <InfoRow label="版本" value={info.ffmpeg.version} />
+                    <InfoRow label="路径" value={info.ffmpeg.path} mono />
+                    <InfoRow label="版本" value={info.ffmpeg.version} mono />
                   </Stack>
                 ) : (
                   <Text size="sm" c="dimmed">未检测到 FFmpeg，转码相关功能不可用。</Text>
@@ -551,8 +570,8 @@ export default function SystemPage() {
 
         {updateInfo ? (
           <Stack gap="xs">
-            <InfoRow label="当前版本" value={updateInfo.current} />
-            <InfoRow label="最新版本" value={updateInfo.latest || '—'} />
+            <InfoRow label="当前版本" value={updateInfo.current} mono />
+            <InfoRow label="最新版本" value={updateInfo.latest || '—'} mono />
             <Group gap="xs">
               {updateInfo.has_update
                 ? <Badge color="orange">有可用更新</Badge>

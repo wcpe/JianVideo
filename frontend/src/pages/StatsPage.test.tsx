@@ -87,6 +87,19 @@ describe('StatsPage', () => {
     expect(screen.getByText('5 次')).toBeVisible()
   })
 
+  it('热力方块与时间线条用品牌紫阶（FR-101 可视化精修）', async () => {
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(sampleStats)))
+    renderPage()
+    // 有值的热力方块背景用品牌紫 token（color-mix purple-6），非写死 rgba 魔法值
+    const cell0 = await screen.findByTestId('heat-cell-0')
+    expect(cell0.style.background).toContain('--mantine-color-purple-6')
+    expect(cell0.style.background).toContain('color-mix')
+    // 时间线条以品牌锚点 purple-6 着色
+    const bar = screen.getByLabelText('2026-06-24 观看 3 个')
+    const fill = bar.querySelector('div') as HTMLElement
+    expect(fill.style.background).toContain('--mantine-color-purple-6')
+  })
+
   it('加载失败时提示错误', async () => {
     server.use(http.get('*/api/library/stats', () => HttpResponse.json({ message: '炸了' }, { status: 500 })))
     renderPage()

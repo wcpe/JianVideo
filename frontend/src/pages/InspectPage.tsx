@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Stack, Title, Group, Card, Text, Button, Loader, Center, Progress, Badge, Checkbox } from '@mantine/core'
+import { Stack, Title, Group, Card, Text, Button, Loader, Center, Progress, Badge } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconStethoscope, IconTrash } from '@tabler/icons-react'
 import * as healthApi from '@/api/health'
 import { batchDeleteMediaFiles } from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
+import MediaRow from '@/components/MediaRow'
 import EmptyState from '@/components/EmptyState'
 import type { HealthIssue, HealthIssueType, HealthScanStatus } from '@/types'
 
@@ -163,23 +164,16 @@ export default function InspectPage() {
               </Group>
               <Stack gap={4}>
                 {group.items.map(issue => (
-                  <Card key={issue.id} withBorder padding="xs" radius="md" className="issue-card">
-                    <Group justify="space-between" wrap="nowrap">
-                      <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                        <Checkbox
-                          checked={selected.has(issue.media_id)}
-                          onChange={() => toggleSelect(issue.media_id)}
-                          aria-label={`选择 ${issue.file_name ?? issue.media_id}`}
-                        />
-                        <Stack gap={0} style={{ minWidth: 0 }}>
-                          <Text size="sm" truncate title={issue.file_path}>
-                            {issue.display_name || issue.file_name || `媒体 #${issue.media_id}`}
-                          </Text>
-                          {issue.detail && <Text size="xs" c="dimmed" truncate title={issue.detail}>{issue.detail}</Text>}
-                        </Stack>
-                      </Group>
-                    </Group>
-                  </Card>
+                  <MediaRow
+                    key={issue.id}
+                    title={issue.display_name || issue.file_name || `媒体 #${issue.media_id}`}
+                    titleTooltip={issue.file_path}
+                    subtitle={issue.detail || undefined}
+                    selectable
+                    selected={selected.has(issue.media_id)}
+                    onToggle={() => toggleSelect(issue.media_id)}
+                    checkboxLabel={`选择 ${issue.file_name ?? issue.media_id}`}
+                  />
                 ))}
               </Stack>
             </Stack>

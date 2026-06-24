@@ -94,6 +94,20 @@ describe('RecyclePage', () => {
     })
   })
 
+  it('媒体行用统一 MediaRow 渲染（缩略图 + 文件名 + 还原，FR-101）', async () => {
+    server.use(
+      http.get('*/api/library/recycle', () => HttpResponse.json({
+        items: [makeMedia(1, '统一行.mkv')],
+      })),
+    )
+    renderPage()
+    const card = (await screen.findByText('统一行.mkv')).closest('.mantine-Card-root') as HTMLElement
+    // MediaRow 复用 MediaThumbnail：行内含缩略图 img（alt=文件名）
+    expect(within(card).getByRole('img', { name: '统一行.mkv' })).toBeInTheDocument()
+    // 行内含还原操作
+    expect(within(card).getByRole('button', { name: '还原' })).toBeVisible()
+  })
+
   // ─── 回收站清理（FR-26）──────────────────────────────
 
   it('有软删项时展示清理回收站按钮', async () => {

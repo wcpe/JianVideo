@@ -134,6 +134,20 @@ describe('DuplicatesPage', () => {
     await waitFor(() => expect(screen.getByText(/没有发现重复/)).toBeVisible())
   })
 
+  it('媒体行用统一 MediaRow 渲染（缩略图 + 勾选 + 文件名，FR-101）', async () => {
+    server.use(
+      http.get('*/api/library/duplicates', () => HttpResponse.json({
+        groups: [[makeMedia(1, '统一行A.jpg'), makeMedia(2, '统一行B.jpg')]],
+      })),
+    )
+    renderPage()
+    const card = (await screen.findByText('统一行A.jpg')).closest('.mantine-Card-root') as HTMLElement
+    // MediaRow 复用 MediaThumbnail：行内含缩略图 img
+    expect(within(card).getByRole('img', { name: '统一行A.jpg' })).toBeInTheDocument()
+    // 行内含勾选框
+    expect(within(card).getByRole('checkbox', { name: '选择 统一行A.jpg' })).toBeInTheDocument()
+  })
+
   it('未选中任何项时删除按钮禁用', async () => {
     server.use(
       http.get('*/api/library/duplicates', () => HttpResponse.json({

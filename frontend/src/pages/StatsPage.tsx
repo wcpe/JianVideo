@@ -12,12 +12,13 @@ import type { WatchStats } from '@/types'
 // 续播位置热力 10 档的区间标签（下标 0=0-10%…9=90-100%）
 const HEATMAP_LABELS = ['0-10%', '10-20%', '20-30%', '30-40%', '40-50%', '50-60%', '60-70%', '70-80%', '80-90%', '90-100%']
 
-// 按桶值占最大值的比例返回背景色（紫色系深浅）：0 值留浅底，值越大越深。
+// 按桶值占最大值的比例返回背景色（品牌紫阶深浅，FR-101）：0 值留浅底，值越大越深。
+// 用品牌紫 token（--mantine-color-purple-6）经 color-mix 与透明叠加，避免写死 rgba 魔法值、随主题色板统一。
 function heatColor(value: number, max: number): string {
   if (value <= 0 || max <= 0) return 'var(--mantine-color-default-border)'
-  // 比例映射到 0.15~0.95 透明度，避免最小值过淡看不出
-  const alpha = 0.15 + 0.8 * (value / max)
-  return `rgba(151, 117, 250, ${alpha.toFixed(2)})`
+  // 比例映射到 25%~100% 不透明度（最小值不过淡看不出）
+  const pct = Math.round((0.25 + 0.75 * (value / max)) * 100)
+  return `color-mix(in srgb, var(--mantine-color-purple-6) ${pct}%, transparent)`
 }
 
 /** 观看统计页（FR-75）：复用 FR-44 观看状态，自建无图表库展示各观看维度 */
@@ -128,9 +129,10 @@ export default function StatsPage() {
               <Stack key={b.date} gap={2} align="center">
                 <div
                   aria-label={`${b.date} 观看 ${b.count} 个`}
-                  style={{ width: 18, height: 70, borderRadius: 4, background: 'var(--mantine-color-default-border)', display: 'flex', alignItems: 'flex-end', overflow: 'hidden' }}
+                  style={{ width: 20, height: 72, borderRadius: 4, background: 'var(--mantine-color-default-border)', display: 'flex', alignItems: 'flex-end', overflow: 'hidden' }}
                 >
-                  <div style={{ width: '100%', height: `${timelineMax > 0 ? Math.round((b.count / timelineMax) * 100) : 0}%`, background: 'var(--mantine-color-purple-5)' }} />
+                  {/* 品牌紫条（FR-101）：以品牌锚点 purple-6 统一时间线条色 */}
+                  <div style={{ width: '100%', height: `${timelineMax > 0 ? Math.round((b.count / timelineMax) * 100) : 0}%`, background: 'var(--mantine-color-purple-6)', borderRadius: '4px 4px 0 0', transition: 'height 200ms ease' }} />
                 </div>
                 <Text size="xs" c="dimmed" style={{ writingMode: 'vertical-rl' }}>{b.date.slice(5)}</Text>
               </Stack>
@@ -173,7 +175,7 @@ export default function StatsPage() {
                     <Text size="sm" truncate>{f.format || '未知格式'}</Text>
                     <Text size="sm" c="dimmed">{f.watched}</Text>
                   </Group>
-                  <Progress value={formatMax > 0 ? (f.watched / formatMax) * 100 : 0} color="grape" size="sm" />
+                  <Progress value={formatMax > 0 ? (f.watched / formatMax) * 100 : 0} color="purple" size="sm" />
                 </div>
               ))}
             </Stack>
