@@ -7,6 +7,7 @@
 ## 未发布
 
 ### 变更
+- **组件规范统一（FR-94，扩 FR-G，含 ref）**：① **原生日期控件换 Mantine DatePickerInput**——时间轴/目录筛选的两个 `<input type="date">`（原生 `年/月/日` spinner，与 Mantine 风格割裂）换为 `@mantine/dates` 的 `DatePickerInput`，统一边框/圆角/占位；用本地年月日做 YYYY-MM-DD ↔ Date 转换（避免 UTC 解析/格式化差一天），**请求侧 `time_from`/`time_to` 字符串契约不变**，转换纯函数 `strToDate`/`dateToStr` 附穷举单测。② **卡片 elevation 基线**——`theme.components.Card` 设默认 `withBorder + shadow:xs + radius:md`（用 FR-92 阴影 token），给卡片表面统一层次（消解卡片扁平）。**新增依赖 `@mantine/dates`（经用户批准，锁 ^7.17.0 与 core 同版本、无版本冲突）**。`design-tokens.test.ts` 加 FR-94 守护。按钮四档层级与徽标语义规范的逐处套用随相关页 FR 落地（守精准修改）。机制见 [docs/specs/design-system-tokens.md](docs/specs/design-system-tokens.md)。
 - **色彩体系与语义色（FR-93，扩 FR-G）**：根因修复+主色收敛。此前全站引用 `--mantine-color-purple-*` / `color="purple"`，却从未在主题定义 `purple` 色板，靠未定义 CSS 变量 / CSS 命名色兜底（不一致）；且 `appTheme` 未设 `primaryColor`，默认走 Mantine 蓝——导航激活态/链接/默认按钮/滑块/进度条等强调色全是蓝、与品牌紫冲突。本次在 `theme.ts` 正式定义 10 阶品牌紫色板（锚定 `#7e14ff` 于 shade 6）并设 `primaryColor:'purple'` + `primaryShade:{light:6,dark:5}`，**一改全站默认主色由蓝收敛回品牌紫**（链接由蓝变紫、进度/徽标/激活态统一）；新增语义色 token `other.semantic`（success/danger/warning/info/neutral → Mantine 命名色）约束绿蓝红只用于语义场景。分散在播放器/后缀/系统页的显式 `color="blue"` 留给将重写这些区域的页 FR（FR-100/101/104）一并收敛，避免散改与冲突（守精准修改）。`design-tokens.test.ts` 加 FR-93 守护。无新依赖、无新 ADR。机制见 [docs/specs/design-system-tokens.md](docs/specs/design-system-tokens.md)。
 
 ### 新增

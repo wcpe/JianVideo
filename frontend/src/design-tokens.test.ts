@@ -86,3 +86,16 @@ describe('色彩体系与语义色（FR-93）', () => {
     })
   })
 })
+
+// FR-94 组件规范守护：卡片默认带边 + 轻 elevation，给表面统一层次。
+describe('组件规范（FR-94）', () => {
+  it('Card 默认带细边 + 轻 elevation 阴影 + md 圆角', () => {
+    const card = appTheme.components?.Card
+    expect(card).toBeDefined()
+    expect(card?.defaultProps).toMatchObject({
+      withBorder: true,
+      shadow: 'xs',
+      radius: 'md',
+    })
+  })
+})

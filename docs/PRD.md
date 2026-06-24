@@ -131,7 +131,7 @@
 | FR-91 | 批量操作扩展：列表多选支持批量加相册、批量打标签（复用 FR-40/FR-41 单项端点），以及批量打包下载（新增后端 zip 流端点，边写边 flush、SMB 项跳过）（扩 FR-69，复用 FR-42） | P8 | 已交付@v0.15.0 |
 | FR-92 | 设计系统 token 基础：在主题定义并接入间距/圆角/阴影/字号刻度/密度/焦点环 token，全站组件改用 token 取代散落硬编码（前端设计系统地基，其余界面 FR 依赖之） | P9 | 开发中 |
 | FR-93 | 色彩体系与语义色：定义品牌紫色板与 success/danger/warning/info/neutral 语义色 token，导航激活态与链接由蓝/绿收敛回品牌紫，徽标/按钮按语义色规范（扩 FR-G） | P9 | 开发中 |
-| FR-94 | 组件规范统一：按钮四档层级（primary/secondary/tertiary/ghost）、卡片层次阴影、徽标分类规范，原生日期控件换 Mantine DatePicker（请求参数不变）（扩 FR-G，含 ref） | P9 | 计划 |
+| FR-94 | 组件规范统一：按钮四档层级（primary/secondary/tertiary/ghost）、卡片层次阴影、徽标分类规范，原生日期控件换 Mantine DatePicker（请求参数不变）（扩 FR-G，含 ref） | P9 | 开发中 |
 | FR-95 | 应用框架重构：顶栏分组+用户头像下拉菜单、侧栏激活态 pill+放大 logo、深层页面包屑、收起导航入口前移（扩 FR-54/FR-55/FR-61） | P9 | 计划 |
 | FR-96 | 全局微交互与动效：卡片/按钮/导航 hover 过渡与抬升、路由切换动画、全局顶部加载进度条，全部带 prefers-reduced-motion 兜底 | P9 | 计划 |
 | FR-97 | 无障碍与可读性：统一焦点可见环、对比度全面核 WCAG AA、触控目标≥44px、长文本 title/截断（扩 FR-G） | P9 | 计划 |

@@ -21,6 +21,7 @@ import MapPage from './pages/MapPage'
 import TranscodePage from './pages/TranscodePage'
 import LicensesPage from './pages/LicensesPage'
 import '@mantine/core/styles.css'
+import '@mantine/dates/styles.css'
 import './index.css'
 
 // 主题色方案持久化到 localStorage，刷新后保留用户选择

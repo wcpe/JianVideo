@@ -1,4 +1,4 @@
-import { createTheme } from '@mantine/core'
+import { createTheme, Card } from '@mantine/core'
 import type { CSSVariablesResolver, MantineColorsTuple } from '@mantine/core'
 
 // 品牌紫色板（FR-93）：锚定品牌主色 #7e14ff 于 shade 6 的 10 阶色阶。
@@ -35,6 +35,10 @@ export const appTheme = createTheme({
   // 暗色用略亮一档主色、亮色用 6 档，保证两主题下强调色对比
   primaryShade: { light: 6, dark: 5 },
   colors: { purple: brandPurple },
+  // 组件默认规范（FR-94）：卡片统一带细边 + 轻 elevation 阴影，给表面层次（消解卡片扁平无层次）
+  components: {
+    Card: Card.extend({ defaultProps: { withBorder: true, shadow: 'xs', radius: 'md' } }),
+  },
   // 全局默认圆角：卡片/按钮/输入等统一继承，免逐处写死
   defaultRadius: 'md',
   // 可见焦点环（无障碍地基，FR-97 依赖）：键盘聚焦时显示
