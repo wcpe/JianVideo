@@ -30,6 +30,19 @@ function renderLayout() {
   )
 }
 
+// 指定初始路由渲染，用于断言激活态 pill
+function renderLayoutAt(initialPath: string) {
+  return render(
+    <MantineProvider>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <AppLayout>
+          <div>页面内容</div>
+        </AppLayout>
+      </MemoryRouter>
+    </MantineProvider>,
+  )
+}
+
 describe('AppLayout 主题切换', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -404,5 +417,112 @@ describe('AppLayout 命令面板（FR-74）', () => {
     await user.click(within(dialog).getByText('时间轴'))
 
     expect(mockNavigate).toHaveBeenCalledWith('/')
+  })
+})
+
+describe('AppLayout 用户头像下拉菜单（FR-95）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  it('顶栏提供用户菜单触发按钮（含用户名无障碍标签）', () => {
+    renderLayout()
+
+    expect(screen.getByRole('button', { name: /admin/ })).toBeInTheDocument()
+  })
+
+  it('默认不直接渲染「退出登录」项（收进菜单）', () => {
+    renderLayout()
+
+    // 菜单未展开时，退出登录项不在文档中
+    expect(screen.queryByText('退出登录')).toBeNull()
+  })
+
+  it('点击头像展开菜单，菜单含用户名与「退出登录」项', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: /admin/ }))
+
+    // 展开后出现「退出登录」菜单项
+    expect(await screen.findByText('退出登录')).toBeInTheDocument()
+  })
+
+  it('点击菜单内「退出登录」触发登出并跳转 /login', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: /admin/ }))
+    const item = await screen.findByText('退出登录')
+    await user.click(item)
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/login')
+    })
+  })
+})
+
+describe('AppLayout 侧栏激活态 pill（FR-95）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('当前路由 /browse：桌面 navbar 中「目录」项标记为激活态', () => {
+    renderLayoutAt('/browse')
+
+    const navbar = getNavbar()
+    const active = navbar.querySelectorAll('[data-active="true"]')
+    // 恰有一个激活项，且其链接指向 /browse
+    expect(active.length).toBe(1)
+    expect(active[0].querySelector('a[href="/browse"]') ?? active[0].closest('a[href="/browse"]') ?? navbar.querySelector('a[href="/browse"][data-active="true"]')).not.toBeNull()
+  })
+
+  it('根路由 /：仅「时间轴」激活，不误激活其他项（前缀匹配排除根）', () => {
+    renderLayoutAt('/')
+
+    const navbar = getNavbar()
+    const active = navbar.querySelectorAll('a[data-active="true"]')
+    expect(active.length).toBe(1)
+    expect(active[0]).toHaveAttribute('href', '/')
+  })
+
+  it('收缩态下激活项仍带激活标记（收缩态可辨）', async () => {
+    const user = userEvent.setup()
+    renderLayoutAt('/albums')
+
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    const navbar = getNavbar()
+    expect(navbar).toHaveAttribute('data-collapsed', 'true')
+    const active = navbar.querySelector('a[data-active="true"]')
+    expect(active).toHaveAttribute('href', '/albums')
+  })
+})
+
+describe('AppLayout 收起导航入口前移（FR-95）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('「收起导航」按钮位于 navbar 顶部（先于首个导航链接出现）', () => {
+    renderLayout()
+
+    const navbar = getNavbar()
+    const collapseBtn = within(navbar).getByRole('button', { name: '收起导航' })
+    const firstNavLink = navbar.querySelector('a[href="/"]') as HTMLElement
+
+    // 文档顺序：收起按钮在第一个导航链接之前
+    const pos = collapseBtn.compareDocumentPosition(firstNavLink)
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

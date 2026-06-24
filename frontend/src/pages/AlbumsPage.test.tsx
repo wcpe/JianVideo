@@ -42,7 +42,8 @@ describe('AlbumsPage', () => {
   it('渲染相册页标题与新建按钮', async () => {
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('相册')).toBeVisible()
+      // 页面标题为 h2 标题；面包屑亦含「相册」文字，故按标题角色断言避免歧义（FR-95 面包屑引入）
+      expect(screen.getByRole('heading', { name: '相册' })).toBeVisible()
       expect(screen.getByRole('button', { name: '新建相册' })).toBeVisible()
     })
   })

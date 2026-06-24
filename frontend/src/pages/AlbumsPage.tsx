@@ -10,6 +10,7 @@ import * as albumApi from '@/api/albums'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import PageBreadcrumbs from '@/components/PageBreadcrumbs'
 import { mediaDisplayName } from '@/utils/media'
 import type { Album, MediaFile } from '@/types'
 
@@ -77,6 +78,8 @@ export default function AlbumsPage() {
 
   return (
     <Stack gap="md">
+      {/* 页面级路由面包屑（FR-95）：首页 › 相册 */}
+      <PageBreadcrumbs items={[{ label: '首页', to: '/' }, { label: '相册' }]} />
       <Group justify="space-between">
         <Title order={2}>相册</Title>
         <Button leftSection={<IconPlus size={16} />} color="purple"
@@ -185,6 +188,14 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
 
   return (
     <Stack gap="md">
+      {/* 页面级路由面包屑（FR-95）：首页 › 相册（返回列表） › 当前相册 */}
+      <PageBreadcrumbs
+        items={[
+          { label: '首页', to: '/' },
+          { label: '相册', onClick: onBack },
+          { label: album.name },
+        ]}
+      />
       <Group justify="space-between">
         <Group gap="xs">
           <ActionIcon variant="subtle" color="gray" aria-label="返回" onClick={onBack}>

@@ -7,6 +7,7 @@ import { IconSearch, IconFilter } from '@tabler/icons-react'
 import { useLibraryPaths } from '@/hooks/useLibraryPaths'
 import { useDirectoryBrowse } from '@/hooks/useDirectoryBrowse'
 import DirectoryBrowser, { sortFiles, type DisplayMode, type DirSort } from '@/components/DirectoryBrowser'
+import PageBreadcrumbs from '@/components/PageBreadcrumbs'
 import MediaQueryFilters from '@/components/MediaQueryFilters'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import ConfirmModal from '@/components/ConfirmModal'
@@ -129,6 +130,8 @@ export default function BrowsePage() {
 
   return (
     <Stack gap="md">
+      {/* 页面级路由面包屑（FR-95）：指明深层页层级 */}
+      <PageBreadcrumbs items={[{ label: '首页', to: '/' }, { label: '目录浏览' }]} />
       <Title order={2}>目录浏览</Title>
 
       {/* 搜索 + 筛选（FR-36，消费 FR-35 引擎，按当前目录递归筛选）：搜索框移动端亦常驻（FR-86） */}

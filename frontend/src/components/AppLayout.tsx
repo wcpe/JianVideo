@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, Menu, Avatar, UnstyledButton, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
@@ -19,6 +19,8 @@ const NAVBAR_WIDTH_COLLAPSED = 64
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { username, logout } = useAuthStore()
   const navigate = useNavigate()
+  // 当前路由路径，用于侧栏激活态 pill（FR-95）判定
+  const { pathname } = useLocation()
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false)
   // 命令面板（FR-74）：全局 Ctrl/Cmd+K 打开、header 入口按钮亦可触发
   const [paletteOpened, { open: openPalette, close: closePalette }] = useDisclosure(false)
@@ -50,6 +52,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     await logout()
     navigate('/login')
   }
+
+  // 导航项激活判定（FR-95）：根路由 '/' 用精确匹配，避免前缀匹配误命中所有路径；
+  // 其余项命中自身或其子路径（如 /albums 命中 /albums 与 /albums/...）。
+  const isNavActive = (path: string) =>
+    path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`)
 
   // 导航项定义（桌面 Navbar 与移动 Drawer 共用，避免重复）
   const navItems = [
@@ -107,16 +114,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     onNavigate?: () => void,
     collapsed = false,
   ) => {
+    // 激活态 pill（FR-95）：当前路由对应项加品牌紫浅底 + 紫字（复用 FR-93 primaryColor purple）、token 圆角；
+    // data-active 供测试与样式钩子，收缩态同样高亮底以保可辨。
+    const active = isNavActive(path)
     const link = (
-      <Link key={path} to={path} onClick={onNavigate} style={{ textDecoration: 'none' }}>
+      <Link
+        key={path}
+        to={path}
+        onClick={onNavigate}
+        data-active={active || undefined}
+        style={{ textDecoration: 'none' }}
+      >
         <Group
           gap={8}
           p="xs"
           justify={collapsed ? 'center' : undefined}
-          style={{ borderRadius: 'var(--mantine-radius-sm)', cursor: 'pointer' }}
+          style={{
+            borderRadius: 'var(--mantine-radius-sm)',
+            cursor: 'pointer',
+            backgroundColor: active ? 'var(--mantine-color-purple-light)' : undefined,
+            color: active ? 'var(--mantine-color-purple-light-color)' : undefined,
+          }}
         >
           <Icon size={16} />
-          {!collapsed && <Text size="sm">{label}</Text>}
+          {!collapsed && <Text size="sm" c={active ? 'inherit' : undefined} fw={active ? 600 : undefined}>{label}</Text>}
         </Group>
       </Link>
     )
@@ -191,10 +212,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               aria-label="导航菜单"
               hiddenFrom="sm"
             />
+            {/* 品牌标志（FR-95 放大 logo）：图标加大并以紫浅底圆框托底，提对比、增品牌存在感 */}
             <Link to="/" style={{ textDecoration: 'none' }}>
-              <Group gap={6}>
-                <IconVideo size={22} style={{ color: 'var(--mantine-color-purple-4)' }} />
-                <Text fw={700} size="lg" style={{ color: 'var(--mantine-color-purple-4)' }}>
+              <Group gap={8}>
+                <Group
+                  justify="center"
+                  align="center"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 'var(--mantine-radius-md)',
+                    backgroundColor: 'var(--mantine-color-purple-light)',
+                  }}
+                >
+                  <IconVideo size={26} style={{ color: 'var(--mantine-color-purple-light-color)' }} />
+                </Group>
+                <Text fw={700} size="xl" style={{ color: 'var(--mantine-color-purple-4)' }}>
                   JianVideo
                 </Text>
               </Group>
@@ -216,7 +249,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <UpdateIndicator />
             {/* 扫描任务队列指示器（FR-29）：有进行中任务时常驻展示 */}
             <ScanTaskIndicator />
-            <Text size="sm" c="dimmed">{username}</Text>
             {/* 主题切换：暗色显示太阳（点击切浅色），浅色显示月亮（点击切暗色） */}
             <ActionIcon
               variant="subtle"
@@ -227,15 +259,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               {computedColorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
             </ActionIcon>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              onClick={handleLogout}
-              title="退出登录"
-              aria-label="退出登录"
-            >
-              <IconLogout size={18} />
-            </ActionIcon>
+            {/* 用户头像下拉菜单（FR-95）：把「用户名 + 退出登录」收进头像菜单，减少顶栏拥挤。
+                target 头像以用户名首字符为标识，菜单含用户名（dimmed 标签）与「退出登录」项。 */}
+            <Menu position="bottom-end" withArrow shadow="md" width={180}>
+              <Menu.Target>
+                <Tooltip label={username} position="bottom" withArrow>
+                  <UnstyledButton aria-label={`用户菜单：${username}`}>
+                    <Avatar color="purple" radius="xl" size={32}>
+                      {username ? username.charAt(0).toUpperCase() : '?'}
+                    </Avatar>
+                  </UnstyledButton>
+                </Tooltip>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>{username}</Menu.Label>
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconLogout size={16} />}
+                  onClick={handleLogout}
+                >
+                  退出登录
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </Group>
         </Group>
       </AppShell.Header>
@@ -258,14 +304,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Drawer>
 
       <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={effectiveCollapsed}>
-        <Stack gap="xs" style={{ flex: 1 }}>
-          {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
-          {renderNavGroups(undefined, effectiveCollapsed)}
-        </Stack>
-        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于收缩按钮上方，适配有效收缩态 */}
-        {renderVersionLicense(effectiveCollapsed)}
-        {/* 收缩 / 展开切换按钮（FR-54）：置于 navbar 底部，随状态切换图标与无障碍标签 */}
-        <Group justify={navCollapsed ? 'center' : 'flex-end'} mt="xs">
+        {/* 收缩 / 展开切换按钮（FR-54，FR-95 入口前移）：置于 navbar 顶部更易发现，
+            随状态切换图标与无障碍标签 */}
+        <Group justify={navCollapsed ? 'center' : 'flex-end'} mb="xs">
           <ActionIcon
             variant="subtle"
             color="gray"
@@ -276,6 +317,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {navCollapsed ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
           </ActionIcon>
         </Group>
+        <Stack gap="xs" style={{ flex: 1 }}>
+          {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
+          {renderNavGroups(undefined, effectiveCollapsed)}
+        </Stack>
+        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于 navbar 底部，适配有效收缩态 */}
+        {renderVersionLicense(effectiveCollapsed)}
       </AppShell.Navbar>
 
       {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}
