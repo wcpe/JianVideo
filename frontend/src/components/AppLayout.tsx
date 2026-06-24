@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
+import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
@@ -43,11 +43,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     navigate('/login')
   }
 
-  const handleNavigate = (path: string) => {
-    navigate(path)
-    closeDrawer()
-  }
-
   // 导航项定义（桌面 Navbar 与移动 Drawer 共用，避免重复）
   const navItems = [
     { path: '/library-manager', label: '管理', icon: IconSettings },
@@ -66,6 +61,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/transcode', label: '转码', icon: IconMovie },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
+  ]
+
+  // 左侧导航分组（FR-83）：把扁平 navItems 按「浏览 / 管理 / 系统」三组重排用于渲染。
+  // navItems 仍是命令面板（FR-74）的扁平真源；此处仅按 path 引用其中同一对象做视觉分组，不复制项、不改路径/语义。
+  const navItemByPath = (path: string) => navItems.find((item) => item.path === path)!
+  const navGroups = [
+    { title: '浏览', items: ['/', '/browse', '/albums', '/map', '/stats'].map(navItemByPath) },
+    { title: '管理', items: ['/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode'].map(navItemByPath) },
+    { title: '系统', items: ['/system'].map(navItemByPath) },
   ]
 
   // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；useHotkeys 默认对匹配事件 preventDefault
@@ -117,6 +121,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       link
     )
   }
+
+  // 分组渲染（FR-83）：桌面 Navbar 与移动 Drawer 共用。
+  // 展开态每组前置 dimmed 小标题；收缩态（64px）不显标题文字，改用 Divider 分隔（首组前不加）以免破版。
+  const renderNavGroups = (onNavigate?: () => void, collapsed = false) =>
+    navGroups.map((group, groupIndex) => (
+      <Stack key={group.title} gap="xs">
+        {collapsed
+          ? groupIndex > 0 && <Divider my={2} />
+          : (
+            <Text size="xs" c="dimmed" fw={600} px={4} mt={groupIndex > 0 ? 'xs' : 0}>
+              {group.title}
+            </Text>
+          )}
+        {group.items.map((item) => renderNavLink(item, onNavigate, collapsed))}
+      </Stack>
+    ))
 
   // 版本号 + 「开源协议」入口（FR-61）：取代原页脚展示。
   // collapsed 收缩态仅渲染协议图标 + Tooltip（含版本号），避免 64px 内文字截断；
@@ -222,7 +242,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         hiddenFrom="sm"
       >
         <Stack gap="xs">
-          {navItems.map((item) => renderNavLink(item, () => handleNavigate(item.path)))}
+          {/* 分组导航（FR-83）：抽屉内固定展开，点击后关闭抽屉（跳转由各项 Link 负责） */}
+          {renderNavGroups(closeDrawer, false)}
           {/* 版本号 + 「开源协议」入口（FR-61）：原页脚在移动端可见，移除后于抽屉底部补回 */}
           {renderVersionLicense(false, closeDrawer)}
         </Stack>
@@ -230,7 +251,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={navCollapsed}>
         <Stack gap="xs" style={{ flex: 1 }}>
-          {navItems.map((item) => renderNavLink(item, undefined, navCollapsed))}
+          {/* 分组导航（FR-83）：随 navCollapsed 切换展开/收缩态渲染 */}
+          {renderNavGroups(undefined, navCollapsed)}
         </Stack>
         {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于收缩按钮上方，适配收缩态 */}
         {renderVersionLicense(navCollapsed)}

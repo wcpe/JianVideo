@@ -182,6 +182,99 @@ describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
   })
 })
 
+describe('AppLayout 左侧导航分组（FR-83）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  // 桌面 Navbar 用 data-collapsed 标识，便于把断言限定在桌面侧边栏（排除移动抽屉重复项）
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('展开态：桌面 navbar 含「浏览 / 管理 / 系统」三组小标题', () => {
+    renderLayout()
+
+    const navbar = within(getNavbar())
+    // 「管理」「系统」既是组标题又是同名导航项，故用 getAllByText 断言至少存在一处
+    expect(navbar.getByText('浏览')).toBeInTheDocument()
+    expect(navbar.getAllByText('管理').length).toBeGreaterThan(0)
+    expect(navbar.getAllByText('系统').length).toBeGreaterThan(0)
+  })
+
+  it('展开态：11 个导航项全部仍在桌面 navbar 中渲染', () => {
+    renderLayout()
+
+    const navbar = within(getNavbar())
+    const labels = ['时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    labels.forEach((label) => {
+      // 「系统」既是组标题又是导航项，故只断言至少存在
+      expect(navbar.getAllByText(label).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('展开态：三组各项归入正确分组（按 navbar 内文档顺序校验组界）', () => {
+    renderLayout()
+
+    const navbar = getNavbar()
+    const text = navbar.textContent ?? ''
+    const idxBrowse = text.indexOf('浏览')
+    const idxManage = text.indexOf('管理')
+    const idxSystem = text.lastIndexOf('系统')
+
+    // 三个组标题按「浏览 < 管理 < 系统」顺序出现
+    expect(idxBrowse).toBeGreaterThanOrEqual(0)
+    expect(idxManage).toBeGreaterThan(idxBrowse)
+    expect(idxSystem).toBeGreaterThan(idxManage)
+
+    // 浏览组成员落在「浏览」与「管理」标题之间
+    ;['时间轴', '目录', '相册', '地图', '统计'].forEach((label) => {
+      const i = text.indexOf(label)
+      expect(i).toBeGreaterThan(idxBrowse)
+      expect(i).toBeLessThan(idxManage)
+    })
+    // 管理组成员落在「管理」标题之后、「系统」组标题之前
+    ;['回收站', '巡检', '重复项', '转码'].forEach((label) => {
+      const i = text.indexOf(label)
+      expect(i).toBeGreaterThan(idxManage)
+      expect(i).toBeLessThan(idxSystem)
+    })
+  })
+
+  it('收缩态：组标题文字隐藏、以分隔线区分组、图标态链接仍可达且不破版', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    const navbar = getNavbar()
+    expect(navbar).toHaveAttribute('data-collapsed', 'true')
+    // 收缩态不平铺组标题文字（64px 放不下），但仍以分隔线区分组（至少 2 条：浏览|管理、管理|系统）
+    expect(within(navbar).queryByText('浏览')).toBeNull()
+    expect(within(navbar).queryByText('管理')).toBeNull()
+    expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2)
+    // 11 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
+    const paths = ['/', '/browse', '/albums', '/map', '/stats', '/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode', '/system']
+    paths.forEach((p) => {
+      expect(navbar.querySelector(`a[href="${p}"]`)).not.toBeNull()
+    })
+  })
+
+  it('移动端抽屉同样按组渲染（含三组小标题）', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '导航菜单' }))
+
+    // 抽屉打开后三组小标题可见（桌面 navbar 也各一份，故至少一处）
+    await waitFor(() => {
+      expect(screen.getAllByText('浏览').length).toBeGreaterThan(0)
+    })
+    expect(screen.getAllByText('管理').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('系统').length).toBeGreaterThan(0)
+  })
+})
+
 describe('AppLayout 命令面板（FR-74）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
