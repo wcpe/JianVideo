@@ -1,12 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MantineProvider } from '@mantine/core'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { MediaFile, MediaListResponse } from '@/types'
 
-// 桩掉 react-leaflet（jsdom 无法渲染真实地图）：组件降级为可断言的 div
+// 桩掉 react-leaflet（jsdom 无法渲染真实地图）：组件降级为可断言的 div，
+// 把初始 center/zoom 透出到 data 属性，便于断言站内地图定位（FR-106）。
 vi.mock('react-leaflet', () => ({
-  MapContainer: ({ children }: { children?: React.ReactNode }) => <div data-testid="map">{children}</div>,
+  MapContainer: ({ children, center, zoom }: { children?: React.ReactNode; center?: [number, number]; zoom?: number }) => (
+    <div data-testid="map" data-center={center ? center.join(',') : ''} data-zoom={zoom}>{children}</div>
+  ),
   TileLayer: () => <div data-testid="tile" />,
   Marker: ({ children }: { children?: React.ReactNode }) => <div data-testid="marker">{children}</div>,
   Popup: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
@@ -37,8 +41,14 @@ function geo(id: number, lat: number, lon: number, mediaTime = ''): MediaFile {
   } as MediaFile
 }
 
-function renderPage() {
-  return render(<MantineProvider><MapPage /></MantineProvider>)
+function renderPage(initialEntry = '/map') {
+  return render(
+    <MantineProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <MapPage />
+      </MemoryRouter>
+    </MantineProvider>,
+  )
 }
 
 describe('MapPage 照片地图（FR-39）', () => {
@@ -76,6 +86,26 @@ describe('MapPage 照片地图（FR-39）', () => {
     renderPage()
     expect(await screen.findByText('加载照片地图失败')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+
+  it('带 ?lat=&lon= 时把地图初始视图定位到该坐标并放大（FR-106）', async () => {
+    mockGetMediaFiles.mockResolvedValue({
+      items: [geo(1, 31.2, 121.4), geo(2, 39.9, 116.4)], total: 2, page: 1, page_size: 100,
+    })
+    renderPage('/map?lat=39.9&lon=116.4')
+    const map = await screen.findByTestId('map')
+    expect(map).toHaveAttribute('data-center', '39.9,116.4')
+    expect(map).toHaveAttribute('data-zoom', '14')
+  })
+
+  it('无 lat/lon 参数时用默认全局视图（FR-106）', async () => {
+    mockGetMediaFiles.mockResolvedValue({
+      items: [geo(1, 31.2, 121.4)], total: 1, page: 1, page_size: 100,
+    })
+    renderPage('/map')
+    const map = await screen.findByTestId('map')
+    expect(map).toHaveAttribute('data-center', '31.2,121.4')
+    expect(map).toHaveAttribute('data-zoom', '4')
   })
 })
 

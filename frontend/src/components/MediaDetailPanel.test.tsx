@@ -77,7 +77,8 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     })], 0)
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/Sony A7/)).toBeInTheDocument()
-    expect(within(dialog).getByText('ISO')).toBeInTheDocument()
+    expect(within(dialog).getByText(/ISO 100/)).toBeInTheDocument()
+    // GPS 外部地图仍作为次要链接保留（FR-106）
     const mapLink = within(dialog).getByRole('link', { name: /在外部地图打开/ })
     expect(mapLink).toHaveAttribute('href', expect.stringContaining('mlat=31.23'))
     expect(mapLink).toHaveAttribute('target', '_blank')
@@ -87,6 +88,101 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     renderPanel([mediaFile({ id: 6, file_name: '无exif.jpg' })], 0)
     const dialog2 = await screen.findByRole('dialog')
     expect(within(dialog2).queryByRole('link', { name: /在外部地图打开/ })).not.toBeInTheDocument()
+  })
+
+  it('EXIF 光圈/快门/ISO 标准化为标准摄影写法（FR-106）', async () => {
+    // 后端裸值：光圈 f/2.8、快门 1/200（无 s）、ISO 数字
+    renderPanel([mediaFile({
+      id: 5, file_name: '照片.jpg',
+      camera: 'Sony A7', aperture: 'f/2.8', shutter: '1/200', iso: 400,
+    })], 0)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('f/2.8')).toBeInTheDocument()
+    expect(within(dialog).getByText('1/200s')).toBeInTheDocument()
+    expect(within(dialog).getByText('ISO 400')).toBeInTheDocument()
+  })
+
+  it('EXIF 区为定宽两列定义列表（FR-106）', async () => {
+    renderPanel([mediaFile({ id: 5, file_name: '照片.jpg', camera: 'Sony A7', lens: 'FE 35mm' })], 0)
+    const dialog = await screen.findByRole('dialog')
+    // 定宽两列以 <dl>/<dt>/<dd> 定义列表承载，相机/镜头标签为 <dt>
+    const dl = within(dialog).getByRole('group', { name: 'EXIF 信息' })
+    expect(dl.tagName.toLowerCase()).toBe('dl')
+    expect(within(dl).getByText('相机').tagName.toLowerCase()).toBe('dt')
+  })
+
+  it('GPS 提供站内地图入口，点击跳 /map 带经纬度（FR-106）', async () => {
+    const user = userEvent.setup()
+    renderPanel([mediaFile({ id: 5, file_name: '照片.jpg', gps_lat: 31.23, gps_lon: 121.47 })], 0)
+    const dialog = await screen.findByRole('dialog')
+    const mapBtn = within(dialog).getByRole('button', { name: /在站内地图打开/ })
+    await user.click(mapBtn)
+    expect(mockNavigate).toHaveBeenCalledWith(expect.stringMatching(/^\/map\?.*lat=31\.23.*lon=121\.47/))
+  })
+
+  it('工具栏含收藏/分享/旋转/下载（FR-106）', async () => {
+    // 传 onToggleFavorite 时显收藏按钮，与分享/旋转/下载一并齐全
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <MediaDetailPanel
+            files={[mediaFile({ id: 7, file_name: '风景.jpg' })]}
+            initialIndex={0}
+            onClose={() => {}}
+            customImageExtensions={{}}
+            onToggleFavorite={() => {}}
+          />
+        </MemoryRouter>
+      </MantineProvider>,
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: /收藏/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /分享/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '向右旋转' })).toBeInTheDocument()
+    // 下载为链接形态
+    expect(within(dialog).getByRole('link', { name: /下载/ })).toHaveAttribute('href', '/api/library/media/7/download')
+  })
+
+  it('点收藏触发 onToggleFavorite（FR-106）', async () => {
+    const user = userEvent.setup()
+    const onToggleFavorite = vi.fn()
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <MediaDetailPanel
+            files={[mediaFile({ id: 7, file_name: '风景.jpg' })]}
+            initialIndex={0}
+            onClose={() => {}}
+            customImageExtensions={{}}
+            onToggleFavorite={onToggleFavorite}
+          />
+        </MemoryRouter>
+      </MantineProvider>,
+    )
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /收藏/ }))
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1)
+    expect(onToggleFavorite.mock.calls[0][0]).toMatchObject({ id: 7 })
+  })
+
+  it('信息栏可一键折叠/展开（FR-106）', async () => {
+    const user = userEvent.setup()
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0)
+    const dialog = await screen.findByRole('dialog')
+    // 默认展开：文件信息可见
+    expect(within(dialog).getByText('文件信息')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: /折叠信息栏/ }))
+    expect(within(dialog).queryByText('文件信息')).not.toBeInTheDocument()
+    // 再点展开
+    await user.click(within(dialog).getByRole('button', { name: /展开信息栏/ }))
+    expect(within(dialog).getByText('文件信息')).toBeInTheDocument()
+  })
+
+  it('提供复制路径与复制 GPS 坐标按钮（FR-106）', async () => {
+    renderPanel([mediaFile({ id: 5, file_name: '照片.jpg', file_path: 'D:/m/照片.jpg', gps_lat: 31.23, gps_lon: 121.47 })], 0)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: /复制路径/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /复制坐标/ })).toBeInTheDocument()
   })
 
   it('上一项/下一项在已加载列表内切换并到端点环绕（FR-105）', async () => {

@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useClipboard } from '@mantine/hooks'
 import { Modal, Group, Stack, Button, ActionIcon, Text, Box, ScrollArea, Divider, Tooltip, Anchor } from '@mantine/core'
 import {
   IconChevronLeft, IconChevronRight, IconX, IconMaximize, IconMinimize,
   IconDownload, IconRotateClockwise, IconRotate2, IconPlayerPlay, IconPlayerPause,
+  IconHeart, IconHeartFilled, IconShare, IconTag, IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand, IconCopy, IconCheck, IconMapPin, IconCamera,
+  IconAperture, IconClock, IconAdjustments, IconPhoto,
 } from '@tabler/icons-react'
 // FR-102：懒加载 VideoPlayer，仅在灯箱内实际查看视频时才加载其 mpegts.js 等重内核，
 // 避免图片预览场景白白拉入大体积播放内核。
 const VideoPlayer = lazy(() => import('@/components/VideoPlayer'))
+import ShareDialog from '@/components/ShareDialog'
+import BatchActionsModals from '@/components/BatchActionsModals'
+import { useBatchActions } from '@/hooks/useBatchActions'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
-import { formatSize, formatDuration } from '@/utils/format'
+import { formatSize, formatDuration, formatAperture, formatShutter, formatIso } from '@/utils/format'
 import type { MediaFile } from '@/types'
 
 interface MediaDetailPanelProps {
@@ -17,6 +25,8 @@ interface MediaDetailPanelProps {
   initialIndex: number | null
   onClose: () => void
   customImageExtensions: Record<number, string[]>
+  /** 切换收藏（FR-106）：父层负责调接口并刷新列表，未传则不显收藏按钮 */
+  onToggleFavorite?: (f: MediaFile) => void
 }
 
 const ZOOM_MIN = 1
@@ -39,14 +49,42 @@ function streamUrl(mediaID: number): string {
   return new URL(`/api/play/${mediaID}/stream`, window.location.href).toString()
 }
 
-/** 一行「标签：值」详情，值为空时不渲染 */
-function DetailRow({ label, value }: { label: string; value: string | number | null | undefined }) {
+// 详情区定宽 label 列宽（FR-106）：定义列表两列对齐，键值成对易读
+const DETAIL_LABEL_WIDTH = 64
+
+/**
+ * 一行「标签 / 值」详情（FR-106）：定宽 label 列 + 紧凑 value 列的定义列表行（dt/dd）。
+ * 复用 FR-101 系统页定宽两列范式；可选前置 tabler 图标，值为空时不渲染。
+ */
+function DetailRow({
+  label, value, icon,
+}: { label: string; value: string | number | null | undefined; icon?: React.ReactNode }) {
   if (value === null || value === undefined || value === '') return null
   return (
-    <Group justify="space-between" gap="sm" wrap="nowrap">
-      <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>{label}</Text>
-      <Text size="sm" ta="right" style={{ wordBreak: 'break-all' }}>{value}</Text>
-    </Group>
+    <Box component="div" style={{ display: 'flex', gap: 'var(--mantine-spacing-sm)', alignItems: 'baseline' }}>
+      <Text
+        component="dt"
+        size="sm"
+        c="dimmed"
+        style={{ width: DETAIL_LABEL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+      >
+        {icon}
+        {label}
+      </Text>
+      <Text component="dd" size="sm" style={{ margin: 0, minWidth: 0, wordBreak: 'break-word' }}>{value}</Text>
+    </Box>
+  )
+}
+
+/** 复制按钮（FR-106）：复制成功 2 秒内显勾选反馈 */
+function CopyIconButton({ value, label }: { value: string; label: string }) {
+  const clipboard = useClipboard({ timeout: 2000 })
+  return (
+    <Tooltip label={clipboard.copied ? '已复制' : label}>
+      <ActionIcon variant="subtle" size="sm" color={clipboard.copied ? 'teal' : 'gray'} aria-label={label} onClick={() => clipboard.copy(value)}>
+        {clipboard.copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+      </ActionIcon>
+    </Tooltip>
   )
 }
 
@@ -70,7 +108,15 @@ function hasExif(f: MediaFile): boolean {
  * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频内嵌播放器直接播放，FR-102）、右侧元数据，
  * 支持全屏切换、←/→ 上下一项、Esc 关闭。EXIF 区块由 FR-38 在右侧补充。
  */
-export default function MediaDetailPanel({ files, initialIndex, onClose, customImageExtensions }: MediaDetailPanelProps) {
+export default function MediaDetailPanel({ files, initialIndex, onClose, customImageExtensions, onToggleFavorite }: MediaDetailPanelProps) {
+  const navigate = useNavigate()
+  // 打标签复用 FR-91 批量编排（单 id 列表即可）：零新后端端点
+  const batch = useBatchActions()
+  // 分享弹窗开合（FR-106）：复用既有 ShareDialog（resourceType='media'）
+  const [shareOpened, setShareOpened] = useState(false)
+  // 信息栏折叠（FR-106）：折叠后右侧详情收起、左侧预览吃满，纯图沉浸
+  const [infoCollapsed, setInfoCollapsed] = useState(false)
+
   const opened = initialIndex !== null
   const [idx, setIdx] = useState<number>(initialIndex ?? 0)
   const [fullscreen, setFullscreen] = useState(false)
@@ -122,6 +168,12 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
   // 右/左旋转 90°（FR-105）
   const rotateRight = useCallback(() => setRotation(r => (r + 90) % 360), [])
   const rotateLeft = useCallback(() => setRotation(r => (r + 270) % 360), [])
+
+  // 在站内地图打开（FR-106）：跳照片地图页并带经纬度定位，外部 OSM 链接保留为次要入口
+  const openInSiteMap = useCallback((lat: number, lon: number) => {
+    onClose()
+    navigate(`/map?lat=${lat}&lon=${lon}`)
+  }, [navigate, onClose])
 
   // 键盘导航与快捷键（FR-105 在既有 ←/→/Esc 上补 +/-、F、Space、R）
   useEffect(() => {
@@ -288,6 +340,35 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
                 </Tooltip>
               </>
             )}
+            {/* 工具栏（FR-106）：收藏 / 打标签 / 分享，与网格操作一致，复用既有能力 */}
+            {onToggleFavorite && (
+              <Tooltip label={file.favorite ? '取消收藏' : '收藏'}>
+                <ActionIcon
+                  variant="subtle"
+                  color={file.favorite ? 'red' : 'gray'}
+                  onClick={() => onToggleFavorite(file)}
+                  aria-label={file.favorite ? '取消收藏' : '收藏'}
+                >
+                  {file.favorite ? <IconHeartFilled size={18} /> : <IconHeart size={18} />}
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Tooltip label="打标签">
+              <ActionIcon variant="subtle" onClick={() => batch.openAddTag([file.id])} aria-label="打标签">
+                <IconTag size={18} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="分享">
+              <ActionIcon variant="subtle" onClick={() => setShareOpened(true)} aria-label="分享">
+                <IconShare size={18} />
+              </ActionIcon>
+            </Tooltip>
+            {/* 信息栏折叠（FR-106）：纯图沉浸 */}
+            <Tooltip label={infoCollapsed ? '展开信息栏' : '折叠信息栏'}>
+              <ActionIcon variant="subtle" onClick={() => setInfoCollapsed(v => !v)} aria-label={infoCollapsed ? '展开信息栏' : '折叠信息栏'}>
+                {infoCollapsed ? <IconLayoutSidebarRightExpand size={18} /> : <IconLayoutSidebarRightCollapse size={18} />}
+              </ActionIcon>
+            </Tooltip>
             <Tooltip label={fullscreen ? '退出全屏 (F)' : '全屏 (F)'}>
               <ActionIcon variant="subtle" onClick={() => setFullscreen(f => !f)} aria-label="全屏切换">
                 {fullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
@@ -341,49 +422,75 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
           )}
         </Box>
 
-        {/* 右侧详情 */}
+        {/* 右侧详情（FR-106 可折叠沉浸）：折叠后不渲染、左侧预览吃满宽度 */}
+        {!infoCollapsed && (
         <ScrollArea style={{ width: 300, flexShrink: 0 }} type="hover">
           <Stack gap="xs">
-            <Text fw={600} size="sm">文件信息</Text>
-            <DetailRow label="显示名" value={mediaDisplayName(file)} />
-            <DetailRow label="文件名" value={file.file_name} />
-            <DetailRow label="类型" value={file.format?.toUpperCase()} />
-            <DetailRow label="大小" value={formatSize(file.file_size)} />
-            {file.width > 0 && file.height > 0 && <DetailRow label="分辨率" value={`${file.width} × ${file.height}`} />}
-            {!isImage && <DetailRow label="时长" value={formatDuration(file.duration)} />}
-            {!isImage && <DetailRow label="视频编码" value={file.video_codec} />}
-            {!isImage && <DetailRow label="音频编码" value={file.audio_codec} />}
+            <Group justify="space-between" wrap="nowrap">
+              <Text fw={600} size="sm">文件信息</Text>
+              {/* 复制文件路径（FR-106） */}
+              {file.file_path && <CopyIconButton value={file.file_path} label="复制路径" />}
+            </Group>
+            {/* 定宽两列定义列表（FR-106） */}
+            <Box component="dl" style={{ margin: 0 }}>
+              <DetailRow label="显示名" value={mediaDisplayName(file)} />
+              <DetailRow label="文件名" value={file.file_name} />
+              <DetailRow label="类型" value={file.format?.toUpperCase()} />
+              <DetailRow label="大小" value={formatSize(file.file_size)} />
+              {file.width > 0 && file.height > 0 && <DetailRow label="分辨率" value={`${file.width} × ${file.height}`} />}
+              {!isImage && <DetailRow label="时长" value={formatDuration(file.duration)} />}
+              {!isImage && <DetailRow label="视频编码" value={file.video_codec} />}
+              {!isImage && <DetailRow label="音频编码" value={file.audio_codec} />}
+            </Box>
             <Divider my={4} />
-            <DetailRow label="加入时间" value={formatTime(file.added_at)} />
-            <DetailRow label="修改时间" value={formatTime(file.modified_at)} />
+            <Box component="dl" style={{ margin: 0 }}>
+              <DetailRow label="加入时间" value={formatTime(file.added_at)} />
+              <DetailRow label="修改时间" value={formatTime(file.modified_at)} />
+            </Box>
 
-            {/* EXIF 信息（FR-38）：有数据才展示 */}
+            {/* EXIF 信息（FR-38/FR-106）：定宽两列 + 图标 + 单位格式化，有数据才展示 */}
             {hasExif(file) && (
               <>
                 <Divider my={4} label="EXIF" labelPosition="left" />
-                <DetailRow
-                  label="拍摄时间"
-                  value={file.media_time ? `${formatTime(file.media_time)}${file.media_time_source ? `（${MEDIA_TIME_SOURCE_LABEL[file.media_time_source] ?? file.media_time_source}）` : ''}` : ''}
-                />
-                <DetailRow label="相机" value={file.camera} />
-                <DetailRow label="镜头" value={file.lens} />
-                <DetailRow label="光圈" value={file.aperture} />
-                <DetailRow label="快门" value={file.shutter} />
-                <DetailRow label="ISO" value={(file.iso ?? 0) > 0 ? file.iso : ''} />
+                <Box component="dl" role="group" aria-label="EXIF 信息" style={{ margin: 0 }}>
+                  <DetailRow
+                    label="拍摄时间"
+                    value={file.media_time ? `${formatTime(file.media_time)}${file.media_time_source ? `（${MEDIA_TIME_SOURCE_LABEL[file.media_time_source] ?? file.media_time_source}）` : ''}` : ''}
+                  />
+                  <DetailRow label="相机" value={file.camera} icon={<IconCamera size={14} />} />
+                  <DetailRow label="镜头" value={file.lens} icon={<IconPhoto size={14} />} />
+                  <DetailRow label="光圈" value={formatAperture(file.aperture)} icon={<IconAperture size={14} />} />
+                  <DetailRow label="快门" value={formatShutter(file.shutter)} icon={<IconClock size={14} />} />
+                  <DetailRow label="ISO" value={formatIso(file.iso)} icon={<IconAdjustments size={14} />} />
+                </Box>
                 {((file.gps_lat ?? 0) !== 0 || (file.gps_lon ?? 0) !== 0) && (
-                  <>
-                    <DetailRow label="GPS" value={`${file.gps_lat?.toFixed(6)}, ${file.gps_lon?.toFixed(6)}`} />
-                    <Group justify="flex-end">
-                      <Anchor
-                        href={`https://www.openstreetmap.org/?mlat=${file.gps_lat}&mlon=${file.gps_lon}#map=15/${file.gps_lat}/${file.gps_lon}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        size="sm"
-                      >
-                        在外部地图打开
-                      </Anchor>
+                  <Stack gap={4}>
+                    <Group gap={4} wrap="nowrap" align="center">
+                      <IconMapPin size={14} style={{ flexShrink: 0, color: 'var(--mantine-color-dimmed)' }} />
+                      <Text size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>
+                        {`${file.gps_lat?.toFixed(6)}, ${file.gps_lon?.toFixed(6)}`}
+                      </Text>
+                      <CopyIconButton value={`${file.gps_lat}, ${file.gps_lon}`} label="复制坐标" />
                     </Group>
-                  </>
+                    {/* 站内地图为主、外部 OSM 为次（FR-106） */}
+                    <Button
+                      size="xs"
+                      variant="light"
+                      leftSection={<IconMapPin size={14} />}
+                      onClick={() => openInSiteMap(file.gps_lat ?? 0, file.gps_lon ?? 0)}
+                    >
+                      在站内地图打开
+                    </Button>
+                    <Anchor
+                      href={`https://www.openstreetmap.org/?mlat=${file.gps_lat}&mlon=${file.gps_lon}#map=15/${file.gps_lat}/${file.gps_lon}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="xs"
+                      c="dimmed"
+                    >
+                      在外部地图打开
+                    </Anchor>
+                  </Stack>
                 )}
               </>
             )}
@@ -401,7 +508,19 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             </Button>
           </Stack>
         </ScrollArea>
+        )}
       </Group>
+
+      {/* 分享弹窗（FR-106）：复用既有 ShareDialog，媒体资源 */}
+      <ShareDialog
+        opened={shareOpened}
+        onClose={() => setShareOpened(false)}
+        resourceType="media"
+        resourceID={file.id}
+        title="分享媒体"
+      />
+      {/* 打标签弹窗（FR-106）：复用 FR-91 批量编排 */}
+      <BatchActionsModals state={batch.modalState} />
     </Modal>
   )
 }

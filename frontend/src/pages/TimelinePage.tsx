@@ -233,6 +233,7 @@ export default function TimelinePage() {
         initialIndex={detailIndex}
         onClose={() => setDetailIndex(null)}
         customImageExtensions={exts}
+        onToggleFavorite={handleToggleFavorite}
       />
 
       {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}

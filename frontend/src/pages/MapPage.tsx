@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Stack, Title, Box, Group, Switch, Skeleton } from '@mantine/core'
 import { IconMapPin, IconAlertTriangle } from '@tabler/icons-react'
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
@@ -39,6 +40,17 @@ export default function MapPage() {
   const [showTracks, setShowTracks] = useState(true)
   // 重载触发器（FR-98）：加载失败时点「重试」自增以重新拉取
   const [reloadKey, setReloadKey] = useState(0)
+  // 站内地图定位入口（FR-106）：灯箱 GPS「在站内地图打开」跳本页带 ?lat=&lon=，
+  // 合法时把初始视图定位到该坐标并放大；非法或缺省走默认全局视图。
+  const [searchParams] = useSearchParams()
+  const focus = useMemo(() => {
+    const lat = Number(searchParams.get('lat'))
+    const lon = Number(searchParams.get('lon'))
+    const valid = searchParams.has('lat') && searchParams.has('lon')
+      && Number.isFinite(lat) && Number.isFinite(lon)
+      && Math.abs(lat) <= 90 && Math.abs(lon) <= 180
+    return valid ? { lat, lon } : null
+  }, [searchParams])
 
   useEffect(() => {
     let active = true
@@ -86,7 +98,12 @@ export default function MapPage() {
         />
       ) : (
         <Box style={{ height: '70vh', borderRadius: 8, overflow: 'hidden' }}>
-          <MapContainer center={[media[0].gps_lat ?? 0, media[0].gps_lon ?? 0]} zoom={4} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
+          <MapContainer
+            center={focus ? [focus.lat, focus.lon] : [media[0].gps_lat ?? 0, media[0].gps_lon ?? 0]}
+            zoom={focus ? 14 : 4}
+            style={{ height: '100%', width: '100%' }}
+            scrollWheelZoom
+          >
             <TileLayer
               attribution='&copy; OpenStreetMap contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
