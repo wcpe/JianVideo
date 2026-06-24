@@ -4,7 +4,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布版本
+## 0.14.0（2026-06-24）
 
 ### 新增
 - **后端出站网络代理设置（FR-80）**：新增 settings 键 `network_proxy`，让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决 FR-46 自更新真机暴露的「本机直连 GitHub 下载 CDN 不可达」。新增独立无业务依赖的 `internal/netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h} 后原子更新（空串清空走直连、非法 URL 拒绝且不覆盖既有值），`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各接 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，**各自 Timeout 语义保持不变**（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则注入；`PUT /api/settings` 含 `network_proxy` 时落库后即时 `SetProxy`，非法值仅记 WARN 不阻断保存（保留既有代理）。前端「设置」页新增「网络代理」输入（占位 `http://host:port` 或 `socks5://host:port`，空=直连，附说明「用于自更新等后端外部网络访问」），复用 FR-63 热更新保存模式。socks5 由 Go 标准库 `net/http` Transport 原生支持，**无新依赖**。守架构不变量（依赖单向：`api`/`update`/`main` → `netproxy`，`netproxy` 无业务依赖）。机制见 [docs/specs/fr-80-network-proxy.md](docs/specs/fr-80-network-proxy.md)。实际代理穿透 GitHub 检测/下载待真机验（本机未必有可用代理）。
