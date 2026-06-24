@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, Suspense, lazy } from 'react'
 import { Modal, Group, Stack, Button, ActionIcon, Text, Box, ScrollArea, Divider, Tooltip, Anchor } from '@mantine/core'
 import {
   IconChevronLeft, IconChevronRight, IconX, IconMaximize, IconMinimize,
-  IconDownload, IconPlayerPlay,
+  IconDownload,
 } from '@tabler/icons-react'
-import MediaThumbnail from '@/components/MediaThumbnail'
+// FR-102：懒加载 VideoPlayer，仅在灯箱内实际查看视频时才加载其 mpegts.js 等重内核，
+// 避免图片预览场景白白拉入大体积播放内核。
+const VideoPlayer = lazy(() => import('@/components/VideoPlayer'))
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import { formatSize, formatDuration } from '@/utils/format'
 import type { MediaFile } from '@/types'
@@ -21,6 +22,11 @@ interface MediaDetailPanelProps {
 const ZOOM_MIN = 1
 const ZOOM_MAX = 4
 const ZOOM_STEP = 0.25
+
+/** 视频流播放地址（FR-102）：绝对化避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败 */
+function streamUrl(mediaID: number): string {
+  return new URL(`/api/play/${mediaID}/stream`, window.location.href).toString()
+}
 
 /** 一行「标签：值」详情，值为空时不渲染 */
 function DetailRow({ label, value }: { label: string; value: string | number | null | undefined }) {
@@ -50,11 +56,10 @@ function hasExif(f: MediaFile): boolean {
 }
 
 /**
- * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频缩略图 + 播放）、右侧元数据，
+ * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频内嵌播放器直接播放，FR-102）、右侧元数据，
  * 支持全屏切换、←/→ 上下一项、Esc 关闭。EXIF 区块由 FR-38 在右侧补充。
  */
 export default function MediaDetailPanel({ files, initialIndex, onClose, customImageExtensions }: MediaDetailPanelProps) {
-  const navigate = useNavigate()
   const opened = initialIndex !== null
   const [idx, setIdx] = useState<number>(initialIndex ?? 0)
   const [fullscreen, setFullscreen] = useState(false)
@@ -147,14 +152,13 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
               />
             </Box>
           ) : (
-            <Stack align="center" gap="md" p="xl">
-              <Box w={320} maw="100%">
-                <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
-              </Box>
-              <Button leftSection={<IconPlayerPlay size={16} />} onClick={() => navigate(`/play/${file.id}`)}>
-                打开播放
-              </Button>
-            </Stack>
+            // FR-102：视频内嵌 VideoPlayer 直接播放（静音自动播），去掉「打开播放」中间步骤。
+            // 灯箱内用既有 /api/play/:id/stream 流地址（与播放页降级路径一致），不引入协商逻辑。
+            <Box w="100%" px="md" style={{ maxWidth: 960 }}>
+              <Suspense fallback={<Text c="dimmed" size="sm">加载播放器…</Text>}>
+                <VideoPlayer url={streamUrl(file.id)} streamType="mp4" autoPlay />
+              </Suspense>
+            </Box>
           )}
         </Box>
 

@@ -13,6 +13,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
   return { ...actual, useNavigate: () => mockNavigate }
 })
 
+// FR-102：灯箱内视频内嵌 VideoPlayer 直接播放。以桩替身断言其渲染及收到的 URL，
+// 避免引入 mpegts.js 真实内核。
+vi.mock('@/components/VideoPlayer', () => ({
+  default: ({ url }: { url: string }) => <div data-testid="video-player" data-url={url} />,
+}))
+
 function mediaFile(over: Partial<MediaFile>): MediaFile {
   return {
     id: 1, library_id: 1, file_path: 'D:/m/a.jpg', file_name: 'a.jpg',
@@ -50,13 +56,16 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     expect(within(dialog).queryByRole('button', { name: /打开播放/ })).not.toBeInTheDocument()
   })
 
-  it('视频：显示缩略图 + 打开播放按钮，点击跳转播放页', async () => {
-    const user = userEvent.setup()
+  it('视频：内嵌 VideoPlayer 直接播放，不再有「打开播放」按钮（FR-102）', async () => {
     renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 120 })], 0)
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('img', { name: '电影.mp4' }).getAttribute('src')).toContain('/api/library/thumbnail/9')
-    await user.click(within(dialog).getByRole('button', { name: /打开播放/ }))
-    expect(mockNavigate).toHaveBeenCalledWith('/play/9')
+    // VideoPlayer 经 React.lazy 懒加载，需异步等待挂载
+    const player = await within(dialog).findByTestId('video-player')
+    expect(player).toBeInTheDocument()
+    expect(player.getAttribute('data-url')).toContain('/api/play/9/stream')
+    // 去掉中间一步：不再展示「打开播放」按钮，也不跳转
+    expect(within(dialog).queryByRole('button', { name: /打开播放/ })).not.toBeInTheDocument()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it('有 EXIF 时展示拍摄信息与外部地图链接（FR-38），无 EXIF 时不展示', async () => {

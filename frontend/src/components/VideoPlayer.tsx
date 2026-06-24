@@ -124,6 +124,9 @@ export default function VideoPlayer({
   onEndedRef.current = onEnded
   const [isPlaying, setIsPlaying] = useState(false)
   const [autoPlayBlocked, setAutoPlayBlocked] = useState(false)
+  // FR-102：静音自动播。浏览器允许 muted autoplay，进页即出画面；autoMuted 为真时
+  // 在角落展示「点击取消静音」入口，用户主动调音量 / 切静音时清除该标记。
+  const [autoMuted, setAutoMuted] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(1)
@@ -159,6 +162,18 @@ export default function VideoPlayer({
     if (hls) { hls.destroy(); hlsRef.current = null }
   }, [])
 
+  // FR-102：统一的静音自动播。先置 muted=true（浏览器允许 muted autoplay）再触发播放，
+  // 进页即出画面并标记 autoMuted（展示取消静音入口）；muted 仍被拦时落到「点击播放」兜底遮罩。
+  // mpegts.js 经由 player.play() 播放，故允许传入自定义 play 触发器；缺省走原生 video.play()。
+  const attemptAutoPlay = useCallback((play?: () => Promise<void> | void) => {
+    const v = videoRef.current; if (!v) return
+    v.muted = true
+    setIsMuted(true)
+    setAutoMuted(true)
+    const result = play ? play() : v.play()
+    void (result as Promise<void> | undefined)?.catch?.(() => setAutoPlayBlocked(true))
+  }, [])
+
   const initMpegtsPlayer = useCallback(
     (streamUrl: string) => {
       if (!videoRef.current) return
@@ -169,7 +184,7 @@ export default function VideoPlayer({
       )
       player.attachMediaElement(videoRef.current)
       player.load()
-      player.on('loadeddata', () => { if (autoPlay) void (player.play() as Promise<void>)?.catch?.(() => setAutoPlayBlocked(true)) })
+      player.on('loadeddata', () => { if (autoPlay) attemptAutoPlay(() => player.play() as Promise<void>) })
       player.on('playing', () => { setIsPlaying(true); setIsWaiting(false) })
       player.on('pause', () => setIsPlaying(false))
       // FR-18：mpegts.js 报错（常见于追上文件写入末端、TS 流暂时断流）→ 标记等待，
@@ -183,7 +198,7 @@ export default function VideoPlayer({
       })
       mpegtsPlayerRef.current = player
     },
-    [autoPlay, destroyMpegtsPlayer]
+    [autoPlay, destroyMpegtsPlayer, attemptAutoPlay]
   )
 
   const initHlsPlayer = useCallback(
@@ -196,13 +211,13 @@ export default function VideoPlayer({
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
         hls.loadSource(masterUrl)
         hls.attachMedia(videoRef.current)
-        hls.on(Hls.Events.MANIFEST_PARSED, () => { if (autoPlay) void videoRef.current?.play()?.catch?.(() => setAutoPlayBlocked(true)) })
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { if (autoPlay) attemptAutoPlay() })
         hls.on(Hls.Events.LEVEL_SWITCHED, (_e, d) => { const l = hls.levels[d.level]; if (l) console.info(`[VideoPlayer] ABR: ${l.width}x${l.height}`) })
         hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) { hls.destroy(); hlsRef.current = null; initMpegtsPlayer(masterUrl) } })
         hlsRef.current = hls
       } catch { initMpegtsPlayer(masterUrl) }
     },
-    [autoPlay, destroyHlsPlayer, initMpegtsPlayer]
+    [autoPlay, destroyHlsPlayer, initMpegtsPlayer, attemptAutoPlay]
   )
 
   // 挂载 / URL 变化
@@ -215,12 +230,12 @@ export default function VideoPlayer({
     if (resolved.streamType === 'mp4' && videoRef.current) {
       destroyMpegtsPlayer(); void destroyHlsPlayer()
       videoRef.current.src = resolved.url
-      if (autoPlay) void videoRef.current.play()?.catch?.(() => setAutoPlayBlocked(true))
+      if (autoPlay) attemptAutoPlay()
       return () => { if (videoRef.current) videoRef.current.removeAttribute('src') }
     }
     if (isABR) void initHlsPlayer(resolved.url); else initMpegtsPlayer(resolved.url)
     return () => { void destroyHlsPlayer(); destroyMpegtsPlayer() }
-  }, [resolved.url, resolved.streamType, resolved.unsupported, isABR, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer])
+  }, [resolved.url, resolved.streamType, resolved.unsupported, isABR, autoPlay, initHlsPlayer, initMpegtsPlayer, destroyHlsPlayer, destroyMpegtsPlayer, attemptAutoPlay])
 
   // FR-44：URL 变化（切换媒体）时重置续播 / 上报 / 看完的一次性标志
   useEffect(() => {
@@ -306,8 +321,10 @@ export default function VideoPlayer({
   }
 
   const handleSeek = (val: number) => { const v = videoRef.current; if (v && duration) v.currentTime = (val / 100) * duration }
-  const handleVolume = (val: number) => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0; setVolume(val); setIsMuted(val === 0) }
-  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !isMuted; setIsMuted(!isMuted) }
+  const handleVolume = (val: number) => { const v = videoRef.current; if (!v) return; v.volume = val; v.muted = val === 0; setVolume(val); setIsMuted(val === 0); setAutoMuted(false) }
+  const toggleMute = () => { const v = videoRef.current; if (!v) return; v.muted = !isMuted; setIsMuted(!isMuted); setAutoMuted(false) }
+  // FR-102：取消静音自动播的静音态，恢复有声并撤下「点击取消静音」入口
+  const unmute = () => { const v = videoRef.current; if (!v) return; v.muted = false; setIsMuted(false); setAutoMuted(false) }
 
   const fmt = (s: number) => { if (!isFinite(s) || isNaN(s)) return '0:00'; const m = Math.floor(s / 60); return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}` }
   const playPct = duration > 0 ? (currentTime / duration) * 100 : 0
@@ -325,6 +342,23 @@ export default function VideoPlayer({
         {autoPlayBlocked && !isPlaying && (
           <Box style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', cursor: 'pointer' }} onClick={togglePlay}>
             <Text c="white" size="lg">点击播放</Text>
+          </Box>
+        )}
+        {/* FR-102：静音自动播时角落提供取消静音入口，点击恢复有声 */}
+        {autoMuted && isMuted && !autoPlayBlocked && (
+          <Box
+            component="button"
+            type="button"
+            onClick={unmute}
+            aria-label="点击取消静音"
+            style={{
+              position: 'absolute', top: 12, right: 12, display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', border: 'none', borderRadius: 'var(--mantine-radius-xl)',
+              backgroundColor: 'rgba(0,0,0,0.6)', color: 'white', cursor: 'pointer', fontSize: 'var(--mantine-font-size-sm)',
+            }}
+          >
+            <IconVolumeOff size={16} />
+            <Text component="span" c="white" size="sm">点击取消静音</Text>
           </Box>
         )}
         {isWaiting && !autoPlayBlocked && (
