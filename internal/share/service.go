@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
@@ -21,6 +22,10 @@ var (
 	ErrShareNotFound = errors.New("分享不存在")
 	// ErrShareExpired token 已过期
 	ErrShareExpired = errors.New("分享已过期")
+	// ErrShareForbidden 访问密码错误（FR-78）
+	ErrShareForbidden = errors.New("分享密码错误")
+	// ErrShareExhausted 访问次数已达上限（FR-78）
+	ErrShareExhausted = errors.New("分享访问次数已用尽")
 )
 
 // tokenBytes 分享 token 的随机字节数（hex 编码后长度翻倍），足够不可枚举。
@@ -37,9 +42,21 @@ func NewService(db *gorm.DB) *Service {
 }
 
 // Create 创建分享：生成加密随机 token 落库。expiresAt 为空表示永不过期。
-func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.Time) (*models.Share, error) {
+// password 非空则以 bcrypt 哈希后存 PasswordHash（绝不存明文）；maxUses 为 0 表示无限次（FR-78）。
+func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int) (*models.Share, error) {
 	if resourceType != models.ShareResourceMedia && resourceType != models.ShareResourceAlbum {
 		return nil, fmt.Errorf("非法分享资源类型: %s", resourceType)
+	}
+	if maxUses < 0 {
+		maxUses = 0
+	}
+	var passwordHash string
+	if password != "" {
+		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("哈希分享密码失败: %w", err)
+		}
+		passwordHash = string(hashed)
 	}
 	token, err := generateToken()
 	if err != nil {
@@ -50,6 +67,8 @@ func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		ExpiresAt:    expiresAt,
+		PasswordHash: passwordHash,
+		MaxUses:      maxUses,
 		CreatedAt:    time.Now(),
 	}
 	if err := s.db.Create(sh).Error; err != nil {
@@ -72,6 +91,41 @@ func (s *Service) Get(token string) (*models.Share, error) {
 		return nil, ErrShareExpired
 	}
 	return &sh, nil
+}
+
+// VerifyPassword 校验访问密码（FR-78）：分享无密码（PasswordHash 为空）直接放行；
+// 否则用 bcrypt 比对，不匹配返回 ErrShareForbidden。不区分以免泄露。
+func (s *Service) VerifyPassword(sh *models.Share, password string) error {
+	if sh.PasswordHash == "" {
+		return nil
+	}
+	if bcrypt.CompareHashAndPassword([]byte(sh.PasswordHash), []byte(password)) != nil {
+		return ErrShareForbidden
+	}
+	return nil
+}
+
+// ConsumeUse 消费一次访问额度（FR-78）：在事务内「先检查后自增」防并发超限。
+// MaxUses 为 0 表示无限、不计数；MaxUses>0 且已达上限返回 ErrShareExhausted。
+// SQLite 单写者 + 事务保证检查与自增原子，避免并发下超发。
+func (s *Service) ConsumeUse(token string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var sh models.Share
+		if err := tx.First(&sh, "token = ?", token).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrShareNotFound
+			}
+			return err
+		}
+		if sh.MaxUses <= 0 {
+			return nil // 无限次：不计数
+		}
+		if sh.UsedCount >= sh.MaxUses {
+			return ErrShareExhausted
+		}
+		return tx.Model(&models.Share{}).Where("token = ?", token).
+			Update("used_count", gorm.Expr("used_count + 1")).Error
+	})
 }
 
 // List 列出全部分享（含已过期，供管理端展示）。

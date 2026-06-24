@@ -898,17 +898,17 @@
 
 ## 分享链接（FR-43）
 
-分享分两层：**管理端点** `/api/shares`（鉴权后，受 APIGuard 保护）创建/列出/撤销；**公开端点** `/api/share/:token`（免登，APIGuard 豁免 `/api/share/` 前缀）由 token 持有者只读访问。公开端点经 `shareAuth` 校验 token + 过期，并对每个 `:mediaId` 做范围校验——不在分享范围内一律 `404`。
+分享分两层：**管理端点** `/api/shares`（鉴权后，受 APIGuard 保护）创建/列出/撤销；**公开端点** `/api/share/:token`（免登，APIGuard 豁免 `/api/share/` 前缀）由 token 持有者只读访问。公开端点经 `shareAuth` 校验 token + 过期，并对每个 `:mediaId` 做范围校验——不在分享范围内一律 `404`。分享可选带访问密码与访问限次（FR-78）。
 
 ### 创建分享
 
 - **方法 / 路径**：`POST /api/shares`（鉴权后）
 - **请求体**：
   ```json
-  { "resource_type": "media", "resource_id": 12, "expires_in_hours": 168 }
+  { "resource_type": "media", "resource_id": 12, "expires_in_hours": 168, "password": "可选密码", "max_uses": 0 }
   ```
-  `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。
-- **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "created_at": "..." }`
+  `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。`password` 可选（FR-78），非空则后端以 bcrypt 哈希存储、绝不明文落库/回显；`max_uses` 可选（FR-78），`>0` 设访问次数上限、缺省或 `0` 表示无限。
+- **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "max_uses": 0, "used_count": 0, "created_at": "..." }`（不含密码哈希）
 - **错误**：`400` 参数错误或非法类型，`404` 被分享资源不存在，`503` 分享服务未启用，`500` 创建失败
 
 ### 列出分享
@@ -924,7 +924,10 @@
 ### 公开访问分享元信息
 
 - **方法 / 路径**：`GET /api/share/:token`（免登）
-- **响应**（200）：媒体分享 `{ "resource_type": "media", "expires_at": ..., "media": {...} }`；相册分享 `{ "resource_type": "album", "expires_at": ..., "album": {...}, "items": [...] }`
+- **请求头**（FR-78）：分享设密码时需带 `X-Share-Password: <密码>`。
+- **响应**（200）：
+  - 校验通过——媒体分享 `{ "resource_type": "media", "expires_at": ..., "requires_password": false, "media": {...} }`；相册分享 `{ "resource_type": "album", "expires_at": ..., "requires_password": false, "album": {...}, "items": [...] }`。
+  - 需密码且未带/带错密码——`{ "resource_type": "media", "requires_password": true }`，**不含任何 media/album 内容**（供前端弹密码框、不泄露内容、不区分过期/撤销）。本端点不消费访问额度。
 - **错误**：`404` token 不存在/已过期/已撤销
 
 ### 公开访问分享内的媒体
@@ -934,5 +937,6 @@
   - `GET /api/share/:token/media/:mediaId/thumbnail`（缩略图）
   - `GET /api/share/:token/media/:mediaId/download`（原文件下载）
   - `GET /api/share/:token/media/:mediaId/stream`（视频渐进式在线播放，支持 Range；不开放转码/HLS）
-- **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。
-- **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删，`503` 播放服务未启用（stream）
+- **请求头**（FR-78）：带 `X-Share-Password` 头时校验密码；`<img>`/`<video>` 直链无法带头时不阻断（拿到 `mediaId` 已必过 `ShareInfo` 密码门禁）。
+- **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。每次成功访问对限次分享原子自增一次 `used_count`（FR-78），达到 `max_uses` 后再访问 `404`。
+- **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删/密码错/次数已用尽，`503` 播放服务未启用（stream）

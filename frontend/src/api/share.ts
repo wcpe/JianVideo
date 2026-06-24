@@ -28,12 +28,20 @@ function getApiErrorMessage(err: unknown, fallback: string): string {
   return error.response?.data?.message || (err instanceof Error ? err.message : fallback)
 }
 
-async function realCreateShare(resourceType: ShareResourceType, resourceID: number, expiresInHours = 0): Promise<Share> {
+async function realCreateShare(
+  resourceType: ShareResourceType,
+  resourceID: number,
+  expiresInHours = 0,
+  password = '',
+  maxUses = 0,
+): Promise<Share> {
   try {
     const res = await client.post<Share>('/api/shares', {
       resource_type: resourceType,
       resource_id: resourceID,
       expires_in_hours: expiresInHours,
+      password,
+      max_uses: maxUses,
     })
     return res.data
   } catch (err) {
@@ -50,8 +58,11 @@ async function realRevokeShare(token: string): Promise<void> {
   await client.delete(`/api/shares/${token}`)
 }
 
-async function realGetShareInfo(token: string): Promise<ShareInfo> {
-  const res = await client.get<ShareInfo>(`/api/share/${token}`)
+async function realGetShareInfo(token: string, password = ''): Promise<ShareInfo> {
+  // 需密码的分享经 X-Share-Password 头校验（FR-78）；密码错时后端只回 {requires_password:true}、不含内容
+  const res = await client.get<ShareInfo>(`/api/share/${token}`, {
+    headers: password ? { 'X-Share-Password': password } : undefined,
+  })
   return res.data
 }
 
@@ -66,7 +77,13 @@ function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
-async function mockCreateShare(resourceType: ShareResourceType, resourceID: number, expiresInHours = 0): Promise<Share> {
+async function mockCreateShare(
+  resourceType: ShareResourceType,
+  resourceID: number,
+  expiresInHours = 0,
+  _password = '',
+  maxUses = 0,
+): Promise<Share> {
   await mockDelay(120)
   const now = new Date()
   const share: Share = {
@@ -74,6 +91,8 @@ async function mockCreateShare(resourceType: ShareResourceType, resourceID: numb
     resource_type: resourceType,
     resource_id: resourceID,
     expires_at: expiresInHours > 0 ? new Date(now.getTime() + expiresInHours * 3600_000).toISOString() : null,
+    max_uses: maxUses,
+    used_count: 0,
     created_at: now.toISOString(),
   }
   mockShares.unshift(share)
@@ -91,7 +110,7 @@ async function mockRevokeShare(token: string): Promise<void> {
   if (idx !== -1) mockShares.splice(idx, 1)
 }
 
-async function mockGetShareInfo(token: string): Promise<ShareInfo> {
+async function mockGetShareInfo(token: string, _password = ''): Promise<ShareInfo> {
   await mockDelay(120)
   const share = mockShares.find(s => s.token === token)
   if (!share) throw new Error('分享不存在或已过期')
@@ -105,9 +124,11 @@ async function mockGetShareInfo(token: string): Promise<ShareInfo> {
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
-export function createShare(resourceType: ShareResourceType, resourceID: number, expiresInHours = 0) {
-  return useMock ? mockCreateShare(resourceType, resourceID, expiresInHours) : realCreateShare(resourceType, resourceID, expiresInHours)
+export function createShare(resourceType: ShareResourceType, resourceID: number, expiresInHours = 0, password = '', maxUses = 0) {
+  return useMock
+    ? mockCreateShare(resourceType, resourceID, expiresInHours, password, maxUses)
+    : realCreateShare(resourceType, resourceID, expiresInHours, password, maxUses)
 }
 export function listShares() { return useMock ? mockListShares() : realListShares() }
 export function revokeShare(token: string) { return useMock ? mockRevokeShare(token) : realRevokeShare(token) }
-export function getShareInfo(token: string) { return useMock ? mockGetShareInfo(token) : realGetShareInfo(token) }
+export function getShareInfo(token: string, password = '') { return useMock ? mockGetShareInfo(token, password) : realGetShareInfo(token, password) }

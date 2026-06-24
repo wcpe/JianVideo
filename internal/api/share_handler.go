@@ -26,6 +26,10 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		ResourceType   string `json:"resource_type"`
 		ResourceID     int64  `json:"resource_id"`
 		ExpiresInHours int    `json:"expires_in_hours"`
+		// Password 可选访问密码（FR-78）；空表示不设密码，后端以 bcrypt 哈希存储。
+		Password string `json:"password"`
+		// MaxUses 可选最大访问次数（FR-78）；0 表示无限。
+		MaxUses int `json:"max_uses"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
@@ -54,7 +58,7 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		t := time.Now().Add(time.Duration(req.ExpiresInHours) * time.Hour)
 		expiresAt = &t
 	}
-	sh, err := h.share.Create(req.ResourceType, req.ResourceID, expiresAt)
+	sh, err := h.share.Create(req.ResourceType, req.ResourceID, expiresAt, req.Password, req.MaxUses)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CREATE_FAILED", "message": "创建分享失败"})
 		return
@@ -145,13 +149,36 @@ func (h *Handler) resolveShareMedia(c *gin.Context) *models.MediaFile {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return nil
 	}
+	// 访问资源时校验密码（带 X-Share-Password 头时；FR-78）并原子消费一次访问额度。
+	// 密码门禁的权威边界在 ShareInfo（无正确密码拿不到 mediaId）；此处对带头请求再校验，
+	// 限次自增发生在每次成功的资源访问上。任一失败统一 404，不区分以免泄露。
+	if err := h.share.VerifyPassword(sh, c.GetHeader("X-Share-Password")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "分享不存在或已过期"})
+		return nil
+	}
+	if err := h.share.ConsumeUse(sh.Token); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "分享不存在或已过期"})
+		return nil
+	}
 	return mf
 }
 
 // ShareInfo GET /api/share/:token 返回分享元信息（媒体或相册成员）。
+// 密码门禁（FR-78）：分享设密码且未带 / 带错密码时，仅返回 {requires_password:true}、
+// 不含任何 media/album 元信息（访客据此弹密码框，又不泄露内容、不区分过期/撤销）；
+// 校验通过才返回完整元信息。本端点不消费访问额度（查看元信息不耗次）。
 func (h *Handler) ShareInfo(c *gin.Context) {
 	sh := currentShare(c)
-	resp := gin.H{"resource_type": sh.ResourceType, "expires_at": sh.ExpiresAt}
+	if err := h.share.VerifyPassword(sh, c.GetHeader("X-Share-Password")); err != nil {
+		// 需要密码但未通过：只回提示，不泄露任何内容元信息。
+		c.JSON(http.StatusOK, gin.H{"resource_type": sh.ResourceType, "requires_password": true})
+		return
+	}
+	resp := gin.H{
+		"resource_type":     sh.ResourceType,
+		"expires_at":        sh.ExpiresAt,
+		"requires_password": sh.PasswordHash != "",
+	}
 	switch sh.ResourceType {
 	case models.ShareResourceMedia:
 		mf, err := h.library.GetMediaFileByID(sh.ResourceID)

@@ -28,6 +28,8 @@ describe('ExternalPlayerDialog 外部播放器深链（FR-79）', () => {
       resource_type: 'media',
       resource_id: 7,
       expires_at: null,
+      max_uses: 0,
+      used_count: 0,
       created_at: '2026-06-24T00:00:00Z',
     })
 
@@ -53,6 +55,8 @@ describe('ExternalPlayerDialog 外部播放器深链（FR-79）', () => {
       resource_type: 'media',
       resource_id: 7,
       expires_at: null,
+      max_uses: 0,
+      used_count: 0,
       created_at: '2026-06-24T00:00:00Z',
     })
 

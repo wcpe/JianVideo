@@ -10,7 +10,8 @@ const (
 	ShareResourceAlbum = "album"
 )
 
-// Share 分享链接（FR-43）：token 化只读公开访问指定媒体 / 相册，带过期与范围。
+// Share 分享链接（FR-43，密码/限次扩展见 FR-78）：token 化只读公开访问指定媒体 / 相册，
+// 带过期、范围、可选访问密码与可选访问限次。
 // 作为鉴权的受控例外——公开访客凭 token 免登只读访问被分享内容。
 type Share struct {
 	// Token 加密随机、不可枚举的分享令牌（主键）
@@ -21,5 +22,12 @@ type Share struct {
 	ResourceID int64 `gorm:"not null;index" json:"resource_id"`
 	// ExpiresAt 过期时间；空表示永不过期
 	ExpiresAt *time.Time `json:"expires_at"`
-	CreatedAt time.Time  `json:"created_at"`
+	// PasswordHash 访问密码的 bcrypt 哈希（FR-78）；空串表示无密码。
+	// 绝不存明文、绝不回显前端（json:"-"）。
+	PasswordHash string `gorm:"default:''" json:"-"`
+	// MaxUses 最大访问次数（FR-78）；0 表示无限。
+	MaxUses int `gorm:"default:0" json:"max_uses"`
+	// UsedCount 已访问次数（FR-78），实际访问资源时原子自增。
+	UsedCount int       `gorm:"default:0" json:"used_count"`
+	CreatedAt time.Time `json:"created_at"`
 }

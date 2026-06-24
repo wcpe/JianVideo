@@ -216,7 +216,7 @@
 
 扫描任务队列以本表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
 
-**分享链接（shares）（FR-43）**
+**分享链接（shares）（FR-43；密码/限次列见 FR-78）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -224,9 +224,12 @@
 | resource_type | TEXT | 分享资源类型：`media` / `album` |
 | resource_id | INTEGER, INDEX | 被分享的媒体 ID 或相册 ID |
 | expires_at | DATETIME NULL | 过期时间；空表示永不过期 |
+| password_hash | TEXT | 访问密码的 bcrypt 哈希（FR-78）；空串=无密码，绝不存明文、不回显前端 |
+| max_uses | INTEGER | 最大访问次数（FR-78）；0=无限 |
+| used_count | INTEGER | 已访问次数（FR-78），实际访问资源时原子自增 |
 | created_at | DATETIME | 创建时间 |
 
-公开访问以 token 为唯一凭据，过期/撤销即失效；范围与安全边界见 §5.9。
+公开访问以 token 为唯一凭据，过期/撤销即失效；密码 / 限次校验、范围与安全边界见 §5.9。
 
 **媒体健康问题（media_health_issues）（FR-73）**
 
@@ -450,9 +453,10 @@
 - **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。
 
-### 5.9 分享链接（FR-43）
+### 5.9 分享链接（FR-43；密码/限次增强见 FR-78）
 
-- 分享以 SQLite `shares` 表为真源（`token` 主键、`resource_type`、`resource_id`、`expires_at` 可空）。`share.Service` 只管 token 生命周期：`crypto/rand` 生成 32 字节不可枚举 token，`Get` 校验过期（已过期/不存在统一为错误，公开层映射 `404`）。
+- 分享以 SQLite `shares` 表为真源（`token` 主键、`resource_type`、`resource_id`、`expires_at` 可空；密码/限次列 `password_hash`/`max_uses`/`used_count`）。`share.Service` 只管 token 生命周期：`crypto/rand` 生成 32 字节不可枚举 token，`Get` 校验过期（已过期/不存在统一为错误，公开层映射 `404`）。
+- **密码与限次（FR-78，安全核心）**：可选访问密码以 bcrypt 哈希存 `password_hash`（复用 auth 既有 `golang.org/x/crypto/bcrypt`，绝不存明文 / 不回显前端 `json:"-"`），`VerifyPassword` 用 `bcrypt.CompareHashAndPassword` 比对；可选访问限次 `ConsumeUse` 在 GORM 事务内「先检查 `used_count<max_uses` 后 `used_count+1`」原子自增（SQLite 单写者 + 事务防并发超发），`max_uses=0` 为无限不计数。**口径**：密码门禁在 `ShareInfo`（进入页）强制——需密码且未带/带错密码只回 `{requires_password:true}`、不含任何 media/album 元信息（不泄露内容、不区分过期/撤销，便于前端弹密码框）、且**不消费**额度；限次的原子自增与密码二次校验发生在**实际访问资源**（raw/thumbnail/download/stream）时，每次成功访问计一次。密码错 / 限次尽统一映射 `404`。
 - **鉴权受控例外**：`auth.APIGuard` 豁免前缀 `/api/share/`（带尾斜杠，不误伤受保护的管理端点 `/api/shares`）；公开路由内经 `shareAuth` 中间件自校验 token + 过期。
 - **范围隔离（安全核心）**：每个 `/api/share/:token/media/:mediaId/*` 端点都做范围校验 `shareAllowsMedia`——media 分享比对 ID，album 分享查 `library.IsMediaInAlbum`；越权/不在范围/不存在一律 `404`，不区分以免信息泄露。
 - **公开播放的安全边界**：免登视频播放只走 `playback.StreamFile`（渐进式原文件 + Range），**不**把 ffmpeg 转码/HLS 管线开放给匿名访客（防资源滥用/DoS）；需转码才能在浏览器播放的格式可下载原文件。`smb://` 不支持。

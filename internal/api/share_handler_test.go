@@ -70,7 +70,7 @@ func TestShare_MediaInfoAndScopeIsolation(t *testing.T) {
 	mfA := realMedia(t, libSvc, "a.mp4", "AAA")
 	mfB := realMedia(t, libSvc, "b.mp4", "BBB")
 
-	sh, err := shareSvc.Create(models.ShareResourceMedia, mfA.ID, nil)
+	sh, err := shareSvc.Create(models.ShareResourceMedia, mfA.ID, nil, "", 0)
 	if err != nil {
 		t.Fatalf("创建分享失败: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestShare_AlbumScope(t *testing.T) {
 	if err := libSvc.AddAlbumItem(album.ID, mfIn.ID); err != nil {
 		t.Fatalf("加入相册失败: %v", err)
 	}
-	sh, _ := shareSvc.Create(models.ShareResourceAlbum, album.ID, nil)
+	sh, _ := shareSvc.Create(models.ShareResourceAlbum, album.ID, nil, "", 0)
 
 	// 元信息含成员
 	req := httptest.NewRequest("GET", "/api/share/"+sh.Token, nil)
@@ -145,12 +145,12 @@ func TestShare_ExpiredRevokedBogus(t *testing.T) {
 	mf := realMedia(t, libSvc, "a.mp4", "A")
 
 	past := time.Now().Add(-time.Hour)
-	expired, _ := shareSvc.Create(models.ShareResourceMedia, mf.ID, &past)
+	expired, _ := shareSvc.Create(models.ShareResourceMedia, mf.ID, &past, "", 0)
 	if code := getStatus(r, "/api/share/"+expired.Token); code != http.StatusNotFound {
 		t.Fatalf("过期 token 应 404, 实际 %d", code)
 	}
 
-	revoked, _ := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil)
+	revoked, _ := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "", 0)
 	_ = shareSvc.Revoke(revoked.Token)
 	if code := getStatus(r, "/api/share/"+revoked.Token); code != http.StatusNotFound {
 		t.Fatalf("撤销 token 应 404, 实际 %d", code)
@@ -223,5 +223,119 @@ func TestShare_ManagementListRevoke(t *testing.T) {
 	// 撤销后公开访问 404
 	if code := getStatus(r, "/api/share/"+created.Token); code != http.StatusNotFound {
 		t.Fatalf("撤销后公开访问应 404, 实际 %d", code)
+	}
+}
+
+// getStatusWithPwd 带 X-Share-Password 头发 GET，返回状态码。
+func getStatusWithPwd(r *gin.Engine, path, pwd string) int {
+	req := httptest.NewRequest("GET", path, nil)
+	if pwd != "" {
+		req.Header.Set("X-Share-Password", pwd)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Code
+}
+
+// TestShare_PasswordGate 密码门禁（FR-78）：元信息无密码只回提示不泄露内容、错误密码访问资源 404、正确密码放行。
+func TestShare_PasswordGate(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "a.mp4", "AAA")
+	sh, err := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "p@ss", 0)
+	if err != nil {
+		t.Fatalf("创建带密码分享失败: %v", err)
+	}
+	dl := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/download"
+
+	// 元信息：无密码只回 requires_password=true，不含 media（不泄露）
+	req := httptest.NewRequest("GET", "/api/share/"+sh.Token, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("需密码分享元信息应 200 提示, 实际 %d", w.Code)
+	}
+	var info struct {
+		RequiresPassword bool              `json:"requires_password"`
+		Media            *models.MediaFile `json:"media"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	if !info.RequiresPassword || info.Media != nil {
+		t.Fatalf("无密码时应仅提示需密码且不含 media, body: %s", w.Body.String())
+	}
+
+	// 资源访问：错误密码 / 无密码 → 404；正确密码 → 200
+	if code := getStatusWithPwd(r, dl, "wrong"); code != http.StatusNotFound {
+		t.Fatalf("错误密码访问资源应 404, 实际 %d", code)
+	}
+	if code := getStatusWithPwd(r, dl, ""); code != http.StatusNotFound {
+		t.Fatalf("无密码访问资源应 404, 实际 %d", code)
+	}
+	if code := getStatusWithPwd(r, dl, "p@ss"); code != http.StatusOK {
+		t.Fatalf("正确密码访问资源应 200, 实际 %d", code)
+	}
+
+	// 元信息带正确密码 → 返回完整内容
+	req = httptest.NewRequest("GET", "/api/share/"+sh.Token, nil)
+	req.Header.Set("X-Share-Password", "p@ss")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	if info.Media == nil || info.Media.ID != mf.ID {
+		t.Fatalf("正确密码元信息应含 media, body: %s", w.Body.String())
+	}
+}
+
+// TestShare_MaxUsesExhausted 限次（FR-78）：达到上限后资源访问 404；查看元信息不耗次。
+func TestShare_MaxUsesExhausted(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "a.mp4", "AAA")
+	sh, _ := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "", 2)
+	dl := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/download"
+
+	// 查看元信息多次：不应消耗访问额度
+	for i := 0; i < 3; i++ {
+		if code := getStatus(r, "/api/share/"+sh.Token); code != http.StatusOK {
+			t.Fatalf("查看元信息应 200, 实际 %d", code)
+		}
+	}
+
+	// 前两次资源访问成功、第三次耗尽 404
+	if code := getStatus(r, dl); code != http.StatusOK {
+		t.Fatalf("第 1 次资源访问应 200, 实际 %d", code)
+	}
+	if code := getStatus(r, dl); code != http.StatusOK {
+		t.Fatalf("第 2 次资源访问应 200, 实际 %d", code)
+	}
+	if code := getStatus(r, dl); code != http.StatusNotFound {
+		t.Fatalf("第 3 次资源访问应耗尽 404, 实际 %d", code)
+	}
+}
+
+// TestShare_CreateWithPasswordNotPlaintextInDB 带密码创建后库中存哈希、API 不回显（FR-78）。
+func TestShare_CreateWithPasswordNotPlaintextInDB(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "a.mp4", "A")
+
+	body := `{"resource_type":"media","resource_id":` + strconv.FormatInt(mf.ID, 10) + `,"password":"top-secret","max_uses":3}`
+	req := httptest.NewRequest("POST", "/api/shares", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("创建期望 201, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	// 响应体不应含密码哈希字段
+	if bytes.Contains(w.Body.Bytes(), []byte("password_hash")) || bytes.Contains(w.Body.Bytes(), []byte("top-secret")) {
+		t.Fatalf("响应不应回显密码或哈希, body: %s", w.Body.String())
+	}
+	var created models.Share
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	if created.MaxUses != 3 {
+		t.Fatalf("max_uses 应为 3, 实际 %d", created.MaxUses)
+	}
+	// 库中应存非明文哈希
+	got, _ := shareSvc.Get(created.Token)
+	if got.PasswordHash == "" || got.PasswordHash == "top-secret" {
+		t.Fatalf("库中应存 bcrypt 哈希、非明文, 实际 %q", got.PasswordHash)
 	}
 }
