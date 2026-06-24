@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Stack, Title, Text, Group, Card, Progress, Loader, Center, SimpleGrid, Badge } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { IconChartBar } from '@tabler/icons-react'
 import { getWatchStats } from '@/api/stats'
 import { mediaDisplayName } from '@/utils/media'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import EmptyState from '@/components/EmptyState'
 import type { WatchStats } from '@/types'
 
 // 续播位置热力 10 档的区间标签（下标 0=0-10%…9=90-100%）
@@ -20,6 +22,7 @@ function heatColor(value: number, max: number): string {
 
 /** 观看统计页（FR-75）：复用 FR-44 观看状态，自建无图表库展示各观看维度 */
 export default function StatsPage() {
+  const navigate = useNavigate()
   const [stats, setStats] = useState<WatchStats | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -41,12 +44,29 @@ export default function StatsPage() {
     return <Text c="dimmed">暂无观看统计数据。</Text>
   }
 
+  // 空库：媒体库还没有任何媒体——整页引导去添加媒体库，不渲染任何空图表卡
+  if (stats.total === 0) {
+    return (
+      <Stack gap="lg">
+        <Title order={2}>观看统计</Title>
+        <EmptyState
+          icon={<IconChartBar size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="还没有可统计的媒体"
+          description="媒体库为空时这里没有数据。先去添加媒体库并扫描，观看后即可看到看了多少、最近活跃度、续播停留位置等统计。"
+          action={{ label: '去添加媒体库', onClick: () => navigate('/library-manager') }}
+        />
+      </Stack>
+    )
+  }
+
   const watchedPercent = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0
   const heatmapMax = Math.max(0, ...stats.position_heatmap)
   const timelineMax = Math.max(0, ...stats.recent_timeline.map((b) => b.count))
   const libraryMax = Math.max(0, ...stats.by_library.map((l) => l.watched))
   const formatMax = Math.max(0, ...stats.by_format.map((f) => f.watched))
   const topMax = Math.max(0, ...stats.top_viewed.map((m) => m.view_count ?? 0))
+  // 稀疏态：有媒体但毫无观看活动（未看、无续播、无时间线）——隐藏满 0 的续播热力网格与孤立时间线细条
+  const noActivity = stats.watched === 0 && heatmapMax === 0 && stats.recent_timeline.length === 0
 
   return (
     <Stack gap="lg">
@@ -70,7 +90,8 @@ export default function StatsPage() {
         </Group>
       </Card>
 
-      {/* 续播位置热力（10 档） */}
+      {/* 续播位置热力（10 档）：稀疏态（无任何观看活动）下整卡满 0 无意义，隐藏 */}
+      {!noActivity && (
       <Card withBorder padding="md" radius="md">
         <Text fw={600} mb="xs">续播位置热力</Text>
         <Text size="xs" c="dimmed" mb="sm">有续播进度的视频停留在播放时长哪个区间——越深表示该区间停留的视频越多。</Text>
@@ -93,8 +114,10 @@ export default function StatsPage() {
           </SimpleGrid>
         )}
       </Card>
+      )}
 
-      {/* 最近观看时间线 */}
+      {/* 最近观看时间线：稀疏态下只有孤立细条或空文案，隐藏 */}
+      {!noActivity && (
       <Card withBorder padding="md" radius="md">
         <Text fw={600} mb="xs">最近观看时间线</Text>
         {stats.recent_timeline.length === 0 ? (
@@ -115,6 +138,7 @@ export default function StatsPage() {
           </Group>
         )}
       </Card>
+      )}
 
       {/* 各库 / 各格式分布 */}
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">

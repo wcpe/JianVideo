@@ -94,4 +94,44 @@ describe('StatsPage', () => {
       expect(mockNotificationShow).toHaveBeenCalled()
     })
   })
+
+  it('空库（total=0）显示整页引导且不渲染任何图表卡', async () => {
+    const emptyStats: WatchStats = {
+      total: 0, watched: 0, unwatched: 0,
+      recent_timeline: [],
+      position_heatmap: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      by_library: [], by_format: [], top_viewed: [],
+    }
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(emptyStats)))
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('还没有可统计的媒体')).toBeVisible()
+    })
+    // 整页引导含一键 CTA
+    expect(screen.getByRole('button', { name: /去添加媒体库/ })).toBeVisible()
+    // 不渲染任何空图表卡：热力网格与进度概览卡都不出现
+    expect(screen.queryByTestId('heat-cell-0')).toBeNull()
+    expect(screen.queryByText('观看进度概览')).toBeNull()
+  })
+
+  it('稀疏态（有媒体但无任何观看活动）隐藏满 0 热力与孤立时间线', async () => {
+    const sparseStats: WatchStats = {
+      total: 8, watched: 0, unwatched: 8,
+      recent_timeline: [],
+      position_heatmap: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      by_library: [{ library_id: 1, label: '电影', watched: 0 }],
+      by_format: [{ format: 'mp4', watched: 0 }],
+      top_viewed: [],
+    }
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(sparseStats)))
+    renderPage()
+    // 仍渲染进度概览（有总数）
+    await waitFor(() => {
+      expect(screen.getByText('观看进度概览')).toBeVisible()
+    })
+    // 续播热力卡与时间线卡整卡隐藏（满 0 无意义）
+    expect(screen.queryByText('续播位置热力')).toBeNull()
+    expect(screen.queryByText('最近观看时间线')).toBeNull()
+    expect(screen.queryByTestId('heat-cell-0')).toBeNull()
+  })
 })

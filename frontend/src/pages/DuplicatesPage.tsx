@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Stack, Title, Group, Card, Text, SimpleGrid, Button, Loader, Center, Checkbox, Paper, Badge } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconTrash, IconScan } from '@tabler/icons-react'
+import { IconTrash, IconScan, IconCopyOff } from '@tabler/icons-react'
 import * as libApi from '@/api/library'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import EmptyState from '@/components/EmptyState'
 import type { DuplicateGroup } from '@/types'
 
 /**
@@ -98,7 +99,12 @@ export default function DuplicatesPage() {
       {loading && groups.length === 0 ? (
         <Center py="xl"><Loader color="purple" /></Center>
       ) : groups.length === 0 ? (
-        <Text c="dimmed">没有发现重复项。</Text>
+        <EmptyState
+          icon={<IconCopyOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="没有发现重复项"
+          description="基于缩略图感知哈希（dHash）未检出近似重复媒体。若新入库媒体尚未参与，点「扫描重复项」补算哈希后再看。"
+          action={{ label: '扫描重复项', leftIcon: <IconScan size={16} />, loading: scanning, onClick: handleScan }}
+        />
       ) : (
         <Stack gap="lg">
           {groups.map((group, gi) => (

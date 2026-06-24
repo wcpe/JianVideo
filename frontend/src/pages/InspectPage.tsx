@@ -5,6 +5,7 @@ import { IconStethoscope, IconTrash } from '@tabler/icons-react'
 import * as healthApi from '@/api/health'
 import { batchDeleteMediaFiles } from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
+import EmptyState from '@/components/EmptyState'
 import type { HealthIssue, HealthIssueType, HealthScanStatus } from '@/types'
 
 // 轮询周期（毫秒）：巡检进行中时刷新进度
@@ -144,7 +145,14 @@ export default function InspectPage() {
       {loading && issues.length === 0 ? (
         <Center py="xl"><Loader color="purple" /></Center>
       ) : grouped.length === 0 ? (
-        <Text c="dimmed">{status?.status === 'completed' ? '太好了，未发现问题媒体。' : '尚未巡检或暂无问题媒体。点击「开始巡检」检查媒体库。'}</Text>
+        <EmptyState
+          icon={<IconStethoscope size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title={status?.status === 'completed' ? '太好了，未发现问题媒体' : '尚未巡检'}
+          description={status?.status === 'completed'
+            ? '本次巡检未找到源文件丢失、0 字节、视频损坏或缩略图无法生成的媒体。'
+            : '点击「开始巡检」后台扫描所有媒体，找出源文件丢失、0 字节、视频损坏、缩略图无法生成的问题媒体。'}
+          action={{ label: scanning ? '巡检中…' : '开始巡检', leftIcon: <IconStethoscope size={16} />, loading: scanning, onClick: handleScan }}
+        />
       ) : (
         <Stack gap="lg">
           {grouped.map(group => (

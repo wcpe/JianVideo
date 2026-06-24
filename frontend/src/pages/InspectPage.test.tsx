@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
@@ -46,7 +46,8 @@ describe('InspectPage', () => {
     await waitFor(() => {
       expect(screen.getByText('问题媒体')).toBeVisible()
     })
-    expect(screen.getByRole('button', { name: /开始巡检/ })).toBeVisible()
+    // 顶栏与空态 CTA 同名「开始巡检」，至少有一个可见
+    expect(screen.getAllByRole('button', { name: /开始巡检/ }).length).toBeGreaterThan(0)
   })
 
   it('无问题时展示提示文案', async () => {
@@ -58,6 +59,26 @@ describe('InspectPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/未发现问题媒体/)).toBeVisible()
     })
+  })
+
+  it('尚未巡检时空态展示引导与可点巡检 CTA', async () => {
+    let triggered = false
+    server.use(
+      http.get('*/api/library/health/status', () => HttpResponse.json(idleStatus)),
+      http.get('*/api/library/health/issues', () => HttpResponse.json({ items: [] })),
+      http.post('*/api/library/health/scan', () => {
+        triggered = true
+        return HttpResponse.json({ status: 'scanning' })
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    // 空态标题
+    expect(await screen.findByText('尚未巡检')).toBeVisible()
+    // 点击空态内的「开始巡检」CTA（与顶栏同名，取空态内的）
+    const emptyState = screen.getByTestId('empty-state')
+    await user.click(within(emptyState).getByRole('button', { name: /开始巡检/ }))
+    await waitFor(() => expect(triggered).toBe(true))
   })
 
   it('按问题类型分组列出问题媒体', async () => {
@@ -94,7 +115,9 @@ describe('InspectPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: /开始巡检/ }))
+    // 顶栏与空态 CTA 同名，点击顶栏（首个）即可触发
+    const buttons = await screen.findAllByRole('button', { name: /开始巡检/ })
+    await user.click(buttons[0])
     await waitFor(() => {
       expect(triggered).toBe(true)
     })

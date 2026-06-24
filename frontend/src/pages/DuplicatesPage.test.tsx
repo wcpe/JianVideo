@@ -51,6 +51,25 @@ describe('DuplicatesPage', () => {
     await waitFor(() => expect(screen.getByText(/没有发现重复/)).toBeVisible())
   })
 
+  it('空态展示引导文案与可点扫描 CTA', async () => {
+    let scanned = false
+    server.use(
+      http.get('*/api/library/duplicates', () => HttpResponse.json({ groups: [] })),
+      http.post('*/api/library/duplicates/scan', () => {
+        scanned = true
+        return HttpResponse.json({ computed: 0 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    // 空态组件渲染（标题文案）
+    expect(await screen.findByText('没有发现重复项')).toBeVisible()
+    // 点击空态内的扫描 CTA（与顶栏同名，取空态卡片内的）
+    const emptyState = screen.getByTestId('empty-state')
+    await user.click(within(emptyState).getByRole('button', { name: /扫描重复项/ }))
+    await waitFor(() => expect(scanned).toBe(true))
+  })
+
   it('列出重复组成员', async () => {
     server.use(
       http.get('*/api/library/duplicates', () => HttpResponse.json({
@@ -75,7 +94,9 @@ describe('DuplicatesPage', () => {
     )
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: /扫描重复项/ }))
+    // 顶栏与空态 CTA 同名，点击顶栏（首个）即可触发
+    const buttons = await screen.findAllByRole('button', { name: /扫描重复项/ })
+    await user.click(buttons[0])
     await waitFor(() => expect(scanned).toBe(true))
   })
 

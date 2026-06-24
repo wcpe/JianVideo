@@ -49,7 +49,8 @@ describe('TranscodePage', () => {
     renderPage()
     await waitFor(() => {
       expect(screen.getByText('转码预设')).toBeVisible()
-      expect(screen.getByRole('button', { name: '新建预设' })).toBeVisible()
+      // 顶栏与空态 CTA 同名「新建预设」，至少有一个可见
+      expect(screen.getAllByRole('button', { name: '新建预设' }).length).toBeGreaterThan(0)
     })
   })
 
@@ -77,7 +78,9 @@ describe('TranscodePage', () => {
     )
     renderPage()
 
-    await userEvent.click(await screen.findByRole('button', { name: '新建预设' }))
+    // 顶栏与空态 CTA 同名「新建预设」，点击顶栏（首个）打开弹窗
+    const newButtons = await screen.findAllByRole('button', { name: '新建预设' })
+    await userEvent.click(newButtons[0])
     const nameInput = await screen.findByLabelText(/预设名称/)
     await userEvent.type(nameInput, '我的预设')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -86,6 +89,25 @@ describe('TranscodePage', () => {
       expect(payload).not.toBeNull()
       expect(payload?.name).toBe('我的预设')
     })
+  })
+
+  it('无预设时空态显示引导与新建 CTA，点击打开新建弹窗', async () => {
+    stubEmpty()
+    const user = userEvent.setup()
+    renderPage()
+    // 空态引导文案
+    expect(await screen.findByText('还没有转码预设')).toBeVisible()
+    // 空态内的「新建预设」CTA（与顶栏同名按钮共存，取空态卡片内的）
+    const ctaButtons = await screen.findAllByRole('button', { name: '新建预设' })
+    // 点击其中一个触发新建弹窗
+    await user.click(ctaButtons[ctaButtons.length - 1])
+    expect(await screen.findByLabelText(/预设名称/)).toBeVisible()
+  })
+
+  it('无预生成任务时空态显示引导文案', async () => {
+    stubEmpty()
+    renderPage()
+    expect(await screen.findByText('暂无预生成任务')).toBeVisible()
   })
 
   it('渲染预生成队列任务', async () => {

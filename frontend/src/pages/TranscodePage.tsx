@@ -6,6 +6,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { IconMovie, IconTrash, IconPlus, IconPencil } from '@tabler/icons-react'
 import ConfirmModal from '@/components/ConfirmModal'
+import EmptyState from '@/components/EmptyState'
 import * as transcodeApi from '@/api/transcode'
 import type { PresetInput } from '@/api/transcode'
 import type { TranscodePreset, TranscodeTask, TranscodeCodec } from '@/types'
@@ -120,7 +121,12 @@ export default function TranscodePage() {
       {loading && presets.length === 0 ? (
         <Center py="xl"><Loader color="purple" /></Center>
       ) : presets.length === 0 ? (
-        <Text c="dimmed">还没有转码预设，点击「新建预设」创建第一个吧。预设可在播放页用于「加入预生成」预热首播。</Text>
+        <EmptyState
+          icon={<IconMovie size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="还没有转码预设"
+          description="创建第一个预设（目标编码 + 分辨率）后，即可在播放页用「加入预生成」预热首播切片，消除首次播放的冷启动等待。"
+          action={{ label: '新建预设', leftIcon: <IconPlus size={16} />, onClick: openCreate }}
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
           {presets.map(p => (
@@ -154,7 +160,10 @@ export default function TranscodePage() {
       {/* 预生成队列任务列表（FR-77）：复用扫描任务展示范式 */}
       <Title order={3}>预生成队列</Title>
       {tasks.length === 0 ? (
-        <Text c="dimmed">暂无预生成任务。在播放页选预设「加入预生成」即可预热首播切片。</Text>
+        <EmptyState
+          title="暂无预生成任务"
+          description="在播放页选一个预设「加入预生成」，任务会在这里排队展示进度，预热完成后首播无需等待。"
+        />
       ) : (
         <Stack gap="xs">
           {tasks.map(t => {

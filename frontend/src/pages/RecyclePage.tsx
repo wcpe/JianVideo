@@ -6,6 +6,7 @@ import type { AxiosError } from 'axios'
 import * as libApi from '@/api/library'
 import ConfirmModal from '@/components/ConfirmModal'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import EmptyState from '@/components/EmptyState'
 import type { MediaFile } from '@/types'
 
 /** 回收站页（FR-25/FR-26）：展示被软删的媒体，支持还原，并可按盘符回收站路径清理 */
@@ -88,7 +89,11 @@ export default function RecyclePage() {
       {loading && items.length === 0 ? (
         <Center py="xl"><Loader color="purple" /></Center>
       ) : items.length === 0 ? (
-        <Text c="dimmed">回收站是空的。</Text>
+        <EmptyState
+          icon={<IconTrash size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+          title="回收站是空的"
+          description="被软删的媒体会出现在这里，源文件仍在磁盘可随时还原。当前没有待还原的媒体。"
+        />
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
           {items.map(media => (
