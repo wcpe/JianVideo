@@ -25,8 +25,7 @@ func Load() *Config {
 			log.Fatalf("[ERROR] 生成随机 JWT 密钥失败: %v", err)
 		}
 		secret = hex.EncodeToString(b)
-		log.Printf("[WARN] JWT_SECRET 未设置，已生成随机密钥: %s", secret)
-		log.Printf("[WARN] 请设置 JWT_SECRET 环境变量以避免每次重启后用户需要重新登录")
+		log.Printf("[WARN] JWT_SECRET 未设置，已生成随机密钥（重启后需重新登录），建议设置 JWT_SECRET 环境变量以持久化会话")
 	}
 	return &Config{
 		ServerPort:   envInt("SERVER_PORT", 8080),
