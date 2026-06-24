@@ -23,10 +23,70 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
-/* 无障碍兜底：用户开启「减少动态效果」时禁用主题切换过渡（FR-84） */
+/* 全局微交互：可点表面 hover 平滑过渡 + 轻微抬升（FR-96）。
+   只过渡 background-color/border-color/box-shadow/transform 这几项，
+   不过渡全部属性，避免大面积重绘的性能开销与闪烁。约 140ms。 */
+.mantine-Card-root,
+.mantine-Button-root,
+.mantine-NavLink-root {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+/* 卡片 hover 抬升：上移 2px + 加深一档阴影（复用 FR-92 阴影 token） */
+.mantine-Card-root:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+/* 路由切换页面进入动画（FR-96）：轻量 fade + 上移渐入 */
+.route-fade {
+  animation: jianvideo-route-fade-in 200ms ease;
+}
+
+@keyframes jianvideo-route-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 全局顶部加载条爬升动画（FR-96）：用于进度条「爬升中」阶段的脉冲微动 */
+@keyframes jianvideo-topbar-pulse {
+  0% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.85;
+  }
+}
+
+/* 无障碍兜底：用户开启「减少动态效果」时禁用主题切换过渡（FR-84），
+   并禁用 FR-96 的 hover 抬升、路由切换动画与顶部进度条动画 */
 @media (prefers-reduced-motion: reduce) {
   body {
     transition: none;
+  }
+  .mantine-Card-root,
+  .mantine-Button-root,
+  .mantine-NavLink-root {
+    transition: none;
+  }
+  .mantine-Card-root:hover {
+    transform: none;
+  }
+  .route-fade {
+    animation: none;
   }
 }
 

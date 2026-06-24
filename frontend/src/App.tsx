@@ -3,6 +3,8 @@ import { MantineProvider, localStorageColorSchemeManager } from '@mantine/core'
 import { appTheme, themeCssVariablesResolver } from './theme'
 import { Notifications } from '@mantine/notifications'
 import AppLayout from './components/AppLayout'
+import RouteTransition from './components/RouteTransition'
+import TopProgressBar from './components/TopProgressBar'
 import ProtectedRoute from './components/ProtectedRoute'
 import RequireAnon from './components/RequireAnon'
 import LoginPage from './pages/LoginPage'
@@ -37,6 +39,10 @@ export default function App() {
     >
       <Notifications position="top-right" />
       <BrowserRouter>
+        {/* 全局顶部加载条（FR-96）：路由切换时顶部进度反馈 */}
+        <TopProgressBar />
+        {/* 路由切换过渡（FR-96）：以路径为 key 包裹页面，轻量渐入 */}
+        <RouteTransition>
         <Routes>
           <Route path="/login" element={<RequireAnon><LoginPage /></RequireAnon>} />
           {/* 公开分享查看页（FR-43）：免登、不套 AppLayout / ProtectedRoute */}
@@ -64,6 +70,7 @@ export default function App() {
           <Route path="/licenses" element={<ProtectedRoute><AppLayout><LicensesPage /></AppLayout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </RouteTransition>
       </BrowserRouter>
     </MantineProvider>
   )
