@@ -16,6 +16,7 @@ import ShareDialog from '@/components/ShareDialog'
 import BatchActionsModals from '@/components/BatchActionsModals'
 import { useBatchActions } from '@/hooks/useBatchActions'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
+import { mediaRawUrl, mediaStreamUrl } from '@/utils/media-url'
 import { formatSize, formatDuration, formatAperture, formatShutter, formatIso } from '@/utils/format'
 import type { MediaFile } from '@/types'
 
@@ -38,16 +39,6 @@ const ZOOM_DOUBLE_CLICK = 2
 const SLIDESHOW_INTERVAL_MS = 3000
 // 相邻预加载半径（FR-105）：预取前后各 1 张原图，切换不闪白
 const PRELOAD_RADIUS = 1
-
-/** 原图地址（FR-105 预加载与图片预览共用） */
-function rawUrl(mediaID: number): string {
-  return `/api/library/media/${mediaID}/raw`
-}
-
-/** 视频流播放地址（FR-102）：绝对化避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败 */
-function streamUrl(mediaID: number): string {
-  return new URL(`/api/play/${mediaID}/stream`, window.location.href).toString()
-}
 
 // 详情区定宽 label 列宽（FR-106）：定义列表两列对齐，键值成对易读
 const DETAIL_LABEL_WIDTH = 64
@@ -208,7 +199,7 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
         if (neighbor && isImageFile(neighbor, customImageExtensions)) {
           // 用 createElement('img') 触发浏览器原图预取，jsdom 下亦可断言 src 赋值
           const pre = document.createElement('img')
-          pre.src = rawUrl(neighbor.id)
+          pre.src = mediaRawUrl(neighbor.id)
         }
       }
     }
@@ -395,7 +386,7 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             >
               <Box
                 component="img"
-                src={rawUrl(file.id)}
+                src={mediaRawUrl(file.id)}
                 alt={file.file_name}
                 draggable={false}
                 onDoubleClick={handleDoubleClick}
@@ -416,7 +407,7 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             // 灯箱内用既有 /api/play/:id/stream 流地址（与播放页降级路径一致），不引入协商逻辑。
             <Box w="100%" px="md" style={{ maxWidth: 960 }}>
               <Suspense fallback={<Text c="dimmed" size="sm">加载播放器…</Text>}>
-                <VideoPlayer url={streamUrl(file.id)} streamType="mp4" autoPlay />
+                <VideoPlayer url={mediaStreamUrl(file.id)} streamType="mp4" autoPlay />
               </Suspense>
             </Box>
           )}

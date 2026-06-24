@@ -11,6 +11,7 @@ import PregenDialog from '@/components/PregenDialog'
 import PageBreadcrumbs from '@/components/PageBreadcrumbs'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
+import { mediaStreamUrl, mediaHlsMasterUrl } from '@/utils/media-url'
 import { probeClientCapabilities } from '@/utils/codec-capability'
 import { useCinemaMode } from '@/hooks/cinema-context'
 import * as libApi from '@/api/library'
@@ -77,10 +78,9 @@ export default function PlayPage() {
       .then((tracks) => setSubtitleTracks(tracks))
       .catch(() => setSubtitleTracks([]))
 
-    // 解析为绝对 URL，避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
-    const toAbsolute = (path: string) => new URL(path, window.location.href).toString()
-    const hlsUrl = toAbsolute(`/api/play/hls/${mediaId}/master`)
-    const streamUrl = toAbsolute(`/api/play/${mediaId}/stream`)
+    // 绝对 URL 由共享构造器给出（FR-107），避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
+    const hlsUrl = mediaHlsMasterUrl(mediaId)
+    const streamUrl = mediaStreamUrl(mediaId)
 
     // master 探测 → mpegts.js（ABR）或 stream（原生 mp4），既有 H.264/TS 路径不变。
     const probeMaster = () => {
