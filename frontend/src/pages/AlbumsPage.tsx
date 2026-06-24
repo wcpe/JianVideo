@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Stack, Title, Group, Button, Card, Text, SimpleGrid, Modal, TextInput, Textarea,
-  ActionIcon, Box, Anchor, Skeleton,
+  ActionIcon, Box, Anchor, Skeleton, Center,
 } from '@mantine/core'
 import { IconPhoto, IconTrash, IconPlus, IconArrowLeft, IconShare, IconPhotoOff, IconAlertTriangle } from '@tabler/icons-react'
 import ShareDialog from '@/components/ShareDialog'
@@ -17,6 +17,39 @@ import type { Album, MediaFile } from '@/types'
 
 const initCreate = { opened: false, name: '', description: '', loading: false }
 const initDelAlbum = { opened: false, album: null as Album | null, loading: false }
+
+/**
+ * 相册封面（FR-100）：有成员时用首个成员的缩略图（复用 FR-99 的 MediaThumbnail），
+ * 空相册或取成员失败时显占位插画。仅在非空相册按需经现有成员端点取首图，不新增后端端点。
+ */
+function AlbumCover({ album }: { album: Album }) {
+  const empty = (album.item_count ?? 0) === 0
+  // 首个成员媒体 id：0 表示未知（加载中/空/失败），>0 则渲染封面缩略图
+  const [coverMediaID, setCoverMediaID] = useState(album.cover_media_id || 0)
+
+  useEffect(() => {
+    // 空相册不发请求；已有显式封面或已解析过则跳过
+    if (empty || coverMediaID > 0) return
+    let cancelled = false
+    albumApi.listAlbumItems(album.id)
+      .then(items => { if (!cancelled && items.length > 0) setCoverMediaID(items[0].id) })
+      .catch(() => { /* 取封面失败退化为占位，不打扰用户 */ })
+    return () => { cancelled = true }
+  }, [album.id, empty, coverMediaID])
+
+  if (coverMediaID > 0) {
+    return <MediaThumbnail mediaID={coverMediaID} fileName={`${album.name} 封面`} objectFit="cover" />
+  }
+  // 占位插画：空相册或封面待解析
+  return (
+    <Center
+      aria-label={`${album.name} 封面占位`}
+      style={{ aspectRatio: '16/9', background: 'var(--mantine-color-default-hover)' }}
+    >
+      <IconPhotoOff size={36} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.6 }} />
+    </Center>
+  )
+}
 
 /** 相册页（FR-40）：列相册、建相册、看相册内容、跨目录把媒体加入/移出 */
 export default function AlbumsPage() {
@@ -115,11 +148,22 @@ export default function AlbumsPage() {
           action={{ label: '新建第一个相册', leftIcon: <IconPlus size={16} />, onClick: () => setCreate({ ...initCreate, opened: true }) }}
         />
       ) : (
-        <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
+        // 自适应网格（FR-100）：用 minmax 让相册卡随容器宽度铺满，不固定列数
+        <Box
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 'var(--mantine-spacing-md)',
+          }}
+        >
           {albums.map(album => (
             <Card key={album.id} withBorder padding="md" radius="md"
               style={{ cursor: 'pointer' }}>
-              <Group justify="space-between" mb="xs" wrap="nowrap">
+              {/* 封面（FR-100）：有成员显首图缩略图、空相册显占位插画，点击进入相册 */}
+              <Card.Section onClick={() => setSelected(album)}>
+                <AlbumCover album={album} />
+              </Card.Section>
+              <Group justify="space-between" mt="sm" mb="xs" wrap="nowrap">
                 <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }} onClick={() => setSelected(album)}>
                   <IconPhoto size={20} style={{ color: 'var(--mantine-color-purple-4)', flexShrink: 0 }} />
                   <Text fw={600} truncate>{album.name}</Text>
@@ -141,7 +185,7 @@ export default function AlbumsPage() {
               </Box>
             </Card>
           ))}
-        </SimpleGrid>
+        </Box>
       )}
 
       <Modal opened={create.opened} onClose={() => setCreate(initCreate)} title="新建相册" centered size="sm">

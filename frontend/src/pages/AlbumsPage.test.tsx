@@ -175,6 +175,55 @@ describe('AlbumsPage', () => {
     })
   })
 
+  it('有成员的相册卡显示成员首图作为封面（FR-100）', async () => {
+    let itemsRequested = false
+    server.use(
+      http.get('*/api/albums', () => HttpResponse.json({
+        items: [{ id: 3, name: '风景', description: '', cover_media_id: 0, created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', item_count: 2 }],
+      })),
+      http.get('*/api/albums/3/items', () => {
+        itemsRequested = true
+        return HttpResponse.json({
+          items: [{
+            id: 42, library_id: 1, file_path: 'D:\\A\\海.jpg', file_name: '海.jpg',
+            file_size: 100, format: 'jpg', video_codec: '', audio_codec: '',
+            duration: 0, width: 1920, height: 1080, bitrate: 0, subtitle_tracks: '',
+            added_at: '2025-01-01T00:00:00Z', modified_at: '2025-01-01T00:00:00Z',
+          }],
+        })
+      }),
+    )
+
+    const { container } = renderPage()
+    await screen.findByText('风景')
+
+    // 取成员封面端点被调用，且渲染了首个成员（id=42）的缩略图 <img>
+    await waitFor(() => expect(itemsRequested).toBe(true))
+    await waitFor(() => {
+      const cover = container.querySelector('img[src*="/api/library/thumbnail/42"]')
+      expect(cover).not.toBeNull()
+    })
+  })
+
+  it('空相册卡显示封面占位插画、不请求成员（FR-100）', async () => {
+    let itemsRequested = false
+    server.use(
+      http.get('*/api/albums', () => HttpResponse.json({
+        items: [{ id: 8, name: '空合集', description: '', cover_media_id: 0, created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', item_count: 0 }],
+      })),
+      http.get('*/api/albums/8/items', () => {
+        itemsRequested = true
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+
+    renderPage()
+    // 占位插画存在（aria-label 标识封面占位）
+    expect(await screen.findByLabelText('空合集 封面占位')).toBeInTheDocument()
+    // 空相册不发成员请求（避免无谓 N 次请求）
+    expect(itemsRequested).toBe(false)
+  })
+
   it('在相册内从媒体库加入媒体', async () => {
     let addPayload: { media_id?: number } | null = null
     server.use(

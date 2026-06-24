@@ -1,10 +1,35 @@
 import { useState } from 'react'
-import { SimpleGrid, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge, SegmentedControl } from '@mantine/core'
-import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader, IconListSearch, IconX } from '@tabler/icons-react'
+import { SimpleGrid, Text, TextInput, Button, Group, Card, ActionIcon, Skeleton, Alert, Box, Badge, SegmentedControl, Collapse, UnstyledButton } from '@mantine/core'
+import { IconPlus, IconTrash, IconRefresh, IconFolder, IconEye, IconLoader, IconListSearch, IconX, IconChevronRight, IconTags } from '@tabler/icons-react'
 import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types'
 
 /** 后缀筛选档位（FR-64）：全部 / 仅视频 / 仅图片 */
 type ExtFilter = 'all' | 'video' | 'image'
+
+/** 单个后缀徽标（FR-100）：内置以描边样式标识不可删、自定义带删除按钮 */
+function ExtensionBadge({
+  ext, onDelete,
+}: {
+  ext: MediaExtension
+  onDelete?: () => void
+}) {
+  return (
+    <Badge
+      size="sm"
+      variant={ext.is_builtin ? 'outline' : 'light'}
+      color={ext.type === 'image' ? 'teal' : 'blue'}
+      rightSection={ext.is_builtin || !onDelete ? undefined : (
+        <ActionIcon size="xs" variant="transparent" color="red"
+          aria-label={`删除后缀 ${ext.extension}`}
+          onClick={onDelete}>
+          <IconX size={10} />
+        </ActionIcon>
+      )}
+    >
+      {ext.extension}{ext.is_builtin ? '（内置）' : ''}
+    </Badge>
+  )
+}
 
 interface LibraryPathManagerProps {
   paths: LibraryPath[]
@@ -38,6 +63,8 @@ export default function LibraryPathManager({
 }: LibraryPathManagerProps) {
   // 各库后缀筛选档位（FR-64），缺省「全部」
   const [extFilters, setExtFilters] = useState<Record<number, ExtFilter>>({})
+  // 各库后缀徽标墙折叠态（FR-100），缺省折叠以收起信息噪声
+  const [extExpanded, setExtExpanded] = useState<Record<number, boolean>>({})
 
   return (
     <Box>
@@ -64,6 +91,10 @@ export default function LibraryPathManager({
             const filter = extFilters[p.id] || 'all'
             const exts = extensionsByLibrary[p.id] || []
             const visibleExts = filter === 'all' ? exts : exts.filter((e) => e.type === filter)
+            // 折叠态展开后按内置/自定义分组（FR-100）
+            const builtinExts = visibleExts.filter((e) => e.is_builtin)
+            const customExts = visibleExts.filter((e) => !e.is_builtin)
+            const expanded = extExpanded[p.id] || false
             return (
             <Card key={p.id} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)">
               {/* 库信息：占整行、可点进浏览 */}
@@ -95,40 +126,62 @@ export default function LibraryPathManager({
                 </ActionIcon>
               </Group>
 
-              {/* 后缀管理（FR-64）：视频/图片/全部 筛选 + 列出（内置不可删 / 自定义可删） */}
-              <Group gap={6} mt="xs" align="center">
-                <SegmentedControl
-                  aria-label={`${p.label || p.path} 后缀筛选`} size="xs" value={filter}
-                  onChange={(v) => setExtFilters((prev) => ({ ...prev, [p.id]: v as ExtFilter }))}
-                  data={[
-                    { value: 'all', label: '全部' },
-                    { value: 'video', label: '视频' },
-                    { value: 'image', label: '图片' },
-                  ]}
+              {/* 后缀管理（FR-64/FR-100）：默认折叠为摘要行，展开后按内置/自定义分组列出 */}
+              <UnstyledButton
+                aria-label={`${p.label || p.path} 后缀列表`}
+                aria-expanded={expanded}
+                mt="xs"
+                onClick={() => setExtExpanded((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}
+              >
+                <IconTags size={14} color="var(--mantine-color-purple-4)" />
+                <Text size="xs" c="dimmed">{exts.length} 个后缀</Text>
+                <IconChevronRight
+                  size={14}
+                  style={{
+                    marginLeft: 'auto',
+                    transition: 'transform 120ms ease',
+                    transform: expanded ? 'rotate(90deg)' : 'none',
+                  }}
                 />
-                <Text size="xs" c="dimmed">{visibleExts.length} 个后缀</Text>
-              </Group>
-              {visibleExts.length > 0 && (
-                <Group gap={4} mt={4} wrap="wrap">
-                  {visibleExts.map((e) => (
-                    <Badge key={e.extension} size="sm"
-                      variant={e.is_builtin ? 'outline' : 'light'}
-                      color={e.type === 'image' ? 'teal' : 'blue'}
-                      rightSection={e.is_builtin ? undefined : (
-                        <ActionIcon size="xs" variant="transparent" color="red"
-                          aria-label={`删除后缀 ${e.extension}`}
-                          onClick={() => onDeleteExtension(p, e.extension)}>
-                          <IconX size={10} />
-                        </ActionIcon>
-                      )}
-                    >
-                      {e.extension}{e.is_builtin ? '（内置）' : ''}
-                    </Badge>
-                  ))}
+              </UnstyledButton>
+              <Collapse in={expanded}>
+                {/* 视频/图片/全部 筛选（FR-64）：作用于展开后的分组内容 */}
+                <Group gap={6} mt="xs" align="center">
+                  <SegmentedControl
+                    aria-label={`${p.label || p.path} 后缀筛选`} size="xs" value={filter}
+                    onChange={(v) => setExtFilters((prev) => ({ ...prev, [p.id]: v as ExtFilter }))}
+                    data={[
+                      { value: 'all', label: '全部' },
+                      { value: 'video', label: '视频' },
+                      { value: 'image', label: '图片' },
+                    ]}
+                  />
                 </Group>
-              )}
+                {builtinExts.length > 0 && (
+                  <Box mt={6}>
+                    <Text size="xs" c="dimmed" mb={4}>内置</Text>
+                    <Group gap={4} wrap="wrap">
+                      {builtinExts.map((e) => <ExtensionBadge key={e.extension} ext={e} />)}
+                    </Group>
+                  </Box>
+                )}
+                {customExts.length > 0 && (
+                  <Box mt={6}>
+                    <Text size="xs" c="dimmed" mb={4}>自定义</Text>
+                    <Group gap={4} wrap="wrap">
+                      {customExts.map((e) => (
+                        <ExtensionBadge key={e.extension} ext={e} onDelete={() => onDeleteExtension(p, e.extension)} />
+                      ))}
+                    </Group>
+                  </Box>
+                )}
+                {visibleExts.length === 0 && (
+                  <Text size="xs" c="dimmed" mt={6}>该筛选下暂无后缀</Text>
+                )}
+              </Collapse>
 
-              {/* 添加自定义后缀（仍 video/image 二选一，不改数据模型） */}
+              {/* 添加自定义后缀（仍 video/image 二选一，不改数据模型）：常显以突出添加入口（FR-100） */}
               <Group gap={4} mt="xs" wrap="nowrap">
                 <TextInput aria-label={`${p.label || p.path} 自定义后缀`} placeholder="自定义后缀，如 .foo" size="xs"
                   value={extensionInputs[p.id] || ''}

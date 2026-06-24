@@ -160,8 +160,12 @@ describe('LibraryManagerPage', () => {
       })),
     )
 
+    const user = userEvent.setup()
     renderPage()
     const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    // 后缀墙默认折叠（FR-100），先展开摘要行
+    await user.click(await within(card).findByLabelText('电影 后缀列表'))
 
     // 内置后缀展示「内置」标识、无删除按钮；自定义后缀有删除按钮
     await waitFor(() => {
@@ -190,6 +194,8 @@ describe('LibraryManagerPage', () => {
     renderPage()
     const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
 
+    // 后缀墙默认折叠（FR-100），先展开摘要行
+    await user.click(await within(card).findByLabelText('电影 后缀列表'))
     await user.click(await within(card).findByLabelText('删除后缀 foo'))
 
     await waitFor(() => {
@@ -210,6 +216,9 @@ describe('LibraryManagerPage', () => {
     const user = userEvent.setup()
     renderPage()
     const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    // 后缀墙默认折叠（FR-100），先展开摘要行
+    await user.click(await within(card).findByLabelText('电影 后缀列表'))
 
     // 全部：两类都显示
     await waitFor(() => {
@@ -271,6 +280,36 @@ describe('LibraryManagerPage', () => {
     await user.click(scanButton)
 
     expect(screen.getByRole('status')).toHaveTextContent('正在扫描')
+  })
+
+  it('后缀墙默认折叠，点摘要行可展开并按内置/自定义分组（FR-100）', async () => {
+    server.use(
+      http.get('*/api/library/extensions', () => HttpResponse.json({
+        items: [
+          { id: 1, library_id: 1, extension: 'mp4', type: 'video', is_builtin: 1, created_at: '2025-01-01T00:00:00Z' },
+          { id: 2, library_id: 1, extension: 'foo', type: 'video', is_builtin: 0, created_at: '2025-01-01T00:00:00Z' },
+        ],
+      })),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement
+
+    // 摘要行存在且默认折叠：徽标未可见（Collapse 关闭态以 display:none 隐藏，元素仍在 DOM）
+    const summary = await within(card).findByLabelText('电影 后缀列表')
+    expect(summary).toHaveAttribute('aria-expanded', 'false')
+    expect(within(card).queryByText(/mp4（内置）/)).not.toBeVisible()
+
+    // 点击摘要行展开：出现「内置」「自定义」分组标题与对应徽标
+    await user.click(summary)
+    await waitFor(() => {
+      expect(within(card).getByText(/mp4（内置）/)).toBeVisible()
+    })
+    expect(summary).toHaveAttribute('aria-expanded', 'true')
+    expect(within(card).getByText('内置')).toBeVisible()
+    expect(within(card).getByText('自定义')).toBeVisible()
+    expect(within(card).getByText('foo')).toBeVisible()
   })
 
   it('提供增量更新与全量扫描两个入口，分别携带对应 mode（FR-27）', async () => {

@@ -90,15 +90,24 @@ function DateGroupRow({
   const secondary = monthDay ? year : ''
   return (
     <Group align="flex-start" wrap="nowrap" gap="md" pb="xl">
-      {/* 左侧竖向日期轴：圆点 + 竖线 + 年/月日 */}
-      <Box style={{ width: 80, flexShrink: 0, position: 'relative' }}>
-        <Group gap={8} wrap="nowrap" align="center" mb={4}>
-          <Box style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--mantine-color-purple-5)', flexShrink: 0 }} />
-          {secondary && <Text size="xs" c="dimmed">{secondary}</Text>}
+      {/* 左侧竖向日期轴（FR-100 时间锚视觉）：实心紫圆点 + 竖线 + 醒目年/月日 */}
+      <Box style={{ width: 88, flexShrink: 0, position: 'relative' }}>
+        {/* 次标签（年）在锚点上方，弱化处理 */}
+        {secondary && <Text size="xs" c="dimmed" pl={24} mb={2}>{secondary}</Text>}
+        <Group gap={8} wrap="nowrap" align="center">
+          {/* 锚点圆点：加大并用品牌紫实心 + 浅紫光晕环，强化时间锚 */}
+          <Box
+            style={{
+              width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+              background: 'var(--mantine-color-purple-6)',
+              boxShadow: '0 0 0 4px var(--mantine-color-purple-light)',
+            }}
+          />
+          {/* 主标签（月-日 / 年）：醒目时间锚 */}
+          <Text fw={700} size="lg" style={{ lineHeight: 1.1 }}>{primary}</Text>
         </Group>
-        <Text fw={700} size="lg" pl={18}>{primary}</Text>
-        {/* 竖线营造时间线视觉 */}
-        <Box style={{ position: 'absolute', left: 4, top: 14, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
+        {/* 竖线营造时间线视觉：起点对齐圆点中心 */}
+        <Box style={{ position: 'absolute', left: 6, top: 22, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
       </Box>
 
       {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列 */}

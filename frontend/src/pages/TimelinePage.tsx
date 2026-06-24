@@ -96,43 +96,50 @@ export default function TimelinePage() {
   }, [pendingDelete, infinite])
 
   // 筛选控件（FR-86）：桌面内联铺开、移动收进抽屉，二者共用同一套受控状态
+  // 控件按「内容筛选 | 视图」分组成带标签容器（FR-100），更清晰；搜索框在本块之外常驻（FR-35/FR-86）。
   const filtersContent = (
-    <Stack gap="md">
-      {/* 收藏与标签筛选（FR-41） */}
-      <MediaFilterBar
-        favorite={favorite}
-        onFavoriteChange={setFavorite}
-        tagId={tagId}
-        onTagIdChange={setTagId}
-      />
+    <Stack gap="lg">
+      {/* 内容筛选组（FR-100）：收藏/标签（FR-41）+ 类型/大小/拍摄时间（FR-36） */}
+      <Box aria-label="内容筛选" role="group">
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>内容筛选</Text>
+        <Stack gap="sm">
+          <MediaFilterBar
+            favorite={favorite}
+            onFavoriteChange={setFavorite}
+            tagId={tagId}
+            onTagIdChange={setTagId}
+          />
+          <MediaQueryFilters
+            mediaType={mediaType}
+            onMediaTypeChange={setMediaType}
+            sizeMin={sizeMin}
+            onSizeMinChange={setSizeMin}
+            timeFrom={timeFrom}
+            onTimeFromChange={setTimeFrom}
+            timeTo={timeTo}
+            onTimeToChange={setTimeTo}
+          />
+        </Stack>
+      </Box>
 
-      {/* 结构化筛选（FR-36）：类型 / 大小 / 拍摄时间范围 */}
-      <MediaQueryFilters
-        mediaType={mediaType}
-        onMediaTypeChange={setMediaType}
-        sizeMin={sizeMin}
-        onSizeMinChange={setSizeMin}
-        timeFrom={timeFrom}
-        onTimeFromChange={setTimeFrom}
-        timeTo={timeTo}
-        onTimeToChange={setTimeTo}
-      />
-
-      {/* 时间轴缩放（FR-32）：按媒体时间组织，日/月/年粒度切换 */}
-      <Group gap="xs" align="center">
-        <Text size="xs" c="dimmed">缩放</Text>
-        <SegmentedControl
-          aria-label="时间轴缩放"
-          size="xs"
-          value={granularity}
-          onChange={(v) => setGranularity(v as TimelineGranularity)}
-          data={[
-            { value: 'day', label: '日' },
-            { value: 'month', label: '月' },
-            { value: 'year', label: '年' },
-          ]}
-        />
-      </Group>
+      {/* 视图组（FR-100）：时间轴缩放（FR-32）日/月/年粒度切换 */}
+      <Box aria-label="视图" role="group">
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>视图</Text>
+        <Group gap="xs" align="center">
+          <Text size="xs" c="dimmed">缩放</Text>
+          <SegmentedControl
+            aria-label="时间轴缩放"
+            size="xs"
+            value={granularity}
+            onChange={(v) => setGranularity(v as TimelineGranularity)}
+            data={[
+              { value: 'day', label: '日' },
+              { value: 'month', label: '月' },
+              { value: 'year', label: '年' },
+            ]}
+          />
+        </Group>
+      </Box>
     </Stack>
   )
 
