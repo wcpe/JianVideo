@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
@@ -270,5 +273,86 @@ func TestHWAccelAndSystemInfo_SameSource(t *testing.T) {
 	}
 	if !hw.FromCache || !sys.HWAccel.FromCache {
 		t.Errorf("两端点均应标记 from_cache=true")
+	}
+}
+
+// doProxyTest 用给定请求体调用 TestProxy 处理器，返回解析后的响应。
+func doProxyTest(t *testing.T, body string) map[string]any {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	var reqBody *bytes.Buffer
+	if body == "" {
+		reqBody = bytes.NewBufferString("")
+	} else {
+		reqBody = bytes.NewBufferString(body)
+	}
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/system/proxy/test", reqBody)
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.TestProxy(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("TestProxy 应返回 200，实际 %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应不是合法 JSON: %v", err)
+	}
+	return resp
+}
+
+// TestTestProxy_InvalidProxyReturnsUnreachable 非法代理 URL 返回 reachable=false 且有明确 detail，不发起外部请求。
+func TestTestProxy_InvalidProxyReturnsUnreachable(t *testing.T) {
+	resp := doProxyTest(t, `{"proxy":"ftp://127.0.0.1:21"}`)
+
+	if reachable, _ := resp["reachable"].(bool); reachable {
+		t.Error("非法代理协议应判不可达")
+	}
+	if detail, _ := resp["detail"].(string); detail == "" {
+		t.Error("非法代理应返回明确错误说明")
+	}
+	// 响应字段齐全
+	for _, k := range []string{"reachable", "detail", "latency_ms", "target"} {
+		if _, ok := resp[k]; !ok {
+			t.Errorf("响应缺少字段 %q", k)
+		}
+	}
+}
+
+// TestTestProxy_RedactsCredentials 含凭据的代理（连不上）时，detail 不回显明文密码（脱敏，安全红线）。
+func TestTestProxy_RedactsCredentials(t *testing.T) {
+	// 指向必然连不上的本地端口触发网络层错误。
+	resp := doProxyTest(t, `{"proxy":"http://user:supersecret@127.0.0.1:1"}`)
+
+	detail, _ := resp["detail"].(string)
+	if strings.Contains(detail, "supersecret") {
+		t.Errorf("detail 不应回显明文密码，实际 %q", detail)
+	}
+}
+
+// TestTestProxy_DoesNotPolluteRuntimeProxy 探测绝不改动运行期全局代理真源（netproxy.current）。
+func TestTestProxy_DoesNotPolluteRuntimeProxy(t *testing.T) {
+	const baseline = "http://127.0.0.1:7890"
+	if err := netproxy.SetProxy(baseline); err != nil {
+		t.Fatalf("设置基线代理失败: %v", err)
+	}
+	t.Cleanup(func() { _ = netproxy.SetProxy("") })
+
+	// 用与基线不同的待测代理探测后，运行期代理应保持基线不变。
+	doProxyTest(t, `{"proxy":"http://127.0.0.1:9999"}`)
+
+	if got := netproxy.Raw(); got != baseline {
+		t.Errorf("探测后运行期代理应保持基线 %q，实际 %q", baseline, got)
+	}
+}
+
+// TestTestProxy_EmptyBodyMeansDirect 空 body 不报错，按测直连处理（reachable 由网络决定，仅验契约不崩）。
+func TestTestProxy_EmptyBodyMeansDirect(t *testing.T) {
+	resp := doProxyTest(t, "")
+	if _, ok := resp["reachable"]; !ok {
+		t.Error("空 body 应正常返回 reachable 字段")
 	}
 }

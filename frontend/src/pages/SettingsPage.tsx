@@ -14,7 +14,7 @@ import {
   SETTING_KEY_MAGICK_PATH,
   SETTING_KEY_NETWORK_PROXY,
 } from '@/api/settings'
-import { getEnvVars, detectFFmpeg } from '@/api/system'
+import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system'
 import { extractErrorMessage } from '@/utils/error'
 import {
   parseRecycleBinRows,
@@ -45,6 +45,10 @@ export default function SettingsPage() {
   // FFmpeg 路径检测（FR-56）
   const [detecting, setDetecting] = useState(false)
   const [detectResult, setDetectResult] = useState<{ available: boolean; version: string } | null>(null)
+
+  // 代理连通性测试（FR-89）
+  const [testingProxy, setTestingProxy] = useState(false)
+  const [proxyTestResult, setProxyTestResult] = useState<{ reachable: boolean; detail: string } | null>(null)
 
   // 挂载时加载现有设置
   useEffect(() => {
@@ -153,6 +157,25 @@ export default function SettingsPage() {
     }
   }, [ffmpegPath])
 
+  // 测试当前输入的代理是否可达（保存前先验；后端用临时 client 探测，不改运行期代理）
+  const handleTestProxy = useCallback(async () => {
+    setTestingProxy(true)
+    setProxyTestResult(null)
+    try {
+      const res = await testProxy(networkProxy)
+      setProxyTestResult({ reachable: res.reachable, detail: res.detail })
+    } catch (err) {
+      notifications.show({
+        title: '测试失败',
+        message: extractErrorMessage(err, '测试代理连通性失败'),
+        color: 'red',
+        autoClose: 4000,
+      })
+    } finally {
+      setTestingProxy(false)
+    }
+  }, [networkProxy])
+
   return (
     <Stack gap="md">
       <Title order={2}>设置</Title>
@@ -178,16 +201,33 @@ export default function SettingsPage() {
             />
           </Card>
 
-          {/* 网络分区（FR-80）：后端出站网络代理，空=直连；随「保存设置」一并保存、保存即生效 */}
+          {/* 网络分区（FR-80/FR-89）：后端出站网络代理，空=直连；随「保存设置」一并保存、保存即生效；可在保存前先「测试」连通性 */}
           <Title order={3}>网络</Title>
           <Card withBorder padding="md" radius="md">
-            <TextInput
-              label="网络代理"
-              description="用于自更新等后端外部网络访问；留空则直连。支持 http/https/socks5"
-              placeholder="如 http://host:port 或 socks5://host:port"
-              value={networkProxy}
-              onChange={(e) => setNetworkProxy(e.currentTarget.value)}
-            />
+            <Stack gap="md">
+              <TextInput
+                label="网络代理"
+                description="用于自更新等后端外部网络访问；留空则直连。支持 http/https/socks5"
+                placeholder="如 http://host:port 或 socks5://host:port"
+                value={networkProxy}
+                onChange={(e) => { setNetworkProxy(e.currentTarget.value); setProxyTestResult(null) }}
+              />
+              <Group gap="sm">
+                <Button variant="default" onClick={handleTestProxy} loading={testingProxy}>
+                  测试
+                </Button>
+                {proxyTestResult && (
+                  proxyTestResult.reachable ? (
+                    <Badge color="green">可达：{proxyTestResult.detail}</Badge>
+                  ) : (
+                    <Badge color="red">不可达：{proxyTestResult.detail}</Badge>
+                  )
+                )}
+              </Group>
+              <Text size="xs" c="dimmed">
+                「测试」用临时连接探测代理（或直连）对外网目标的可达性，不改动运行期代理；确认可达后再用下方「保存设置」持久化。
+              </Text>
+            </Stack>
           </Card>
 
           {/* 工具路径分区（FR-56/FR-63）：ffmpeg/ffprobe/magick 可配置，随「保存设置」一并保存、保存即生效 */}

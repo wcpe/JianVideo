@@ -247,6 +247,32 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('填代理点测试，展示可达 Badge（FR-89）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const input = await screen.findByLabelText('网络代理')
+    await user.type(input, 'http://127.0.0.1:7890')
+    await user.click(screen.getByRole('button', { name: '测试' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/可达：HTTP 200/)).toBeVisible()
+    })
+  })
+
+  it('测试不可达代理时展示「不可达」Badge（FR-89）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const input = await screen.findByLabelText('网络代理')
+    await user.type(input, 'http://bad-proxy:9999')
+    await user.click(screen.getByRole('button', { name: '测试' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/不可达：/)).toBeVisible()
+    })
+  })
+
   it('保存 magick 路径走 PUT /api/settings（FR-63）', async () => {
     const user = userEvent.setup()
     let putBody: { settings: Record<string, string> } | null = null

@@ -1,4 +1,4 @@
-import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress, EnvVar, FFmpegDetectResult } from '@/types'
+import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress, EnvVar, FFmpegDetectResult, ProxyTestResult } from '@/types'
 import client from './client'
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -55,6 +55,12 @@ async function realGetEnvVars(): Promise<EnvVar[]> {
 
 async function realDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
   const res = await client.post<FFmpegDetectResult>('/api/system/ffmpeg/detect', { path: path ?? '' })
+  return res.data
+}
+
+async function realTestProxy(proxy?: string): Promise<ProxyTestResult> {
+  // 代理探测需发起出站请求、国内常较慢；单请求超时放宽到 15s（覆盖全局），避免前端先于后端超时。
+  const res = await client.post<ProxyTestResult>('/api/system/proxy/test', { proxy: proxy ?? '' }, { timeout: 15000 })
   return res.data
 }
 
@@ -193,6 +199,18 @@ async function mockDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
   }
 }
 
+async function mockTestProxy(proxy?: string): Promise<ProxyTestResult> {
+  await mockDelay(300)
+  // 模拟：含 bad 字样视为不可达，其余（含空=直连）视为可达
+  const reachable = !proxy || !proxy.toLowerCase().includes('bad')
+  return {
+    reachable,
+    detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
+    latency_ms: reachable ? 123 : 0,
+    target: 'https://api.github.com',
+  }
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -228,6 +246,11 @@ export function getEnvVars(): Promise<EnvVar[]> {
 // FFmpeg 路径检测（FR-56）：path 可空 = 测当前已配置路径
 export function detectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
   return useMock ? mockDetectFFmpeg(path) : realDetectFFmpeg(path)
+}
+
+// 代理连通性测试（FR-89）：proxy 可空 = 测直连；用临时 client 探测，不改后端运行期代理
+export function testProxy(proxy?: string): Promise<ProxyTestResult> {
+  return useMock ? mockTestProxy(proxy) : realTestProxy(proxy)
 }
 
 // pingHealth 探测服务是否在线，用于自更新/回滚重启后轮询恢复。

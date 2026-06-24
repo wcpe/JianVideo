@@ -9,8 +9,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
+
+// defaultProxyTestTarget 代理连通性测试的默认探测目标（FR-89）。
+// 与 FR-46 自更新出站目标一致：代理能连通它即说明自更新等出站访问可走该代理。
+const defaultProxyTestTarget = "https://api.github.com"
+
+// proxyTestTimeout 单次代理连通性探测的整体超时上限（FR-89）：足够覆盖一次握手 + GET，又不长时间阻塞。
+const proxyTestTimeout = 10 * time.Second
 
 // SystemInfo GET /api/system/info
 // 返回系统信息（OS/架构/CPU 数/主机名/Go 版本/应用版本）与 ffmpeg 状态及硬件加速检测结果。
@@ -214,5 +222,28 @@ func (h *Handler) DetectFFmpeg(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"ffmpeg_available": available,
 		"ffmpeg_version":   version,
+	})
+}
+
+// TestProxy POST /api/system/proxy/test
+// 测试指定代理对默认目标的连通性（FR-89），请求体 {"proxy":"..."}（proxy 可空 = 测直连）。
+// 用临时 http.Client 探测，绝不改动运行期全局代理真源（netproxy.current）；
+// 含凭据的代理地址在返回与日志中一律脱敏。返回 {reachable, detail, latency_ms}。
+func (h *Handler) TestProxy(c *gin.Context) {
+	var req struct {
+		Proxy string `json:"proxy"`
+	}
+	// 允许空 body / 缺省 proxy：绑定失败不视为错误，按测直连处理。
+	_ = c.ShouldBindJSON(&req)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), proxyTestTimeout)
+	defer cancel()
+
+	reachable, detail, latency := netproxy.TestProxy(ctx, req.Proxy, defaultProxyTestTarget)
+	c.JSON(http.StatusOK, gin.H{
+		"reachable":  reachable,
+		"detail":     detail,
+		"latency_ms": latency.Milliseconds(),
+		"target":     defaultProxyTestTarget,
 	})
 }

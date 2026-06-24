@@ -156,6 +156,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sys.GET("/env", h.SystemEnv)
 		// FFmpeg 路径检测（FR-56）：保存前先验路径是否可用
 		sys.POST("/ffmpeg/detect", h.DetectFFmpeg)
+		// 代理连通性测试（FR-89）：保存前先验代理是否可达，用临时 client、不污染运行期代理
+		sys.POST("/proxy/test", h.TestProxy)
 		// 远程自更新（FR-46）：检测 / 应用 / 回滚
 		sys.GET("/update/check", h.CheckUpdate)
 		sys.POST("/update/apply", h.ApplyUpdate)

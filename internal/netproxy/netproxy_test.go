@@ -1,9 +1,13 @@
 package netproxy
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // reset 把全局代理清回直连，保证用例之间互不污染。
@@ -148,4 +152,100 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestTestProxy_EmptyMeansDirectReachable 空代理 = 直连，能连通本地 httptest 目标。
+func TestTestProxy_EmptyMeansDirectReachable(t *testing.T) {
+	reset(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	reachable, detail, latency := TestProxy(context.Background(), "", target.URL)
+	if !reachable {
+		t.Fatalf("直连本地目标应可达，detail=%q", detail)
+	}
+	if latency <= 0 {
+		t.Errorf("耗时应为正值，实际 %v", latency)
+	}
+}
+
+// TestTestProxy_ForwardsThroughProxy 合法代理转发命中：探测请求确实经过本地代理桩。
+func TestTestProxy_ForwardsThroughProxy(t *testing.T) {
+	reset(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	// 本地 HTTP 代理桩：收到任何转发请求即计数并回 200，证明探测确经代理。
+	var hit atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxy.Close()
+
+	reachable, detail, _ := TestProxy(context.Background(), proxy.URL, target.URL)
+	if !reachable {
+		t.Fatalf("经本地代理桩应可达，detail=%q", detail)
+	}
+	if hit.Load() == 0 {
+		t.Error("探测请求未命中代理桩，说明未经代理转发")
+	}
+}
+
+// TestTestProxy_InvalidURLReturnsError 非法代理 URL 判不可达且给出明确错误，不发起请求。
+func TestTestProxy_InvalidURLReturnsError(t *testing.T) {
+	reset(t)
+	reachable, detail, latency := TestProxy(context.Background(), "ftp://127.0.0.1:21", "http://127.0.0.1:1")
+	if reachable {
+		t.Error("非法代理协议应判不可达")
+	}
+	if detail == "" {
+		t.Error("非法代理应返回明确错误说明")
+	}
+	if latency != 0 {
+		t.Errorf("非法 URL 不应发起请求，耗时应为 0，实际 %v", latency)
+	}
+}
+
+// TestTestProxy_DoesNotPolluteCurrent 探测（无论合法 / 非法 / 直连）绝不改动运行期 current。
+func TestTestProxy_DoesNotPolluteCurrent(t *testing.T) {
+	reset(t)
+	const baseline = "http://127.0.0.1:7890"
+	if err := SetProxy(baseline); err != nil {
+		t.Fatalf("设置基线代理失败: %v", err)
+	}
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	// 用与基线不同的待测代理 + 直连 + 非法值分别探测，运行期 current 都不应被改动。
+	_, _, _ = TestProxy(context.Background(), "http://127.0.0.1:9999", target.URL)
+	_, _, _ = TestProxy(context.Background(), "", target.URL)
+	_, _, _ = TestProxy(context.Background(), "ftp://bad", target.URL)
+
+	u, _ := ProxyFunc(&http.Request{})
+	if u == nil || u.Host != "127.0.0.1:7890" {
+		t.Errorf("探测后运行期代理应保持基线 %q，实际 %v", baseline, u)
+	}
+}
+
+// TestTestProxy_RedactsCredentials 含凭据的代理连不上时，错误说明不回显明文密码。
+func TestTestProxy_RedactsCredentials(t *testing.T) {
+	reset(t)
+	// 指向一个必然连不上的地址，触发网络层错误，检查 detail 不含明文密码。
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	reachable, detail, _ := TestProxy(ctx, "http://user:supersecret@127.0.0.1:1/", "http://127.0.0.1:2/")
+	if reachable {
+		t.Error("连不上的代理应判不可达")
+	}
+	if contains(detail, "supersecret") {
+		t.Errorf("错误说明不应回显明文密码，实际 %q", detail)
+	}
 }

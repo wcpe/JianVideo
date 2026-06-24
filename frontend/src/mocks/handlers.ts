@@ -606,6 +606,20 @@ export const handlers = [
     })
   }),
 
+  // 代理连通性测试（FR-89）：含 bad 字样视为不可达，其余（含空=直连）视为可达
+  http.post('*/api/system/proxy/test', async ({ request }) => {
+    await delay(120)
+    const body = await request.json() as { proxy?: string }
+    const proxy = body.proxy || ''
+    const reachable = !proxy || !proxy.toLowerCase().includes('bad')
+    return HttpResponse.json({
+      reachable,
+      detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
+      latency_ms: reachable ? 123 : 0,
+      target: 'https://api.github.com',
+    })
+  }),
+
   // 自更新（FR-46）
   http.get('*/api/system/update/check', async ({ request }) => {
     await delay(150)

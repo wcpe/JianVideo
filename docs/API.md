@@ -809,6 +809,19 @@
   ```
 - **说明**：对指定路径跑 `path -version` 验证是否可用（`path` 可省/空 = 测当前已配置路径）。**仅探测、不改写运行期全局路径**，供用户保存前先验路径。不可用时返回 `ffmpeg_available:false` 且 `ffmpeg_version` 为空串。持久化路径走 `PUT /api/settings`（键 `ffmpeg_path`/`ffprobe_path`），保存后即时应用到运行期。
 
+### 测试代理连通性（FR-89）
+
+- **方法 / 路径**：`POST /api/system/proxy/test`
+- **请求**：
+  ```json
+  { "proxy": "http://host:port" }
+  ```
+- **响应**（200）：
+  ```json
+  { "reachable": true, "detail": "HTTP 200", "latency_ms": 123, "target": "https://api.github.com" }
+  ```
+- **说明**：用**临时 `http.Client`** 经待测代理（`proxy` 可省/空 = 测直连）对默认目标 `https://api.github.com`（与自更新出站目标一致，FR-46）发一次轻量 GET 探测连通性。**仅探测、绝不改写运行期全局代理真源**（`netproxy.current`），与「保存即生效」的 `PUT /api/settings`（键 `network_proxy`，FR-80）解耦，供用户保存前先验。只要 HTTP 层拿到任意响应（含 4xx）即 `reachable:true`、`detail` 为 `HTTP <状态码>`；网络层错误（连不上代理 / 目标、超时）`reachable:false`、`detail` 为脱敏后的原因。**代理 URL 含 userinfo 凭据时返回与日志一律脱敏，绝不回显明文**（安全红线）。整体超时约 10s。
+
 ### 自更新下载进度（FR-90）
 
 - **方法 / 路径**：`GET /api/system/update/progress`

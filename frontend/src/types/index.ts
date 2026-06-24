@@ -448,6 +448,18 @@ export interface FFmpegDetectResult {
   ffmpeg_version: string
 }
 
+/** 代理连通性测试结果（FR-89） */
+export interface ProxyTestResult {
+  /** 经待测代理（或直连）是否能连通探测目标 */
+  reachable: boolean
+  /** 结果说明：可达为 HTTP 状态、不可达为脱敏后的原因 */
+  detail: string
+  /** 本次探测耗时（毫秒） */
+  latency_ms: number
+  /** 探测目标地址 */
+  target: string
+}
+
 /** 回收站清理结果统计（FR-26）：成功移动数与失败跳过数 */
 export interface RecycleCleanupResult {
   moved: number
