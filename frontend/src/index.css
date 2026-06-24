@@ -42,6 +42,21 @@ body {
   box-shadow: var(--mantine-shadow-md);
 }
 
+/* 媒体卡 hover 快捷操作浮层（FR-99）：默认隐藏（透明 + 上移微偏），
+   卡片悬停 / 内部聚焦时淡入显现，使播放/收藏/更多无需点进详情即可触达。 */
+.media-card-actions {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+  pointer-events: none;
+}
+.media-card:hover .media-card-actions,
+.media-card:focus-within .media-card-actions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 /* 路由切换页面进入动画（FR-96）：轻量 fade + 上移渐入 */
 .route-fade {
   animation: jianvideo-route-fade-in 200ms ease;
@@ -87,6 +102,15 @@ body {
   }
   .route-fade {
     animation: none;
+  }
+  /* 媒体卡浮层（FR-99）：减少动态时去掉过渡与位移，仅靠透明度即时切换 */
+  .media-card-actions {
+    transition: none;
+    transform: none;
+  }
+  .media-card:hover .media-card-actions,
+  .media-card:focus-within .media-card-actions {
+    transform: none;
   }
 }
 
@@ -135,5 +159,11 @@ textarea:focus:not(:focus-visible),
   .mantine-ActionIcon-root {
     min-width: 44px;
     min-height: 44px;
+  }
+  /* 触控设备无 hover（FR-99）：媒体卡操作浮层常显，避免无法触达 */
+  .media-card-actions {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
 }

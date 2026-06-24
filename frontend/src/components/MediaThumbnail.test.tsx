@@ -3,10 +3,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { MantineProvider } from '@mantine/core'
 import MediaThumbnail from './MediaThumbnail'
 
-function renderThumb(props?: Partial<{ mediaID: number; fileName: string; aspectRatio: string }>) {
+function renderThumb(props?: Partial<React.ComponentProps<typeof MediaThumbnail>>) {
   return render(
     <MantineProvider>
-      <MediaThumbnail mediaID={props?.mediaID ?? 1} fileName={props?.fileName ?? 'pic.png'} aspectRatio={props?.aspectRatio} />
+      <MediaThumbnail
+        mediaID={props?.mediaID ?? 1}
+        fileName={props?.fileName ?? 'pic.png'}
+        aspectRatio={props?.aspectRatio}
+        objectFit={props?.objectFit}
+        overlay={props?.overlay}
+      />
     </MantineProvider>,
   )
 }
@@ -68,6 +74,17 @@ describe('MediaThumbnail', () => {
     const img2 = screen.getByAltText('pic.png') as HTMLImageElement
     fireEvent.load(img2)
     expect(container.querySelector('.mantine-Skeleton-root')).toBeNull()
+  })
+
+  it('传入 objectFit=cover 时图片以 cover 填充（FR-99）', () => {
+    renderThumb({ objectFit: 'cover' })
+    const img = screen.getByAltText('pic.png') as HTMLImageElement
+    expect(img.style.objectFit).toBe('cover')
+  })
+
+  it('渲染传入的 overlay 叠层内容（FR-99）', () => {
+    renderThumb({ overlay: <div data-testid="ov">叠层</div> })
+    expect(screen.getByTestId('ov')).toBeTruthy()
   })
 
   it('加载失败且非 202 时显示降级占位', async () => {

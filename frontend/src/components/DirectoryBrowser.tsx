@@ -1,12 +1,14 @@
 import { useMemo, useEffect, useState } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, Checkbox } from '@mantine/core'
-import { IconFolder, IconAlertCircle, IconSearchOff } from '@tabler/icons-react'
+import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Badge, Checkbox, ActionIcon } from '@mantine/core'
+import { IconFolder, IconAlertCircle, IconSearchOff, IconPlayerPlay, IconDots } from '@tabler/icons-react'
 import EmptyState from '@/components/EmptyState'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import MediaCardOverlay from '@/components/MediaCardOverlay'
 import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu'
+import SelectionBatchBar from '@/components/SelectionBatchBar'
 import { useMultiSelect } from '@/hooks/useMultiSelect'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
@@ -44,11 +46,12 @@ interface DirectoryBrowserProps {
   onBatchDownload?: (ids: number[]) => void
 }
 
-// 各档位的网格列数（图标档）
-const GRID_COLS: Record<Exclude<DisplayMode, 'list'>, { base: number; sm: number; lg: number }> = {
-  large: { base: 2, sm: 3, lg: 4 },
-  medium: { base: 3, sm: 5, lg: 6 },
-  small: { base: 4, sm: 6, lg: 8 },
+// 各图标档的响应式列数（FR-99）：按容器宽度断点自适应增/减列，超宽屏增列、窄屏减列。
+// 档位（大/中/小）通过不同断点阈值控制每列目标宽度（小图标列更密）。
+const GRID_COLS: Record<Exclude<DisplayMode, 'list'>, Record<string, number>> = {
+  large: { '180px': 2, '480px': 3, '760px': 4, '1080px': 5, '1400px': 6 },
+  medium: { '160px': 3, '480px': 4, '720px': 6, '1080px': 8, '1400px': 10 },
+  small: { '160px': 4, '420px': 6, '720px': 8, '1080px': 10, '1400px': 12 },
 }
 
 /** 按排序方式对文件排序（纯函数，不改输入）。 */
@@ -124,6 +127,10 @@ export default function DirectoryBrowser({
     const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId]
     fn?.(ids)
   }
+
+  // sticky 批量条（FR-99）：以当前选中集为对象调用 FR-91 批量回调，复用已有多选 state。
+  const selectedArr = () => Array.from(selectedIds).sort((a, b) => a - b)
+  const runBarBatch = (fn?: (ids: number[]) => void) => { if (selectedIds.size > 0) fn?.(selectedArr()) }
 
   if (error) {
     return (
@@ -212,10 +219,10 @@ export default function DirectoryBrowser({
           })}
         </Stack>
       ) : (
-        // 图标档（大/中/小）
-        <SimpleGrid cols={cols}>
+        // 图标档（大/中/小）：响应式列数 + 缩略图叠层信息卡（FR-99）
+        <SimpleGrid type="container" cols={cols}>
           {sortedDirs.map((dir) => (
-            <Card key={`dir-${dir.path}`} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)"
+            <Card key={`dir-${dir.path}`} withBorder p="sm" radius="md" bg="var(--mantine-color-default)"
               style={{ cursor: 'pointer' }} className="hover-card" onClick={() => onEnterDir(dir)}>
               <Stack gap={4} align="center">
                 <IconFolder size={displayMode === 'small' ? 24 : 40} color="var(--mantine-color-purple-4)" />
@@ -224,34 +231,69 @@ export default function DirectoryBrowser({
             </Card>
           ))}
           {sortedFiles.map((file, i) => {
+            const isImage = isImageFile(file, customImageExtensions)
             const selected = selectedIds.has(file.id)
             return (
-              <Card key={`file-${file.id}`} withBorder p={displayMode === 'small' ? 4 : 'sm'} radius="md"
-                bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
-                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined, position: 'relative' }}
-                className="hover-card"
+              <Card key={`file-${file.id}`} withBorder p={0} radius="md"
+                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined, position: 'relative', overflow: 'hidden' }}
+                className="hover-card media-card"
                 onClick={(e) => select.handleItemClick(i, e)}
                 onDoubleClick={() => onOpenFile(file, i)}
                 onContextMenu={(e) => handleContextMenu(i, e)}
                 data-selected={selected || undefined}
               >
-                {select.checkboxMode && (
-                  <Checkbox
-                    size="xs" checked={selected} readOnly tabIndex={-1}
-                    aria-label={`选择 ${mediaDisplayName(file)}`}
-                    style={{ position: 'absolute', top: 6, left: 6, zIndex: 1 }}
+                <Box style={{ position: 'relative' }}>
+                  <MediaThumbnail
+                    mediaID={file.id}
+                    fileName={file.file_name}
+                    objectFit="cover"
+                    overlay={<MediaCardOverlay file={file} isImage={isImage} selected={selected} checkboxMode={select.checkboxMode} />}
                   />
-                )}
-                <Box mb={4}>
-                  <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
+                  {select.checkboxMode && (
+                    <Checkbox
+                      size="xs" checked={selected} readOnly tabIndex={-1}
+                      aria-label={`选择 ${mediaDisplayName(file)}`}
+                      style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
+                    />
+                  )}
+                  {/* hover 快捷操作浮层（FR-99）：双击打开沿用，浮层提供单击打开/更多入口 */}
+                  <Group
+                    gap={6} wrap="nowrap"
+                    className="media-card-actions"
+                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 6 }}
+                  >
+                    <ActionIcon
+                      variant="filled" color="dark" size="sm" radius="xl"
+                      aria-label="打开" title="打开"
+                      onClick={(e) => { e.stopPropagation(); onOpenFile(file, i) }}
+                    >
+                      <IconPlayerPlay size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="filled" color="dark" size="sm" radius="xl"
+                      aria-label="更多操作" title="更多操作"
+                      onClick={(e) => { e.stopPropagation(); handleContextMenu(i, e) }}
+                    >
+                      <IconDots size={14} />
+                    </ActionIcon>
+                  </Group>
                 </Box>
-                {displayMode !== 'small' && (
-                  <Text size="xs" truncate title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
-                )}
               </Card>
             )
           })}
         </SimpleGrid>
+      )}
+
+      {/* sticky 批量操作条（FR-99）：选中 ≥1 项时浮现，复用已有多选 state 与 FR-91 批量回调 */}
+      {selectionEnabled && (
+        <SelectionBatchBar
+          count={selectedIds.size}
+          onClear={select.clear}
+          onDelete={() => onBatchDelete?.(selectedArr())}
+          onAddToAlbum={onBatchAddToAlbum ? () => runBarBatch(onBatchAddToAlbum) : undefined}
+          onAddTag={onBatchAddTag ? () => runBarBatch(onBatchAddTag) : undefined}
+          onDownload={onBatchDownload ? () => runBarBatch(onBatchDownload) : undefined}
+        />
       )}
 
       {/* 右键常用菜单（FR-69）：父组件关心选择时挂载 */}

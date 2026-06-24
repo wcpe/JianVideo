@@ -1,14 +1,15 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Badge, Skeleton, Alert, Stack, Loader, Center, ActionIcon, Checkbox } from '@mantine/core'
-import { IconFolder, IconAlertCircle, IconStar, IconStarFilled, IconSearchOff } from '@tabler/icons-react'
+import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Loader, Center, ActionIcon, Checkbox } from '@mantine/core'
+import { IconFolder, IconAlertCircle, IconStar, IconStarFilled, IconSearchOff, IconPlayerPlay, IconDots } from '@tabler/icons-react'
 import EmptyState from '@/components/EmptyState'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
-import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
 import { groupMediaByDate } from '@/utils/timeline'
 import MediaThumbnail from '@/components/MediaThumbnail'
+import MediaCardOverlay from '@/components/MediaCardOverlay'
 import TimelineScrubber from '@/components/TimelineScrubber'
 import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu'
+import SelectionBatchBar from '@/components/SelectionBatchBar'
 import { useMultiSelect, type ClickModifiers } from '@/hooks/useMultiSelect'
 import type { MediaFile } from '@/types'
 import type { DateGroup, TimelineGranularity } from '@/utils/timeline'
@@ -100,9 +101,9 @@ function DateGroupRow({
         <Box style={{ position: 'absolute', left: 4, top: 14, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
       </Box>
 
-      {/* 右侧媒体卡片网格 */}
+      {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列 */}
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <SimpleGrid cols={{ base: 2, sm: 3, lg: 4 }}>
+        <SimpleGrid type="container" cols={{ '180px': 2, '480px': 3, '760px': 4, '1040px': 5, '1360px': 6 }}>
           {group.files.map((file) => {
             const isImage = isImageFile(file, customImageExtensions)
             const selected = selection.enabled && selection.isSelected(file.id)
@@ -119,48 +120,64 @@ function DateGroupRow({
             return (
               <Card
                 key={file.id}
-                withBorder p="sm" radius="md"
-                bg={selected ? 'var(--mantine-color-purple-light)' : 'var(--mantine-color-default)'}
-                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-5)' : undefined }}
+                withBorder p={0} radius="md"
+                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined, overflow: 'hidden' }}
                 onClick={handleClick}
                 onContextMenu={(e) => selection.onCardContextMenu(file.id, e)}
-                className="hover-card"
+                className="hover-card media-card"
                 data-selected={selected || undefined}
               >
-                {/* 视频与图片都展示缩略图，右上角叠加标星按钮（FR-41） */}
-                <Box mb="xs" style={{ position: 'relative' }}>
-                  <MediaThumbnail mediaID={file.id} fileName={file.file_name} />
+                {/* 缩略图铺满卡面 + 叠层信息（FR-99）：信息密度叠到底部渐变层，不再多行占高 */}
+                <Box style={{ position: 'relative' }}>
+                  <MediaThumbnail
+                    mediaID={file.id}
+                    fileName={file.file_name}
+                    objectFit="cover"
+                    overlay={<MediaCardOverlay file={file} isImage={isImage} selected={selected} checkboxMode={selection.checkboxMode} />}
+                  />
                   {selection.enabled && selection.checkboxMode && (
                     <Checkbox
                       size="xs" checked={selected} readOnly tabIndex={-1}
                       aria-label={`选择 ${mediaDisplayName(file)}`}
-                      style={{ position: 'absolute', top: 6, left: 6, zIndex: 1 }}
+                      style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
                     />
                   )}
-                  {onToggleFavorite && (
+                  {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 收藏 / 更多 */}
+                  <Group
+                    gap={6} wrap="nowrap"
+                    className="media-card-actions"
+                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 6 }}
+                  >
                     <ActionIcon
-                      variant="filled"
-                      color={file.favorite ? 'yellow' : 'dark'}
-                      size="sm"
-                      aria-label={file.favorite ? '取消收藏' : '收藏'}
-                      title={file.favorite ? '取消收藏' : '收藏'}
-                      style={{ position: 'absolute', top: 6, right: 6, opacity: 0.9 }}
-                      onClick={(e) => {
-                        // 阻止冒泡，避免触发卡片打开
-                        e.stopPropagation()
-                        onToggleFavorite(file)
-                      }}
+                      variant="filled" color="dark" size="sm" radius="xl"
+                      aria-label="播放" title="播放"
+                      onClick={(e) => { e.stopPropagation(); onOpenFile(file) }}
                     >
-                      {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                      <IconPlayerPlay size={14} />
                     </ActionIcon>
-                  )}
+                    {onToggleFavorite && (
+                      <ActionIcon
+                        variant="filled"
+                        color={file.favorite ? 'yellow' : 'dark'}
+                        size="sm" radius="xl"
+                        aria-label={file.favorite ? '取消收藏' : '收藏'}
+                        title={file.favorite ? '取消收藏' : '收藏'}
+                        onClick={(e) => { e.stopPropagation(); onToggleFavorite(file) }}
+                      >
+                        {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                      </ActionIcon>
+                    )}
+                    {selection.enabled && (
+                      <ActionIcon
+                        variant="filled" color="dark" size="sm" radius="xl"
+                        aria-label="更多操作" title="更多操作"
+                        onClick={(e) => { e.stopPropagation(); selection.onCardContextMenu(file.id, e) }}
+                      >
+                        <IconDots size={14} />
+                      </ActionIcon>
+                    )}
+                  </Group>
                 </Box>
-                <Text fw={500} size="sm" truncate mb="xs" title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
-                <Group gap="xs" wrap="nowrap">
-                  <Badge size="xs" variant="light" color="blue">{file.format.toUpperCase()}</Badge>
-                  <Badge size="xs" variant="light" color="purple">{formatSize(file.file_size)}</Badge>
-                  {!isImage && <Badge size="xs" variant="light" color="gray">{formatDuration(file.duration)}</Badge>}
-                </Group>
               </Card>
             )
           })}
@@ -253,6 +270,10 @@ export default function TimelineView({
     const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId]
     fn?.(ids)
   }
+
+  // sticky 批量条（FR-99）：以当前选中集为对象调用 FR-91 批量回调，复用已有多选 state。
+  const selectedArr = () => Array.from(selectedIds).sort((a, b) => a - b)
+  const runBarBatch = (fn?: (ids: number[]) => void) => { if (selectedIds.size > 0) fn?.(selectedArr()) }
 
   const selection: SelectionContext = {
     enabled: selectionEnabled,
@@ -380,6 +401,18 @@ export default function TimelineView({
         <Center py="md">
           <Loader size="sm" color="purple" />
         </Center>
+      )}
+
+      {/* sticky 批量操作条（FR-99）：选中 ≥1 项时浮现，复用已有多选 state 与 FR-91 批量回调 */}
+      {selectionEnabled && (
+        <SelectionBatchBar
+          count={selectedIds.size}
+          onClear={select.clear}
+          onDelete={() => onBatchDelete?.(selectedArr())}
+          onAddToAlbum={onBatchAddToAlbum ? () => runBarBatch(onBatchAddToAlbum) : undefined}
+          onAddTag={onBatchAddTag ? () => runBarBatch(onBatchAddTag) : undefined}
+          onDownload={onBatchDownload ? () => runBarBatch(onBatchDownload) : undefined}
+        />
       )}
 
       {/* 右键常用菜单（FR-69）：父组件关心选择时挂载 */}

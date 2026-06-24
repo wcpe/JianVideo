@@ -201,7 +201,8 @@ describe('TimelinePage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByText('海报.jpg'))
+    // 文件名已移入 pointer-events:none 的卡片底部叠层（FR-99），点击落在缩略图上（行为：点图片打开预览）
+    await user.click(await screen.findByAltText('海报.jpg'))
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('img', { name: '海报.jpg' })).toHaveAttribute('src', '/api/library/media/88/raw')
@@ -247,7 +248,8 @@ describe('TimelinePage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByText('封面.foo'))
+    // 文件名已移入 pointer-events:none 的卡片底部叠层（FR-99），点击落在缩略图上（行为：点图片打开预览）
+    await user.click(await screen.findByAltText('封面.foo'))
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('img', { name: '封面.foo' })).toHaveAttribute('src', '/api/library/media/99/raw')

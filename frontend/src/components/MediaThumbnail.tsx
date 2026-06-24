@@ -7,6 +7,10 @@ interface MediaThumbnailProps {
   fileName: string
   // 容器纵横比（CSS aspect-ratio 值），默认 16/9 与历史一致；详情页等可传 '1/1'。
   aspectRatio?: string
+  // 图片填充方式（FR-99）：默认 contain 不裁切；网格卡可传 cover 让缩略图铺满更饱满。
+  objectFit?: 'contain' | 'cover'
+  // 叠层内容（FR-99）：渲染在缩略图之上（角标 / 播放叠层 / 信息层等），加载/降级态亦保留。
+  overlay?: React.ReactNode
 }
 
 // 受支持的多尺寸缩略图宽度（与后端 thumbnailSizes 白名单一致，FR-81 P12）。
@@ -20,7 +24,7 @@ function thumbnailURL(mediaID: number, size: number): string {
   return `/api/library/thumbnail/${mediaID}?size=${size}`
 }
 
-export default function MediaThumbnail({ mediaID, fileName, aspectRatio = '16/9' }: MediaThumbnailProps) {
+export default function MediaThumbnail({ mediaID, fileName, aspectRatio = '16/9', objectFit = 'contain', overlay }: MediaThumbnailProps) {
   // 状态机：loading 显骨架、loaded 显图、error 显降级占位。
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading')
   // reloadKey 自增以强制 <img> 重新发起请求（202 轮询时用）。
@@ -87,7 +91,7 @@ export default function MediaThumbnail({ mediaID, fileName, aspectRatio = '16/9'
           style={{
             width: '100%',
             height: '100%',
-            objectFit: 'contain',
+            objectFit,
           }}
         />
       )}
@@ -100,6 +104,8 @@ export default function MediaThumbnail({ mediaID, fileName, aspectRatio = '16/9'
           style={{ position: 'absolute', inset: 0 }}
         />
       )}
+      {/* 叠层内容（FR-99）：角标 / 播放叠层 / 底部信息层等，叠在缩略图之上 */}
+      {overlay}
     </Box>
   )
 }
