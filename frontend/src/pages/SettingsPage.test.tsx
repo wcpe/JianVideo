@@ -36,8 +36,109 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('扫描周期（秒）')).toHaveValue('3600')
     })
-    // 回收站路径初始 JSON 也应展示
-    expect(screen.getByLabelText('每盘符回收站路径（JSON）')).toHaveValue('{"D":"D:/.recycle"}')
+    // 回收站路径初始 JSON 回填为结构化行：盘符 D + 路径 D:/.recycle
+    expect(screen.getByLabelText('盘符 1')).toHaveValue('D')
+    expect(screen.getByLabelText('回收站路径 1')).toHaveValue('D:/.recycle')
+  })
+
+  it('设置项按「扫描 / 网络 / 工具路径 / 回收站」分区且字段归位', async () => {
+    renderPage()
+    await screen.findByLabelText('扫描周期（秒）')
+    // 四个分区标题均出现
+    for (const title of ['扫描', '网络', '工具路径', '回收站']) {
+      expect(screen.getByRole('heading', { name: title })).toBeVisible()
+    }
+    // 仍只有一个「保存设置」按钮（单次统一 PUT）
+    expect(screen.getAllByRole('button', { name: '保存设置' })).toHaveLength(1)
+  })
+
+  it('回收站编辑器：增行后多一组盘符/路径输入', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByLabelText('盘符 1')
+    await user.click(screen.getByRole('button', { name: '添加盘符' }))
+    expect(screen.getByLabelText('盘符 2')).toBeInTheDocument()
+    expect(screen.getByLabelText('回收站路径 2')).toBeInTheDocument()
+  })
+
+  it('回收站编辑器：删行后该组输入消失', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByLabelText('盘符 1')
+    await user.click(screen.getByRole('button', { name: '删除盘符 1' }))
+    expect(screen.queryByLabelText('盘符 1')).not.toBeInTheDocument()
+  })
+
+  it('回收站编辑器：有效行序列化为 JSON 串提交', async () => {
+    const user = userEvent.setup()
+    let putBody: { settings: Record<string, string> } | null = null
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: putBody.settings })
+      }),
+    )
+    renderPage()
+
+    const pathInput = await screen.findByLabelText('回收站路径 1')
+    await user.clear(pathInput)
+    await user.type(pathInput, 'D:/trash')
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      )
+    })
+    expect(putBody).not.toBeNull()
+    expect(putBody!.settings.recycle_bin_paths).toBe('{"D":"D:/trash"}')
+  })
+
+  it('回收站编辑器：空盘符行内校验且不提交', async () => {
+    const user = userEvent.setup()
+    let putCalled = false
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putCalled = true
+        const body = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: body.settings })
+      }),
+    )
+    renderPage()
+
+    const driveInput = await screen.findByLabelText('盘符 1')
+    await user.clear(driveInput) // 盘符清空 → 非法
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    // 行内校验提示出现，且整体不提交（不发 PUT）
+    await waitFor(() => {
+      expect(screen.getByText('盘符不能为空')).toBeVisible()
+    })
+    expect(putCalled).toBe(false)
+  })
+
+  it('回收站编辑器：重复盘符行内校验且不提交', async () => {
+    const user = userEvent.setup()
+    let putCalled = false
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putCalled = true
+        const body = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: body.settings })
+      }),
+    )
+    renderPage()
+
+    await screen.findByLabelText('盘符 1')
+    // 加一行并填与第一行相同的盘符 D
+    await user.click(screen.getByRole('button', { name: '添加盘符' }))
+    await user.type(screen.getByLabelText('盘符 2'), 'D')
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText('盘符重复').length).toBeGreaterThan(0)
+    })
+    expect(putCalled).toBe(false)
   })
 
   it('修改扫描周期并保存后提示成功', async () => {
@@ -84,6 +185,40 @@ describe('SettingsPage', () => {
     // 敏感项明文绝不出现在 DOM（脱敏）：响应里没有真实 secret，故任何 secret 串都不应可见
     // 未设置项展示「（未设置）」掩码（敏感 SMB 与非敏感 DEBUG 均如此，故至少一处）
     expect(screen.getAllByText('（未设置）').length).toBeGreaterThan(0)
+  })
+
+  it('JWT_SECRET 未设置（set=false）时显内联警示', async () => {
+    server.use(
+      http.get('*/api/system/env', () =>
+        HttpResponse.json({
+          env: [
+            { key: 'JWT_SECRET', description: 'JWT 签名密钥', sensitive: true, set: false, value: '（未设置）' },
+          ],
+        }),
+      ),
+    )
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText(/未设置 JWT_SECRET/)).toBeVisible()
+    })
+  })
+
+  it('JWT_SECRET 已设置（set=true）时不显警示', async () => {
+    server.use(
+      http.get('*/api/system/env', () =>
+        HttpResponse.json({
+          env: [
+            { key: 'JWT_SECRET', description: 'JWT 签名密钥', sensitive: true, set: true, value: '****（已设置）' },
+          ],
+        }),
+      ),
+    )
+    renderPage()
+    // 等环境变量表渲染完成
+    await waitFor(() => {
+      expect(screen.getByText('JWT_SECRET')).toBeVisible()
+    })
+    expect(screen.queryByText(/未设置 JWT_SECRET/)).not.toBeInTheDocument()
   })
 
   it('填 ffmpeg 路径点检测，展示可用性与版本', async () => {

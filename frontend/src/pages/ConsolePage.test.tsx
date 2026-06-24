@@ -62,9 +62,9 @@ describe('ConsolePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true')
     })
-    // SettingsPage 内容渲染：扫描周期 / 回收站路径输入
+    // SettingsPage 内容渲染：扫描周期 / 回收站结构化编辑器首行盘符（FR-87）
     expect(await screen.findByLabelText('扫描周期（秒）')).toBeInTheDocument()
-    expect(screen.getByLabelText('每盘符回收站路径（JSON）')).toBeInTheDocument()
+    expect(screen.getByLabelText('盘符 1')).toBeInTheDocument()
     // URL query 已更新
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=settings')
   })
