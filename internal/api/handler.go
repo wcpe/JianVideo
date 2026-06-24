@@ -62,6 +62,10 @@ type Handler struct {
 
 	// 媒体健康巡检服务（FR-73）：未注入时健康端点返回 503。
 	health *library.HealthService
+
+	// 转码预设存储与预生成队列（FR-77）：未注入时相关端点返回 503。
+	presets     *transcoder.PresetStore
+	pregenQueue *transcoder.PregenQueue
 }
 
 // NewHandler 创建处理器。
@@ -97,6 +101,14 @@ func (h *Handler) WithDBPath(path string) *Handler {
 // 未注入时相关端点返回 503，保持无服务环境可用。
 func (h *Handler) WithHealthService(svc *library.HealthService) *Handler {
 	h.health = svc
+	return h
+}
+
+// WithTranscodePresets 注入转码预设存储与预生成队列（FR-77），启用预设 CRUD 与预生成端点。
+// 未注入时相关端点返回 503，保持无服务环境可用。
+func (h *Handler) WithTranscodePresets(store *transcoder.PresetStore, queue *transcoder.PregenQueue) *Handler {
+	h.presets = store
+	h.pregenQueue = queue
 	return h
 }
 

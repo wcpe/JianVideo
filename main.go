@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"log"
@@ -83,6 +84,8 @@ func main() {
 		&models.Share{},
 		&models.CodecProbeCache{},
 		&models.MediaHealthIssue{},
+		&models.TranscodePreset{},
+		&models.TranscodeTask{},
 	); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
@@ -179,7 +182,25 @@ func main() {
 	// 媒体健康巡检服务（FR-73）：后台只读巡检全部未软删媒体，问题落 media_health_issues 表。
 	healthSvc := library.NewDefaultHealthService(gormDB)
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc)
+	// 转码预设与预生成队列（FR-77）：预设存储 + 单 worker 串行预生成队列。
+	// exec 闭包反查媒体路径并按预设编码调 PreSliceWithCodec 预热切片到 hlsDir/{mediaID}/。
+	// 复用 FR-29 任务队列范式（见 ADR-0039），重启先恢复残留 running 再启动。
+	presetStore := transcoder.NewPresetStore(gormDB)
+	pregenQueue := transcoder.NewPregenQueue(gormDB, func(mediaID int64, codec string) error {
+		mf, err := libSvc.GetMediaFileByID(mediaID)
+		if err != nil {
+			return fmt.Errorf("预生成反查媒体失败: mediaID=%d: %w", mediaID, err)
+		}
+		_, err = transcoder.PreSliceWithCodec(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, hlsMgr, hlsDir)
+		return err
+	})
+	if err := pregenQueue.RecoverRunning(); err != nil {
+		log.Printf("[WARN] 预生成队列重启恢复失败: %v", err)
+	}
+	pregenQueue.Start()
+	defer pregenQueue.Stop()
+
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

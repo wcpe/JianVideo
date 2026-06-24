@@ -136,6 +136,17 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	// 硬件加速能力查询：读编码器实测缓存派生，与 /api/system/info 同源（FR-49）
 	r.GET("/api/transcode/hwaccel", h.HWAccel)
 
+	// 转码预设与预生成队列（FR-77）：预设 CRUD + 入预生成队列 + 列任务
+	transcode := r.Group("/api/transcode")
+	{
+		transcode.GET("/presets", h.ListTranscodePresets)
+		transcode.POST("/presets", h.CreateTranscodePreset)
+		transcode.PUT("/presets/:id", h.UpdateTranscodePreset)
+		transcode.DELETE("/presets/:id", h.DeleteTranscodePreset)
+		transcode.POST("/tasks", h.CreateTranscodeTask)
+		transcode.GET("/tasks", h.ListTranscodeTasks)
+	}
+
 	// 系统诊断（FR-21）：系统信息查询与编解码器实测
 	sys := r.Group("/api/system")
 	{
