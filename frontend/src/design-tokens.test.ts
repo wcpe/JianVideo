@@ -57,3 +57,32 @@ describe('设计系统 token（FR-92）', () => {
     expect((appTheme.other as { contentMaxWidth?: string })?.contentMaxWidth).toBe('1280px')
   })
 })
+
+// FR-93 色彩体系守护：品牌紫为主色、purple 色板已定义、语义色 token 在位。
+describe('色彩体系与语义色（FR-93）', () => {
+  it('品牌紫为全局主色（默认主色由蓝收敛回紫）', () => {
+    expect(appTheme.primaryColor).toBe('purple')
+  })
+
+  it('定义完整 10 阶品牌紫色板（修复此前未定义 purple 的兜底）', () => {
+    const purple = appTheme.colors?.purple
+    expect(purple).toBeDefined()
+    expect(purple).toHaveLength(10)
+    expect(purple?.[6]).toBe('#7e14ff') // shade 6 = 品牌主色
+  })
+
+  it('设双主题 primaryShade，保证暗/亮强调色对比', () => {
+    expect(appTheme.primaryShade).toMatchObject({ light: 6, dark: 5 })
+  })
+
+  it('暴露语义色 token（success/danger/warning/info/neutral）', () => {
+    const semantic = (appTheme.other as { semantic?: Record<string, string> })?.semantic
+    expect(semantic).toMatchObject({
+      success: 'green',
+      danger: 'red',
+      warning: 'yellow',
+      info: 'purple',
+      neutral: 'gray',
+    })
+  })
+})

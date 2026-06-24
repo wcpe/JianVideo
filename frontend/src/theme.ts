@@ -1,5 +1,14 @@
 import { createTheme } from '@mantine/core'
-import type { CSSVariablesResolver } from '@mantine/core'
+import type { CSSVariablesResolver, MantineColorsTuple } from '@mantine/core'
+
+// 品牌紫色板（FR-93）：锚定品牌主色 #7e14ff 于 shade 6 的 10 阶色阶。
+// 此前全站引用 --mantine-color-purple-* / color="purple"，却从未定义 purple 色板，
+// 靠未定义 CSS 变量 / CSS 命名色兜底（不一致）；这里正式定义并设为 primaryColor，
+// 一改全站默认主色由 Mantine 默认蓝转品牌紫（导航激活态/链接/默认按钮/滑块/开关随之收敛）。
+const brandPurple: MantineColorsTuple = [
+  '#f3ebff', '#e0ccff', '#c9a7fb', '#b182f7', '#9c63f3',
+  '#8a45f0', '#7e14ff', '#6f10e6', '#5c0cbd', '#490996',
+]
 
 // 全局 CSS 变量覆盖（FR-84）：
 // Mantine 暗色默认把 `--mantine-color-dimmed` 映射到 dark.2(#828282)，
@@ -21,6 +30,11 @@ export const themeCssVariablesResolver: CSSVariablesResolver = () => ({
 // 不发明新 token 体系（Mantine 已有 spacing/radius/shadows/fontSizes/lineHeights），
 // 不做全站 find-replace；spacing/fontSizes 沿用 Mantine 默认以免大面积布局回归。
 export const appTheme = createTheme({
+  // 品牌紫为全局主色（FR-93）：默认按钮/链接/导航激活态/滑块/开关等随之由蓝转紫
+  primaryColor: 'purple',
+  // 暗色用略亮一档主色、亮色用 6 档，保证两主题下强调色对比
+  primaryShade: { light: 6, dark: 5 },
+  colors: { purple: brandPurple },
   // 全局默认圆角：卡片/按钮/输入等统一继承，免逐处写死
   defaultRadius: 'md',
   // 可见焦点环（无障碍地基，FR-97 依赖）：键盘聚焦时显示
@@ -65,5 +79,14 @@ export const appTheme = createTheme({
   // 自定义语义 token：供后续布局 FR（如 FR-95 内容限宽居中）消费
   other: {
     contentMaxWidth: '1280px',
+    // 语义色 token（FR-93）：success/danger/warning/info/neutral → Mantine 命名色，
+    // 供组件/页按语义取色，约束「绿蓝红」只用于其语义场景，避免滥用。
+    semantic: {
+      success: 'green',
+      danger: 'red',
+      warning: 'yellow',
+      info: 'purple',
+      neutral: 'gray',
+    },
   },
 })
