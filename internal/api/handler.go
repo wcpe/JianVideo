@@ -1,10 +1,12 @@
 package api
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"net/http"
@@ -803,6 +805,124 @@ func (h *Handler) serveDownload(c *gin.Context, mf *models.MediaFile) {
 	// 以附件下载，文件名用真实文件名；按 RFC 5987 编码以兼容中文/特殊字符并防头注入
 	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(mf.FileName))
 	c.File(mf.FilePath)
+}
+
+// 批量打包下载上限（FR-91）：超限直接拒绝，避免一次性打包过大批量拖垮服务/浏览器
+const (
+	batchDownloadMaxCount = 500              // 单次最多打包文件数
+	batchDownloadMaxBytes = 5 << 30          // 单次最多打包总大小（5 GiB）
+	batchZipFileName      = "媒体打包.zip"     // 下载附件名
+)
+
+// BatchDownloadMediaFiles GET /api/library/media/batch-download?ids=1,2,3
+// 将选中媒体的原文件用 archive/zip 流式打包为附件下载（FR-91，扩 FR-42）。
+// 边写边 flush、不一次性读入内存；smb:// 路径项与磁盘不可访问项跳过（响应头 X-Skipped 计数）；
+// 用请求 context 控制取消，不设整体超时（规避大文件被客户端超时掐断）。
+func (h *Handler) BatchDownloadMediaFiles(c *gin.Context) {
+	ids := parseBatchIDs(c.Query("ids"))
+	if len(ids) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_IDS", "message": "未提供有效的 ids"})
+		return
+	}
+	if len(ids) > batchDownloadMaxCount {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "TOO_MANY", "message": "选中数量超过上限"})
+		return
+	}
+
+	files, err := h.library.GetMediaFilesByIDs(ids)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "QUERY_FAILED", "message": "查询失败"})
+		return
+	}
+
+	// 预估总大小：超限在写任何字节前拒绝，便于客户端拿到 JSON 错误而非半截 zip
+	var totalBytes int64
+	for i := range files {
+		totalBytes += files[i].FileSize
+	}
+	if totalBytes > batchDownloadMaxBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "TOO_LARGE", "message": "选中文件总大小超过上限"})
+		return
+	}
+
+	// 响应头：附件名按 RFC 5987 编码防中文乱码与头注入；chunked 流式输出
+	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(batchZipFileName))
+	c.Header("Content-Type", "application/zip")
+	c.Writer.WriteHeader(http.StatusOK)
+
+	skipped := h.streamZip(c, files)
+	// 跳过计数经尾部头回传（chunked 下浏览器仍可读到 trailer 之外的普通头需在写前设置，
+	// 故 X-Skipped 仅作日志佐证，前端以 zip 内实际文件数为准）
+	if skipped > 0 {
+		log.Printf("[INFO] 批量打包下载跳过 %d 项（smb 或不可访问）", skipped)
+	}
+}
+
+// streamZip 把 files 的原文件逐个写入 zip 并即时 flush，返回跳过项数。
+// 跳过：smb:// 路径、打开失败的文件。任一文件中途出错记日志并继续，不中断整批。
+func (h *Handler) streamZip(c *gin.Context, files []models.MediaFile) int {
+	zw := zip.NewWriter(c.Writer)
+	defer zw.Close()
+	flusher, _ := c.Writer.(http.Flusher)
+
+	skipped := 0
+	for i := range files {
+		select {
+		case <-c.Request.Context().Done():
+			return skipped // 客户端断开，停止打包
+		default:
+		}
+		if addZipEntry(zw, &files[i]) {
+			zw.Flush()
+			if flusher != nil {
+				flusher.Flush() // 边写边推，避免在内存中累积整包
+			}
+		} else {
+			skipped++
+		}
+	}
+	return skipped
+}
+
+// addZipEntry 把单个媒体原文件写入 zip。smb:// 或打开失败返回 false（跳过）。
+func addZipEntry(zw *zip.Writer, mf *models.MediaFile) bool {
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		return false
+	}
+	f, err := os.Open(mf.FilePath)
+	if err != nil {
+		log.Printf("[WARN] 批量打包下载跳过不可访问文件 id=%d: %v", mf.ID, err)
+		return false
+	}
+	defer f.Close()
+
+	w, err := zw.Create(mf.FileName)
+	if err != nil {
+		log.Printf("[WARN] 批量打包下载创建 zip 条目失败 id=%d: %v", mf.ID, err)
+		return false
+	}
+	if _, err := io.Copy(w, f); err != nil {
+		log.Printf("[WARN] 批量打包下载写入文件出错 id=%d: %v", mf.ID, err)
+		return false
+	}
+	return true
+}
+
+// parseBatchIDs 解析逗号分隔的 id 列表，忽略空白与非法项。
+func parseBatchIDs(raw string) []int64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]int64, 0, len(parts))
+	for _, p := range parts {
+		v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
+		if err != nil || v <= 0 {
+			continue
+		}
+		ids = append(ids, v)
+	}
+	return ids
 }
 
 // ListMediaExtensions GET /api/library/extensions

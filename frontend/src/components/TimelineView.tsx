@@ -46,6 +46,10 @@ interface TimelineViewProps {
   onSelectionChange?: (ids: number[]) => void
   onBatchDelete?: (ids: number[]) => void
   onDeleteOne?: (file: MediaFile) => void
+  // 批量操作（FR-91）：以 id 集为对象（无选中退化为右键项），均可选
+  onBatchAddToAlbum?: (ids: number[]) => void
+  onBatchAddTag?: (ids: number[]) => void
+  onBatchDownload?: (ids: number[]) => void
 }
 
 /** 单个日期组的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
@@ -180,6 +184,9 @@ export default function TimelineView({
   onSelectionChange,
   onBatchDelete,
   onDeleteOne,
+  onBatchAddToAlbum,
+  onBatchAddTag,
+  onBatchDownload,
 }: TimelineViewProps) {
   // 列表容器 ref，用于计算窗口虚拟化所需的 scrollMargin（列表相对文档顶部的偏移）
   const listRef = useRef<HTMLDivElement>(null)
@@ -192,7 +199,10 @@ export default function TimelineView({
   )
 
   // 父组件关心选择（提供任一选择相关回调）时启用选择手势与右键菜单
-  const selectionEnabled = !!(onSelectionChange || onBatchDelete || onDeleteOne)
+  const selectionEnabled = !!(
+    onSelectionChange || onBatchDelete || onDeleteOne ||
+    onBatchAddToAlbum || onBatchAddTag || onBatchDownload
+  )
   // 全部已加载项按分组渲染顺序展平为有序 id 列表——Ctrl+A / Shift 区间均以此为范围（虚拟列表边界：
   // 已加载多少就能选多少，未滚动触发 loadMore 的项不在范围内）。flatIndexOf 供卡片把 id 反查为下标。
   const flatIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f.id)), [groups])
@@ -228,6 +238,13 @@ export default function TimelineView({
       const f = mediaFiles.find((x) => x.id === targetId)
       if (f) onDeleteOne?.(f)
     }
+  }
+
+  // 批量操作（FR-91）：有选中按选中集；无选中退化为右键项。统一关菜单后回调。
+  function runBatch(targetId: number, fn?: (ids: number[]) => void) {
+    setMenu(null)
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId]
+    fn?.(ids)
   }
 
   const selection: SelectionContext = {
@@ -362,6 +379,9 @@ export default function TimelineView({
           onSelectAll={() => { select.selectAll(); setMenu(null) }}
           onInvert={() => { select.invertSelection(); setMenu(null) }}
           onToggleCheckboxMode={() => { select.setCheckboxMode(!select.checkboxMode); setMenu(null) }}
+          onAddToAlbum={onBatchAddToAlbum ? (id) => runBatch(id, onBatchAddToAlbum) : undefined}
+          onAddTag={onBatchAddTag ? (id) => runBatch(id, onBatchAddTag) : undefined}
+          onDownload={onBatchDownload ? (id) => runBatch(id, onBatchDownload) : undefined}
         />
       )}
     </>

@@ -45,6 +45,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 批量软删（FR-69）：单事务对多个 media_id 复用软删，进回收站
 		lib.POST("/media/batch-delete", h.BatchDeleteMediaFiles)
 
+		// 批量打包下载（FR-91）：将选中媒体原文件流式打包为 zip 附件，smb 项跳过
+		lib.GET("/media/batch-download", h.BatchDownloadMediaFiles)
+
 		// 感知哈希去重（FR-70）：扫描计算缺失 dHash + 查询重复组
 		lib.POST("/duplicates/scan", h.ScanDuplicates)
 		lib.GET("/duplicates", h.ListDuplicates)

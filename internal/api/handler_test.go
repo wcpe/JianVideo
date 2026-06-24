@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -259,6 +260,116 @@ func TestBatchDeleteMediaFiles_InvalidBody_API(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("非法 body 期望 400, 实际 %d", w.Code)
+	}
+}
+
+// createTempMedia 在临时目录写一个内容文件并登记媒体记录，返回媒体 ID。
+func createTempMedia(t *testing.T, svc *library.Service, name, content string) int64 {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("写临时文件失败: %v", err)
+	}
+	mf, err := svc.CreateMediaFile(1, p, int64(len(content)))
+	if err != nil {
+		t.Fatalf("登记媒体失败: %v", err)
+	}
+	return mf.ID
+}
+
+// readZipNames 解析 zip 响应体，返回内含文件名→内容。
+func readZipNames(t *testing.T, body []byte) map[string]string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("解析 zip 失败: %v", err)
+	}
+	out := map[string]string{}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("打开 zip 条目失败: %v", err)
+		}
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		out[f.Name] = string(data)
+	}
+	return out
+}
+
+func TestBatchDownloadMediaFiles_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	id1 := createTempMedia(t, svc, "甲.mp4", "AAA")
+	id2 := createTempMedia(t, svc, "乙.jpg", "BBBB")
+
+	url := "/api/library/media/batch-download?ids=" +
+		strconv.FormatInt(id1, 10) + "," + strconv.FormatInt(id2, 10)
+	req := httptest.NewRequest("GET", url, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("Content-Type 应为 application/zip, 实得 %q", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "filename*=UTF-8''") {
+		t.Fatalf("Content-Disposition 应含 RFC5987 编码文件名, 实得 %q", cd)
+	}
+	names := readZipNames(t, w.Body.Bytes())
+	if len(names) != 2 {
+		t.Fatalf("zip 应含 2 个文件, 实得 %d", len(names))
+	}
+	if names["甲.mp4"] != "AAA" || names["乙.jpg"] != "BBBB" {
+		t.Fatalf("zip 内容不符: %+v", names)
+	}
+}
+
+func TestBatchDownloadMediaFiles_SkipSMBAndInvalid_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	good := createTempMedia(t, svc, "ok.mp4", "DATA")
+	// smb 项：路径以 smb:// 开头，应被跳过
+	smbMf, _ := svc.CreateMediaFile(1, "smb://server/share/x.mp4", 100)
+
+	url := "/api/library/media/batch-download?ids=" +
+		strconv.FormatInt(good, 10) + "," +
+		strconv.FormatInt(smbMf.ID, 10) + ",999999" // 含不存在 id
+	req := httptest.NewRequest("GET", url, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d", w.Code)
+	}
+	names := readZipNames(t, w.Body.Bytes())
+	if len(names) != 1 || names["ok.mp4"] != "DATA" {
+		t.Fatalf("应仅含可访问的本地文件, 实得 %+v", names)
+	}
+}
+
+func TestBatchDownloadMediaFiles_EmptyIDs_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	req := httptest.NewRequest("GET", "/api/library/media/batch-download?ids=", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("空 ids 期望 400, 实际 %d", w.Code)
+	}
+}
+
+func TestBatchDownloadMediaFiles_TooMany_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	parts := make([]string, batchDownloadMaxCount+1)
+	for i := range parts {
+		parts[i] = strconv.Itoa(i + 1)
+	}
+	req := httptest.NewRequest("GET", "/api/library/media/batch-download?ids="+strings.Join(parts, ","), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("超数量上限期望 400, 实际 %d", w.Code)
 	}
 }
 

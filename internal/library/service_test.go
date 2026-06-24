@@ -425,6 +425,39 @@ func TestBatchDeleteMediaFiles_SkipsInvalidAndDeleted(t *testing.T) {
 	}
 }
 
+// TestGetMediaFilesByIDs 批量取媒体记录：排除已软删项、不存在 id 不在结果、空列表 no-op（FR-91）。
+func TestGetMediaFilesByIDs(t *testing.T) {
+	svc, _ := newTestService(t)
+	a, _ := svc.CreateMediaFile(1, "/tmp/a.mp4", 1024)
+	b, _ := svc.CreateMediaFile(1, "/tmp/b.mp4", 2048)
+	gone, _ := svc.CreateMediaFile(1, "/tmp/gone.mp4", 512)
+	if err := svc.DeleteMediaFile(gone.ID); err != nil {
+		t.Fatalf("预置软删失败: %v", err)
+	}
+
+	// 含有效 a/b、已软删 gone、不存在 99999：结果应仅含 a、b
+	items, err := svc.GetMediaFilesByIDs([]int64{a.ID, b.ID, gone.ID, 99999})
+	if err != nil {
+		t.Fatalf("批量查询失败: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("应仅含 2 条有效项, 实得 %d", len(items))
+	}
+	got := map[int64]bool{}
+	for i := range items {
+		got[items[i].ID] = true
+	}
+	if !got[a.ID] || !got[b.ID] {
+		t.Fatalf("结果应含 a、b, 实得 %+v", got)
+	}
+
+	// 空列表为 no-op
+	empty, err := svc.GetMediaFilesByIDs(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("空列表应返回空切片不报错, err=%v len=%d", err, len(empty))
+	}
+}
+
 func TestCreateMediaFile_EmptyPath(t *testing.T) {
 	svc, _ := newTestService(t)
 

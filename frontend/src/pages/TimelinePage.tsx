@@ -13,6 +13,8 @@ import ContinueWatching from '@/components/ContinueWatching'
 import OnThisDay from '@/components/OnThisDay'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import ConfirmModal from '@/components/ConfirmModal'
+import BatchActionsModals from '@/components/BatchActionsModals'
+import { useBatchActions } from '@/hooks/useBatchActions'
 import { extractErrorMessage } from '@/utils/error'
 import * as libApi from '@/api/library'
 import type { TimelineGranularity } from '@/utils/timeline'
@@ -38,6 +40,8 @@ export default function TimelinePage() {
   // 移动端筛选抽屉开合（FR-86）：窄屏将筛选控件收进抽屉，搜索框常驻
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false)
   const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo, sort: 'media_time' })
+  // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
+  const batch = useBatchActions()
   const paths = useLibraryPaths(undefined)
   const exts = paths.customImageExtensions
   // 扫描完成后重载第一页
@@ -191,7 +195,12 @@ export default function TimelinePage() {
         granularity={granularity}
         onBatchDelete={(ids) => setPendingDelete(ids)}
         onDeleteOne={(f) => setPendingDelete([f.id])}
+        onBatchAddToAlbum={batch.openAddToAlbum}
+        onBatchAddTag={batch.openAddTag}
+        onBatchDownload={batch.download}
       />
+
+      <BatchActionsModals state={batch.modalState} />
 
       <MediaDetailPanel
         files={infinite.items}

@@ -33,6 +33,10 @@ interface DirectoryBrowserProps {
   onSelectionChange?: (ids: number[]) => void
   onBatchDelete?: (ids: number[]) => void
   onDeleteOne?: (file: MediaFile) => void
+  // 批量操作（FR-91）：以 id 集为对象（无选中退化为右键项），均可选
+  onBatchAddToAlbum?: (ids: number[]) => void
+  onBatchAddTag?: (ids: number[]) => void
+  onBatchDownload?: (ids: number[]) => void
 }
 
 // 各档位的网格列数（图标档）
@@ -67,6 +71,7 @@ export default function DirectoryBrowser({
   onEnterDir, onBreadcrumbNavigate, onErrorClose, onOpenFile,
   displayMode = 'list', sort = 'name',
   onSelectionChange, onBatchDelete, onDeleteOne,
+  onBatchAddToAlbum, onBatchAddTag, onBatchDownload,
 }: DirectoryBrowserProps) {
   const sortedDirs = useMemo(() => [...directories].sort((a, b) => a.name.localeCompare(b.name)), [directories])
   const sortedFiles = useMemo(() => sortFiles(files, sort), [files, sort])
@@ -76,7 +81,10 @@ export default function DirectoryBrowser({
   const { selectedIds } = select
   const [menu, setMenu] = useState<ContextMenuState | null>(null)
   // 父组件关心选择（提供任一选择相关回调）时启用右键菜单与复选框模式
-  const selectionEnabled = !!(onSelectionChange || onBatchDelete || onDeleteOne)
+  const selectionEnabled = !!(
+    onSelectionChange || onBatchDelete || onDeleteOne ||
+    onBatchAddToAlbum || onBatchAddTag || onBatchDownload
+  )
 
   // 选中集变化上抛父组件（升序，便于稳定断言/消费）
   useEffect(() => {
@@ -102,6 +110,13 @@ export default function DirectoryBrowser({
       const f = sortedFiles.find((x) => x.id === targetId)
       if (f) onDeleteOne?.(f)
     }
+  }
+
+  // 批量操作（FR-91）：有选中按选中集；无选中退化为右键项。统一关菜单后回调。
+  function runBatch(targetId: number, fn?: (ids: number[]) => void) {
+    setMenu(null)
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId]
+    fn?.(ids)
   }
 
   if (error) {
@@ -235,6 +250,9 @@ export default function DirectoryBrowser({
           onSelectAll={() => { select.selectAll(); setMenu(null) }}
           onInvert={() => { select.invertSelection(); setMenu(null) }}
           onToggleCheckboxMode={() => { select.setCheckboxMode(!select.checkboxMode); setMenu(null) }}
+          onAddToAlbum={onBatchAddToAlbum ? (id) => runBatch(id, onBatchAddToAlbum) : undefined}
+          onAddTag={onBatchAddTag ? (id) => runBatch(id, onBatchAddTag) : undefined}
+          onDownload={onBatchDownload ? (id) => runBatch(id, onBatchDownload) : undefined}
         />
       )}
     </>

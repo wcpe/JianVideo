@@ -10,6 +10,8 @@ import DirectoryBrowser, { sortFiles, type DisplayMode, type DirSort } from '@/c
 import MediaQueryFilters from '@/components/MediaQueryFilters'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import ConfirmModal from '@/components/ConfirmModal'
+import BatchActionsModals from '@/components/BatchActionsModals'
+import { useBatchActions } from '@/hooks/useBatchActions'
 import { extractErrorMessage } from '@/utils/error'
 import * as libApi from '@/api/library'
 import type { MediaFile } from '@/types'
@@ -42,6 +44,8 @@ export default function BrowsePage() {
   // 批量删除（FR-69）：待确认删除的 id 列表（非空即弹确认框）+ 删除进行中
   const [pendingDelete, setPendingDelete] = useState<number[]>([])
   const [deleting, setDeleting] = useState(false)
+  // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
+  const batch = useBatchActions()
   // 移动端筛选抽屉开合（FR-86）：窄屏将结构化筛选收进抽屉，搜索框常驻
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false)
 
@@ -220,6 +224,9 @@ export default function BrowsePage() {
           displayMode={displayMode} sort={sort}
           onBatchDelete={(ids) => setPendingDelete(ids)}
           onDeleteOne={(f) => setPendingDelete([f.id])}
+          onBatchAddToAlbum={batch.openAddToAlbum}
+          onBatchAddTag={batch.openAddTag}
+          onBatchDownload={batch.download}
         />
       ) : (
         // 浏览模式：文件夹树
@@ -232,8 +239,13 @@ export default function BrowsePage() {
           displayMode={displayMode} sort={sort}
           onBatchDelete={(ids) => setPendingDelete(ids)}
           onDeleteOne={(f) => setPendingDelete([f.id])}
+          onBatchAddToAlbum={batch.openAddToAlbum}
+          onBatchAddTag={batch.openAddTag}
+          onBatchDownload={batch.download}
         />
       )}
+
+      <BatchActionsModals state={batch.modalState} />
 
       <MediaDetailPanel
         files={sortedFiles}

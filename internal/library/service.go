@@ -302,6 +302,21 @@ func (s *Service) BatchDeleteMediaFiles(ids []int64) (int64, error) {
 	return affected, nil
 }
 
+// GetMediaFilesByIDs 批量获取媒体文件（FR-91 批量打包下载）。
+// 单次 IN 查询取回，排除已软删项（与 GetMediaFileByID 的访问隔离一致），避免 N+1。
+// 不存在 / 已软删的 id 自然不在结果中；空列表为 no-op 返回空切片。
+// 返回顺序不保证与入参一致，调用方如需保序自行处理。
+func (s *Service) GetMediaFilesByIDs(ids []int64) ([]models.MediaFile, error) {
+	if len(ids) == 0 {
+		return []models.MediaFile{}, nil
+	}
+	var items []models.MediaFile
+	if err := s.db.Where("id IN ? AND deleted_at IS NULL", ids).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 // ListDeletedMediaFiles 列出全部已软删的媒体文件（回收站，FR-25），按软删时间倒序。
 func (s *Service) ListDeletedMediaFiles() ([]models.MediaFile, error) {
 	var items []models.MediaFile

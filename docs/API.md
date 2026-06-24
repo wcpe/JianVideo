@@ -278,6 +278,15 @@
 - **说明**：批量软删——在单事务内对所有 `deleted_at IS NULL` 的有效 ID 一次 `UPDATE` 置 `deleted_at = now`，复用单条软删语义（不动磁盘源文件），软删项一并进回收站。跳过不存在 / 已软删的 ID（不计入 `deleted`、不报错）；空 `ids` 为 no-op 返回 `{"deleted": 0}`。
 - **错误**：`400` 请求体无效，`500` 批量删除失败
 
+### 批量打包下载（FR-91）
+
+- **方法 / 路径**：`GET /api/library/media/batch-download?ids=101,102,...`
+- **查询参数**：`ids` 逗号分隔的媒体 ID 列表（忽略空白与非法项）。
+- **响应**（200）：`application/zip` 二进制，`Content-Disposition: attachment`，附件名 `媒体打包.zip`（按 RFC 5987 `filename*=UTF-8''` 编码）。经 `archive/zip` 流式 chunked 输出、边写边 flush（不一次性读入内存），用请求 context 控制取消、不设整体超时。
+- **说明**：将选中媒体的原文件逐个写入 zip（不转码 / 不转换）。`smb://` 路径项与磁盘不可访问项跳过（不写入 zip、不报错），故返回 zip 内文件数可能少于请求 ID 数。鉴权后访问（FR-13）；软删项不计入（FR-25）。
+- **上限**：选中数量 ≤ 500、预估总大小 ≤ 5 GiB，超限在写任何字节前拒绝。
+- **错误**：`400` 未提供有效 ids / 数量超限 / 总大小超限，`500` 查询失败
+
 ### 扫描去重哈希（FR-70）
 
 - **方法 / 路径**：`POST /api/library/duplicates/scan`
