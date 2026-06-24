@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
+import { CinemaContext } from '@/hooks/cinema-context'
 import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
 import UpdateIndicator from './UpdateIndicator'
@@ -23,6 +24,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [paletteOpened, { open: openPalette, close: closePalette }] = useDisclosure(false)
   // 桌面导航收缩态（FR-54）：持久化到 localStorage，刷新后保持；仅影响桌面 Navbar，移动端抽屉不受影响
   const [navCollapsed, toggleNavCollapsed] = useNavCollapsed()
+  // 影院模式（FR-85）：播放页临时收起导航的本地会话态，不写 localStorage、不改 navCollapsed 持久语义。
+  // 自持本地态并经 CinemaContext 下发给子页面（如播放页）；不消费自身 Provider，便于下方计算有效收缩态。
+  const [cinema, setCinemaState] = useState(false)
+  const setCinema = useCallback((value: boolean) => setCinemaState(value), [])
+  const cinemaValue = useMemo(() => ({ cinema, setCinema }), [cinema, setCinema])
+  // 有效收缩态 = 全局持久收缩 或 影院态临时收缩；二者任一为真即收缩，互不污染
+  const effectiveCollapsed = navCollapsed || cinema
   // 主题切换：当前色方案与切换方法（认证恢复已交由 ProtectedRoute 负责）
   const { toggleColorScheme } = useMantineColorScheme()
   const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
@@ -169,7 +177,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: navCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
+      navbar={{ width: effectiveCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
       padding="md"
     >
       <AppShell.Header>
@@ -249,13 +257,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Stack>
       </Drawer>
 
-      <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={navCollapsed}>
+      <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={effectiveCollapsed}>
         <Stack gap="xs" style={{ flex: 1 }}>
-          {/* 分组导航（FR-83）：随 navCollapsed 切换展开/收缩态渲染 */}
-          {renderNavGroups(undefined, navCollapsed)}
+          {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
+          {renderNavGroups(undefined, effectiveCollapsed)}
         </Stack>
-        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于收缩按钮上方，适配收缩态 */}
-        {renderVersionLicense(navCollapsed)}
+        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于收缩按钮上方，适配有效收缩态 */}
+        {renderVersionLicense(effectiveCollapsed)}
         {/* 收缩 / 展开切换按钮（FR-54）：置于 navbar 底部，随状态切换图标与无障碍标签 */}
         <Group justify={navCollapsed ? 'center' : 'flex-end'} mt="xs">
           <ActionIcon
@@ -270,7 +278,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </Group>
       </AppShell.Navbar>
 
-      <AppShell.Main>{children}</AppShell.Main>
+      {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}
+      <AppShell.Main>
+        <CinemaContext.Provider value={cinemaValue}>{children}</CinemaContext.Provider>
+      </AppShell.Main>
 
       {/* 全局命令面板（FR-74）：Ctrl/Cmd+K 或 header 入口打开 */}
       <CommandPalette opened={paletteOpened} onClose={closePalette} commands={commands} />

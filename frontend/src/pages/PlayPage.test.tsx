@@ -1,11 +1,13 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { MantineProvider } from '@mantine/core'
 import { http, HttpResponse } from 'msw'
 import { server } from '@/mocks/beforeAll'
+import { useState } from 'react'
 import PlayPage from './PlayPage'
+import { CinemaContext, useCinemaMode } from '@/hooks/cinema-context'
 
 // mock VideoPlayer 组件，避免依赖 mpegts.js
 vi.mock('@/components/VideoPlayer', () => ({
@@ -33,6 +35,40 @@ function renderPlayPage(route: string) {
       <RouterProvider router={router} />
     </MantineProvider>,
   )
+}
+
+// 影院态探针：把上下文里的 cinema 渲染成 data 属性，便于断言播放页对影院态的切换
+function CinemaProbe() {
+  const { cinema } = useCinemaMode()
+  return <div data-testid="cinema-probe" data-cinema={String(cinema)} />
+}
+
+// 测试用影院 Provider：持有本地态经 CinemaContext 下发，模拟 AppLayout 的下发行为
+function TestCinemaProvider({ children }: { children: React.ReactNode }) {
+  const [cinema, setCinema] = useState(false)
+  return <CinemaContext.Provider value={{ cinema, setCinema }}>{children}</CinemaContext.Provider>
+}
+
+// 带影院 Provider + 探针 + 可切换路由的渲染，用于影院态切入/切出与离开页面恢复的断言。
+// 关键：CinemaProvider 与探针置于 router 之上、不随路由卸载，从而能观察 PlayPage 卸载后影院态的恢复。
+function renderPlayPageWithCinema(route: string) {
+  const router = createMemoryRouter(
+    [
+      { path: '/play/:id', element: <PlayPage /> },
+      { path: '/other', element: <div data-testid="other-page">其它页面</div> },
+    ],
+    { initialEntries: [route] },
+  )
+  const result = render(
+    <MantineProvider>
+      <TestCinemaProvider>
+        <CinemaProbe />
+        <RouterProvider router={router} />
+      </TestCinemaProvider>
+    </MantineProvider>,
+  )
+  // 暴露 router 便于测试触发路由切换，模拟用户离开播放页
+  return { ...result, router }
 }
 
 describe('PlayPage', () => {
@@ -81,8 +117,9 @@ describe('PlayPage', () => {
     // 初始展示真实文件名（无显示名时回退）
     await waitFor(() => expect(screen.getByRole('heading', { name: 'real.mkv' })).toBeInTheDocument())
 
-    // 打开「改显示名」二次确认弹窗
-    await user.click(screen.getByRole('button', { name: '改显示名' }))
+    // 打开「更多」菜单后点击「改显示名」二次确认弹窗（FR-85 操作收纳）
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '改显示名' }))
     const input = await screen.findByLabelText('显示名')
     await user.clear(input)
     await user.type(input, '我的影片')
@@ -120,7 +157,8 @@ describe('PlayPage', () => {
     renderPlayPage('/play/1')
     await waitFor(() => expect(screen.getByRole('heading', { name: 'old.mkv' })).toBeInTheDocument())
 
-    await user.click(screen.getByRole('button', { name: '改文件名' }))
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '改文件名' }))
     const input = await screen.findByLabelText('真实文件名')
     await user.clear(input)
     await user.type(input, 'new.mkv')
@@ -242,5 +280,98 @@ describe('PlayPage', () => {
       // 未走 fMP4 描述符
       expect(player.getAttribute('data-desc-path')).toBe('')
     })
+  })
+})
+
+describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('头部仅外露返回 + 影院 + 更多，次要操作不平铺为按钮', async () => {
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    // 外露：返回、影院模式、更多操作
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '影院模式' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument()
+
+    // 次要操作不再以独立按钮平铺在头部（已收进「更多」菜单，菜单未展开时不在文档）
+    expect(screen.queryByRole('button', { name: '改显示名' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '分享' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '加入预生成' })).toBeNull()
+  })
+
+  it('「更多」菜单收纳全部六个次要操作项', async () => {
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+
+    for (const name of ['改显示名', '改文件名', '下载', '分享', '外部播放器', '加入预生成']) {
+      expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('菜单内点击「分享」触发分享弹窗（FR-43 回归）', async () => {
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '分享' }))
+
+    // 分享弹窗标题出现，确认菜单项正确触发对应弹窗
+    expect(await screen.findByText('分享此媒体')).toBeInTheDocument()
+  })
+
+  it('菜单内点击「加入预生成」触发预生成弹窗（FR-77 回归）', async () => {
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '加入预生成' }))
+
+    // PregenDialog 打开后含「加入预生成队列」标题
+    expect(await screen.findByText('加入预生成队列')).toBeInTheDocument()
+  })
+
+  it('点「影院模式」切入影院态（cinema=true），再点「退出影院」切出', async () => {
+    const user = userEvent.setup()
+    renderPlayPageWithCinema('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    const probe = screen.getByTestId('cinema-probe')
+    expect(probe).toHaveAttribute('data-cinema', 'false')
+
+    // 切入：按钮文案变为「退出影院」，上下文 cinema=true
+    await user.click(screen.getByRole('button', { name: '影院模式' }))
+    expect(probe).toHaveAttribute('data-cinema', 'true')
+    expect(screen.getByRole('button', { name: '退出影院' })).toBeInTheDocument()
+
+    // 切出：恢复非影院态
+    await user.click(screen.getByRole('button', { name: '退出影院' }))
+    expect(probe).toHaveAttribute('data-cinema', 'false')
+    expect(screen.getByRole('button', { name: '影院模式' })).toBeInTheDocument()
+  })
+
+  it('离开播放页自动恢复非影院态（导航走后 cinema 回落 false）', async () => {
+    const user = userEvent.setup()
+    const { router } = renderPlayPageWithCinema('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    const probe = screen.getByTestId('cinema-probe')
+    await user.click(screen.getByRole('button', { name: '影院模式' }))
+    expect(probe).toHaveAttribute('data-cinema', 'true')
+
+    // 离开播放页：PlayPage 卸载，其清理函数应把影院态恢复为 false（Provider 仍挂载、探针可观察）
+    await act(async () => {
+      await router.navigate('/other')
+    })
+    await screen.findByTestId('other-page')
+    await waitFor(() => expect(probe).toHaveAttribute('data-cinema', 'false'))
   })
 })

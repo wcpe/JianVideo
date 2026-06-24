@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie, IconDots, IconMaximize, IconMinimize } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
@@ -11,6 +11,7 @@ import PregenDialog from '@/components/PregenDialog'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
 import { probeClientCapabilities } from '@/utils/codec-capability'
+import { useCinemaMode } from '@/hooks/cinema-context'
 import * as libApi from '@/api/library'
 import * as playApi from '@/api/play'
 import * as subtitleApi from '@/api/subtitle'
@@ -23,6 +24,8 @@ type NameEditKind = 'display' | 'real'
 export default function PlayPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  // 影院模式（FR-85）：临时收起左导航扩大视频区，播放页本地态（不污染全站持久态）
+  const { cinema, setCinema } = useCinemaMode()
   const [media, setMedia] = useState<MediaFile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -108,6 +111,11 @@ export default function PlayPage() {
       .catch(() => probeMaster())
   }, [id])
 
+  // 影院模式（FR-85）：离开播放页（卸载）时自动恢复全站导航，避免影院态泄漏到其它页面
+  useEffect(() => {
+    return () => setCinema(false)
+  }, [setCinema])
+
   // 选择字幕轨道
   const selectTrack = async (trackIndex: number) => {
     if (!media) return
@@ -184,9 +192,10 @@ export default function PlayPage() {
 
   return (
     <Stack gap="md">
-      {/* 返回 + 标题 + 字幕选择 */}
-      <Group gap="sm" justify="space-between">
-        <Group gap="sm">
+      {/* 头部（FR-85 操作收纳）：外露返回 + 标题 + 影院 + 更多，次要操作收进「更多 ⋯」菜单；
+          wrap="nowrap" + 标题截断，窄屏不换行铺满、不挤出按钮。右侧保留字幕菜单。 */}
+      <Group gap="sm" justify="space-between" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
           <Button
             variant="subtle"
             color="gray"
@@ -196,68 +205,61 @@ export default function PlayPage() {
           >
             返回
           </Button>
-          <Title order={3}>{mediaDisplayName(media)}</Title>
-          {/* 双模式改名入口（FR-30）：均需二次确认 */}
+          <Title order={3} lineClamp={1} style={{ wordBreak: 'break-all' }}>{mediaDisplayName(media)}</Title>
+          {/* 影院模式（FR-85）：临时收起左导航扩大视频区，切出/离开播放页自动恢复 */}
           <Button
-            variant="subtle"
-            color="gray"
+            variant={cinema ? 'light' : 'subtle'}
+            color={cinema ? 'purple' : 'gray'}
             size="sm"
-            leftSection={<IconPencil size={14} />}
-            onClick={() => setNameEditKind('display')}
+            leftSection={cinema ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
+            onClick={() => setCinema(!cinema)}
           >
-            改显示名
+            {cinema ? '退出影院' : '影院模式'}
           </Button>
-          <Button
-            variant="subtle"
-            color="gray"
-            size="sm"
-            leftSection={<IconFileText size={14} />}
-            onClick={() => setNameEditKind('real')}
-          >
-            改文件名
-          </Button>
-          {/* 下载原文件（FR-42）：附件下载磁盘原始文件 */}
-          <Button
-            component="a"
-            href={`/api/library/media/${media.id}/download`}
-            download
-            variant="subtle"
-            color="gray"
-            size="sm"
-            leftSection={<IconDownload size={14} />}
-          >
-            下载
-          </Button>
-          {/* 分享链接（FR-43）：生成 token 化免登访问链接 */}
-          <Button
-            variant="subtle"
-            color="gray"
-            size="sm"
-            leftSection={<IconShare size={14} />}
-            onClick={() => setShareOpened(true)}
-          >
-            分享
-          </Button>
-          {/* 外部播放器深链（FR-79）：生成 VLC/IINA 可打开的免登网络串流地址 */}
-          <Button
-            variant="subtle"
-            color="gray"
-            size="sm"
-            leftSection={<IconExternalLink size={14} />}
-            onClick={() => setExtPlayerOpened(true)}
-          >
-            外部播放器
-          </Button>
-          {/* 加入预生成（FR-77）：选预设把本媒体加入预生成队列预热首播 */}
-          <Button
-            variant="subtle"
-            color="gray"
-            size="sm"
-            leftSection={<IconMovie size={14} />}
-            onClick={() => setPregenOpened(true)}
-          >
-            加入预生成
-          </Button>
+          {/* 「更多」菜单（FR-85 操作收纳）：收纳改名/下载/分享/外部播放器/加入预生成等次要操作 */}
+          <Menu position="bottom-start">
+            <Menu.Target>
+              <Button
+                variant="subtle"
+                color="gray"
+                size="sm"
+                leftSection={<IconDots size={14} />}
+                aria-label="更多操作"
+              >
+                更多
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {/* 双模式改名入口（FR-30）：均需二次确认 */}
+              <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setNameEditKind('display')}>
+                改显示名
+              </Menu.Item>
+              <Menu.Item leftSection={<IconFileText size={14} />} onClick={() => setNameEditKind('real')}>
+                改文件名
+              </Menu.Item>
+              {/* 下载原文件（FR-42）：附件下载磁盘原始文件 */}
+              <Menu.Item
+                component="a"
+                href={`/api/library/media/${media.id}/download`}
+                download
+                leftSection={<IconDownload size={14} />}
+              >
+                下载
+              </Menu.Item>
+              {/* 分享链接（FR-43）：生成 token 化免登访问链接 */}
+              <Menu.Item leftSection={<IconShare size={14} />} onClick={() => setShareOpened(true)}>
+                分享
+              </Menu.Item>
+              {/* 外部播放器深链（FR-79）：生成 VLC/IINA 可打开的免登网络串流地址 */}
+              <Menu.Item leftSection={<IconExternalLink size={14} />} onClick={() => setExtPlayerOpened(true)}>
+                外部播放器
+              </Menu.Item>
+              {/* 加入预生成（FR-77）：选预设把本媒体加入预生成队列预热首播 */}
+              <Menu.Item leftSection={<IconMovie size={14} />} onClick={() => setPregenOpened(true)}>
+                加入预生成
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
 
         {/* 字幕选择菜单 */}

@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import AppLayout from './AppLayout'
 import { useAuthStore } from '@/stores/auth'
+import { useCinemaMode } from '@/hooks/cinema-context'
 
 // mock react-router-dom 的 useNavigate，避免真实跳转
 const mockNavigate = vi.fn()
@@ -272,6 +273,80 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     })
     expect(screen.getAllByText('管理').length).toBeGreaterThan(0)
     expect(screen.getAllByText('系统').length).toBeGreaterThan(0)
+  })
+})
+
+describe('AppLayout 影院模式（FR-85）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  // 子组件：从影院上下文取 setCinema，渲染一个切换按钮，模拟播放页切入/切出影院态
+  function CinemaToggler() {
+    const { cinema, setCinema } = useCinemaMode()
+    return (
+      <button type="button" onClick={() => setCinema(!cinema)}>
+        切影院:{String(cinema)}
+      </button>
+    )
+  }
+
+  function renderWithToggler() {
+    return render(
+      <MantineProvider>
+        <MemoryRouter>
+          <AppLayout>
+            <CinemaToggler />
+          </AppLayout>
+        </MemoryRouter>
+      </MantineProvider>,
+    )
+  }
+
+  it('影院态切入：导航有效收缩（data-collapsed=true），不写 localStorage 持久态', async () => {
+    const user = userEvent.setup()
+    renderWithToggler()
+
+    // 初始展开
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'false')
+
+    await user.click(screen.getByRole('button', { name: /切影院:false/ }))
+
+    // 有效收缩态为 true（navCollapsed=false 但 cinema=true）
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    // 影院态不污染全局持久态：localStorage 不被写入
+    expect(localStorage.getItem('jianvideo-nav-collapsed')).toBeNull()
+  })
+
+  it('影院态切出：导航恢复展开', async () => {
+    const user = userEvent.setup()
+    renderWithToggler()
+
+    await user.click(screen.getByRole('button', { name: /切影院:false/ }))
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+
+    await user.click(screen.getByRole('button', { name: /切影院:true/ }))
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'false')
+  })
+
+  it('全局持久收缩态优先生效：navCollapsed=true 时无论影院态导航均收缩', async () => {
+    localStorage.setItem('jianvideo-nav-collapsed', '1')
+    const user = userEvent.setup()
+    renderWithToggler()
+
+    // 预置持久收缩
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+
+    // 切入再切出影院态，导航始终收缩（持久态主导），且持久值不被影院切换改写
+    await user.click(screen.getByRole('button', { name: /切影院:false/ }))
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    await user.click(screen.getByRole('button', { name: /切影院:true/ }))
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('1')
   })
 })
 
