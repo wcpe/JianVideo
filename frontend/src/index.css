@@ -118,6 +118,19 @@ body {
   min-height: 100vh;
 }
 
+/* 播放页全屏沉浸布局（FR-103）：PlayPage 挂载时给 body 加 play-immersive 类，
+   去掉 AppShell.Main 的 padding 并把其高度锁到视口、禁外层滚动，使播放页正好铺满、
+   不可纵向滚动；卸载时移除该类、其它页布局不受影响。用 100dvh 避开移动端地址栏高度抖动。 */
+body.play-immersive {
+  overflow: hidden;
+}
+
+body.play-immersive .mantine-AppShell-main {
+  padding: 0;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* 键盘焦点可见环（FR-97 无障碍）：仅键盘聚焦（:focus-visible）时为可交互元素
    显示清晰焦点环，复用 FR-93 品牌紫主色 token（不写死 hex）。FR-92 已设
    focusRing:'auto'（Mantine box-shadow 焦点环）；这里用 outline 在全站统一兜底，

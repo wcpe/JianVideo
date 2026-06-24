@@ -30,6 +30,12 @@ interface VideoPlayerProps {
    */
   streamType?: 'mpegts' | 'mp4'
   /**
+   * 填充模式（FR-103）：为真时视频区放弃固定 16:9 比例，改为 flex 填充父容器剩余高度
+   * （video 以 object-fit:contain letterbox 黑边铺满），供播放页全屏沉浸布局使用。
+   * 缺省 false 时维持固定 16:9（灯箱 / 分享等用法零改动）。
+   */
+  fill?: boolean
+  /**
    * 续播起始位置（秒，FR-44）。大于 1 时在媒体可定位后 seek 到该位置一次。
    */
   initialPosition?: number
@@ -105,6 +111,7 @@ export default function VideoPlayer({
   subtitleVisible = false,
   isABR: isABRProp,
   streamType = 'mpegts',
+  fill = false,
   initialPosition,
   onPositionReport,
   onEnded,
@@ -330,9 +337,28 @@ export default function VideoPlayer({
   const playPct = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
-    <Box style={{ display: 'flex', flexDirection: 'column', width: '100%', backgroundColor: 'black', borderRadius: 'var(--mantine-radius-lg)', overflow: 'hidden' }}>
-      <Box style={{ position: 'relative', width: '100%', aspectRatio: '16/9', backgroundColor: 'black' }}>
-        <video ref={videoRef} style={{ width: '100%', height: '100%', backgroundColor: 'black' }} playsInline />
+    <Box
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        backgroundColor: 'black',
+        borderRadius: 'var(--mantine-radius-lg)',
+        overflow: 'hidden',
+        // FR-103 填充模式：撑满父容器剩余高度（播放页全屏沉浸用）
+        ...(fill ? { flex: 1, height: '100%', minHeight: 0 } : {}),
+      }}
+    >
+      <Box
+        style={{
+          position: 'relative',
+          width: '100%',
+          backgroundColor: 'black',
+          // FR-103：填充模式去掉固定 16:9，改为 flex 填充剩余高度；缺省维持 16:9
+          ...(fill ? { flex: 1, minHeight: 0 } : { aspectRatio: '16/9' }),
+        }}
+      >
+        <video ref={videoRef} style={{ width: '100%', height: '100%', backgroundColor: 'black', objectFit: 'contain' }} playsInline />
         {/* FR-52：目标编码不受支持且无回退源时的提示（不抛 Network Error） */}
         {resolved.unsupported && (
           <Box role="alert" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: '0 1rem' }}>

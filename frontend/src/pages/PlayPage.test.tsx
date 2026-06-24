@@ -11,13 +11,14 @@ import { CinemaContext, useCinemaMode } from '@/hooks/cinema-context'
 
 // mock VideoPlayer 组件，避免依赖 mpegts.js
 vi.mock('@/components/VideoPlayer', () => ({
-  default: (props: { url?: string; isABR?: boolean; streamType?: string; initialPosition?: number; descriptor?: { codec: string; path: string; url: string } }) => (
+  default: (props: { url?: string; isABR?: boolean; streamType?: string; initialPosition?: number; fill?: boolean; descriptor?: { codec: string; path: string; url: string } }) => (
     <div
       data-testid="video-player"
       data-url={props.url}
       data-is-abr={String(!!props.isABR)}
       data-stream-type={props.streamType || ''}
       data-initial-position={props.initialPosition ?? ''}
+      data-fill={String(!!props.fill)}
       data-desc-codec={props.descriptor?.codec ?? ''}
       data-desc-path={props.descriptor?.path ?? ''}
       data-desc-url={props.descriptor?.url ?? ''}
@@ -373,5 +374,62 @@ describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
     })
     await screen.findByTestId('other-page')
     await waitFor(() => expect(probe).toHaveAttribute('data-cinema', 'false'))
+  })
+})
+
+describe('PlayPage 全屏沉浸布局（FR-103）', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('根容器 100dvh + overflow hidden（铺满视口、不可纵向滚动）', async () => {
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    // jsdom 的 CSSOM 不识别 dvh 单位会丢弃该 height 声明（铺满高度下沉到真机验收），
+    // 这里断言 jsdom 可识别的「列向 flex + 锁纵向滚动」，并对 height 原始属性串断言 100dvh。
+    const root = screen.getByTestId('play-immersive-root')
+    expect(root.style.overflow).toBe('hidden')
+    expect(root.style.flexDirection).toBe('column')
+    expect(root.style.display).toBe('flex')
+    expect(root.getAttribute('style')).toContain('height: 100dvh')
+  })
+
+  it('视频区以填充模式（fill）渲染播放器，吃满剩余高度', async () => {
+    renderPlayPage('/play/1')
+    const player = await screen.findByTestId('video-player')
+    expect(player.getAttribute('data-fill')).toBe('true')
+  })
+
+  it('媒体信息默认不在视频下方文档流（收进抽屉，未打开时不渲染内容）', async () => {
+    renderPlayPage('/play/1')
+    await screen.findByTestId('video-player')
+    // 「媒体信息」标题在抽屉关闭时不出现在文档流
+    expect(screen.queryByText('媒体信息')).toBeNull()
+  })
+
+  it('「更多」菜单的「详情」项打开媒体信息抽屉', async () => {
+    const user = userEvent.setup()
+    renderPlayPage('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '详情' }))
+
+    // 抽屉打开后展示「媒体信息」与字段标签
+    expect(await screen.findByText('媒体信息')).toBeInTheDocument()
+    expect(screen.getByText('真实文件名')).toBeInTheDocument()
+  })
+
+  it('挂载时给 body 加 play-immersive 类，卸载后移除（协调 AppShell.Main）', async () => {
+    const { router } = renderPlayPageWithCinema('/play/1')
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument())
+    expect(document.body.classList.contains('play-immersive')).toBe(true)
+
+    await act(async () => {
+      await router.navigate('/other')
+    })
+    await screen.findByTestId('other-page')
+    await waitFor(() => expect(document.body.classList.contains('play-immersive')).toBe(false))
   })
 })

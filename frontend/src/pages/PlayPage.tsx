@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
+import { Button, Text, Group, Badge, Skeleton, Alert, Box, Title, Menu, Drawer } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie, IconDots, IconMaximize, IconMinimize } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie, IconDots, IconMaximize, IconMinimize, IconInfoCircle } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
@@ -54,6 +54,8 @@ export default function PlayPage() {
   const [extPlayerOpened, setExtPlayerOpened] = useState(false)
   // 加入预生成队列弹窗开关（FR-77）
   const [pregenOpened, setPregenOpened] = useState(false)
+  // 媒体信息抽屉开关（FR-103）：信息移出文档流、收进右侧抽屉，经「更多」菜单「详情」打开
+  const [infoOpened, setInfoOpened] = useState(false)
   const [nameEditSaving, setNameEditSaving] = useState(false)
 
   useEffect(() => {
@@ -116,6 +118,13 @@ export default function PlayPage() {
   useEffect(() => {
     return () => setCinema(false)
   }, [setCinema])
+
+  // 全屏沉浸布局（FR-103）：播放路由挂载时给 body 加 play-immersive 类，
+  // index.css 据此去掉 AppShell.Main 的 padding 并锁高、禁外层滚动；卸载时移除，仅作用播放路由。
+  useEffect(() => {
+    document.body.classList.add('play-immersive')
+    return () => document.body.classList.remove('play-immersive')
+  }, [])
 
   // 选择字幕轨道
   const selectTrack = async (trackIndex: number) => {
@@ -192,7 +201,9 @@ export default function PlayPage() {
   }
 
   return (
-    <Stack gap="md">
+    // 全屏沉浸容器（FR-103）：100dvh 铺满视口、列向 flex、overflow hidden 锁纵向滚动；
+    // 用 dvh 避开移动端地址栏高度抖动。头部 flex-shrink，视频区 flex:1 吃满剩余高度。
+    <Box data-testid="play-immersive-root" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: 'var(--mantine-spacing-sm)' }}>
       {/* 页面级路由面包屑（FR-95）：首页 › 当前媒体；影院态下收起以让位视频区 */}
       {!cinema && (
         <PageBreadcrumbs items={[{ label: '首页', to: '/' }, { label: mediaDisplayName(media) }]} />
@@ -235,6 +246,10 @@ export default function PlayPage() {
               </Button>
             </Menu.Target>
             <Menu.Dropdown>
+              {/* 媒体信息详情（FR-103）：信息移出文档流后由此入口打开右侧抽屉查看 */}
+              <Menu.Item leftSection={<IconInfoCircle size={14} />} onClick={() => setInfoOpened(true)}>
+                详情
+              </Menu.Item>
               {/* 双模式改名入口（FR-30）：均需二次确认 */}
               <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setNameEditKind('display')}>
                 改显示名
@@ -295,26 +310,37 @@ export default function PlayPage() {
         )}
       </Group>
 
-      {/* 播放器：协商出 fMP4 时交描述符给自适应播放器（FR-53）；
-          否则探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video）。 */}
-      {playerUrl && playerIsABR !== null && (
-        <VideoPlayer
-          url={playerUrl}
-          descriptor={descriptor ?? undefined}
-          autoPlay
-          subtitleEntries={subtitleEntries}
-          subtitleVisible={subtitleVisible}
-          isABR={playerIsABR}
-          streamType={playerIsABR ? 'mpegts' : 'mp4'}
-          initialPosition={media.last_position}
-          onPositionReport={handlePositionReport}
-          onEnded={handleEnded}
-        />
-      )}
+      {/* 视频区（FR-103）：flex:1 + minHeight:0 吃满头部/控件之外的全部高度，
+          VideoPlayer 传 fill 让视频以 object-fit:contain 填满（letterbox 黑边）。 */}
+      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {/* 播放器：协商出 fMP4 时交描述符给自适应播放器（FR-53）；
+            否则探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video）。 */}
+        {playerUrl && playerIsABR !== null && (
+          <VideoPlayer
+            url={playerUrl}
+            descriptor={descriptor ?? undefined}
+            autoPlay
+            fill
+            subtitleEntries={subtitleEntries}
+            subtitleVisible={subtitleVisible}
+            isABR={playerIsABR}
+            streamType={playerIsABR ? 'mpegts' : 'mp4'}
+            initialPosition={media.last_position}
+            onPositionReport={handlePositionReport}
+            onEnded={handleEnded}
+          />
+        )}
+      </Box>
 
-      {/* 媒体信息 */}
-      <Paper withBorder p="md" radius="md" bg="var(--mantine-color-default)">
-        <Text fw={600} size="sm" mb="sm">媒体信息</Text>
+      {/* 媒体信息抽屉（FR-103）：信息移出视频下方文档流、不再撑高页面，
+          经「更多」菜单「详情」打开右侧抽屉查看，内容不变。 */}
+      <Drawer
+        opened={infoOpened}
+        onClose={() => setInfoOpened(false)}
+        position="right"
+        title="媒体信息"
+        size="md"
+      >
         <Group gap="md" wrap="wrap">
           <div>
             <Text size="xs" c="dimmed">真实文件名</Text>
@@ -337,7 +363,7 @@ export default function PlayPage() {
             <Text size="sm">{media.width > 0 ? `${media.width}x${media.height}` : '-'}</Text>
           </div>
         </Group>
-      </Paper>
+      </Drawer>
 
       {/* 改显示名（仅库内，不动磁盘）：二次确认弹窗 */}
       <NameEditModal
@@ -387,6 +413,6 @@ export default function PlayPage() {
         onClose={() => setPregenOpened(false)}
         mediaID={media.id}
       />
-    </Stack>
+    </Box>
   )
 }
