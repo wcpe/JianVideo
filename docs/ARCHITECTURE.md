@@ -336,9 +336,11 @@
 
 ### 5.1.1 缩略图生成
 
-- `thumbnail.go` 提供缩略图能力：入库时对新文件异步调用 `GenerateThumbnail`，视频取第 2 秒帧、普通图片缩放为 320px 宽，统一经 ffmpeg 生成；HEIC/RAW 改经外部 ImageMagick（`magick`）缩放生成 320px 宽缩略图（FR-37）。生成失败仅记日志不阻塞入库。
+- `thumbnail.go` 提供缩略图能力：入库时对新文件异步调用 `GenerateThumbnail`，视频取第 2 秒帧、普通图片缩放为目标宽，统一经 ffmpeg 生成；HEIC/RAW 改经外部 ImageMagick（`magick`）缩放生成缩略图（FR-37）。生成失败仅记日志不阻塞入库。
+- **透明源中性灰底（FR-81 P1）**：带 alpha 的源（透明 PNG / 部分 WEBP / HEIC 等）若直接压 JPEG，透明区会被默认黑底合成纯黑。ffmpeg 路径以 `color=0x808080` 经 `scale2ref`+`overlay` 把图像合成到中性灰底；magick 路径以 `-background #808080 -flatten` 刷灰后再缩放。无 alpha 的源叠加灰底不可见、结果不变。灰底色值由常量 `thumbnailMatteColor` 统一定义。
+- **多尺寸缓存（FR-81 P12）**：受支持尺寸白名单 `{160,320,640}`（默认 320）。`thumbnailPathForSize` 按尺寸映射缓存路径——**默认尺寸 320 保持历史命名（无后缀），非默认尺寸用 `<hash>_<size>.jpg` 与默认产物并存**；故 dHash 去重（FR-70）与健康巡检（FR-73）读取的固定缩略图路径不变。
 - 缩略图存于数据目录下 `thumbnails/`（启动时 `InitThumbnailDir` 初始化，按原始路径 SHA-256 hash 命名避免特殊字符冲突）。
-- `GET /api/library/thumbnail/:id` 返回缩略图；尚未生成时返回 `202` 并触发后台生成，前端可稍后重试。媒体卡片用缩略图，图片预览弹窗仍用原图。
+- `GET /api/library/thumbnail/:id` 返回缩略图，支持 `size` 查询参数按列宽请求多尺寸（非白名单值回落默认 320）；对应尺寸尚未生成时返回 `202` 并触发后台生成，前端可稍后重试。前端 `MediaThumbnail` 以 `object-fit:contain` + 中性背景容器按原比例自适应显示（竖图/正方图完整不裁，FR-81 P3），缺图先显骨架占位、命中 202 时短间隔轮询重载、加载失败显降级占位（FR-81 P14），并经 `srcset`/`sizes` 按列宽请求更小尺寸。图片预览弹窗仍用原图。
 
 ### 5.2 文件监听与增量更新
 

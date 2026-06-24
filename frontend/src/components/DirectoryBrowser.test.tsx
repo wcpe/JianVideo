@@ -128,6 +128,6 @@ describe('DirectoryBrowser 资源管理器视图（FR-33）', () => {
       files: [file({ id: 7, file_name: '图.jpg' })],
       displayMode: 'large',
     })
-    expect(screen.getByRole('img', { name: '图.jpg' })).toHaveAttribute('src', '/api/library/thumbnail/7')
+    expect(screen.getByRole('img', { name: '图.jpg' }).getAttribute('src')).toContain('/api/library/thumbnail/7')
   })
 })

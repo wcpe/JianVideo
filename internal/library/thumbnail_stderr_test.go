@@ -26,8 +26,8 @@ func TestGenerateThumbnail_LogsFFmpegStderr(t *testing.T) {
 		name string
 		run  func(string)
 	}{
-		{"图片缩略图", generateImageThumbnail},
-		{"视频缩略图", generateVideoThumbnail},
+		{"图片缩略图", func(p string) { generateImageThumbnail(p, thumbnailWidth) }},
+		{"视频缩略图", func(p string) { generateVideoThumbnail(p, thumbnailWidth) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -54,7 +54,7 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     const user = userEvent.setup()
     renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 120 })], 0)
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('img', { name: '电影.mp4' })).toHaveAttribute('src', '/api/library/thumbnail/9')
+    expect(within(dialog).getByRole('img', { name: '电影.mp4' }).getAttribute('src')).toContain('/api/library/thumbnail/9')
     await user.click(within(dialog).getByRole('button', { name: /打开播放/ }))
     expect(mockNavigate).toHaveBeenCalledWith('/play/9')
   })

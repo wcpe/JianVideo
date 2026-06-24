@@ -21,8 +21,11 @@ import (
 const (
 	// magickConvertTimeout 单次 magick 转换超时（RAW 解码可能较慢，给足时间）。
 	magickConvertTimeout = 30 * time.Second
-	// thumbnailWidth 缩略图缩放宽度（与 ffmpeg 图片缩略图一致）。
+	// thumbnailWidth 缩略图默认缩放宽度（与 ffmpeg 图片缩略图一致）。
 	thumbnailWidth = 320
+	// thumbnailMatteColor 缩略图中性灰底色值（FR-81 P1）：带 alpha 的源合成到此底色再压 JPEG，
+	// 消除透明区被默认黑底合成的纯黑。ffmpeg（0x808080）与 magick（#808080）共用同一灰度值。
+	thumbnailMatteColor = "808080"
 )
 
 // magickConvertExts 需要经 magick 转换为 JPEG 的源扩展名集合（不含点、小写）。
@@ -116,10 +119,13 @@ func buildMagickConvertArgs(src, dst string) []string {
 // buildMagickThumbnailArgs 构建「源 → 缩略图 JPEG」的 magick 命令行参数。
 // 缩放为 width 宽、等比高度（width x，> 表示仅缩小不放大）。
 // 同上：输入在前，-auto-orient / -thumbnail 算子在后（ImageMagick 7 要求）。
+// FR-81 P1：先以 -background 中性灰底 -flatten 把透明区刷成灰，消除 HEIC/RAW 透明区被合成纯黑。
 func buildMagickThumbnailArgs(src, dst string, width int) []string {
 	return []string{
 		src + "[0]",
 		"-auto-orient",
+		"-background", "#" + thumbnailMatteColor,
+		"-flatten",
 		"-thumbnail", strconv.Itoa(width) + "x>",
 		dst,
 	}

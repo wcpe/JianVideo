@@ -90,13 +90,13 @@ describe('TimelinePage', () => {
     expect(screen.getByText('01-09')).toBeInTheDocument()
     expect(screen.getByText('01-01')).toBeInTheDocument()
 
-    // 图片卡片渲染缩略图指向缩略图 URL
+    // 图片卡片渲染缩略图指向缩略图 URL（多尺寸：带 size 参数，FR-81）
     const pngThumb = screen.getByRole('img', { name: '海报.png' })
-    expect(pngThumb).toHaveAttribute('src', '/api/library/thumbnail/200')
+    expect(pngThumb.getAttribute('src')).toContain('/api/library/thumbnail/200')
 
     // 视频卡片现在同样渲染缩略图
     const mkvThumb = screen.getByRole('img', { name: '星际穿越.mkv' })
-    expect(mkvThumb).toHaveAttribute('src', '/api/library/thumbnail/201')
+    expect(mkvThumb.getAttribute('src')).toContain('/api/library/thumbnail/201')
   })
 
   it('点击刷新按钮重载首页数据（FR-67）', async () => {

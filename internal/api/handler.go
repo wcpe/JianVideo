@@ -685,16 +685,31 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 }
 
 // serveThumbnail 回传缩略图（不存在则异步生成并返回 202）。抽出供鉴权版与分享版（FR-43）共用。
+// 支持 size 查询参数按列宽请求多尺寸（FR-81 P12）：非白名单值回落默认尺寸；默认尺寸缓存路径保持不变。
 func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
-	thumbnailPath := library.FindThumbnailPath(mf.FilePath)
+	size := library.NormalizeThumbnailSize(parseThumbnailSize(c))
+	thumbnailPath := library.ThumbnailPathForSize(mf.FilePath, size)
 	if _, err := os.Stat(thumbnailPath); err != nil {
-		// 缩略图不存在，异步生成后返回 202
-		go library.GenerateThumbnail(mf.FilePath)
+		// 该尺寸缩略图不存在，异步生成后返回 202
+		go library.GenerateThumbnailSize(mf.FilePath, size)
 		c.JSON(http.StatusAccepted, gin.H{"code": "GENERATING", "message": "缩略图生成中"})
 		return
 	}
 
 	c.File(thumbnailPath)
+}
+
+// parseThumbnailSize 解析缩略图 size 查询参数（缺省 / 非数字回 0，交由 NormalizeThumbnailSize 回落默认）。
+func parseThumbnailSize(c *gin.Context) int {
+	raw := c.Query("size")
+	if raw == "" {
+		return 0
+	}
+	size, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return size
 }
 
 // GetRawImage GET /api/library/media/:id/raw
