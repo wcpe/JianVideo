@@ -4,6 +4,11 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 新增
+- **设计系统 token 基础（FR-92，第九期地基）**：在 `frontend/src/theme.ts` 的 `appTheme` 集中定义/调优设计 token 并设全局默认，经 Mantine 级联让全站统一——是第九期其余界面 FR 的依赖地基。设 `defaultRadius:'md'`（卡片/按钮/输入统一继承圆角）、`focusRing:'auto'`（可见焦点环，无障碍地基）、`cursorType:'pointer'`；显式圆角刻度、精炼的 elevation 阴影刻度（消解卡片扁平无层次）、略放宽的行高刻度、平衡收小的标题刻度（消解 H1 过大）、自定义语义 token `other.contentMaxWidth`（供后续布局限宽）。**不发明新 token 体系**（Mantine 已有 spacing/radius/shadows/fontSizes/lineHeights）、**不做全站 find-replace**（守精准修改）；`spacing`/`fontSizes` 沿用 Mantine 默认以免布局回归；保留 FR-84 的 dimmed 对比度覆盖。新增 `design-tokens.test.ts` 守护。无新依赖、无新架构决策、无新 ADR。机制见 [docs/specs/design-system-tokens.md](docs/specs/design-system-tokens.md)。
+
 ## 0.15.0（2026-06-24）
 
 ### 安全
