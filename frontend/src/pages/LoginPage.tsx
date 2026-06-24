@@ -1,9 +1,10 @@
 import { useForm } from '@mantine/form'
-import { TextInput, Button, Paper, Title, Text, Alert, Center, Box } from '@mantine/core'
+import { TextInput, Button, Paper, Title, Text, Alert, Center, Box, Tooltip, Group } from '@mantine/core'
 import { IconLock, IconUser, IconAlertCircle } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { notifications } from '@mantine/notifications'
+import BrandLogo from '@/components/BrandLogo'
 
 /** 登录页 — Mantine 居中卡片表单 */
 export default function LoginPage() {
@@ -37,6 +38,9 @@ export default function LoginPage() {
     <Center h="100vh" w="100%">
       <Box w={360} maw="90vw">
         <Paper withBorder p="xl" radius="md" bg="var(--mantine-color-default)">
+          <Group justify="center" mb="xs">
+            <BrandLogo size={64} />
+          </Group>
           <Title order={2} ta="center" mb={4} c="purple.4">
             JianVideo
           </Title>
@@ -74,14 +78,26 @@ export default function LoginPage() {
               {...form.getInputProps('password')}
               mb="lg"
             />
-            <Button
-              type="submit"
-              fullWidth
-              loading={loading}
-              disabled={!form.isValid()}
+            <Tooltip
+              label="请先填写用户名和密码"
+              disabled={form.isValid()}
+              withArrow
+              events={{ hover: true, focus: true, touch: true }}
             >
-              {loading ? '登录中...' : '登录'}
-            </Button>
+              <Button
+                type="submit"
+                fullWidth
+                loading={loading}
+                disabled={!form.isValid()}
+              >
+                {loading ? '登录中...' : '登录'}
+              </Button>
+            </Tooltip>
+            {!form.isValid() && (
+              <Text size="xs" c="dimmed" ta="center" mt="xs">
+                填写用户名和密码后即可登录
+              </Text>
+            )}
           </form>
         </Paper>
       </Box>

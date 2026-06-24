@@ -9,7 +9,8 @@
 ### 安全
 - **JWT 随机密钥不再明文写入日志**：未设置 `JWT_SECRET` 时启动会生成随机密钥，原先把密钥明文打进 WARN 日志（有泄露风险）；改为仅提示「已生成随机密钥（重启后需重新登录），建议设置 JWT_SECRET 环境变量以持久化会话」，不再输出密钥本身。
 
-## 0.14.0（2026-06-24）
+### 新增
+- **登录页打磨（FR-82，扩 FR-13）**：纯前端打磨登录首屏，不碰后端、无新依赖。①**禁用态明确化**——空表单时登录按钮仍禁用（防无效提交），但按钮下方常驻一行辅助提示「填写用户名和密码后即可登录」，并对按钮包裹 tooltip「请先填写用户名和密码」，让用户判断这是「未填完」而非「按钮坏了」；表单填妥后提示消失、按钮恢复常态（tooltip 为增强，因 Mantine 禁用按钮不派发悬停事件，可辨性以常驻辅助文案为准）。②**品牌图形**——新增原创内联 SVG 组件 `frontend/src/components/BrandLogo.tsx`（视频/媒体主题：圆角媒体帧轮廓 + 中心播放三角 + 两侧胶片齿孔，配色取品牌紫 `--mantine-color-purple-4/6` CSS 变量，`role="img"`+`aria-label="JianVideo 标志"` 兼顾无障碍与可断言），置于登录卡片标题上方，消除整页空洞感；不引第三方插画/图标库素材。窄屏沿用 `maw="90vw"` 不溢出。机制见 [docs/specs/login-polish.md](docs/specs/login-polish.md)。浏览器实机的 logo 显示、禁用态提示清晰度与窄屏布局待真机验。
 
 ### 新增
 - **后端出站网络代理设置（FR-80）**：新增 settings 键 `network_proxy`，让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决 FR-46 自更新真机暴露的「本机直连 GitHub 下载 CDN 不可达」。新增独立无业务依赖的 `internal/netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h} 后原子更新（空串清空走直连、非法 URL 拒绝且不覆盖既有值），`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各接 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，**各自 Timeout 语义保持不变**（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则注入；`PUT /api/settings` 含 `network_proxy` 时落库后即时 `SetProxy`，非法值仅记 WARN 不阻断保存（保留既有代理）。前端「设置」页新增「网络代理」输入（占位 `http://host:port` 或 `socks5://host:port`，空=直连，附说明「用于自更新等后端外部网络访问」），复用 FR-63 热更新保存模式。socks5 由 Go 标准库 `net/http` Transport 原生支持，**无新依赖**。守架构不变量（依赖单向：`api`/`update`/`main` → `netproxy`，`netproxy` 无业务依赖）。机制见 [docs/specs/fr-80-network-proxy.md](docs/specs/fr-80-network-proxy.md)。实际代理穿透 GitHub 检测/下载待真机验（本机未必有可用代理）。

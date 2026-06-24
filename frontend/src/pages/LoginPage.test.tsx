@@ -149,9 +149,42 @@ describe('LoginPage', () => {
     await user.tab()
 
     await waitFor(() => {
-      // Mantine 表单验证错误文本
-      const errorText = screen.queryByText(/用户名/) || screen.queryByText(/请输入/)
+      // Mantine 表单 blur 校验错误文本（精确匹配避免与辅助提示「填写用户名和密码后即可登录」冲突）
+      const errorText = screen.queryByText('请输入用户名') || screen.queryByText('请输入密码')
       expect(errorText || button).toBeInTheDocument()
     })
+  })
+
+  // FR-82：禁用态明确化——空表单时按钮禁用且有可辨辅助提示
+  it('空表单时按钮禁用且展示可辨辅助提示', () => {
+    renderLoginPage()
+
+    const button = screen.getByRole('button', { name: '登录' })
+    expect(button).toBeDisabled()
+
+    // 应存在辅助提示告知用户需先填写，而非按钮故障
+    expect(screen.getByText(/填写用户名和密码后即可登录/)).toBeInTheDocument()
+  })
+
+  // FR-82：品牌图形——登录卡片上方渲染原创 SVG logo
+  it('渲染品牌 logo 图形', () => {
+    renderLoginPage()
+
+    expect(screen.getByRole('img', { name: 'JianVideo 标志' })).toBeInTheDocument()
+  })
+
+  // FR-82：填妥用户名密码后按钮可用、辅助提示消失（既有登录流程不回归）
+  it('填妥用户名密码后按钮恢复可用且辅助提示消失', async () => {
+    const user = userEvent.setup()
+    renderLoginPage()
+
+    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin')
+    await user.type(screen.getByLabelText(/密码/i), 'admin')
+
+    const button = screen.getByRole('button', { name: '登录' })
+    await waitFor(() => {
+      expect(button).toBeEnabled()
+    })
+    expect(screen.queryByText(/填写用户名和密码后即可登录/)).not.toBeInTheDocument()
   })
 })
