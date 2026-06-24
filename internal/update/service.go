@@ -68,6 +68,9 @@ type Service struct {
 	owner   string
 	repo    string
 	client  *http.Client
+	// downloadClient 专用于下载二进制产物：不设整体 Timeout，靠调用方 context 控制超时，
+	// 避免慢网络下几十 MB 的产物被 client 的 30s 整体超时掐断（检测仍走 client 的 30s）。
+	downloadClient *http.Client
 
 	mu    sync.Mutex
 	cache map[Channel]cachedCheck
@@ -79,9 +82,18 @@ func NewService() *Service {
 		baseURL: defaultBaseURL,
 		owner:   defaultOwner,
 		repo:    defaultRepo,
-		client:  &http.Client{Timeout: 30 * time.Second},
-		cache:   map[Channel]cachedCheck{},
+		client:         &http.Client{Timeout: 30 * time.Second},
+		downloadClient: &http.Client{}, // 无整体超时：下载大产物靠 context（handler 给 5min）控制
+		cache:          map[Channel]cachedCheck{},
 	}
+}
+
+// dlClient 返回下载专用 client；未注入（如测试以字面量构造 Service）时回退到 client。
+func (s *Service) dlClient() *http.Client {
+	if s.downloadClient != nil {
+		return s.downloadClient
+	}
+	return s.client
 }
 
 // resolveTarget 拉取并按频道选出目标 Release 及当前平台的二进制资产、校验和资产。
@@ -225,12 +237,12 @@ func (s *Service) Apply(ctx context.Context, current, channel string) error {
 	if err != nil {
 		return err
 	}
-	tmpBin, err := downloadToTemp(ctx, s.client, bin.URL, dir, bin.Name)
+	tmpBin, err := downloadToTemp(ctx, s.dlClient(), bin.URL, dir, bin.Name)
 	if err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
-	sumsText, err := downloadText(ctx, s.client, sums.URL)
+	sumsText, err := downloadText(ctx, s.dlClient(), sums.URL)
 	if err != nil {
 		os.RemoveAll(dir)
 		return err
