@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { notifications } from '@mantine/notifications'
 import { listAlbums, addAlbumItem } from '@/api/albums'
-import { getTags, createTag, addMediaTag } from '@/api/library'
+import { getTags, addMediaTag } from '@/api/library'
 import { useAuthStore } from '@/stores/auth'
 import { extractErrorMessage } from '@/utils/error'
 import type { Album, Tag } from '@/types'
