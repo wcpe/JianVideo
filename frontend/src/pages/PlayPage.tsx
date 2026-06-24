@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button, Text, Group, Paper, Badge, Skeleton, Alert, Stack, Title, Menu } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink } from '@tabler/icons-react'
+import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie } from '@tabler/icons-react'
 import VideoPlayer from '@/components/VideoPlayer'
 import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
 import ExternalPlayerDialog from '@/components/ExternalPlayerDialog'
+import PregenDialog from '@/components/PregenDialog'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
 import { probeClientCapabilities } from '@/utils/codec-capability'
@@ -47,6 +48,8 @@ export default function PlayPage() {
   const [shareOpened, setShareOpened] = useState(false)
   // 外部播放器深链弹窗开关（FR-79）
   const [extPlayerOpened, setExtPlayerOpened] = useState(false)
+  // 加入预生成队列弹窗开关（FR-77）
+  const [pregenOpened, setPregenOpened] = useState(false)
   const [nameEditSaving, setNameEditSaving] = useState(false)
 
   useEffect(() => {
@@ -245,6 +248,16 @@ export default function PlayPage() {
           >
             外部播放器
           </Button>
+          {/* 加入预生成（FR-77）：选预设把本媒体加入预生成队列预热首播 */}
+          <Button
+            variant="subtle"
+            color="gray"
+            size="sm"
+            leftSection={<IconMovie size={14} />}
+            onClick={() => setPregenOpened(true)}
+          >
+            加入预生成
+          </Button>
         </Group>
 
         {/* 字幕选择菜单 */}
@@ -359,6 +372,13 @@ export default function PlayPage() {
         onClose={() => setExtPlayerOpened(false)}
         mediaID={media.id}
         lastPosition={media.last_position}
+      />
+
+      {/* 加入预生成队列弹窗（FR-77）：选预设把本媒体加入转码预生成队列 */}
+      <PregenDialog
+        opened={pregenOpened}
+        onClose={() => setPregenOpened(false)}
+        mediaID={media.id}
       />
     </Stack>
   )

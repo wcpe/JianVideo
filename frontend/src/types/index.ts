@@ -153,6 +153,35 @@ export interface ScanTasksResponse {
   current: ScanTask | null
 }
 
+/** 转码目标编码（FR-77） */
+export type TranscodeCodec = 'h264' | 'h265' | 'av1' | 'vp9'
+
+/** 转码预设（FR-77）：可复用的目标编码/分辨率模板，width/height 为 0 表示沿用源分辨率 */
+export interface TranscodePreset {
+  id: number
+  name: string
+  codec: TranscodeCodec
+  width: number
+  height: number
+  created_at: string
+  updated_at: string
+}
+
+/** 转码预生成任务（FR-77）：把「某媒体 + 某预设」入队，单 worker 串行预转码预热首播 */
+export interface TranscodeTask {
+  id: number
+  media_id: number
+  preset_id: number
+  codec: string
+  width: number
+  height: number
+  status: string        // "pending" / "running" / "completed" / "error"
+  error: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
 /** 媒体健康问题类型（FR-73） */
 export type HealthIssueType = 'broken' | 'zero_byte' | 'missing' | 'no_thumbnail'
 
