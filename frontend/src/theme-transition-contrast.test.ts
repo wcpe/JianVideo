@@ -48,8 +48,11 @@ describe('FR-84 暗色 dimmed 对比度达 WCAG AA', () => {
     // 必须是更亮的语义变量 dark.1，不得是默认 dark.2，也不得写死 hex
     expect(dimmed).toBe('var(--mantine-color-dark-1)')
     expect(dimmed).not.toContain('#')
-    // 亮色不覆盖（默认 gray.6 已达标）
-    expect(vars.light['--mantine-color-dimmed']).toBeUndefined()
+    // 亮色：默认 gray.6(#868e96) 落白底仅 3.32:1 不达 AA（FR-97 修复），
+    // 下调为更深的语义变量 gray.7，不得写死 hex（详尽对比度校验见 theme.test.ts）
+    const lightDimmed = vars.light['--mantine-color-dimmed']
+    expect(lightDimmed).toBe('var(--mantine-color-gray-7)')
+    expect(lightDimmed).not.toContain('#')
   })
 
   it('上调后的 dimmed 叠在 dark.7/dark.6 表面上正常文本对比度 ≥4.5:1', () => {

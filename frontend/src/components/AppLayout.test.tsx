@@ -274,6 +274,19 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     })
   })
 
+  it('收缩态：图标态导航链接仍有可访问名（FR-97：收起后 link-name 缺失修复）', () => {
+    // 预置收缩态，mount 即收起：此时标签文字隐藏，链接须以 aria-label 提供可访问名
+    localStorage.setItem('jianvideo-nav-collapsed', '1')
+    renderLayout()
+
+    const navbar = within(getNavbar())
+    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）
+    const names = ['时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    names.forEach((name) => {
+      expect(navbar.getByRole('link', { name }).getAttribute('href')).toBeTruthy()
+    })
+  })
+
   it('移动端抽屉同样按组渲染（含三组小标题）', async () => {
     const user = userEvent.setup()
     renderLayout()

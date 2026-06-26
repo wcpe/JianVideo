@@ -100,6 +100,38 @@ describe('StatsPage', () => {
     expect(fill.style.background).toContain('--mantine-color-purple-6')
   })
 
+  it('所有进度条都有可访问名（FR-97：progressbar 无名修复）', async () => {
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(sampleStats)))
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('观看进度概览')).toBeVisible()
+    })
+    const bars = screen.getAllByRole('progressbar')
+    expect(bars.length).toBeGreaterThan(0)
+    for (const bar of bars) {
+      expect(bar).toHaveAccessibleName()
+    }
+  })
+
+  it('热力方块与时间线条用 role=img + 可访问名（FR-97：禁用 aria-label on div 修复）', async () => {
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(sampleStats)))
+    renderPage()
+    // 热力方块：role=img，名取区间与个数
+    const cell0 = await screen.findByTestId('heat-cell-0')
+    expect(cell0).toHaveAttribute('role', 'img')
+    // 时间线条：role=img，名取日期与个数
+    const bar = screen.getByLabelText('2026-06-24 观看 3 个')
+    expect(bar).toHaveAttribute('role', 'img')
+  })
+
+  it('未看灰色徽标文字用更深 gray-7 以达对比度（FR-97）', async () => {
+    server.use(http.get('*/api/library/stats', () => HttpResponse.json(sampleStats)))
+    renderPage()
+    const label = await screen.findByText('未看')
+    // label 文字色被强制为更深的语义变量 gray-7（非默认 gray.6），保证落浅灰底达 AA
+    expect(label.style.color).toContain('--mantine-color-gray-7')
+  })
+
   it('加载失败时提示错误', async () => {
     server.use(http.get('*/api/library/stats', () => HttpResponse.json({ message: '炸了' }, { status: 500 })))
     renderPage()

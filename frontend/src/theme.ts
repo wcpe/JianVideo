@@ -10,19 +10,23 @@ const brandPurple: MantineColorsTuple = [
   '#8a45f0', '#7e14ff', '#6f10e6', '#5c0cbd', '#490996',
 ]
 
-// 全局 CSS 变量覆盖（FR-84）：
-// Mantine 暗色默认把 `--mantine-color-dimmed` 映射到 dark.2(#828282)，
+// 全局 CSS 变量覆盖（FR-84 + FR-97 对比度修复）：
+// 暗色：Mantine 默认把 `--mantine-color-dimmed` 映射到 dark.2(#828282)，
 // 叠在 dark.7/dark.6 表面上对比度仅约 4.0/3.5:1，处于 WCAG AA 边缘。
 // 这里在暗色变体下把 dimmed 上调为更亮的语义变量 dark.1(#b8b8b8)，
 // 叠 dark.7=7.83:1、叠 dark.6=6.85:1，正常文本均 ≥4.5:1。
-// 一处改、全局生效，所有 c="dimmed" 站点随之达标，且保持语义变量（不写死 hex）。
-// 亮色保持 Mantine 默认（gray.6 已达标），故 light 不覆盖。
+// 亮色：Mantine 默认 dimmed 为 gray.6(#868e96)，落白底仅 3.32:1、落浅灰底(gray.1)仅 3.02:1，
+// 任意字号均不达 AA 4.5:1（真机 Lighthouse 实测失分）。这里下调为更深的语义变量 gray.7(#495057)，
+// 落白底 8.18:1、落浅灰底 7.42:1，正常文本均 ≥4.5:1。
+// 两侧均一处改、全局生效，所有 c="dimmed" 站点随之达标，且保持语义变量（不写死 hex）。
 export const themeCssVariablesResolver: CSSVariablesResolver = () => ({
   variables: {},
   dark: {
     '--mantine-color-dimmed': 'var(--mantine-color-dark-1)',
   },
-  light: {},
+  light: {
+    '--mantine-color-dimmed': 'var(--mantine-color-gray-7)',
+  },
 })
 
 // 应用主题（FR-92 设计系统 token 地基）：集中定义/调优设计 token 并设全局默认，

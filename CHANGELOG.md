@@ -4,6 +4,11 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 修复
+- **无障碍对比度与可访问名（FR-97 真机收尾）**：v0.16.0 发布后经真实浏览器 Lighthouse 桌面无障碍审计（统计页）发现四类 WCAG 失分，本次修复后该页无障碍分由 87 升至 **100**（收起/展开导航两态均 100）。① **亮色 dimmed 文字对比度**——`theme.ts` 的 `cssVariablesResolver` 此前仅覆盖暗色 dimmed、亮色沿用 Mantine 默认 `gray.6`(#868e96)，落白底仅 3.32:1、落浅灰底 3.02:1，任意字号均不达 AA 4.5:1（全站 `c="dimmed"` 文本受影响，单一 token 根因）；亮色 dimmed 下调为更深的语义变量 `gray.7`(#495057，落白底 8.18:1、浅灰底 7.42:1），一处改全站达标、保持语义变量不写死 hex。② **进度条可访问名**——统计页 4 个 `Progress`（观看进度概览/各库/各格式/Top 榜）补 `aria-label`，消除 `progressbar` 无名。③ **图表 div 禁用属性**——续播热力方块与时间线条的 `<div aria-label>` 补 `role="img"`，修正「无 role 的 div 不可用 aria-label」。④ **收起态导航链接无名**——侧栏收起（仅图标）时导航 `<Link>` 无可访问文本，给每个导航链接补 `aria-label`（取导航名），两态均有可访问名。⑤ **未看徽标对比度**——统计页 `color="gray"` light 徽标文字默认取 `gray.6` 落浅灰底仅 2.85:1，强制 label 文字为更深 `gray.7`。纯前端、无新依赖、无新架构决策、无新 ADR。新增 `theme.test.ts`（WCAG 对比度纯函数 + 亮/暗 dimmed 映射断言），`StatsPage.test.tsx`/`AppLayout.test.tsx`/`theme-transition-contrast.test.ts` 加 FR-97 守护（进度条可访问名、图表 role、收起态导航名、未看徽标深色、亮色 dimmed 映射归真）。
+
 ## 0.16.0（2026-06-25）
 
 ### 变更

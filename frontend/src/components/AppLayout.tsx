@@ -123,6 +123,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         to={path}
         onClick={onNavigate}
         data-active={active || undefined}
+        aria-label={label}
         style={{ textDecoration: 'none' }}
       >
         <Group

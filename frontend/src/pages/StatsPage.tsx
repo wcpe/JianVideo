@@ -81,13 +81,14 @@ export default function StatsPage() {
           <Text size="sm" c="dimmed">已看 {stats.watched} / 共 {stats.total}（{watchedPercent}%）</Text>
         </Group>
         <Progress.Root size="xl">
-          <Progress.Section value={watchedPercent} color="purple">
+          <Progress.Section value={watchedPercent} color="purple" aria-label={`观看进度 ${watchedPercent}%`}>
             <Progress.Label>已看 {stats.watched}</Progress.Label>
           </Progress.Section>
         </Progress.Root>
         <Group gap="lg" mt="xs">
           <Group gap={6}><Badge color="purple" variant="filled" size="sm">已看</Badge><Text size="sm">{stats.watched}</Text></Group>
-          <Group gap={6}><Badge color="gray" variant="light" size="sm">未看</Badge><Text size="sm">{stats.unwatched}</Text></Group>
+          {/* 灰色 light 徽标文字默认取 gray.6(#868e96)，落浅灰底仅约 2.85:1 不达 AA；强制 label 为更深 gray.7（FR-97 对比度修复） */}
+          <Group gap={6}><Badge color="gray" variant="light" size="sm" styles={{ label: { color: 'var(--mantine-color-gray-7)' } }}>未看</Badge><Text size="sm">{stats.unwatched}</Text></Group>
         </Group>
       </Card>
 
@@ -104,6 +105,7 @@ export default function StatsPage() {
               <Stack key={i} gap={2} align="center">
                 <div
                   data-testid={`heat-cell-${i}`}
+                  role="img"
                   aria-label={`${HEATMAP_LABELS[i]} ${value} 个`}
                   style={{ width: '100%', height: 40, borderRadius: 6, background: heatColor(value, heatmapMax), display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -128,6 +130,7 @@ export default function StatsPage() {
             {stats.recent_timeline.map((b) => (
               <Stack key={b.date} gap={2} align="center">
                 <div
+                  role="img"
                   aria-label={`${b.date} 观看 ${b.count} 个`}
                   style={{ width: 20, height: 72, borderRadius: 4, background: 'var(--mantine-color-default-border)', display: 'flex', alignItems: 'flex-end', overflow: 'hidden' }}
                 >
@@ -156,7 +159,7 @@ export default function StatsPage() {
                     <Text size="sm" truncate>{l.label || `库 #${l.library_id}`}</Text>
                     <Text size="sm" c="dimmed">{l.watched}</Text>
                   </Group>
-                  <Progress value={libraryMax > 0 ? (l.watched / libraryMax) * 100 : 0} color="purple" size="sm" />
+                  <Progress value={libraryMax > 0 ? (l.watched / libraryMax) * 100 : 0} color="purple" size="sm" aria-label={`${l.label || `库 #${l.library_id}`} 已看 ${l.watched}`} />
                 </div>
               ))}
             </Stack>
@@ -175,7 +178,7 @@ export default function StatsPage() {
                     <Text size="sm" truncate>{f.format || '未知格式'}</Text>
                     <Text size="sm" c="dimmed">{f.watched}</Text>
                   </Group>
-                  <Progress value={formatMax > 0 ? (f.watched / formatMax) * 100 : 0} color="purple" size="sm" />
+                  <Progress value={formatMax > 0 ? (f.watched / formatMax) * 100 : 0} color="purple" size="sm" aria-label={`${f.format || '未知格式'} 已看 ${f.watched}`} />
                 </div>
               ))}
             </Stack>
@@ -206,7 +209,7 @@ export default function StatsPage() {
                   </Group>
                   <Badge color="purple" variant="light" style={{ flexShrink: 0 }}>{m.view_count ?? 0} 次</Badge>
                 </Group>
-                <Progress value={topMax > 0 ? ((m.view_count ?? 0) / topMax) * 100 : 0} color="purple" size="xs" mt={6} />
+                <Progress value={topMax > 0 ? ((m.view_count ?? 0) / topMax) * 100 : 0} color="purple" size="xs" mt={6} aria-label={`${mediaDisplayName(m)} 观看 ${m.view_count ?? 0} 次`} />
               </Card>
             ))}
           </Stack>
