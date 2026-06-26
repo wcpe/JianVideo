@@ -365,6 +365,50 @@ describe('SystemPage', () => {
     expect(forceParam).toBe('true')
   })
 
+  it('进入应用更新子 tab 即自动展示更新信息（免手动点检查更新）', async () => {
+    localStorage.clear()
+    // 确定性 handler（不依赖跨测试泄漏的频道设置）：任意频道都回固定版本 + 发布说明
+    server.use(
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json({
+          current: '0.16.0', latest: 'v0.16.9', has_update: true, tag: 'v0.16.9',
+          prerelease: false, channel: 'stable', notes: '自动展示的发布说明', asset_name: 'jianvideo-windows-amd64',
+        }),
+      ),
+    )
+    // 直接以 ?sys=update 进入应用更新子 tab，不点击任何按钮
+    renderPage('/system?tab=system&sys=update')
+
+    // 自动检查（非 force，走后端缓存）后应自动展示最新版本与发布说明，无需手动点
+    await waitFor(() => {
+      expect(screen.getByText('v0.16.9')).toBeVisible()
+    })
+    expect(screen.getByText('自动展示的发布说明')).toBeVisible()
+    // 不应再停留在「点击检查更新」的引导占位文案
+    expect(screen.queryByText(/点击「检查更新」/)).toBeNull()
+  })
+
+  it('命中本地缓存时进入即时展示缓存的发布说明（不依赖网络）', async () => {
+    localStorage.clear()
+    // 预置 stable 频道的本地缓存（含独特发布说明），并让网络长时间不返回
+    localStorage.setItem('jianvideo.update.check.stable', JSON.stringify({
+      current: '0.16.0', latest: 'v0.16.1', has_update: true, tag: 'v0.16.1',
+      prerelease: false, channel: 'stable', notes: '缓存的更新日志要点', asset_name: 'jianvideo-windows-amd64',
+    }))
+    server.use(
+      http.get('*/api/system/update/check', async () => {
+        await delay(10000) // 网络迟迟不返回，验证缓存能先行展示
+        return HttpResponse.json({ current: '0.16.0', latest: 'v0.16.1', has_update: true, tag: 'v0.16.1', prerelease: false, channel: 'stable', notes: '', asset_name: '' })
+      }),
+    )
+
+    renderPage('/system?tab=system&sys=update')
+
+    // 缓存在挂载时同步注入，发布说明无需等待网络即可见
+    expect(await screen.findByText('缓存的更新日志要点')).toBeVisible()
+    expect(screen.getByText('v0.16.1')).toBeVisible()
+  })
+
   it('点「立即更新并重启」弹 Mantine 模态框，确认才触发更新（FR-62）', async () => {
     const user = userEvent.setup()
     let applyCalled = false

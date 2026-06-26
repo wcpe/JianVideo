@@ -47,6 +47,30 @@ func parseVersion(s string) parsedVersion {
 	return parsedVersion{nums[0], nums[1], nums[2], pre, true}
 }
 
+// baselineCmp 比较两版本的 MAJOR.MINOR.PATCH 基线（忽略预发布标识）：
+// a 高于 b 返 1、低于返 -1、相等返 0。
+func baselineCmp(a, b parsedVersion) int {
+	switch {
+	case a.major != b.major:
+		if a.major > b.major {
+			return 1
+		}
+		return -1
+	case a.minor != b.minor:
+		if a.minor > b.minor {
+			return 1
+		}
+		return -1
+	case a.patch != b.patch:
+		if a.patch > b.patch {
+			return 1
+		}
+		return -1
+	default:
+		return 0
+	}
+}
+
 // isNewer 判断 latest 是否比 current 更新（值得更新）。
 // 规则：① 主/次/修订按数值比较；② 同基线下「正式版」优于「预发布」；
 // ③ 同基线两个预发布标识不同则视为有更新（用于滚动 dev 预发布频道）；

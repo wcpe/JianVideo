@@ -211,15 +211,29 @@ func copyResult(r *CheckResult) *CheckResult {
 
 // hasUpdate 判断目标版本相对当前版本是否应提示更新。
 // 正式版（stable）：按语义版本比较，仅更高才提示。
-// 测试版（prerelease，dev 滚动）：只要最新预发布版本与当前不同即提示——
-// 既支持从正式版切到测试版，也支持 dev→更新的 dev；同一 dev 则不提示。
+// 测试版（prerelease，dev 滚动）：按 MAJOR.MINOR.PATCH 基线比较——基线更高才有更新、
+// 基线更低绝不降级（修复「更旧的 dev 误报可更新」）、同基线下标识不同即提示
+// （既支持从正式版切到同基线测试版，也支持 dev→同基线的新 dev；同一 dev 则不提示）。
 func hasUpdate(latest, current string, ch Channel) bool {
 	latest = strings.TrimSpace(latest)
 	if latest == "" {
 		return false
 	}
 	if ch == ChannelPrerelease {
-		return latest != strings.TrimSpace(current)
+		l := parseVersion(latest)
+		c := parseVersion(current)
+		// 任一无法解析：沿用保守兜底——与当前不同即视为有更新
+		if !l.ok || !c.ok {
+			return latest != strings.TrimSpace(current)
+		}
+		switch baselineCmp(l, c) {
+		case 1:
+			return true // 基线更高：有更新
+		case -1:
+			return false // 基线更低：不降级
+		default:
+			return l.pre != c.pre // 同基线：预发布标识不同即可切换
+		}
 	}
 	return isNewer(latest, current)
 }

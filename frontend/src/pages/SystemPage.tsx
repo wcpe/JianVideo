@@ -14,6 +14,7 @@ import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
+import { loadCachedUpdate, saveCachedUpdate } from '@/utils/update-cache'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types'
 
 // 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
@@ -211,6 +212,23 @@ export default function SystemPage() {
     return () => { active = false }
   }, [])
 
+  // 进入 / 切换频道即展示更新信息（FR-46）：先用本地缓存即时回填上次的版本与发布说明（免手动点检查），
+  // 再后台非强制刷新（命中后端 TTL 缓存即廉价返回）保持最新；后台失败保留缓存、静默不打扰。
+  useEffect(() => {
+    // 即时展示该频道缓存（含发布说明）；无缓存则清空，避免切频道时残留另一频道旧数据
+    setUpdateInfo(loadCachedUpdate(channel))
+    setUpdateError(null)
+    let active = true
+    systemApi.checkUpdate(channel, false)
+      .then((res) => {
+        if (!active) return
+        setUpdateInfo(res)
+        saveCachedUpdate(channel, res)
+      })
+      .catch(() => { /* 后台刷新失败：保留已展示的缓存，静默不打扰 */ })
+    return () => { active = false }
+  }, [channel])
+
   // 默认走缓存（force 为 false），「重新测试」强制重跑（force 为 true）
   const handleCodecTest = useCallback(async (force: boolean) => {
     setCodecLoading(true)
@@ -235,7 +253,10 @@ export default function SystemPage() {
     setUpdateInfo(null)
     try {
       // 默认走后端 TTL 缓存（force 为 false），命中即时返回，缓解直连 GitHub 慢导致的超时
-      setUpdateInfo(await systemApi.checkUpdate(channel, force))
+      const res = await systemApi.checkUpdate(channel, force)
+      setUpdateInfo(res)
+      // 写入本地缓存（含发布说明），供下次进入即时展示，免再手动点检查
+      saveCachedUpdate(channel, res)
     } catch (err) {
       // 仅采用后端返回的友好 message；无响应（超时/网络异常）时用固定兜底，不回显裸 axios 串
       setUpdateError(updateCheckErrorMessage(err))
@@ -244,12 +265,10 @@ export default function SystemPage() {
     }
   }, [channel])
 
-  // 切换并持久化更新频道（正式版/测试版），清空旧检查结果
+  // 切换并持久化更新频道（正式版/测试版）；切换后由 [channel] 副作用回填该频道缓存并后台刷新
   const handleChannelChange = useCallback((v: string) => {
     const ch: 'stable' | 'prerelease' = v === 'prerelease' ? 'prerelease' : 'stable'
     setChannel(ch)
-    setUpdateInfo(null)
-    setUpdateError(null)
     updateSettings({ [SETTING_KEY_UPDATE_CHANNEL]: ch }).catch(() => { /* 持久化失败不阻塞使用 */ })
   }, [])
 

@@ -27,6 +27,31 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
+// TestHasUpdate_PrereleaseNoBaselineDowngrade 回归核心 bug：
+// 预发布频道不得把「基线更低」的版本误报为有更新
+// （用户实测：当前 0.16.0，测试版 latest 为更旧的 0.14.1-dev 仍提示可更新）。
+func TestHasUpdate_PrereleaseNoBaselineDowngrade(t *testing.T) {
+	cases := []struct {
+		name            string
+		latest, current string
+		ch              Channel
+		want            bool
+	}{
+		{"预发布·基线更低不更新", "0.14.1-dev.e62a6e4", "0.16.0", ChannelPrerelease, false},
+		{"预发布·基线更高有更新", "0.17.0-dev.abc1234", "0.16.0", ChannelPrerelease, true},
+		{"预发布·同基线正式切dev可更新", "0.7.0-dev.abc1234", "0.7.0", ChannelPrerelease, true},
+		{"预发布·同一dev不更新", "0.7.0-dev.abc1234", "0.7.0-dev.abc1234", ChannelPrerelease, false},
+		{"预发布·同基线两dev不同可更新", "0.7.0-dev.def5678", "0.7.0-dev.abc1234", ChannelPrerelease, true},
+		{"正式·基线更低不更新", "0.14.0", "0.16.0", ChannelStable, false},
+		{"正式·基线更高有更新", "0.17.0", "0.16.0", ChannelStable, true},
+	}
+	for _, c := range cases {
+		if got := hasUpdate(c.latest, c.current, c.ch); got != c.want {
+			t.Errorf("%s: hasUpdate(%q, %q, %v)=%v, 期望 %v", c.name, c.latest, c.current, c.ch, got, c.want)
+		}
+	}
+}
+
 // TestParseVersion 校验解析的成功与失败用例。
 func TestParseVersion(t *testing.T) {
 	if v := parseVersion("v1.2.3"); !v.ok || v.major != 1 || v.minor != 2 || v.patch != 3 || v.pre != "" {
