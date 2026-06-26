@@ -318,7 +318,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {navCollapsed ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
           </ActionIcon>
         </Group>
-        <Stack gap="xs" style={{ flex: 1 }}>
+        {/* 导航列表滚动区：navbar 为定高 flex 列，列表项多 + 视口矮时会溢出。
+            flex:1 占据中间剩余高度、minHeight:0 允许收缩到内容以下、overflowY:auto 触发内部滚动，
+            从而顶部收起按钮与底部版本/协议常驻、中间列表可纵向滚动（修复导航栏无法滚动） */}
+        <Stack gap="xs" data-testid="nav-scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
           {renderNavGroups(undefined, effectiveCollapsed)}
         </Stack>

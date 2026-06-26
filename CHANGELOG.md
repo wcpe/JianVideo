@@ -4,6 +4,11 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 修复
+- **侧边导航栏无法滚动**：桌面 `AppShell.Navbar`（`AppLayout.tsx`）为定高 flex 列，导航项较多（11 项 + 三组标题 + 分隔线 + 顶部收起按钮 + 底部版本/协议）叠加矮视口时内容超出可用高度，但中间导航列表 `Stack` 仅 `flex:1`、未设溢出滚动，navbar 自身 `overflow-y: visible`，导致溢出内容（转码/系统/开源协议）溢出视口被截断且无法滚动到达（实测视口高 500 时内容 741px、「系统」「开源协议」落在视口外）。给导航列表 `Stack` 补 `minHeight:0 + overflowY:auto`（flex 子项须 `minHeight:0` 方能收缩到内容以下并触发内部滚动），使**顶部收起按钮与底部版本/协议常驻、中间导航列表可纵向滚动**，矮视口下全部导航项可达。纯前端、无新依赖、无新架构决策、无新 ADR。`AppLayout.test.tsx` 加滚动容器样式与底部入口常驻断言。
+
 ## 0.16.1（2026-06-26）
 
 ### 修复

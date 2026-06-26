@@ -302,6 +302,36 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
   })
 })
 
+describe('AppLayout 导航纵向滚动（修复导航栏无法滚动）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('导航组容器可纵向滚动（flex:1 + minHeight:0 + overflowY:auto），矮视口下溢出内容可达', () => {
+    renderLayout()
+
+    // 导航组的滚动容器：内容超过 navbar 可用高度时须能内部滚动，而非溢出视口被截断
+    const scroll = within(getNavbar()).getByTestId('nav-scroll-area')
+    const style = getComputedStyle(scroll)
+    expect(style.overflowY).toBe('auto')
+    // flex 子项须 minHeight:0 才能收缩到内容以下并触发滚动
+    expect(style.minHeight).toBe('0px')
+  })
+
+  it('版本号/开源协议入口仍在滚动容器之外（底部常驻，不随导航列表滚走）', () => {
+    renderLayout()
+
+    const scroll = within(getNavbar()).getByTestId('nav-scroll-area')
+    // 「开源协议」链接置于滚动容器外（navbar 底部常驻），不被包含在可滚动的导航列表内
+    const license = within(getNavbar()).getByRole('link', { name: '开源协议' })
+    expect(scroll.contains(license)).toBe(false)
+  })
+})
+
 describe('AppLayout 影院模式（FR-85）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
