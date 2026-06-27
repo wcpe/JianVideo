@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -114,6 +115,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 
 		// /api/me 由全局 APIGuard 统一保护，无需再单独挂中间件。
 		apiGroup.GET("/me", handleMe)
+		// 修改密码（FR-108）：受 APIGuard 保护（须已登录），从认证上下文取当前用户名
+		apiGroup.POST("/me/password", handleChangePassword(svc))
 	}
 
 	// 健康检查
@@ -239,4 +242,36 @@ func handleMe(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"username": username,
 	})
+}
+
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// handleChangePassword 修改当前登录用户的密码（FR-108）。
+// 受 APIGuard 保护：用户名取自认证上下文；当前密码不符返回 401，成功返回 204。
+func handleChangePassword(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username, ok := c.Get("username")
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "未认证"})
+			return
+		}
+		var req changePasswordRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+			return
+		}
+		err := svc.ChangePassword(username.(string), req.OldPassword, req.NewPassword)
+		if errors.Is(err, auth.ErrCurrentPasswordWrong) {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "WRONG_PASSWORD", "message": "当前密码错误"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "CHANGE_PASSWORD_FAILED", "message": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
 }

@@ -7,6 +7,7 @@
 ## 未发布
 
 ### 新增
+- **登录用户修改密码（FR-108）**：已登录用户可在「系统 → 设置 → 账户安全」修改密码——校验当前密码后设置新密码、bcrypt 存储、即时生效（旧密码立即失效、新密码立即可用）。后端新增受保护端点 `POST /api/me/password`（用户取自认证上下文，当前密码不符返回 401，成功 204）；`auth.Service` 增 `ChangePassword` 与 `ErrCurrentPasswordWrong`，`models` 增 `UpdateUserPassword`。前端设置页新增「账户安全」卡（当前/新/确认密码，前端校验新密码 ≥6 位且两次一致）。附带修复 `auth` 包 `TestParseToken_Tampered` 概率性误判（改篡改签名段首字符，避免末位 base64 冗余位等价）。
 - **首次初始化引导（FR-109）**：取消「启动自动创建 admin/admin 默认账户」（消除默认弱口令隐患），改为首次初始化引导——系统无任何用户时，首次访问自动进入 `/setup` 引导页，由用户设置管理员用户名+密码创建首个账户并自动登录；已有用户的实例行为不变（直接进登录页）。后端新增免登端点 `GET /api/auth/setup-status`（查是否需初始化）与 `POST /api/auth/setup`（无用户时创建首个账户并签发 Cookie，已初始化返回 409）；`auth.Service` 增 `NeedsSetup`/`Setup`，`CreateDefaultUser` 保留仅供测试播种。前端新增 `/setup` 路由、`SetupPage`、`RequireSetup` 守卫，`auth` store 增 `needsSetup`/`setup`，`ProtectedRoute`/`RequireAnon` 在需初始化时导向 `/setup`。决策见 ADR-0040（部分取代 ADR-0016 的默认账户创建）。**行为变更**：全新部署不再有 admin/admin 默认账户，须在引导页设置。
 
 ### 修复

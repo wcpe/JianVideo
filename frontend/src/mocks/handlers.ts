@@ -81,6 +81,16 @@ export const handlers = [
     )
   }),
 
+  // 修改密码（FR-108）：当前密码为 admin 视为正确，否则 401
+  http.post('*/api/me/password', async ({ request }) => {
+    await delay(200)
+    const body = await request.json() as { old_password: string; new_password: string }
+    if (body.old_password !== 'admin') {
+      return HttpResponse.json({ code: 'WRONG_PASSWORD', message: '当前密码错误' }, { status: 401 })
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   // ─── 媒体库目录 ─────────────────────────────────────
 
   http.get('*/api/library/paths', async () => {

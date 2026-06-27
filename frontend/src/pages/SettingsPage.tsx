@@ -15,6 +15,7 @@ import {
   SETTING_KEY_NETWORK_PROXY,
 } from '@/api/settings'
 import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system'
+import { changePassword } from '@/api/auth'
 import { extractErrorMessage } from '@/utils/error'
 import {
   parseRecycleBinRows,
@@ -36,6 +37,13 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  // 修改密码（FR-108）：独立于设置读写，不被设置加载阻塞
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [pwError, setPwError] = useState<string | null>(null)
 
   // 环境变量（FR-56，只读）
   const [envVars, setEnvVars] = useState<EnvVar[]>([])
@@ -176,9 +184,73 @@ export default function SettingsPage() {
     }
   }, [networkProxy])
 
+  const handleChangePassword = useCallback(async () => {
+    setPwError(null)
+    if (newPassword.length < 6) {
+      setPwError('新密码至少 6 位')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError('两次输入的新密码不一致')
+      return
+    }
+    setChangingPassword(true)
+    try {
+      await changePassword(currentPassword, newPassword)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      notifications.show({ title: '修改成功', message: '密码已更新', color: 'green', autoClose: 2000 })
+    } catch (err) {
+      setPwError(extractErrorMessage(err, '修改密码失败'))
+    } finally {
+      setChangingPassword(false)
+    }
+  }, [currentPassword, newPassword, confirmPassword])
+
   return (
     <Stack gap="md">
       <Title order={2}>设置</Title>
+
+      {/* 账户安全（FR-108）：修改当前登录用户密码，独立于下方运行期设置 */}
+      <Title order={3}>账户安全</Title>
+      <Card withBorder padding="md" radius="md">
+        <Stack gap="md">
+          {pwError && (
+            <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={() => setPwError(null)}>
+              {pwError}
+            </Alert>
+          )}
+          <TextInput
+            label="当前密码"
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.currentTarget.value)}
+          />
+          <TextInput
+            label="新密码"
+            description="至少 6 位"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.currentTarget.value)}
+          />
+          <TextInput
+            label="确认新密码"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.currentTarget.value)}
+          />
+          <Group>
+            <Button
+              onClick={handleChangePassword}
+              loading={changingPassword}
+              disabled={!currentPassword || !newPassword || !confirmPassword}
+            >
+              修改密码
+            </Button>
+          </Group>
+        </Stack>
+      </Card>
 
       {loadError && (
         <Alert icon={<IconAlertCircle size={16} />} color="red" title="加载失败">

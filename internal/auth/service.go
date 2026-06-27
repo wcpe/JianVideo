@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ErrCurrentPasswordWrong 修改密码时当前密码校验失败（FR-108），供 handler 区分 401。
+var ErrCurrentPasswordWrong = errors.New("当前密码错误")
 
 // Service 认证服务
 type Service struct {
@@ -69,6 +73,29 @@ func (s *Service) CreateDefaultUser() error {
 
 	_, err = models.CreateUser(s.db, "admin", string(hash))
 	return err
+}
+
+// ChangePassword 校验当前密码后将用户密码改为新密码（FR-108）。
+// 当前密码不符返回 ErrCurrentPasswordWrong；新密码为空或用户不存在返回错误。
+func (s *Service) ChangePassword(username, currentPassword, newPassword string) error {
+	if newPassword == "" {
+		return fmt.Errorf("新密码不能为空")
+	}
+	user, err := models.FindUserByUsername(s.db, username)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("用户不存在")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return ErrCurrentPasswordWrong
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("生成密码哈希失败: %w", err)
+	}
+	return models.UpdateUserPassword(s.db, username, string(hash))
 }
 
 // Login 验证用户凭据

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/wcpe/JianVideo/internal/db"
@@ -144,6 +145,59 @@ func TestSetup_RejectsEmpty(t *testing.T) {
 	}
 	if _, err := svc.Setup("alice", ""); err == nil {
 		t.Error("空密码应被拒绝")
+	}
+}
+
+func TestChangePassword_Success(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatalf("播种用户失败: %v", err)
+	}
+
+	if err := svc.ChangePassword("admin", "admin", "new-secret"); err != nil {
+		t.Fatalf("改密应成功: %v", err)
+	}
+	// 旧密码登录失败、新密码登录成功
+	if _, err := svc.Login("admin", "admin"); err == nil {
+		t.Error("改密后旧密码登录应失败")
+	}
+	if _, err := svc.Login("admin", "new-secret"); err != nil {
+		t.Errorf("改密后新密码登录应成功: %v", err)
+	}
+}
+
+func TestChangePassword_WrongCurrent(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatalf("播种用户失败: %v", err)
+	}
+
+	err := svc.ChangePassword("admin", "wrong-current", "new-secret")
+	if !errors.Is(err, ErrCurrentPasswordWrong) {
+		t.Errorf("当前密码错误应返回 ErrCurrentPasswordWrong, 得到 %v", err)
+	}
+	// 密码未被更改：原密码仍可登录
+	if _, err := svc.Login("admin", "admin"); err != nil {
+		t.Errorf("改密失败后原密码应仍可登录: %v", err)
+	}
+}
+
+func TestChangePassword_EmptyNew(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatalf("播种用户失败: %v", err)
+	}
+	if err := svc.ChangePassword("admin", "admin", ""); err == nil {
+		t.Error("新密码为空应被拒绝")
 	}
 }
 

@@ -85,6 +85,37 @@ func setupFreshRouter(t *testing.T) *gin.Engine {
 	return NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), nil, nil)
 }
 
+// setupSeededRouter 构建一个「已播种 admin/admin」的独立临时文件库路由。
+// 用于会改动用户数据（如改密）的用例，避免污染共享内存库里的 admin。
+func setupSeededRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	dbPath := filepath.Join(t.TempDir(), "seeded.db")
+	gormDB, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gormDB.AutoMigrate(
+		&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{},
+		&models.User{}, &models.PlaybackSession{},
+	); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
+	}
+	cfg := &config.Config{ServerPort: 8080, JWTSecret: "test-secret", JWTExpiresIn: 72 * time.Hour, DBPath: dbPath}
+	t.Cleanup(func() {
+		if sqlDB, err := gormDB.DB(); err == nil {
+			sqlDB.Close()
+		}
+	})
+	r := NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), nil, nil)
+	sqlDB, _ := gormDB.DB()
+	if err := auth.NewService(sqlDB, cfg.JWTSecret).CreateDefaultUser(); err != nil {
+		t.Fatalf("播种默认用户失败: %v", err)
+	}
+	return r
+}
+
 // setupTestRouterWithFrontend 同上，但注入桩内嵌前端（含 PWA 根资源），用于静态服务测试。
 func setupTestRouterWithFrontend(t *testing.T, frontendFS fs.FS) *gin.Engine {
 	t.Helper()
@@ -325,6 +356,82 @@ func TestSetup_RejectsWhenInitialized(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("已初始化应返回 409, 得到 %d, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestChangePassword_RequiresAuth(t *testing.T) {
+	r := setupSeededRouter(t)
+
+	body := `{"old_password":"admin","new_password":"new-secret"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/me/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("未认证改密应 401, 得到 %d", w.Code)
+	}
+}
+
+// loginCookie 登录 admin/admin 并返回 Set-Cookie，供受保护端点测试复用。
+func loginCookie(t *testing.T, r *gin.Engine) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"admin","password":"admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("登录失败: %d %s", w.Code, w.Body.String())
+	}
+	return w.Header().Get("Set-Cookie")
+}
+
+func TestChangePassword_WrongCurrent(t *testing.T) {
+	r := setupSeededRouter(t)
+	cookie := loginCookie(t, r)
+
+	body := `{"old_password":"wrong","new_password":"new-secret"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/me/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("当前密码错误应 401, 得到 %d, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestChangePassword_Success(t *testing.T) {
+	r := setupSeededRouter(t)
+	cookie := loginCookie(t, r)
+
+	body := `{"old_password":"admin","new_password":"new-secret"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/me/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookie)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("改密应 204, 得到 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// 旧密码登录失败
+	oldW := httptest.NewRecorder()
+	oldReq, _ := http.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"admin","password":"admin"}`))
+	oldReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(oldW, oldReq)
+	if oldW.Code != http.StatusUnauthorized {
+		t.Errorf("改密后旧密码登录应 401, 得到 %d", oldW.Code)
+	}
+
+	// 新密码登录成功
+	newW := httptest.NewRecorder()
+	newReq, _ := http.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"admin","password":"new-secret"}`))
+	newReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(newW, newReq)
+	if newW.Code != http.StatusOK {
+		t.Errorf("改密后新密码登录应 200, 得到 %d", newW.Code)
 	}
 }
 

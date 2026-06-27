@@ -344,4 +344,59 @@ describe('SettingsPage', () => {
     expect(putBody).not.toBeNull()
     expect(putBody!.settings.ffmpeg_path).toBe('D:/tools/ffmpeg.exe')
   })
+
+  it('账户安全卡展示修改密码表单（FR-108）', async () => {
+    renderPage()
+    expect(await screen.findByRole('heading', { name: '账户安全' })).toBeVisible()
+    expect(screen.getByLabelText('当前密码')).toBeInTheDocument()
+    expect(screen.getByLabelText('新密码')).toBeInTheDocument()
+    expect(screen.getByLabelText('确认新密码')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '修改密码' })).toBeInTheDocument()
+  })
+
+  it('两次新密码不一致时报错且不请求（FR-108）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByLabelText('当前密码')
+
+    await user.type(screen.getByLabelText('当前密码'), 'admin')
+    await user.type(screen.getByLabelText('新密码'), 'secret123')
+    await user.type(screen.getByLabelText('确认新密码'), 'mismatch1')
+    await user.click(screen.getByRole('button', { name: '修改密码' }))
+
+    expect(await screen.findByText('两次输入的新密码不一致')).toBeVisible()
+    expect(mockNotificationShow).not.toHaveBeenCalled()
+  })
+
+  it('当前密码错误时展示错误（FR-108）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByLabelText('当前密码')
+
+    await user.type(screen.getByLabelText('当前密码'), 'wrong-pass')
+    await user.type(screen.getByLabelText('新密码'), 'secret123')
+    await user.type(screen.getByLabelText('确认新密码'), 'secret123')
+    await user.click(screen.getByRole('button', { name: '修改密码' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('当前密码错误')).toBeVisible()
+    })
+  })
+
+  it('正确当前密码改密成功提示（FR-108）', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByLabelText('当前密码')
+
+    await user.type(screen.getByLabelText('当前密码'), 'admin')
+    await user.type(screen.getByLabelText('新密码'), 'secret123')
+    await user.type(screen.getByLabelText('确认新密码'), 'secret123')
+    await user.click(screen.getByRole('button', { name: '修改密码' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '修改成功', color: 'green' }),
+      )
+    })
+  })
 })

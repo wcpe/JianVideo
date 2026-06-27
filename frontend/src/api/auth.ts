@@ -27,6 +27,10 @@ async function realSetup(username: string, password: string): Promise<void> {
   await client.post('/api/auth/setup', { username, password })
 }
 
+async function realChangePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await client.post('/api/me/password', { old_password: oldPassword, new_password: newPassword })
+}
+
 // ─── Mock API ────────────────────────────────────────
 
 function mockDelay(ms: number): Promise<void> {
@@ -58,6 +62,12 @@ async function mockSetup(_username: string, _password: string): Promise<void> {
   await mockDelay(300)
 }
 
+async function mockChangePassword(oldPassword: string, _newPassword: string): Promise<void> {
+  await mockDelay(300)
+  // mock 模式：当前密码为 admin 视为正确，否则报错（便于本地演示校验失败分支）
+  if (oldPassword !== 'admin') throw new Error('当前密码错误')
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function login(username: string, password: string) { return useMock ? mockLogin(username, password) : realLogin(username, password) }
@@ -65,3 +75,4 @@ export function logout() { return useMock ? mockLogout() : realLogout() }
 export function getMe() { return useMock ? mockGetMe() : realGetMe() }
 export function getSetupStatus() { return useMock ? mockGetSetupStatus() : realGetSetupStatus() }
 export function setup(username: string, password: string) { return useMock ? mockSetup(username, password) : realSetup(username, password) }
+export function changePassword(oldPassword: string, newPassword: string) { return useMock ? mockChangePassword(oldPassword, newPassword) : realChangePassword(oldPassword, newPassword) }

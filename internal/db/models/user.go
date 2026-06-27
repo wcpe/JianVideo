@@ -54,6 +54,25 @@ func FindUserByUsername(d *sql.DB, username string) (*User, error) {
 	return &u, nil
 }
 
+// UpdateUserPassword 更新指定用户的密码哈希；用户不存在返回 sql.ErrNoRows。
+func UpdateUserPassword(d *sql.DB, username, passwordHash string) error {
+	res, err := d.Exec(
+		"UPDATE users SET password_hash = ? WHERE username = ?",
+		passwordHash, username,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // UserExists 检查是否已有用户存在
 func UserExists(d *sql.DB) (bool, error) {
 	var count int
