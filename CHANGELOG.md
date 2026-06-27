@@ -4,7 +4,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## 0.17.1（2026-06-27）
 
 ### 修复
 - **无可回滚版本时仍显示回滚按钮（FR-46）**：系统页「应用更新」的「回滚到上一版」按钮此前恒显示，但仅当存在上一版备份（`.old`）时回滚才有效——无备份时点按钮会失败报「无可回滚的旧版本」。后端 `update.Service` 新增 `RollbackAvailable()`（探测 `os.Executable()+".old"` 是否存在，纯函数 `rollbackAvailableAt` 便于单测），更新检查响应（`CheckResult`）新增实时计算的 `rollback_available` 字段（不入缓存，避免 `.old` 状态过期）；前端据此条件渲染回滚按钮（无备份则不显示）。新增 `TestRollbackAvailableAt` 与 SystemPage「无回滚版本隐藏按钮」断言。
