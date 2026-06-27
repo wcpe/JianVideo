@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import {
   Stack, Title, Card, Text, Group, Badge, Button, Alert, Skeleton, Table, SimpleGrid, Code, Box, SegmentedControl,
-  TypographyStylesProvider, Tabs, Modal, Progress,
+  TypographyStylesProvider, Modal, Progress,
 } from '@mantine/core'
 import { useClipboard, useDisclosure } from '@mantine/hooks'
 import {
-  IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp,
-  IconDeviceDesktop, IconCpu, IconTestPipe, IconCloudDownload, IconCloudUp,
+  IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp, IconCloudUp,
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,17 +13,21 @@ import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
 import { loadCachedUpdate, saveCachedUpdate } from '@/utils/update-cache'
+import AnchorNav from '@/components/AnchorNav'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types'
 
 // 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
 const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂时不可用，请稍后重试'
 
-// 子 tab 取值（FR-59）：运行环境 / 硬件加速 / 编解码测试 / 应用更新；URL query `sys` 缺省或非法落回运行环境。
-const SUB_TAB_ENV = 'env'
-const SUB_TAB_HWACCEL = 'hwaccel'
-const SUB_TAB_CODEC = 'codec'
-const SUB_TAB_UPDATE = 'update'
-const SUB_TABS = [SUB_TAB_ENV, SUB_TAB_HWACCEL, SUB_TAB_CODEC, SUB_TAB_UPDATE]
+// 系统区块取值（FR-113 一级 tab）：运行环境 / 硬件加速 / 编解码 / 应用更新；
+// 由 ConsolePage 的一级 tab 驱动选中哪个区块，本组件仅渲染该区块（不再有内层 tab）。
+export type SystemSection = 'env' | 'hwaccel' | 'codec' | 'update'
+
+// 运行环境区块内左侧锚点（FR-113）：运行环境 / FFmpeg 两区块
+const ENV_ANCHORS = [
+  { id: 'sys-env', label: '运行环境' },
+  { id: 'sys-ffmpeg', label: 'FFmpeg' },
+]
 
 /**
  * 单行信息项（FR-101 重排）：定宽 label 列 + 紧贴其后的 value 列的紧凑两列。
@@ -164,8 +166,11 @@ function friendlyUpdateError(raw: string): string {
   return raw
 }
 
-/** 系统诊断页：展示运行环境、FFmpeg/硬件加速信息，并支持编解码器测试 */
-export default function SystemPage() {
+/**
+ * 系统诊断页：展示运行环境、FFmpeg/硬件加速信息，并支持编解码器测试与应用更新。
+ * FR-113 拍平为一级 tab 后，由 ConsolePage 通过 `section` 选定渲染哪个区块（不再有内层 tab）。
+ */
+export default function SystemPage({ section }: { section: SystemSection }) {
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [infoError, setInfoError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -173,19 +178,6 @@ export default function SystemPage() {
   const [codecError, setCodecError] = useState<string | null>(null)
   const [codecLoading, setCodecLoading] = useState(false)
   const clipboard = useClipboard({ timeout: 2000 })
-
-  // 子 tab 由 URL query `sys` 控制（FR-59），缺省/非法落回运行环境，便于页眉精确跳转与深链。
-  const [searchParams, setSearchParams] = useSearchParams()
-  const rawSub = searchParams.get('sys')
-  const activeSubTab = rawSub && SUB_TABS.includes(rawSub) ? rawSub : SUB_TAB_ENV
-  // 切子 tab 时仅改写 `sys`，函数式更新保留外层 `tab=system` 等已有 query；replace 避免历史堆叠。
-  const handleSubTabChange = useCallback((value: string | null) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.set('sys', value ?? SUB_TAB_ENV)
-      return next
-    }, { replace: true })
-  }, [setSearchParams])
 
   // 自更新（FR-46）
   const [channel, setChannel] = useState<'stable' | 'prerelease'>('stable')
@@ -376,24 +368,19 @@ export default function SystemPage() {
         </Alert>
       )}
 
-      {/* 子 tab（FR-59）：拆为运行环境(含 FFmpeg)/硬件加速/编解码测试/应用更新，消除长滚动；
-          keepMounted={false} 仅渲染当前面板，状态由 URL query `sys` 控制（便于页眉精确跳转与深链）。 */}
-      <Tabs value={activeSubTab} onChange={handleSubTabChange} keepMounted={false}>
-        <Tabs.List mb="md">
-          <Tabs.Tab value={SUB_TAB_ENV} leftSection={<IconDeviceDesktop size={16} />}>运行环境</Tabs.Tab>
-          <Tabs.Tab value={SUB_TAB_HWACCEL} leftSection={<IconCpu size={16} />}>硬件加速</Tabs.Tab>
-          <Tabs.Tab value={SUB_TAB_CODEC} leftSection={<IconTestPipe size={16} />}>编解码测试</Tabs.Tab>
-          <Tabs.Tab value={SUB_TAB_UPDATE} leftSection={<IconCloudDownload size={16} />}>应用更新</Tabs.Tab>
-        </Tabs.List>
-
-        {/* 运行环境子 tab：运行环境信息 + FFmpeg */}
-        <Tabs.Panel value={SUB_TAB_ENV}>
+      {/* 运行环境区块（FR-113）：运行环境信息 + FFmpeg，左侧锚点导航定位两区块 */}
+      {section === 'env' && (
+        <Group align="flex-start" gap="lg" wrap="nowrap">
+          <Box w={160} style={{ flexShrink: 0 }} visibleFrom="sm">
+            <AnchorNav sections={ENV_ANCHORS} />
+          </Box>
+          <Box style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
             <Skeleton height={320} radius="md" />
           ) : info ? (
             <Stack gap="md">
               {/* 运行环境 */}
-              <Card withBorder padding="md" radius="md">
+              <Card id="sys-env" withBorder padding="md" radius="md">
                 <Title order={4} mb="sm">运行环境</Title>
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
                   <InfoRow label="应用版本" value={info.app_version} mono />
@@ -417,7 +404,7 @@ export default function SystemPage() {
               </Card>
 
               {/* FFmpeg */}
-              <Card withBorder padding="md" radius="md">
+              <Card id="sys-ffmpeg" withBorder padding="md" radius="md">
                 <Group justify="space-between" mb="sm">
                   <Title order={4}>FFmpeg</Title>
                   <Badge color={info.ffmpeg.available ? 'green' : 'red'}>
@@ -435,13 +422,15 @@ export default function SystemPage() {
               </Card>
             </Stack>
           ) : null}
-        </Tabs.Panel>
+          </Box>
+        </Group>
+      )}
 
-        {/* 硬件加速子 tab */}
-        <Tabs.Panel value={SUB_TAB_HWACCEL}>
-          {loading ? (
-            <Skeleton height={320} radius="md" />
-          ) : info ? (
+      {/* 硬件加速区块（FR-113） */}
+      {section === 'hwaccel' && (
+        loading ? (
+          <Skeleton height={320} radius="md" />
+        ) : info ? (
             <Card withBorder padding="md" radius="md">
               <Title order={4} mb="sm">硬件加速</Title>
               <Stack gap="xs">
@@ -505,11 +494,11 @@ export default function SystemPage() {
                 )}
               </Stack>
             </Card>
-          ) : null}
-        </Tabs.Panel>
+        ) : null
+      )}
 
-        {/* 编解码测试子 tab */}
-        <Tabs.Panel value={SUB_TAB_CODEC}>
+      {/* 编解码区块（FR-113） */}
+      {section === 'codec' && (
           <CodecTestCard
             info={info}
             codec={codec}
@@ -519,10 +508,11 @@ export default function SystemPage() {
             onTest={handleCodecTest}
             onCopy={handleCopy}
           />
-        </Tabs.Panel>
+      )}
 
-        {/* 应用更新子 tab（FR-46）；id=update 兜底锚点（页眉精确跳转改为选中本子 tab，FR-59）*/}
-        <Tabs.Panel value={SUB_TAB_UPDATE}>
+      {/* 应用更新区块（FR-46）；id=update 兜底锚点（页眉精确跳转改为选中本一级 tab，FR-113）*/}
+      {section === 'update' && (
+        <>
           <Card id="update" withBorder padding="md" radius="md">
             <Group justify="space-between" mb="sm">
               <Title order={4}>应用更新</Title>
@@ -683,8 +673,8 @@ export default function SystemPage() {
               </Group>
             </Stack>
           </Modal>
-        </Tabs.Panel>
-      </Tabs>
+        </>
+      )}
     </Stack>
   )
 }

@@ -6,9 +6,9 @@ import { IconArrowUpCircle } from '@tabler/icons-react'
 import { checkUpdate } from '@/api/system'
 import { getSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 
-// 点击指示器跳转目标：系统信息 tab 的「应用更新」子 tab（FR-59 归真 FR-58）。
-// SystemPage 读 query `sys=update` 自动选中应用更新子 tab，精确定位、无需锚点滚动。
-const UPDATE_ROUTE = '/system?tab=system&sys=update'
+// 点击指示器跳转目标：控制台「应用更新」一级 tab（FR-113 拍平为一级 tab）。
+// ConsolePage 读 query `?tab=update` 直接选中应用更新 tab，精确定位；旧式 `?tab=system&sys=update` 仍兼容。
+const UPDATE_ROUTE = '/system?tab=update'
 
 /**
  * 页眉「更新可用」提示（FR-58）。

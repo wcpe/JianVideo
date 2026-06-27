@@ -446,7 +446,7 @@
 - `POST /api/system/codec-test`：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用**外部 ffmpeg 跑一小段试编码**（`-f lavfi … -f null`），报告「是否编入当前 ffmpeg / 试编码是否成功 / 失败尾部」。默认读 §5.6 持久化缓存即时返回，`?force=true` 强制重测；响应附 `from_cache`/`ffmpeg_version`/`tested_at`。与 §5.6 同源（实测即真源）。
 - `GET /api/system/env`（FR-56）：只读返回项目已知环境变量清单（key/中文用途/是否敏感/是否已设置/展示值），元数据表集中维护于 api 层（涵盖根 config 与 `internal/config` 两套来源）。**敏感项（`JWT_SECRET`、`SMB_MASTER_PASSWORD`）绝不回显明文**——`value` 固定掩码、只暴露 `set` 布尔（安全红线）；非敏感项 `value` 为 `os.Getenv` 明文。env 为进程级，只查看不修改。
 - `POST /api/system/ffmpeg/detect`（FR-56）：对请求体 `path`（空=测当前）跑 `path -version` 验证可用性，基于纯函数 `transcoder.CheckFFmpegPath`（**不改写运行期全局路径**），返回 `{ffmpeg_available, ffmpeg_version}`，供用户保存前先验路径；持久化走 §5.8 的 `ffmpeg_path`/`ffprobe_path` 设置键。
-- 前端在 `/system` 控制台页的「系统信息」tab 展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。控制台页（`ConsolePage`，FR-55）以 Mantine `Tabs` 把「系统信息」与「设置」（§5.8）合并为单页两 tab，tab 状态由 URL query `?tab=system|settings` 控制；`SystemPage`/`SettingsPage` 原样作 tab 内容。
+- 前端在 `/system` 控制台页展示（硬件加速卡片按家族 × 编码逐项展示、标示缓存来源与「重新测试」）并支持一键复制纯文本报告。控制台页（`ConsolePage`，FR-113 取代 FR-55 两级结构）以 Mantine `Tabs` 拍平为**一级 tab**——运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置（设置即 §5.8 的 `SettingsPage`），tab 状态由 URL query `?tab=env|hwaccel|codec|update|settings` 控制；`ConsolePage` 把前四项作为 `section` 传给 `SystemPage`（其只渲染对应区块、不再有内层 tab），第五项渲染 `SettingsPage`。**向后兼容旧深链**：`?tab=system&sys=<x>` 归一为对应一级 tab（`sys` 缺省落 env）、`?tab=settings` 落设置。每个含多区块的 tab（运行环境、设置）内由通用组件 `AnchorNav` 提供左侧锚点导航：`IntersectionObserver` 观测各区块、滚动高亮当前，点击 `scrollIntoView` 平滑定位。
 
 ### 5.8 运行期设置（FR-24）
 
@@ -482,7 +482,7 @@
 - **配置**：通过 `config.yml` 或环境变量控制（端口、媒体库路径、FFmpeg 路径等）。
 - **前端构建**：React + TypeScript 通过 Vite 构建，`dist/` 目录通过 `go:embed` 内嵌。
 - **开源协议页（FR-57，入口位置见 FR-61）**：当前版本（取自 `GET /api/system/info` 的 `app_version`）+「开源协议」链接 → `/licenses`（`LicensesPage`，受保护路由）的入口由左侧导航（`AppShell.Navbar`）底部承载（FR-61 取代原 FR-57 的 `AppShell.Footer` 页脚，页脚已移除）：桌面展开态平铺版本号文本与协议链接，收缩态（64px）以协议图标 + Tooltip（含版本号）承载、避免文字截断，移动端抽屉（`Drawer`）底部同样补版本号与协议链接。协议清单 `frontend/src/data/licenses.json` 由 `frontend/scripts/gen-licenses.mjs` **构建期生成**（`npm run gen:licenses`）：前端全部生产依赖经 `license-checker` 取协议全文、后端 `go.mod` 直接依赖（剔除 `// indirect`）尽力从本机 Go module cache 读全文（读不到给 `pkg.go.dev?tab=licenses` 外链）、项目自身读根 `LICENSE`（MIT）。JSON 入库、随 `dist/` go:embed 内嵌，**页面直接 import、运行时不联网**。
-- **页眉「更新可用」提示（FR-58）**：全局页眉（`AppShell.Header`）的 `UpdateIndicator` 组件消费 FR-46 的更新检查——挂载时按持久化频道（设置键 `update_channel`）调一次 `GET /api/system/update/check`（**非 force**，命中后端 10 分钟 TTL 缓存即廉价返回），仅当 `has_update=true` 时常驻展示提示（含目标版本 `latest`/`tag`），点击经 React Router 导航到 `/system?tab=system#update`（`SystemPage` 应用更新卡片带 `id="update"` 锚点，尽力滚动定位）。检查失败 / 无更新一律不展示、**失败静默**（复用 FR-46 优雅降级语义），不新增端点、不绕缓存、不轮询。
+- **页眉「更新可用」提示（FR-58）**：全局页眉（`AppShell.Header`）的 `UpdateIndicator` 组件消费 FR-46 的更新检查——挂载时按持久化频道（设置键 `update_channel`）调一次 `GET /api/system/update/check`（**非 force**，命中后端 10 分钟 TTL 缓存即廉价返回），仅当 `has_update=true` 时常驻展示提示（含目标版本 `latest`/`tag`），点击经 React Router 导航到 `/system?tab=update`（FR-113 拍平为一级 tab 后直接选中应用更新 tab；旧式 `?tab=system&sys=update` 仍兼容）。检查失败 / 无更新一律不展示、**失败静默**（复用 FR-46 优雅降级语义），不新增端点、不绕缓存、不轮询。
 - **PWA**：经 `vite-plugin-pwa` 产出 `manifest.webmanifest` + Service Worker，支持「添加到主屏」与离线应用壳；Service Worker 仅预缓存壳静态资源，`/api`/媒体流运行时走网络（见 [ADR-0028](adr/0028-mobile-pwa.md)）。
 - **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
 - **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Stack, Title, Card, TextInput, Button, Alert, Skeleton, Text, Table, Badge, Group, Code, ActionIcon, Switch,
+  Stack, Title, Card, TextInput, Button, Alert, Skeleton, Text, Table, Badge, Group, Code, ActionIcon, Switch, Box,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconAlertCircle, IconTrash, IconPlus } from '@tabler/icons-react'
@@ -17,6 +17,7 @@ import {
 } from '@/api/settings'
 import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system'
 import { changePassword } from '@/api/auth'
+import AnchorNav from '@/components/AnchorNav'
 import { extractErrorMessage } from '@/utils/error'
 import {
   parseRecycleBinRows,
@@ -25,6 +26,17 @@ import {
   type RecycleBinRow,
 } from '@/utils/recycle-bin'
 import type { EnvVar } from '@/types'
+
+// 设置页左侧锚点（FR-113）：各分区标题挂同名 id，点击滚动定位、滚动高亮
+const SETTINGS_ANCHORS = [
+  { id: 'set-account', label: '账户安全' },
+  { id: 'set-scan', label: '扫描' },
+  { id: 'set-network', label: '网络' },
+  { id: 'set-tools', label: '工具路径' },
+  { id: 'set-recycle', label: '回收站' },
+  { id: 'set-diagnostics', label: '诊断' },
+  { id: 'set-env', label: '环境变量' },
+]
 
 /** 设置页（FR-24/FR-56/FR-63/FR-87）：按扫描/网络/工具路径/回收站分区读写运行期键值设置，并只读查看环境变量 */
 export default function SettingsPage() {
@@ -215,11 +227,16 @@ export default function SettingsPage() {
   }, [currentPassword, newPassword, confirmPassword])
 
   return (
-    <Stack gap="md">
+    <Group align="flex-start" gap="lg" wrap="nowrap">
+      {/* 左侧锚点导航（FR-113）：窄屏隐藏、点击滚动定位到对应分区 */}
+      <Box w={160} style={{ flexShrink: 0 }} visibleFrom="sm">
+        <AnchorNav sections={SETTINGS_ANCHORS} />
+      </Box>
+      <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
       <Title order={2}>设置</Title>
 
       {/* 账户安全（FR-108）：修改当前登录用户密码，独立于下方运行期设置 */}
-      <Title order={3}>账户安全</Title>
+      <Title id="set-account" order={3}>账户安全</Title>
       <Card withBorder padding="md" radius="md">
         <Stack gap="md">
           {pwError && (
@@ -269,7 +286,7 @@ export default function SettingsPage() {
       ) : (
         <>
           {/* 扫描分区（FR-24）：定时扫描周期 */}
-          <Title order={3}>扫描</Title>
+          <Title id="set-scan" order={3}>扫描</Title>
           <Card withBorder padding="md" radius="md">
             <TextInput
               label="扫描周期（秒）"
@@ -280,7 +297,7 @@ export default function SettingsPage() {
           </Card>
 
           {/* 网络分区（FR-80/FR-89）：后端出站网络代理，空=直连；随「保存设置」一并保存、保存即生效；可在保存前先「测试」连通性 */}
-          <Title order={3}>网络</Title>
+          <Title id="set-network" order={3}>网络</Title>
           <Card withBorder padding="md" radius="md">
             <Stack gap="md">
               <TextInput
@@ -309,7 +326,7 @@ export default function SettingsPage() {
           </Card>
 
           {/* 工具路径分区（FR-56/FR-63）：ffmpeg/ffprobe/magick 可配置，随「保存设置」一并保存、保存即生效 */}
-          <Title order={3}>工具路径</Title>
+          <Title id="set-tools" order={3}>工具路径</Title>
           <Card withBorder padding="md" radius="md">
             <Stack gap="md">
               <TextInput
@@ -353,7 +370,7 @@ export default function SettingsPage() {
           </Card>
 
           {/* 回收站分区（FR-87）：结构化「盘符→路径」行列表编辑，序列化为 recycle_bin_paths JSON 串 */}
-          <Title order={3}>回收站</Title>
+          <Title id="set-recycle" order={3}>回收站</Title>
           <Card withBorder padding="md" radius="md">
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
@@ -399,7 +416,7 @@ export default function SettingsPage() {
           </Card>
 
           {/* 诊断分区（FR-110）：运行时调试日志开关，开启输出 GORM 详细 SQL/慢查询日志，随「保存设置」一并保存、保存即生效 */}
-          <Title order={3}>诊断</Title>
+          <Title id="set-diagnostics" order={3}>诊断</Title>
           <Card withBorder padding="md" radius="md">
             <Stack gap="xs">
               <Switch
@@ -422,7 +439,7 @@ export default function SettingsPage() {
       )}
 
       {/* 环境变量（FR-56）：只读查看，敏感项脱敏 */}
-      <Title order={3}>环境变量</Title>
+      <Title id="set-env" order={3}>环境变量</Title>
       {envError && (
         <Alert icon={<IconAlertCircle size={16} />} color="red" title="加载失败">
           {envError}
@@ -475,6 +492,7 @@ export default function SettingsPage() {
           </Stack>
         </Card>
       )}
-    </Stack>
+      </Stack>
+    </Group>
   )
 }

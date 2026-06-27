@@ -8,6 +8,8 @@
 
 ### 修复
 - **测试版频道「一直有更新」（FR-46/FR-48）**：dev 版本号策略此前取 `max(最新 tag, VERSION)` 的**下一修订号**，使发完正式版（如 0.17.1）后 dev 恒为 `0.17.2-dev.<SHA>`——主干无新提交也凭空高一位；后端 `hasUpdate` 同基线判定按短 SHA 比较（`pre != pre`），每次 push main 重建 dev 即误报「有更新」。本次两端同修：① dev 版本号改为 `<最新正式版 tag 基线>-dev.<提交距离>.g<短SHA>`（基线不再 +1，提交距离 = `git rev-list --count <tag>..HEAD` 反映真实主干），提交距离为 0（发完正式版无新提交）时 `scripts/dev-version.sh` 退出码非 0、`prerelease.yml` 据此跳过发布；② 后端同基线更新判定改按「提交距离序号」比较——仅序号增大（主干真有新提交）才提示，短 SHA churn 不误报，旧格式 dev 走保守兜底。新增 `TestHasUpdate_PrereleaseSameBaselineCompareBySeq`、`TestCheck_PrereleaseSeqNoChurn`、`TestCheck_PrereleaseAfterStableReleaseNoNewCommit` 及更新后的 `scripts/dev-version_test.sh` 守护。决策见 ADR-0042（扩展 ADR-0032）。真实发布链路端到端「发版后频道不再误报」待真机验。
+### 变更
+- **系统/设置页改一级 tab + 每 tab 左侧锚点导航（FR-113）**：控制台页（`ConsolePage`）去掉「系统信息 / 设置」两级 tab，拍平为一级 tab——运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置（「设置」并入为同级 tab）。`SystemPage` 改为按 `section` 渲染单个区块（不再有内层 tab），`ConsolePage` 以新式 `?tab=env|hwaccel|codec|update|settings` 控制选中并**向后兼容旧深链**（`?tab=system&sys=update`、`?tab=settings` 仍能正确定位）；页眉 `UpdateIndicator` 跳转改 `?tab=update`。新增通用组件 `AnchorNav`（`IntersectionObserver` 观测区块、滚动高亮当前，点击 `scrollIntoView` 平滑定位），运行环境 tab（运行环境/FFmpeg）与设置 tab（账户安全/扫描/网络/工具路径/回收站/诊断/环境变量）各配左侧锚点列。纯前端、无新依赖、无新 ADR。新增 `AnchorNav.test.tsx`，重写 `ConsolePage.test.tsx`/`SystemPage.test.tsx` 覆盖一级 tab 与旧深链兼容。
 
 ## 0.17.1（2026-06-27）
 
