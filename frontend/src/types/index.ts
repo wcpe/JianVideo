@@ -287,6 +287,23 @@ export interface LibrarySummary {
   by_library: LibrarySummaryRow[]
 }
 
+/** 按天新增媒体的一天（FR-118）：本地日期 YYYY-MM-DD 与当天新增的数量/体量/时长 */
+export interface MediaTrendPoint {
+  /** 本地日期 YYYY-MM-DD */
+  date: string
+  /** 当天新增媒体数 */
+  count: number
+  /** 当天新增媒体文件大小求和（字节） */
+  size: number
+  /** 当天新增媒体时长求和（秒） */
+  duration: number
+}
+
+/** 媒体新增趋势（FR-118）：按天分桶、升序，仅含有新增的天；前端据此累加得累计增长曲线 */
+export interface MediaTrends {
+  media_added: MediaTrendPoint[]
+}
+
 /** 媒体库后缀类型 */
 export type MediaExtensionType = 'video' | 'image'
 

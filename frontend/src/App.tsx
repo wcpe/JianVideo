@@ -1,5 +1,6 @@
+import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { MantineProvider, localStorageColorSchemeManager } from '@mantine/core'
+import { MantineProvider, localStorageColorSchemeManager, Center, Loader } from '@mantine/core'
 import { appTheme, themeCssVariablesResolver } from './theme'
 import { Notifications } from '@mantine/notifications'
 import AppLayout from './components/AppLayout'
@@ -17,7 +18,9 @@ import AlbumsPage from './pages/AlbumsPage'
 import RecyclePage from './pages/RecyclePage'
 import InspectPage from './pages/InspectPage'
 import DuplicatesPage from './pages/DuplicatesPage'
-import StatsPage from './pages/StatsPage'
+// 统计页懒加载（ADR-0045）：仅此页引入 Recharts 图表库，按路由 code-split，
+// 让 recharts 落入独立 chunk、不进主包（否则主包超 PWA 预缓存 2MiB 上限）。
+const StatsPage = lazy(() => import('./pages/StatsPage'))
 import PlayPage from './pages/PlayPage'
 import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
@@ -65,8 +68,8 @@ export default function App() {
           <Route path="/inspect" element={<ProtectedRoute><AppLayout><InspectPage /></AppLayout></ProtectedRoute>} />
           {/* 感知哈希去重「重复项」页（FR-70） */}
           <Route path="/duplicates" element={<ProtectedRoute><AppLayout><DuplicatesPage /></AppLayout></ProtectedRoute>} />
-          {/* 观看热力与统计页（FR-75） */}
-          <Route path="/stats" element={<ProtectedRoute><AppLayout><StatsPage /></AppLayout></ProtectedRoute>} />
+          {/* 观看热力与统计页（FR-75 + FR-118）：懒加载，套 Suspense 给图表 chunk 加载兜底 */}
+          <Route path="/stats" element={<ProtectedRoute><AppLayout><Suspense fallback={<Center py="xl"><Loader color="purple" /></Center>}><StatsPage /></Suspense></AppLayout></ProtectedRoute>} />
           {/* 转码预设与预生成队列页（FR-77） */}
           <Route path="/transcode" element={<ProtectedRoute><AppLayout><TranscodePage /></AppLayout></ProtectedRoute>} />
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />

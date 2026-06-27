@@ -207,6 +207,7 @@
 - **AC-19**（FR-110，需用户确认）：默认启动与运行日志中无 GORM `record not found`/SQL 噪音；设置页开启「调试日志」后输出 SQL/请求详细日志、关闭后停止；重启后保持上次开关状态。
 - **AC-20**（FR-111，需真实发布/脚本确认）：正式发布产物的 Release 正文等于 CHANGELOG 对应版本段内容；预发布正文的「自上个正式版以来的变更」段为 CHANGELOG 未发布段实际内容（非「暂无记录」）。
 - **AC-21**（FR-117，需用户确认）：根路由 `/` 渲染「概览」数据看板——KPI（媒体总数 + 视频/图片拆分、视频总时长、占用空间、媒体库数、相册数）、媒体构成与各库分布、观看概览（可跳 `/stats`）、系统状态、任务队列、继续观看；空库时各卡显示零值而非报错。`GET /api/library/summary` 单次聚合返回 total/video_count/image_count/total_size/total_duration/library_count/by_library。
+- **AC-22**（FR-118，需用户确认）：`/stats` 顶部「观看 / 媒体」两 tab 可切换并经 `?tab=` 记忆；观看 tab 含已看/未看/追看中当前值卡 + 观看活跃趋势折线 + 既有续播热力/各库各格式分布/Top 榜；媒体 tab 含媒体总数/视频/图片/总时长/占用当前值卡 + 媒体增长与累计容量/时长折线 + 媒体构成；折线可 hover 显示精确值；空库整页空态、空趋势显占位不报错。`GET /api/library/trends` 返回按天新增媒体序列（date/count/size/duration，升序）。
 
 ## 7. 分期（路线）
 
