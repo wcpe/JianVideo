@@ -160,6 +160,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	sys := r.Group("/api/system")
 	{
 		sys.GET("/info", h.SystemInfo)
+		// 系统指标时序与当前快照（FR-119）：下采样 points + current，供监控页折线与当前值卡
+		sys.GET("/metrics", h.SystemMetrics)
 		sys.POST("/codec-test", h.CodecTest)
 		// 环境变量查看（FR-56，只读，敏感脱敏）
 		sys.GET("/env", h.SystemEnv)

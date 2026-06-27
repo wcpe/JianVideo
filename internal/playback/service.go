@@ -66,6 +66,13 @@ func (s *Service) Stop() {
 	close(s.stopCh)
 }
 
+// ActiveSessions 返回当前活跃会话数（FR-119）：只读计数，供系统指标采样器经 provider 取转码并发。
+func (s *Service) ActiveSessions() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.sessions)
+}
+
 // cleanupLoop 定期清理超过 24 小时未更新的会话。
 func (s *Service) cleanupLoop() {
 	ticker := time.NewTicker(30 * time.Minute)

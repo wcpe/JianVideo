@@ -841,7 +841,23 @@
     "hwaccel": { "available": [], "preferred": "libx264", "codecs": [], "intel_gpu": false, "intel_gpu_detail": "", "software_fallback": true, "from_cache": false, "ffmpeg_version": "", "tested_at": "" }
   }
   ```
-- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的 per-codec 结构（上例为冷态，未实测）；`app_version` 由构建期 `-ldflags -X main.version` 注入。`runtime`（FR-60）为进程与 Go 运行时信息——`pid`/`work_dir`/`executable`（`os` 包）、`db_path`/`uptime_seconds`（由 main 注入数据库路径与启动时刻派生，未注入时分别为空串 / 0）、`mem_alloc`/`mem_sys`/`num_gc`（`runtime.MemStats`，字节）、`gomaxprocs`（`runtime.GOMAXPROCS(0)`）；全部来自标准库，系统级总内存 / 磁盘可用不在此列（需第三方库，范围外）。
+- **说明**：`hwaccel` 复用 `GET /api/transcode/hwaccel` 的 per-codec 结构（上例为冷态，未实测）；`app_version` 由构建期 `-ldflags -X main.version` 注入。`runtime`（FR-60）为进程与 Go 运行时信息——`pid`/`work_dir`/`executable`（`os` 包）、`db_path`/`uptime_seconds`（由 main 注入数据库路径与启动时刻派生，未注入时分别为空串 / 0）、`mem_alloc`/`mem_sys`/`num_gc`（`runtime.MemStats`，字节）、`gomaxprocs`（`runtime.GOMAXPROCS(0)`）；全部来自标准库，系统级总内存 / 磁盘可用不在此列（见 `GET /api/system/metrics` 系统指标时序，FR-119）。
+
+### 系统指标时序（FR-119）
+
+- **方法 / 路径**：`GET /api/system/metrics`
+- **查询参数**：`range`（`1h` / `24h` / `7d`，缺省 `24h`）
+- **响应**（200）：
+  ```json
+  {
+    "range": "24h",
+    "points": [
+      {"t": "2026-06-27T10:00:00Z", "cpu_percent": 38.2, "mem_used_bytes": 195000000, "mem_sys_bytes": 536870912, "disk_used_bytes": 1979900000000, "disk_total_bytes": 2600000000000, "transcode_active": 2, "goroutines": 120}
+    ],
+    "current": {"cpu_percent": 41.0, "mem_used_bytes": 198000000, "mem_sys_bytes": 536870912, "disk_used_bytes": 1979900000000, "disk_total_bytes": 2600000000000, "transcode_active": 2, "goroutines": 122}
+  }
+  ```
+- **说明**：系统监控页（`/monitor`）的指标时序。后台采样器每 15s 采一行（系统 CPU% 经 gopsutil、进程内存经 `runtime`、数据盘用量经 gopsutil、转码并发为活跃会话数、goroutine 数）写入 SQLite `metric_samples`，按 7 天保留期裁剪。本端点按 `range` 选窗口与桶大小**下采样**（`1h`→60s、`24h`→300s、`7d`→1800s，`GROUP BY` 时间桶 + AVG/MAX）使点数有界。`current` 为最新一条原始样本（供当前值卡）；刚启动无样本时 `points` 为空数组、`current` 为 `null`。机制见 ADR-0044。
 
 ### 编解码器实测
 

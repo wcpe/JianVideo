@@ -19,9 +19,10 @@ import (
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/api"
 	"github.com/wcpe/JianVideo/internal/db"
-	"github.com/wcpe/JianVideo/internal/dblog"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/dblog"
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/metrics"
 	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
@@ -92,6 +93,7 @@ func main() {
 		&models.MediaHealthIssue{},
 		&models.TranscodePreset{},
 		&models.TranscodeTask{},
+		&models.MetricSample{},
 	); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
@@ -167,6 +169,12 @@ func main() {
 	pbSvc := playback.NewService()
 	defer pbSvc.Stop()
 
+	// 系统指标采样器（FR-119，见 ADR-0044）：后台定时采样 CPU/内存/磁盘/转码并发落 SQLite，
+	// 数据盘取数据库所在目录、转码并发由播放服务活跃会话数注入；随服务启停，关闭时等待 goroutine 干净退出。
+	metricsSampler := metrics.NewSampler(gormDB, filepath.Dir(cfg.DBPath), pbSvc.ActiveSessions)
+	metricsSampler.Start(context.Background())
+	defer metricsSampler.Stop()
+
 	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
 	// settingsSvc 已在 ffmpeg 路径注入处创建（FR-56），此处复用。
 	libSvc := library.NewService(gormDB)
@@ -222,7 +230,7 @@ func main() {
 	pregenQueue.Start()
 	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

@@ -22,6 +22,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/metrics"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/settings"
@@ -71,6 +72,9 @@ type Handler struct {
 	// 转码预设存储与预生成队列（FR-77）：未注入时相关端点返回 503。
 	presets     *transcoder.PresetStore
 	pregenQueue *transcoder.PregenQueue
+
+	// 系统指标采样器（FR-119）：未注入时 /api/system/metrics 返回 503。
+	metrics *metrics.Sampler
 }
 
 // NewHandler 创建处理器。
@@ -114,6 +118,13 @@ func (h *Handler) WithHealthService(svc *library.HealthService) *Handler {
 func (h *Handler) WithTranscodePresets(store *transcoder.PresetStore, queue *transcoder.PregenQueue) *Handler {
 	h.presets = store
 	h.pregenQueue = queue
+	return h
+}
+
+// WithMetrics 注入系统指标采样器（FR-119），启用 /api/system/metrics 端点。
+// 未注入时该端点返回 503，保持无采样器环境可用。
+func (h *Handler) WithMetrics(sampler *metrics.Sampler) *Handler {
+	h.metrics = sampler
 	return h
 }
 
@@ -819,9 +830,9 @@ func (h *Handler) serveDownload(c *gin.Context, mf *models.MediaFile) {
 
 // 批量打包下载上限（FR-91）：超限直接拒绝，避免一次性打包过大批量拖垮服务/浏览器
 const (
-	batchDownloadMaxCount = 500              // 单次最多打包文件数
-	batchDownloadMaxBytes = 5 << 30          // 单次最多打包总大小（5 GiB）
-	batchZipFileName      = "媒体打包.zip"     // 下载附件名
+	batchDownloadMaxCount = 500        // 单次最多打包文件数
+	batchDownloadMaxBytes = 5 << 30    // 单次最多打包总大小（5 GiB）
+	batchZipFileName      = "媒体打包.zip" // 下载附件名
 )
 
 // BatchDownloadMediaFiles GET /api/library/media/batch-download?ids=1,2,3
