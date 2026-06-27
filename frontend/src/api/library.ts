@@ -223,11 +223,11 @@ async function realGetScanTasks(): Promise<ScanTasksResponse> {
   return res.data
 }
 
-async function realBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
+async function realBrowseDirectory(parentPath: string, sort = 'name'): Promise<BrowseResponse> {
   try {
-    // 聚合虚拟根（FR-66）：parent_path=__root__ 时不带 library_id，后端忽略
-    const params: { parent_path: string; library_id?: number } = { parent_path: parentPath }
-    if (libraryID > 0) params.library_id = libraryID
+    // 真实路径树聚合（FR-121）：仅按 parent_path 跨库导航，sort 服务端排序；
+    // library_id 已弃用、不再下发（后端按真实路径聚合，传了也忽略）。
+    const params = { parent_path: parentPath, sort }
     const res = await client.get<BrowseResponse>('/api/library/browse', { params })
     return res.data
   } catch (err) {
@@ -576,55 +576,70 @@ async function mockDeleteMediaExtension(libraryID: number, extension: string): P
   mockExtensions.splice(idx, 1)
 }
 
-async function mockBrowseDirectory(libraryID: number, parentPath: string): Promise<BrowseResponse> {
+// 推导真实路径的卷根（FR-121）：本地 `D:/...` → `D:`；UNC `//host/share/...` → `//host/share`。
+function mockVolumeRoot(rawPath: string): string {
+  const p = rawPath.replace(/\\/g, '/')
+  if (p.startsWith('//')) {
+    const seg = p.slice(2).split('/').filter(Boolean)
+    return seg.length >= 2 ? `//${seg[0]}/${seg[1]}` : p
+  }
+  const m = p.match(/^([A-Za-z]:)/)
+  return m ? m[1] : p.split('/').filter(Boolean)[0] || p
+}
+
+// 按 sort 对文件排序（与后端语义一致：目录恒在前另行处理，此处仅排文件，全部升序）。
+function mockSortFiles(files: MediaFile[], sort: string): MediaFile[] {
+  const arr = [...files]
+  switch (sort) {
+    case 'size': return arr.sort((a, b) => a.file_size - b.file_size)
+    case 'type': return arr.sort((a, b) => (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name))
+    case 'time': return arr.sort((a, b) => (a.modified_at || '').localeCompare(b.modified_at || ''))
+    default: return arr.sort((a, b) => a.file_name.localeCompare(b.file_name))
+  }
+}
+
+async function mockBrowseDirectory(parentPath: string, sort = 'name'): Promise<BrowseResponse> {
   await mockDelay(150)
-  // 聚合虚拟根（FR-66）：列出所有启用库作为顶层目录、各项携带 library_id
+  const alive = mockMediaFiles.filter(m => !mockDeletedIds.has(m.id))
+
+  // 真实路径树根（FR-121）：各启用库推导卷根、去重排序作为顶层目录项（不带 library_id）。
   if (parentPath === '__root__') {
+    const roots = Array.from(new Set(mockPaths.filter(p => p.enabled).map(p => mockVolumeRoot(p.path)))).sort()
     return {
-      breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
-      directories: mockPaths
-        .filter(p => p.enabled)
-        .map(p => ({ name: p.label || p.path, path: p.path, library_id: p.id })),
+      breadcrumbs: [{ name: '全部', path: '__root__' }],
+      directories: roots.map(r => ({ name: r, path: r })),
       files: [],
     }
   }
-  // 从 mockMediaFiles 中筛选匹配前缀的文件
-  const prefix = parentPath.replace(/\\/g, '/') + '/'
-  const allFiles = mockMediaFiles.filter(m => {
-    const fp = m.file_path.replace(/\\/g, '/')
-    return fp.startsWith(prefix) && m.library_id === libraryID
-  })
 
-  // 按第一级子目录分组
+  // 浏览真实路径 P（FR-121）：跨所有库按前缀合并，不依赖 library_id。
+  const prefix = parentPath.replace(/\\/g, '/') + '/'
   const dirSet = new Set<string>()
-  const files: typeof allFiles = []
-  for (const f of allFiles) {
-    const rel = f.file_path.replace(/\\/g, '/').replace(prefix, '')
+  const files: MediaFile[] = []
+  for (const f of alive) {
+    const fp = f.file_path.replace(/\\/g, '/')
+    if (!fp.startsWith(prefix)) continue
+    const rel = fp.slice(prefix.length)
     const slashIdx = rel.indexOf('/')
-    if (slashIdx !== -1) {
-      dirSet.add(rel.substring(0, slashIdx))
-    } else {
-      files.push(f)
-    }
+    if (slashIdx !== -1) dirSet.add(rel.substring(0, slashIdx))
+    else files.push(f)
   }
 
-  // 构建面包屑，Windows 盘符不加前导斜杠
-  const cleanPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  // 面包屑：按分隔符拆段累进，Windows 盘符不加前导斜杠（保持 `D:/...` 形式）。
+  const cleanPath = parentPath.replace(/\\/g, '/').replace(/\/+$/g, '')
   const parts = cleanPath.split('/').filter(Boolean)
   const breadcrumbs: { name: string; path: string }[] = []
   let current = ''
-  for (const p of parts) {
-    current = /^[A-Za-z]:$/.test(p) && current === '' ? p : `${current.replace(/\/$/, '')}/${p}`
-    breadcrumbs.push({ name: p, path: current })
+  for (const seg of parts) {
+    current = current === '' ? seg : `${current}/${seg}`
+    breadcrumbs.push({ name: seg, path: current })
   }
-  if (breadcrumbs.length === 0) {
-    breadcrumbs.push({ name: '/', path: '/' })
-  }
+  if (breadcrumbs.length === 0) breadcrumbs.push({ name: cleanPath || '/', path: cleanPath || '/' })
 
   return {
     breadcrumbs,
     directories: Array.from(dirSet).sort().map(name => ({ name, path: prefix + name })),
-    files,
+    files: mockSortFiles(files, sort),
   }
 }
 
@@ -666,7 +681,8 @@ export function createScanProgressSSE(onProgress: (status: ScanStatus) => void):
   })
   return () => eventSource.close()
 }
-export function browseDirectory(libraryID: number, parentPath: string) { return useMock ? mockBrowseDirectory(libraryID, parentPath) : realBrowseDirectory(libraryID, parentPath) }
+// 目录浏览（FR-121）：仅按真实路径 parent_path 跨库导航，sort 服务端排序（name/size/type/time）。
+export function browseDirectory(parentPath: string, sort = 'name') { return useMock ? mockBrowseDirectory(parentPath, sort) : realBrowseDirectory(parentPath, sort) }
 
 // 收藏与标签（FR-41）
 export function setMediaFavorite(id: number, favorite: boolean) { return useMock ? mockSetMediaFavorite(id, favorite) : realSetMediaFavorite(id, favorite) }

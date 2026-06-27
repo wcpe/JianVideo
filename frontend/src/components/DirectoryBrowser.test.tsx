@@ -132,6 +132,47 @@ describe('DirectoryBrowser 资源管理器视图（FR-33）', () => {
   })
 })
 
+describe('DirectoryBrowser 详情视图（FR-121）', () => {
+  it('渲染名称/修改日期/类型/大小列头', () => {
+    renderBrowser({
+      files: [file({ id: 1, file_name: 'a.jpg', format: 'jpg', file_size: 2048 })],
+      displayMode: 'details',
+    })
+    expect(screen.getByRole('columnheader', { name: '名称' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '修改日期' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '类型' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '大小' })).toBeInTheDocument()
+  })
+
+  it('目录行类型为「文件夹」、大小占位「—」；文件行显示类型大写与大小', () => {
+    renderBrowser({
+      dirs: [{ name: '子目录', path: 'D:/m/sub' } as DirInfo],
+      files: [file({ id: 1, file_name: '影片.mkv', format: 'mkv', file_size: 2048 })],
+      displayMode: 'details',
+    })
+    expect(screen.getByText('子目录')).toBeInTheDocument()
+    expect(screen.getByText('文件夹')).toBeInTheDocument()
+    expect(screen.getByText('影片.mkv')).toBeInTheDocument()
+    expect(screen.getByText('MKV')).toBeInTheDocument()
+    expect(screen.getByText('2.0 KB')).toBeInTheDocument()
+  })
+
+  it('详情视图双击目录进入、双击文件打开', async () => {
+    const onEnterDir = vi.fn()
+    const onOpen = vi.fn()
+    const user = userEvent.setup()
+    renderBrowser({
+      dirs: [{ name: '进我', path: 'D:/m/进我' } as DirInfo],
+      files: [file({ id: 1, file_name: '开我.jpg' })],
+      displayMode: 'details', onEnterDir, onOpenFile: onOpen,
+    })
+    await user.dblClick(screen.getByText('进我'))
+    expect(onEnterDir).toHaveBeenCalledWith(expect.objectContaining({ path: 'D:/m/进我' }))
+    await user.dblClick(screen.getByText('开我.jpg'))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('DirectoryBrowser 空态区分（FR-98）', () => {
   function renderEmpty(props: Partial<React.ComponentProps<typeof DirectoryBrowser>> = {}) {
     return render(

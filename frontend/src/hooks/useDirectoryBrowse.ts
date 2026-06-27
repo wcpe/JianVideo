@@ -2,27 +2,33 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import * as libApi from '@/api/library'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
-/** 目录浏览聚合虚拟根标记（FR-66）：列出所有启用库作为顶层目录。 */
+/** 真实路径树根标记（FR-121）：顶层列出各盘符 / 共享根。 */
 export const BROWSE_ROOT = '__root__'
 
+/** 目录排序键（FR-121）：服务端按此排序文件（目录恒在前、按名）。 */
+export type BrowseSort = 'name' | 'size' | 'type' | 'time'
+
+/**
+ * 目录浏览数据 hook（FR-121 真实路径树）：仅按真实路径 parent_path 跨库导航，
+ * 排序经后端 sort 参数生效（name/size/type/time）。不再依赖 library_id。
+ */
 export function useDirectoryBrowse() {
-  const [browseLibraryID, setBrowseLibraryID] = useState<number | null>(null)
-  const [browseParentPath, setBrowseParentPath] = useState(BROWSE_ROOT)
+  const [currentPath, setCurrentPath] = useState<string>(BROWSE_ROOT)
+  const [sort, setSortState] = useState<BrowseSort>('name')
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
   const [directories, setDirectories] = useState<DirInfo[]>([])
   const [files, setFiles] = useState<MediaFile[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 是否已初始化过浏览起点（聚合虚拟根或带库定位），避免查询参数副作用重复初始化
+  // 是否已初始化过浏览起点（真实路径或根），避免查询参数副作用重复初始化
   const initialized = useRef(false)
 
-  const loadBrowse = useCallback(async (libraryID: number | null, parentPath: string) => {
+  const loadBrowse = useCallback(async (path: string, sortKey: BrowseSort) => {
     setLoading(true)
     setError(null)
     try {
-      // 聚合根（FR-66）不带 library_id；其余传 0 占位由 api 层按 >0 决定是否携带
-      const res = await libApi.browseDirectory(libraryID ?? 0, parentPath)
+      const res = await libApi.browseDirectory(path, sortKey)
       setBreadcrumbs(res.breadcrumbs)
       setDirectories(res.directories)
       setFiles(res.files)
@@ -37,58 +43,57 @@ export function useDirectoryBrowse() {
     }
   }, [])
 
-  // 以聚合虚拟根初始化（无库定位查询参数时）。仅首次生效。
+  // 以真实路径树根初始化（无定位查询参数时）。仅首次生效。
   const initRoot = useCallback(() => {
     if (initialized.current) return
     initialized.current = true
-    setBrowseLibraryID(null)
-    setBrowseParentPath(BROWSE_ROOT)
+    setCurrentPath(BROWSE_ROOT)
   }, [])
 
-  // 进入目录（FR-66）：根层库目录项带 library_id → 切到该库下钻；普通子目录仅切路径。
-  const handleEnterDir = useCallback((dir: DirInfo) => {
-    if (dir.library_id != null && dir.library_id > 0) {
-      setBrowseLibraryID(dir.library_id)
-    }
-    setBrowseParentPath(dir.path)
-  }, [])
-
-  // 面包屑导航：回到虚拟根 → 清空当前库；否则在当前库内切路径。
-  const handleBreadcrumbNavigate = useCallback((path: string) => {
-    if (path === BROWSE_ROOT) {
-      setBrowseLibraryID(null)
-    }
-    setBrowseParentPath(path)
-  }, [])
-
-  // 带库定位（library_id + 起始 path）直接进库浏览（如存储库管理页跳转）。
-  const handleBrowsePath = useCallback((libraryID: number, parentPath: string) => {
+  // 带定位（起始 path）直接进该目录（如存储库管理页跳转）。library_id 已弃用、忽略。
+  const initPath = useCallback((path: string) => {
     initialized.current = true
-    setBrowseLibraryID(libraryID)
-    setBrowseParentPath(parentPath)
+    setCurrentPath(path)
   }, [])
 
-  // 加载：聚合根（path=__root__）忽略 library_id 始终加载；其余有库才加载。
+  // 进入子目录 / 切换路径（地址栏、左树、目录卡片共用）。
+  const navigateTo = useCallback((path: string) => {
+    setCurrentPath(path)
+  }, [])
+
+  const handleEnterDir = useCallback((dir: DirInfo) => {
+    setCurrentPath(dir.path)
+  }, [])
+
+  // 切换排序（FR-121）：服务端重排，随之重载当前目录。
+  const setSort = useCallback((next: BrowseSort) => {
+    setSortState(next)
+  }, [])
+
+  // 当前路径或排序变化即重载。
   useEffect(() => {
-    if (browseParentPath === BROWSE_ROOT || browseLibraryID !== null) {
-      loadBrowse(browseLibraryID, browseParentPath)
-    }
-  }, [browseLibraryID, browseParentPath, loadBrowse])
+    loadBrowse(currentPath, sort)
+  }, [currentPath, sort, loadBrowse])
+
+  // 手动重载当前目录（如删除后刷新）。
+  const reload = useCallback(() => {
+    loadBrowse(currentPath, sort)
+  }, [currentPath, sort, loadBrowse])
 
   return {
-    browseLibraryID,
-    browseParentPath,
+    currentPath,
+    sort,
     breadcrumbs,
     directories,
     files,
     loading,
     error,
     setError,
-    setBrowseParentPath,
-    loadBrowse,
-    initRoot,
+    setSort,
+    navigateTo,
     handleEnterDir,
-    handleBreadcrumbNavigate,
-    handleBrowsePath,
+    initRoot,
+    initPath,
+    reload,
   }
 }

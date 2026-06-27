@@ -8,7 +8,6 @@ import NameEditModal from '@/components/NameEditModal'
 import ShareDialog from '@/components/ShareDialog'
 import ExternalPlayerDialog from '@/components/ExternalPlayerDialog'
 import PregenDialog from '@/components/PregenDialog'
-import PageBreadcrumbs from '@/components/PageBreadcrumbs'
 import { parseWebVTT } from '@/utils/subtitle'
 import { mediaDisplayName } from '@/utils/media'
 import { mediaStreamUrl, mediaHlsMasterUrl } from '@/utils/media-url'
@@ -207,10 +206,6 @@ export default function PlayPage() {
     // 全屏沉浸容器（FR-103）：100dvh 铺满视口、列向 flex、overflow hidden 锁纵向滚动；
     // 用 dvh 避开移动端地址栏高度抖动。头部 flex-shrink，视频区 flex:1 吃满剩余高度。
     <Box data-testid="play-immersive-root" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: 'var(--mantine-spacing-sm)' }}>
-      {/* 页面级路由面包屑（FR-95）：首页 › 当前媒体；影院态下收起以让位视频区 */}
-      {!cinema && (
-        <PageBreadcrumbs items={[{ label: '首页', to: '/' }, { label: mediaDisplayName(media) }]} />
-      )}
       {/* 头部（FR-85 操作收纳）：外露返回 + 标题 + 影院 + 更多，次要操作收进「更多 ⋯」菜单；
           wrap="nowrap" + 标题截断，窄屏不换行铺满、不挤出按钮。右侧保留字幕菜单。 */}
       <Group gap="sm" justify="space-between" wrap="nowrap">

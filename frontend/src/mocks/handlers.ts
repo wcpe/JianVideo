@@ -466,54 +466,65 @@ export const handlers = [
   http.get('*/api/library/browse', async ({ request }) => {
     await delay(200)
     const url = new URL(request.url)
-    const libraryID = Number(url.searchParams.get('library_id') || '0')
-    const parentPath = url.searchParams.get('parent_path') || '/'
+    const parentPath = url.searchParams.get('parent_path') || '__root__'
+    const sort = url.searchParams.get('sort') || 'name'
+    const alive = mediaFiles.filter(m => !deletedMediaIds.has(m.id))
 
-    // 聚合虚拟根（FR-66）：列出所有启用库作为顶层目录、各项携带 library_id
+    // 真实路径树根（FR-121）：各启用库推导卷根、去重排序作为顶层目录项（不带 library_id）。
     if (parentPath === '__root__') {
+      const volRoot = (raw: string): string => {
+        const p = raw.replace(/\\/g, '/')
+        if (p.startsWith('//')) {
+          const seg = p.slice(2).split('/').filter(Boolean)
+          return seg.length >= 2 ? `//${seg[0]}/${seg[1]}` : p
+        }
+        const m = p.match(/^([A-Za-z]:)/)
+        return m ? m[1] : (p.split('/').filter(Boolean)[0] || p)
+      }
+      const roots = Array.from(new Set(paths.filter(p => p.enabled).map(p => volRoot(p.path)))).sort()
       return HttpResponse.json({
-        breadcrumbs: [{ name: '全部存储库', path: '__root__' }],
-        directories: paths
-          .filter(p => p.enabled)
-          .map(p => ({ name: p.label || p.path, path: p.path, library_id: p.id })),
+        breadcrumbs: [{ name: '全部', path: '__root__' }],
+        directories: roots.map(r => ({ name: r, path: r })),
         files: [],
       })
     }
 
+    // 浏览真实路径 P（FR-121）：跨所有库按前缀合并，不依赖 library_id。
     const prefix = parentPath.replace(/\\/g, '/') + '/'
-    const allFiles = mediaFiles.filter(m => {
-      const fp = m.file_path.replace(/\\/g, '/')
-      return fp.startsWith(prefix) && m.library_id === libraryID
-    })
-
     const dirSet = new Set<string>()
-    const files: typeof allFiles = []
-    for (const f of allFiles) {
-      const rel = f.file_path.replace(/\\/g, '/').replace(prefix, '')
+    const files: MediaFile[] = []
+    for (const f of alive) {
+      const fp = f.file_path.replace(/\\/g, '/')
+      if (!fp.startsWith(prefix)) continue
+      const rel = fp.slice(prefix.length)
       const slashIdx = rel.indexOf('/')
-      if (slashIdx !== -1) {
-        dirSet.add(rel.substring(0, slashIdx))
-      } else {
-        files.push(f)
-      }
+      if (slashIdx !== -1) dirSet.add(rel.substring(0, slashIdx))
+      else files.push(f)
     }
 
-    const cleanPath = parentPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    // 面包屑：按分隔符拆段累进，Windows 盘符不加前导斜杠（`D:/...`）。
+    const cleanPath = parentPath.replace(/\\/g, '/').replace(/\/+$/g, '')
     const parts = cleanPath.split('/').filter(Boolean)
     const breadcrumbs: { name: string; path: string }[] = []
     let current = ''
-    for (const p of parts) {
-      current = /^[A-Za-z]:$/.test(p) && current === '' ? p : `${current.replace(/\/$/, '')}/${p}`
-      breadcrumbs.push({ name: p, path: current })
+    for (const seg of parts) {
+      current = current === '' ? seg : `${current}/${seg}`
+      breadcrumbs.push({ name: seg, path: current })
     }
-    if (breadcrumbs.length === 0) {
-      breadcrumbs.push({ name: '/', path: '/' })
-    }
+    if (breadcrumbs.length === 0) breadcrumbs.push({ name: cleanPath || '/', path: cleanPath || '/' })
+
+    // 服务端排序（FR-121）：目录恒在前、按名；文件按 sort 升序。
+    const sorted = [...files].sort((a, b) => {
+      if (sort === 'size') return a.file_size - b.file_size
+      if (sort === 'type') return (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name)
+      if (sort === 'time') return (a.modified_at || '').localeCompare(b.modified_at || '')
+      return a.file_name.localeCompare(b.file_name)
+    })
 
     return HttpResponse.json({
       breadcrumbs,
       directories: Array.from(dirSet).sort().map(name => ({ name, path: prefix + name })),
-      files,
+      files: sorted,
     })
   }),
 

@@ -4,7 +4,6 @@ import { IconFolder, IconAlertCircle, IconSearchOff, IconPlayerPlay, IconDots } 
 import EmptyState from '@/components/EmptyState'
 import { formatSize, formatDuration } from '@/utils/format'
 import { isImageFile, mediaDisplayName } from '@/utils/media'
-import DirectoryBreadcrumb from '@/components/DirectoryBreadcrumb'
 import MediaThumbnail from '@/components/MediaThumbnail'
 import MediaCardOverlay from '@/components/MediaCardOverlay'
 import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu'
@@ -12,20 +11,28 @@ import SelectionBatchBar from '@/components/SelectionBatchBar'
 import { useMultiSelect } from '@/hooks/useMultiSelect'
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types'
 
-/** 展示方式（FR-33）：列表详情 / 大-中-小图标 */
-export type DisplayMode = 'list' | 'large' | 'medium' | 'small'
+/** 展示方式（FR-33/FR-121）：详情表格 / 列表 / 大-中-小图标 */
+export type DisplayMode = 'details' | 'list' | 'large' | 'medium' | 'small'
 /** 排序方式（FR-33） */
 export type DirSort = 'name' | 'size' | 'type' | 'time'
 
+/** 把后端 modified_at 渲染为本地日期时间；无值返回 '—'。 */
+function formatModified(s?: string): string {
+  if (!s) return '—'
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString()
+}
+
 interface DirectoryBrowserProps {
-  breadcrumbs: BreadcrumbItem[]
+  // 地址栏接管路径导航后，面包屑改由 BrowsePage 顶部渲染；此处保留可选以兼容旧调用，不再内嵌渲染。
+  breadcrumbs?: BreadcrumbItem[]
   directories: DirInfo[]
   files: MediaFile[]
   loading: boolean
   error: string | null
   customImageExtensions: Record<number, string[]>
   onEnterDir: (dir: DirInfo) => void
-  onBreadcrumbNavigate: (path: string) => void
+  onBreadcrumbNavigate?: (path: string) => void
   onErrorClose: () => void
   /** 双击文件触发打开（FR-33）；参数为该文件在排序后 files 中的下标 */
   onOpenFile: (file: MediaFile, index: number) => void
@@ -44,11 +51,13 @@ interface DirectoryBrowserProps {
   onBatchAddToAlbum?: (ids: number[]) => void
   onBatchAddTag?: (ids: number[]) => void
   onBatchDownload?: (ids: number[]) => void
+  // 隐藏内置 sticky 批量条（FR-121）：资源管理器工具栏已承载批量动作时传 true 避免双批量 UI。
+  hideSelectionBar?: boolean
 }
 
 // 各图标档的响应式列数（FR-99）：按容器宽度断点自适应增/减列，超宽屏增列、窄屏减列。
 // 档位（大/中/小）通过不同断点阈值控制每列目标宽度（小图标列更密）。
-const GRID_COLS: Record<Exclude<DisplayMode, 'list'>, Record<string, number>> = {
+const GRID_COLS: Record<Exclude<DisplayMode, 'list' | 'details'>, Record<string, number>> = {
   large: { '180px': 2, '480px': 3, '760px': 4, '1080px': 5, '1400px': 6 },
   medium: { '160px': 3, '480px': 4, '720px': 6, '1080px': 8, '1400px': 10 },
   small: { '160px': 4, '420px': 6, '720px': 8, '1080px': 10, '1400px': 12 },
@@ -75,12 +84,13 @@ export function sortFiles(files: MediaFile[], sort: DirSort): MediaFile[] {
  * 右键弹常用菜单（删除选中/全选/反选/复选框模式）。目录项不参与选择（仅文件可选）。
  */
 export default function DirectoryBrowser({
-  breadcrumbs, directories, files, loading, error, customImageExtensions,
-  onEnterDir, onBreadcrumbNavigate, onErrorClose, onOpenFile,
+  directories, files, loading, error, customImageExtensions,
+  onEnterDir, onErrorClose, onOpenFile,
   displayMode = 'list', sort = 'name',
   filtered = false, onClearFilter,
   onSelectionChange, onBatchDelete, onDeleteOne,
   onBatchAddToAlbum, onBatchAddTag, onBatchDownload,
+  hideSelectionBar = false,
 }: DirectoryBrowserProps) {
   const sortedDirs = useMemo(() => [...directories].sort((a, b) => a.name.localeCompare(b.name)), [directories])
   const sortedFiles = useMemo(() => sortFiles(files, sort), [files, sort])
@@ -140,17 +150,12 @@ export default function DirectoryBrowser({
     )
   }
 
+  const isDetails = displayMode === 'details'
   const isList = displayMode === 'list'
-  const cols = isList ? undefined : GRID_COLS[displayMode]
+  const cols = (isDetails || isList) ? undefined : GRID_COLS[displayMode as Exclude<DisplayMode, 'list' | 'details'>]
 
   return (
     <>
-      {breadcrumbs.length > 0 && (
-        <Box mb="sm">
-          <DirectoryBreadcrumb items={breadcrumbs} onNavigate={onBreadcrumbNavigate} />
-        </Box>
-      )}
-
       {loading ? (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} height={60} radius="md" />)}
@@ -171,6 +176,86 @@ export default function DirectoryBrowser({
             description="这个目录下没有可显示的子目录或媒体文件。"
           />
         )
+      ) : isDetails ? (
+        // 详情视图（FR-121）：名称 / 修改日期 / 类型 / 大小 列。目录行大小「—」、类型「文件夹」。
+        <Box style={{ overflowX: 'auto' }}>
+          <Box role="table" aria-label="目录详情" style={{ minWidth: 520 }}>
+            {/* 表头 */}
+            <Group
+              role="row"
+              gap="sm"
+              wrap="nowrap"
+              px="xs"
+              py={6}
+              style={{ borderBottom: '1px solid var(--mantine-color-default-border)', color: 'var(--mantine-color-dimmed)' }}
+            >
+              <Text role="columnheader" size="xs" fw={600} style={{ flex: 1, minWidth: 0 }}>名称</Text>
+              <Text role="columnheader" size="xs" fw={600} style={{ width: 180, flexShrink: 0 }}>修改日期</Text>
+              <Text role="columnheader" size="xs" fw={600} style={{ width: 96, flexShrink: 0 }}>类型</Text>
+              <Text role="columnheader" size="xs" fw={600} ta="right" style={{ width: 96, flexShrink: 0 }}>大小</Text>
+            </Group>
+
+            {sortedDirs.map((dir) => (
+              <Group
+                role="row"
+                key={`dir-${dir.path}`}
+                gap="sm"
+                wrap="nowrap"
+                px="xs"
+                py={6}
+                className="hover-card"
+                style={{ cursor: 'pointer', borderBottom: '1px solid var(--mantine-color-default-border)' }}
+                onClick={() => onEnterDir(dir)}
+              >
+                <Group role="cell" gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                  <IconFolder size={16} color="var(--mantine-color-purple-4)" style={{ flexShrink: 0 }} />
+                  <Text size="sm" truncate title={dir.name}>{dir.name}</Text>
+                </Group>
+                <Text role="cell" size="sm" c="dimmed" style={{ width: 180, flexShrink: 0 }}>—</Text>
+                <Text role="cell" size="sm" c="dimmed" style={{ width: 96, flexShrink: 0 }}>文件夹</Text>
+                <Text role="cell" size="sm" c="dimmed" ta="right" style={{ width: 96, flexShrink: 0 }}>—</Text>
+              </Group>
+            ))}
+
+            {sortedFiles.map((file, i) => {
+              const selected = selectedIds.has(file.id)
+              return (
+                <Group
+                  role="row"
+                  key={`file-${file.id}`}
+                  gap="sm"
+                  wrap="nowrap"
+                  px="xs"
+                  py={6}
+                  className="hover-card"
+                  style={{
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--mantine-color-default-border)',
+                    background: selected ? 'var(--mantine-color-purple-light)' : undefined,
+                  }}
+                  onClick={(e) => select.handleItemClick(i, e)}
+                  onDoubleClick={() => onOpenFile(file, i)}
+                  onContextMenu={(e) => handleContextMenu(i, e)}
+                  data-selected={selected || undefined}
+                >
+                  <Group role="cell" gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                    {select.checkboxMode && (
+                      <Checkbox
+                        size="xs" checked={selected} readOnly tabIndex={-1}
+                        aria-label={`选择 ${mediaDisplayName(file)}`}
+                        style={{ flexShrink: 0 }}
+                      />
+                    )}
+                    <Text size="sm" truncate title={mediaDisplayName(file)}>{mediaDisplayName(file)}</Text>
+                  </Group>
+                  <Text role="cell" size="sm" c="dimmed" style={{ width: 180, flexShrink: 0 }}>{formatModified(file.modified_at)}</Text>
+                  <Text role="cell" size="sm" c="dimmed" style={{ width: 96, flexShrink: 0 }}>{file.format.toUpperCase()}</Text>
+                  <Text role="cell" size="sm" ta="right" style={{ width: 96, flexShrink: 0 }}>{formatSize(file.file_size)}</Text>
+                </Group>
+              )
+            })}
+          </Box>
+        </Box>
       ) : isList ? (
         // 列表（详情行）
         <Stack gap={4}>
@@ -284,8 +369,9 @@ export default function DirectoryBrowser({
         </SimpleGrid>
       )}
 
-      {/* sticky 批量操作条（FR-99）：选中 ≥1 项时浮现，复用已有多选 state 与 FR-91 批量回调 */}
-      {selectionEnabled && (
+      {/* sticky 批量操作条（FR-99）：选中 ≥1 项时浮现，复用已有多选 state 与 FR-91 批量回调。
+          资源管理器（FR-121）由工具栏承载批量动作时传 hideSelectionBar 抑制，避免双批量 UI。 */}
+      {selectionEnabled && !hideSelectionBar && (
         <SelectionBatchBar
           count={selectedIds.size}
           onClear={select.clear}

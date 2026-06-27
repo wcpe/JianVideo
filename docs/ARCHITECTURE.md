@@ -295,13 +295,13 @@
 
 ### 5.0 目录浏览
 
-- `GET /api/library/browse`：按 `library_id` + `parent_path` 浏览目录内容
-- 一次 SQL 查询（`file_path LIKE prefix%`）+ Go 层 map 分组聚合子目录
+- `GET /api/library/browse`：按 `parent_path`（+ 可选 `sort`）浏览**真实路径树**，跨所有库按 `file_path` 前缀聚合（`library_id` 已弃用、仍接受但被忽略）
+- 一次 SQL 查询（`file_path LIKE 'P/%'`，跨库）+ Go 层去重聚合下一级子目录
 - 面包屑由后端按路径分隔符拆分构建；Windows 盘符路径保持 `D:/...` 形式，不额外加 `/D:`
 - `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
-- 前端 Tab 切换（时间轴 | 文件目录），媒体库目录卡片提供“浏览”入口，面包屑导航 + 文件列表复用现有卡片样式
-- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携 `library_id` + 起始 `path` 跳转 `/browse` 定位到该库根目录。`GET /api/library/paths` 每项附带 `media_count`（按 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
-- **聚合虚拟根（FR-66，[ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时进入聚合根分支——忽略 `library_id`，列出所有启用库作为顶层目录项（`DirInfo.library_id` 填该库 ID、`name`=label、`path`=库 path），面包屑单段 `{name:"全部存储库", path:"__root__"}`；其余 `parent_path` 走原单库前缀逻辑不变。前端目录浏览页（`/browse`）默认进虚拟根列全部库、点库携 `library_id` 下钻、面包屑可回根；带 `library_id`+`path` 深链则直接进该库（向后兼容）。库列表真源仍是 `library_paths`、媒体真源仍是 `media_files`，聚合根不新增持久状态
+- 前端 `/browse` 为资源管理器布局（FR-121）：左导航树（懒展开、自动展开当前路径祖先链）+ 可点地址栏（路径段）+ 工具栏（批量动作 + 视图模式 + 排序）+ 名称/修改日期/类型/大小详情列 + 状态栏；已移除全局页级面包屑 `PageBreadcrumbs`
+- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携起始 `path` 跳转 `/browse` 定位到该库根目录（导航按真实路径，FR-121）。`GET /api/library/paths` 每项附带 `media_count`（按 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
+- **真实路径树（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 [ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时返回各**盘符/共享根**（由各启用库 `path` 推导卷根：本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`，去重排序）；其余 `parent_path` 按真实路径**跨所有库**前缀聚合（子目录 = `file_path LIKE 'P/%'` 的下一级去重、文件 = 目录恰为 P 的项，均排除软删，不再按 `library_id` 收窄）。有路径包含关系的库在公共上级自然合并为单一树（`D:\1` 与 `D:\1\2` → `D:→1→2`；库 `D:\` 则整盘可浏览）。`DirInfo.library_id` 对子目录不再填，文件保留各自 `library_id` 供删除/下载等操作；`sort`（name/size/type/time）服务端排序。库注册真源 `library_paths`、媒体真源 `media_files` 不变
 
 ## 5. 关键机制
 
