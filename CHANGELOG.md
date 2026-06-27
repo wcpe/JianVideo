@@ -6,6 +6,9 @@
 
 ## 未发布
 
+### 新增
+- **页眉刷新按钮（FR-114）**：全局页眉新增刷新按钮（`IconRefresh`，无障碍名「刷新当前页面」），点击仅重载当前路由页面的内容数据——不整页 `reload`、不重载导航/页眉、不重置登录态。机制：`AppLayout` 持 `refreshNonce` 状态，刷新按钮自增之；`AppShell.Main` 内主内容区包裹元素 key 由 `${pathname}:${refreshNonce}` 组成，序号变化使当前路由内容区重挂载、重跑各页数据拉取副作用（导航/页眉在 Main 之外不受影响，登录态由 store/Cookie 持有不触动）。与 FR-67 时间轴页内刷新并存。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：刷新按钮存在、点击使内容区重挂载且登录态不变、不触发路由跳转。机制见 [docs/specs/header-refresh.md](docs/specs/header-refresh.md)。
+
 ### 变更
 - **导航交互完善（FR-115）**：左侧导航的「展开/收缩」按钮由 navbar 顶部移到底部右下角；点击顶栏 logo 改为切换导航展开/收缩并持久化（`localStorage`），**移除 logo「点击回首页」**——回首页改由导航「时间轴」项（`/`）进入；补齐所有导航项的 hover 背景与过渡态（非激活项也有可见浅底 + 平滑过渡，复用 `--mantine-color-default-hover` 设计 token，激活项保持品牌紫浅底不被覆盖，`prefers-reduced-motion` 下过渡关闭）。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：收缩按钮居底、点 logo 切换收展且持久化、「时间轴」指向首页、导航项带 hover 类。机制见 [docs/specs/nav-interaction.md](docs/specs/nav-interaction.md)。
 

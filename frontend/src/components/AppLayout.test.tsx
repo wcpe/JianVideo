@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -545,6 +546,61 @@ describe('AppLayout 侧栏激活态 pill（FR-95）', () => {
     expect(navbar).toHaveAttribute('data-collapsed', 'true')
     const active = navbar.querySelector('a[data-active="true"]')
     expect(active).toHaveAttribute('href', '/albums')
+  })
+})
+
+describe('AppLayout 页眉刷新按钮（FR-114）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  // 统计子内容挂载次数的探针：每次挂载自增一个外部计数，用于验证刷新触发重挂载
+  function MountProbe({ onMount }: { onMount: () => void }) {
+    useEffect(() => {
+      onMount()
+    }, [onMount])
+    return <div>探针内容</div>
+  }
+
+  it('页眉渲染刷新按钮（含无障碍标签）', () => {
+    renderLayout()
+    expect(screen.getByRole('button', { name: '刷新当前页面' })).toBeInTheDocument()
+  })
+
+  it('点击刷新使主内容区重挂载（重跑数据拉取），导航/页眉不重置登录态', async () => {
+    const user = userEvent.setup()
+    const onMount = vi.fn()
+
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <AppLayout>
+            <MountProbe onMount={onMount} />
+          </AppLayout>
+        </MemoryRouter>
+      </MantineProvider>,
+    )
+
+    // 初始挂载一次
+    expect(onMount).toHaveBeenCalledTimes(1)
+
+    // 点击刷新：内容区 key 变化致重挂载，探针再次挂载
+    await user.click(screen.getByRole('button', { name: '刷新当前页面' }))
+    expect(onMount).toHaveBeenCalledTimes(2)
+
+    // 不整页 reload、不重置登录态：auth store 仍为已认证、用户菜单仍在
+    expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    expect(screen.getByRole('button', { name: /admin/ })).toBeInTheDocument()
+  })
+
+  it('刷新不触发路由跳转（仅重载内容，不动导航）', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(screen.getByRole('button', { name: '刷新当前页面' }))
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })
 

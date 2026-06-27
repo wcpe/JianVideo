@@ -39,6 +39,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const computedColorScheme = useComputedColorScheme('dark', { getInitialValueInEffect: true })
   // 导航底部版本号（FR-61）：取自系统信息；失败静默不显，不阻塞布局
   const [appVersion, setAppVersion] = useState('')
+  // 页眉刷新（FR-114）：自增刷新序号，作为主内容区 key 的一部分；
+  // 序号变化使当前路由内容区重挂载、重跑数据拉取副作用，仅刷新内容数据，
+  // 不整页 reload、不重载导航/页眉、不触动登录态。
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const handleRefresh = useCallback(() => setRefreshNonce((n) => n + 1), [])
 
   // 拉取应用版本用于导航底部展示；失败仅静默（版本缺省，不影响其余布局）
   useEffect(() => {
@@ -243,6 +248,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Group>
 
           <Group gap="sm">
+            {/* 刷新当前页面内容（FR-114）：仅重载当前路由内容数据，
+                不整页 reload、不重载导航/页眉、不重置登录态 */}
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={handleRefresh}
+              title="刷新当前页面"
+              aria-label="刷新当前页面"
+            >
+              <IconRefresh size={18} />
+            </ActionIcon>
             {/* 命令面板入口（FR-74）：移动端无物理键盘时点击打开，桌面端 Ctrl/Cmd+K 亦可 */}
             <ActionIcon
               variant="subtle"
@@ -340,9 +356,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}
       <AppShell.Main>
         {/* 路由切换淡入（FR-96/FIX-2）：仅包裹主内容区，
-            以路径为 key 重挂载触发渐入；导航栏与页眉在 Main 之外，不跟随淡入/闪动 */}
+            以路径为 key 重挂载触发渐入；导航栏与页眉在 Main 之外，不跟随淡入/闪动。
+            内容区 key 叠加刷新序号（FR-114）：路径或刷新序号变化均重挂载内容、重跑数据拉取。 */}
         <RouteTransition>
-          <CinemaContext.Provider value={cinemaValue}>{children}</CinemaContext.Provider>
+          <CinemaContext.Provider key={`${pathname}:${refreshNonce}`} value={cinemaValue}>
+            {children}
+          </CinemaContext.Provider>
         </RouteTransition>
       </AppShell.Main>
 
