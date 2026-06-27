@@ -4,7 +4,7 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## 0.17.0（2026-06-27）
 
 ### 新增
 - **登录用户修改密码（FR-108）**：已登录用户可在「系统 → 设置 → 账户安全」修改密码——校验当前密码后设置新密码、bcrypt 存储、即时生效（旧密码立即失效、新密码立即可用）。后端新增受保护端点 `POST /api/me/password`（用户取自认证上下文，当前密码不符返回 401，成功 204）；`auth.Service` 增 `ChangePassword` 与 `ErrCurrentPasswordWrong`，`models` 增 `UpdateUserPassword`。前端设置页新增「账户安全」卡（当前/新/确认密码，前端校验新密码 ≥6 位且两次一致）。附带修复 `auth` 包 `TestParseToken_Tampered` 概率性误判（改篡改签名段首字符，避免末位 base64 冗余位等价）。
