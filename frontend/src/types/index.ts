@@ -252,6 +252,41 @@ export interface WatchStats {
   top_viewed: MediaFile[]
 }
 
+/** 概览看板各库聚合行（FR-117）：单个媒体库的媒体数量与体量统计 */
+export interface LibrarySummaryRow {
+  library_id: number
+  /** 库展示名，取自 library_paths（LEFT JOIN） */
+  label: string
+  /** 该库未软删媒体总数 */
+  media_count: number
+  /** 该库视频数（format 不在内置图片后缀名单内） */
+  video_count: number
+  /** 该库图片数（format 在内置图片后缀名单内） */
+  image_count: number
+  /** 该库文件大小求和（字节） */
+  total_size: number
+  /** 该库时长求和（秒，图片为 0 不影响） */
+  total_duration: number
+}
+
+/** 概览看板媒体库总量聚合（FR-117）：一次性聚合，所有计数/求和仅统计未软删媒体 */
+export interface LibrarySummary {
+  /** 未软删媒体总数 */
+  total: number
+  /** 视频总数 */
+  video_count: number
+  /** 图片总数 */
+  image_count: number
+  /** 文件大小求和（字节） */
+  total_size: number
+  /** 时长求和（秒） */
+  total_duration: number
+  /** 启用库数（与 /paths 口径一致，enabled=1） */
+  library_count: number
+  /** 各库聚合（按 library_id 分组） */
+  by_library: LibrarySummaryRow[]
+}
+
 /** 媒体库后缀类型 */
 export type MediaExtensionType = 'video' | 'image'
 

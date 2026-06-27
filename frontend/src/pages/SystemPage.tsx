@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
+import { formatBytes, formatUptime } from '@/utils/format'
 import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from '@/utils/update-cache'
 import AnchorNav from '@/components/AnchorNav'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types'
@@ -68,30 +69,6 @@ function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode
       </Text>
     </Group>
   )
-}
-
-/** 把字节数格式化为人类可读单位（FR-60 运行时内存展示） */
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-/** 把秒数格式化为「Xd Xh Xm Xs」运行时长（FR-60） */
-function formatUptime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0s'
-  const s = Math.floor(seconds)
-  const d = Math.floor(s / 86400)
-  const h = Math.floor((s % 86400) / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  const parts: string[] = []
-  if (d > 0) parts.push(`${d}d`)
-  if (h > 0) parts.push(`${h}h`)
-  if (m > 0) parts.push(`${m}m`)
-  parts.push(`${sec}s`)
-  return parts.join(' ')
 }
 
 /** 把运行环境信息整理为可粘贴的纯文本报告（FR-113 后续增强：运行环境区块「复制」） */

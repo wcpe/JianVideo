@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, Menu, Avatar, UnstyledButton, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie, IconLayoutDashboard } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { useNavWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX } from '@/hooks/useNavWidth'
@@ -87,7 +87,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 导航项定义（桌面 Navbar 与移动 Drawer 共用，避免重复）
   const navItems = [
     { path: '/library-manager', label: '管理', icon: IconSettings },
-    { path: '/', label: '时间轴', icon: IconClock },
+    // 首页概览数据看板（FR-117）：根路由 '/' 为概览
+    { path: '/', label: '概览', icon: IconLayoutDashboard },
+    // 时间轴迁至 /timeline（FR-117）：浏览媒体入口，仍用时钟图标
+    { path: '/timeline', label: '时间轴', icon: IconClock },
     { path: '/browse', label: '目录', icon: IconFolderOpen },
     { path: '/albums', label: '相册', icon: IconPhoto },
     { path: '/map', label: '地图', icon: IconMapPin },
@@ -108,7 +111,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // navItems 仍是命令面板（FR-74）的扁平真源；此处仅按 path 引用其中同一对象做视觉分组，不复制项、不改路径/语义。
   const navItemByPath = (path: string) => navItems.find((item) => item.path === path)!
   const navGroups = [
-    { title: '浏览', items: ['/', '/browse', '/albums', '/map', '/stats'].map(navItemByPath) },
+    { title: '浏览', items: ['/', '/timeline', '/browse', '/albums', '/map', '/stats'].map(navItemByPath) },
     { title: '管理', items: ['/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode'].map(navItemByPath) },
     { title: '系统', items: ['/system'].map(navItemByPath) },
   ]
@@ -126,7 +129,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       run: () => navigate(item.path),
     })),
     // 「搜索」与「扫描媒体库」不在面板内直接执行（依赖页面级上下文），仅跳到对应页面承接
-    { id: 'search', label: '搜索', icon: IconSearch, run: () => navigate('/') },
+    // 搜索框在时间轴页（FR-35/FR-86），时间轴迁至 /timeline 后搜索命令随之指向 /timeline（FR-117）
+    { id: 'search', label: '搜索', icon: IconSearch, run: () => navigate('/timeline') },
     { id: 'scan', label: '扫描媒体库', icon: IconRefresh, run: () => navigate('/library-manager') },
     { id: 'licenses', label: '开源协议', icon: IconLicense, run: () => navigate('/licenses') },
     { id: 'toggle-theme', label: '切换主题', icon: IconPalette, run: () => toggleColorScheme() },

@@ -17,6 +17,36 @@ export function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+/**
+ * 把字节数格式化为人类可读单位（FR-60 运行时内存、FR-117 概览占用空间复用）。
+ * 自 SystemPage 提取为公共函数，消除复制粘贴；非有限值或 ≤0 统一返回 `0 B`。
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+/**
+ * 把秒数格式化为「Xd Xh Xm Xs」运行时长（FR-60）。
+ * 自 SystemPage 提取为公共函数；非有限值或 ≤0 统一返回 `0s`。
+ */
+export function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s'
+  const s = Math.floor(seconds)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const parts: string[] = []
+  if (d > 0) parts.push(`${d}d`)
+  if (h > 0) parts.push(`${h}h`)
+  if (m > 0) parts.push(`${m}m`)
+  parts.push(`${sec}s`)
+  return parts.join(' ')
+}
+
 // 以下 EXIF 单位格式化（FR-106）：把后端存储的裸值归一化为标准摄影写法，
 // 对已带/未带标准标记的输入均幂等，便于 EXIF 区一致呈现。
 

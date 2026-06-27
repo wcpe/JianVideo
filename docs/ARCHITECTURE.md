@@ -283,7 +283,7 @@
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117） |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD 与预生成队列入队/列任务（FR-77） |
@@ -473,6 +473,12 @@
 
 - **照片地图（FR-39，[ADR-0031](adr/0031-photo-map-leaflet.md)）**：前端页 `MapPage`（`/map`）用 leaflet + react-leaflet + OSM 在线瓦片展示带 GPS 的照片地理分布。数据经 `getMediaFiles({has_gps:true,...})` 分页累积拉取地理标记子集（后端 `has_gps` 筛选 `gps_lat != 0 OR gps_lon != 0`），逐点打 `Marker`、弹窗显示缩略图与名称。瓦片显示依赖联网，属真机/在线维度。
 - **旅程轨迹（FR-76，扩 FR-39，无新 ADR）**：纯前端展示层增强，复用既定技术栈、不改后端、不引依赖。拉取时加 `sort:'media_time_asc'`（后端按 `COALESCE(media_time, added_at) ASC` 返回升序）；纯函数 `buildDayTracks(files)`（`frontend/src/utils/gpsTrack.ts`）过滤有效 GPS 点、复用 `groupMediaByDate(files,'day')` 按天分组、丢弃点数 < 2 的天、按日期升序输出 `{date,positions,color}[]`（颜色按下标循环取 `TRACK_COLORS`）。`MapPage` 据此渲染若干 `Polyline` 折线层叠加在散点上，「轨迹模式」`Switch`（默认开）控制折线显隐，散点 `Marker` 始终渲染。轨迹按「天」朴素聚合（同一天≈同一行程），更细的行程切分属后续增强、不在本期。
+
+### 5.11 首页概览看板（FR-117，[ADR-0043](adr/0043-homepage-overview-dashboard.md)）
+
+- 根路由 `/` 由时间轴改为「概览」数据看板；时间轴迁至 `/timeline`（导航「浏览」组并列「概览」「时间轴」两入口）。取代由 FR-A/AC-13 确立的「时间轴=首页」约定（修订 AC-13 + 新增 AC-21）。
+- 看板总量维度由 `GET /api/library/summary` 提供：一次聚合（`COUNT`/`SUM` + 一次 `GROUP BY library_id`）返回媒体总数、视频/图片拆分、`SUM(file_size)`、`SUM(duration)`、启用库数与各库明细；全程 `deleted_at IS NULL`，视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致），避免 N+1。聚合在 library 服务层、`db` 仅读写。
+- 其余维度复用既有端点（观看统计 FR-75 / 系统信息 FR-21 / 健康巡检 FR-73 / 扫描任务 FR-29 / 转码任务 FR-77 / 继续观看 FR-44）；前端各数据源独立降级，空库零值不崩。
 
 ## 6. 部署
 

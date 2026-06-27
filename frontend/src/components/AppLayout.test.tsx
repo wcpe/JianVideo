@@ -223,11 +223,12 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     expect(navbar.getAllByText('系统').length).toBeGreaterThan(0)
   })
 
-  it('展开态：11 个导航项全部仍在桌面 navbar 中渲染', () => {
+  it('展开态：12 个导航项全部仍在桌面 navbar 中渲染', () => {
     renderLayout()
 
     const navbar = within(getNavbar())
-    const labels = ['时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    // 概览（FR-117）置于浏览组首项；时间轴随之保留
+    const labels = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
     labels.forEach((label) => {
       // 「系统」既是组标题又是导航项，故只断言至少存在
       expect(navbar.getAllByText(label).length).toBeGreaterThan(0)
@@ -248,8 +249,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     expect(idxManage).toBeGreaterThan(idxBrowse)
     expect(idxSystem).toBeGreaterThan(idxManage)
 
-    // 浏览组成员落在「浏览」与「管理」标题之间
-    ;['时间轴', '目录', '相册', '地图', '统计'].forEach((label) => {
+    // 浏览组成员落在「浏览」与「管理」标题之间（概览为首项，FR-117）
+    ;['概览', '时间轴', '目录', '相册', '地图', '统计'].forEach((label) => {
       const i = text.indexOf(label)
       expect(i).toBeGreaterThan(idxBrowse)
       expect(i).toBeLessThan(idxManage)
@@ -274,8 +275,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     expect(within(navbar).queryByText('浏览')).toBeNull()
     expect(within(navbar).queryByText('管理')).toBeNull()
     expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2)
-    // 11 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
-    const paths = ['/', '/browse', '/albums', '/map', '/stats', '/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode', '/system']
+    // 12 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）；概览 '/' 与时间轴 '/timeline'（FR-117）
+    const paths = ['/', '/timeline', '/browse', '/albums', '/map', '/stats', '/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode', '/system']
     paths.forEach((p) => {
       expect(navbar.querySelector(`a[href="${p}"]`)).not.toBeNull()
     })
@@ -287,8 +288,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     renderLayout()
 
     const navbar = within(getNavbar())
-    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）
-    const names = ['时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）；含概览（FR-117）
+    const names = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
     names.forEach((name) => {
       expect(navbar.getByRole('link', { name }).getAttribute('href')).toBeTruthy()
     })
@@ -516,17 +517,31 @@ describe('AppLayout 命令面板（FR-74）', () => {
     expect(within(dialog).getByText('切换主题')).toBeInTheDocument()
   })
 
-  it('命令面板内点击「时间轴」命令触发跳转', async () => {
+  it('命令面板内点击「时间轴」命令触发跳转（FR-117 后指向 /timeline）', async () => {
     const user = userEvent.setup()
     renderLayout()
 
     fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
     const dialog = await screen.findByRole('dialog')
 
-    // 输入过滤到「时间轴」后在面板内点击，断言 navigate 被调用到 '/'
+    // 输入过滤到「时间轴」后在面板内点击，断言 navigate 被调用到 '/timeline'（时间轴已迁址）
     const input = within(dialog).getByRole('textbox', { name: '命令' })
     await user.type(input, '时间轴')
     await user.click(within(dialog).getByText('时间轴'))
+
+    expect(mockNavigate).toHaveBeenCalledWith('/timeline')
+  })
+
+  it('命令面板内点击「概览」命令跳转 /（FR-117）', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true })
+    const dialog = await screen.findByRole('dialog')
+
+    const input = within(dialog).getByRole('textbox', { name: '命令' })
+    await user.type(input, '概览')
+    await user.click(within(dialog).getByText('概览'))
 
     expect(mockNavigate).toHaveBeenCalledWith('/')
   })
@@ -595,11 +610,12 @@ describe('AppLayout 侧栏激活态 pill（FR-95）', () => {
     expect(active[0].querySelector('a[href="/browse"]') ?? active[0].closest('a[href="/browse"]') ?? navbar.querySelector('a[href="/browse"][data-active="true"]')).not.toBeNull()
   })
 
-  it('根路由 /：仅「时间轴」激活，不误激活其他项（前缀匹配排除根）', () => {
+  it('根路由 /：仅「概览」激活，不误激活其他项（前缀匹配排除根；FR-117）', () => {
     renderLayoutAt('/')
 
     const navbar = getNavbar()
     const active = navbar.querySelectorAll('a[data-active="true"]')
+    // 概览为根路由 '/'，精确匹配下恰一个激活项且 href 为 '/'，时间轴 /timeline 不被误激活
     expect(active.length).toBe(1)
     expect(active[0]).toHaveAttribute('href', '/')
   })
@@ -747,20 +763,21 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('0')
   })
 
-  it('「时间轴」导航项指向 / 首页（回首页入口）', () => {
+  it('「概览」导航项指向 / 首页，「时间轴」指向 /timeline（FR-117 迁址）', () => {
     renderLayout()
 
     const navbar = getNavbar()
-    const timeline = within(navbar).getByRole('link', { name: '时间轴' })
-    expect(timeline).toHaveAttribute('href', '/')
+    // 概览取代时间轴成为首页入口；时间轴迁至 /timeline
+    expect(within(navbar).getByRole('link', { name: '概览' })).toHaveAttribute('href', '/')
+    expect(within(navbar).getByRole('link', { name: '时间轴' })).toHaveAttribute('href', '/timeline')
   })
 
   it('所有导航项均带 hover 反馈类 nav-link（非激活项亦有可见 hover 背景）', () => {
     renderLayoutAt('/browse')
 
     const navbar = getNavbar()
-    // 11 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）
-    expect(navbar.querySelectorAll('.nav-link').length).toBe(11)
+    // 12 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(12)
     // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1)
   })

@@ -10,6 +10,7 @@ import RequireSetup from './components/RequireSetup'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
 import LibraryManagerPage from './pages/LibraryManagerPage'
+import OverviewPage from './pages/OverviewPage'
 import TimelinePage from './pages/TimelinePage'
 import BrowsePage from './pages/BrowsePage'
 import AlbumsPage from './pages/AlbumsPage'
@@ -53,7 +54,9 @@ export default function App() {
           {/* 公开分享查看页（FR-43）：免登、不套 AppLayout / ProtectedRoute */}
           <Route path="/s/:token" element={<SharePage />} />
           <Route path="/library-manager" element={<ProtectedRoute><AppLayout><LibraryManagerPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/" element={<ProtectedRoute><AppLayout><TimelinePage /></AppLayout></ProtectedRoute>} />
+          {/* 首页概览数据看板（FR-117）：根路由由时间轴改为概览，时间轴迁至 /timeline */}
+          <Route path="/" element={<ProtectedRoute><AppLayout><OverviewPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/timeline" element={<ProtectedRoute><AppLayout><TimelinePage /></AppLayout></ProtectedRoute>} />
           <Route path="/browse" element={<ProtectedRoute><AppLayout><BrowsePage /></AppLayout></ProtectedRoute>} />
           <Route path="/albums" element={<ProtectedRoute><AppLayout><AlbumsPage /></AppLayout></ProtectedRoute>} />
           <Route path="/map" element={<ProtectedRoute><AppLayout><MapPage /></AppLayout></ProtectedRoute>} />
