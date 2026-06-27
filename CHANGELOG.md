@@ -6,6 +6,10 @@
 
 ## 未发布
 
+### 修复
+- **控制台内容标题与一级 tab 不一致（FR-113 后续修复）**：`SystemPage` 的内容区 order-2 标题对所有四个系统 tab（运行环境/硬件加速/编解码/应用更新）都恒显「系统诊断」——点「应用更新」tab 内容标题却是「系统诊断」，与上方 tab 名不符。改为按当前 `section` 显示对应一级 tab 名称（env→运行环境、hwaccel→硬件加速、codec→编解码、update→应用更新）；抽出 `SECTION_TITLES` 映射并由 `ConsolePage` 的 `Tabs.Tab` 文案与各区块内容标题共用（单一真源、不再各写一份硬编码）。设置 tab 标题仍为「设置」。纯前端、无新依赖、无新 ADR。`SystemPage.test.tsx`/`ConsolePage.test.tsx` 加各 section 内容区标题断言（含「应用更新」section 标题为「应用更新」而非「系统诊断」）。机制见 [docs/specs/console-flat-tabs-anchor-nav.md](docs/specs/console-flat-tabs-anchor-nav.md)。
+- **控制台锚点高亮不准、点击定位偏移、滚动后 tab 条被页眉遮住（吸顶布局根因，FR-113 后续修复）**：深层根因在布局——控制台固定页眉（`.mantine-AppShell-header`，position:fixed，占视口 y=0..56）与 sticky 一级 tab 条（`.console-tabs > .mantine-Tabs-list`，原 `top:0`）叠放：tab 条 stuck 在 y=0 正好**被固定页眉盖住**（滚动后整条 tab 看不见），且吸顶偏移测量在「点击时未 stuck」与「滚动后已 stuck」取值不一致，导致点击落点与高亮判定线对不上（点「网络」却高亮「扫描」、区块落点被遮）。本次三处同修：① **sticky tab 条让开页眉**——`top` 由 `0` 改为 `var(--app-shell-header-height, 56px)`（取 AppShell 暴露的页眉高度变量、随配置/安全区自适应，不写死），使 tab 条 stuck 在页眉正下方、滚动时可见；② **左侧锚点列 `.anchor-nav-sticky` 让开页眉 + tab 条**——`top` 改为 `calc(var(--app-shell-header-height,56px) + 2.375rem)`（tab 条高度无变量、取实测近似常量），原内联 `top:56` 移除（仅保留 `position:sticky` 内联供单测断言）；③ **`measureStickyOffset` 改为返回稳定 stuck 偏移**——= 固定页眉 `offsetHeight` + tab 条 `offsetHeight`（与当前滚动无关），使点击设的 `scroll-margin-top` 与 scroll-spy 判定线（`scrollPos + 吸顶偏移 + 小提前量`）用同一值、点哪个锚点就高亮哪个且区块落在 tab 条正下方完整可见。死区/触底/空集保留语义不回归（空 offsets 保留 active、触底钳末项、绝不回退首项）。纯前端、无新依赖、无新 ADR。`AnchorNav.test.tsx` 的 `measureStickyOffset` 用例改为桩定页眉 + tab 条 `offsetHeight` 验稳定偏移，组件级吸顶高亮/点击 `scroll-margin-top` 用例随之调整，保留死区/触底用例。机制见 [docs/specs/console-flat-tabs-anchor-nav.md](docs/specs/console-flat-tabs-anchor-nav.md)。
+
 ## 0.19.0（2026-06-27）
 
 ### 新增

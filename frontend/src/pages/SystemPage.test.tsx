@@ -49,8 +49,33 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     await waitFor(() => {
       expect(screen.getByText('0.3.0')).toBeVisible()
     })
-    expect(screen.getByText('系统诊断')).toBeVisible()
     expect(screen.getByText('go1.22.5')).toBeVisible()
+  })
+
+  it('内容区 order-2 标题按 section 显示对应一级 tab 名称（FR-113 后续修复）', async () => {
+    // env → 运行环境（标题与「运行环境」卡片标题文本同名，故标题应出现至少两次：order-2 + order-4 卡片）
+    const { unmount } = renderSection('env')
+    await screen.findByText('0.3.0')
+    expect(screen.getAllByText('运行环境').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('系统诊断')).toBeNull()
+    unmount()
+
+    // hwaccel → 硬件加速
+    renderSection('hwaccel')
+    expect(await screen.findByRole('heading', { level: 2, name: '硬件加速' })).toBeVisible()
+  })
+
+  it('应用更新区块 order-2 标题为「应用更新」而非「系统诊断」（FR-113 后续修复）', async () => {
+    renderSection('update')
+    // order-2 页面标题应为「应用更新」（与上方一级 tab 名一致），且不再误显「系统诊断」
+    expect(await screen.findByRole('heading', { level: 2, name: '应用更新' })).toBeVisible()
+    expect(screen.queryByText('系统诊断')).toBeNull()
+  })
+
+  it('编解码区块 order-2 标题为「编解码」（FR-113 后续修复）', async () => {
+    renderSection('codec')
+    expect(await screen.findByRole('heading', { level: 2, name: '编解码' })).toBeVisible()
+    expect(screen.queryByText('系统诊断')).toBeNull()
   })
 
   it('运行环境区块展示运行时信息（PID/运行时长/数据库路径等，FR-60）', async () => {

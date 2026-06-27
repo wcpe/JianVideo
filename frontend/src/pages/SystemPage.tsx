@@ -23,6 +23,15 @@ const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂�
 // 由 ConsolePage 的一级 tab 驱动选中哪个区块，本组件仅渲染该区块（不再有内层 tab）。
 export type SystemSection = 'env' | 'hwaccel' | 'codec' | 'update'
 
+// 区块 → 一级 tab 名称映射（FR-113 后续修复）：内容区 order-2 标题按当前 section 显示对应 tab 名，
+// 与 ConsolePage 的 Tabs.Tab 文案保持一致（避免「应用更新」tab 却显示「系统诊断」）。集中一处定义，不散落硬编码。
+export const SECTION_TITLES: Record<SystemSection, string> = {
+  env: '运行环境',
+  hwaccel: '硬件加速',
+  codec: '编解码',
+  update: '应用更新',
+}
+
 // 运行环境区块内左侧锚点（FR-113）：运行环境 / FFmpeg 两区块
 const ENV_ANCHORS = [
   { id: 'sys-env', label: '运行环境' },
@@ -387,7 +396,8 @@ export default function SystemPage({ section }: { section: SystemSection }) {
 
   return (
     <Stack gap="md">
-      <Title order={2}>系统诊断</Title>
+      {/* 内容区标题按当前 section 显示对应一级 tab 名称（FR-113 后续修复），与上方 tab 文案一致 */}
+      <Title order={2}>{SECTION_TITLES[section]}</Title>
 
       {infoError && (
         <Alert icon={<IconAlertCircle size={16} />} color="red" title="加载失败">
@@ -398,11 +408,13 @@ export default function SystemPage({ section }: { section: SystemSection }) {
       {/* 运行环境区块（FR-113）：运行环境信息 + FFmpeg，左侧锚点导航定位两区块 */}
       {section === 'env' && (
         <Group align="flex-start" gap="lg" wrap="nowrap">
-          {/* 左侧锚点 sticky 常驻（FR-113 修复）：滚动时锚点列吸顶可见、不随内容滚走 */}
+          {/* 左侧锚点 sticky 常驻（FR-113 修复）：滚动时锚点列吸顶可见、不随内容滚走。
+              position 内联（便于 jsdom 单测断言）；top 由 .anchor-nav-sticky 设为「页眉 + tab 条」高度，
+              让开固定页眉与 sticky 一级 tab 条（FR-113 第三批修复），不再内联写死 56。 */}
           <Box
             w={160}
             className="anchor-nav-sticky"
-            style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'sticky', top: 56 }}
+            style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'sticky' }}
             visibleFrom="sm"
           >
             <AnchorNav sections={ENV_ANCHORS} />

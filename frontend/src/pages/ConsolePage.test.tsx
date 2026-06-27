@@ -55,8 +55,8 @@ describe('ConsolePage（FR-113 一级 tab）', () => {
   it('缺省进入运行环境 tab，可见运行环境内容与左侧锚点', async () => {
     renderPage()
     expect(screen.getByRole('tab', { name: '运行环境' })).toHaveAttribute('aria-selected', 'true')
-    // 运行环境内容渲染（页面级标题保留）
-    expect(await screen.findByText('系统诊断')).toBeVisible()
+    // 运行环境内容渲染：内容区 order-2 标题为「运行环境」（FR-113 后续修复：标题随 section 而非恒为「系统诊断」）
+    expect(await screen.findByRole('heading', { level: 2, name: '运行环境' })).toBeVisible()
     // 左侧锚点：运行环境 / FFmpeg
     const nav = screen.getByRole('navigation', { name: '区块导航' })
     expect(nav).toBeInTheDocument()

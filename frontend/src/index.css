@@ -83,18 +83,23 @@ a:not([data-active]) .nav-link:hover {
 }
 
 /* 控制台一级 tab 头部吸顶（FR-113 修复）：随内容滚动时一级 tab 常驻顶部，避免锚点定位后 tab 被滚走。
-   吸到 AppShell.Main 滚动容器顶部，补半透明背景遮挡其下滚动内容、加微弱底边界分隔。 */
+   top 让开固定页眉（FR-113 第三批修复）：原 top:0 让 tab 条 stuck 在 y=0、被固定页眉（position:fixed、
+   占 y=0..headerHeight）盖住而看不见。改为 top=页眉高度，使 tab 条 stuck 在页眉正下方、滚动时可见。
+   top 取 AppShell 暴露的 --app-shell-header-height（随 header 配置/安全区变化），缺省兜底 56px、不写死。 */
 .console-tabs > .mantine-Tabs-list {
   position: sticky;
-  top: 0;
+  top: var(--app-shell-header-height, 56px);
   z-index: 3;
   background-color: var(--mantine-color-body);
 }
 
 /* 设置/系统页左侧锚点列 sticky 常驻（FR-113 修复）：内容滚动时锚点列吸顶可见、不随内容滚走。
-   position/top 由组件内联（便于 jsdom 单测断言）；此处补 max-height + 自滚动，防锚点项过多溢出。 */
+   position 由组件内联（便于 jsdom 单测断言）；top 在此设以让开「固定页眉 + sticky 一级 tab 条」
+   （FR-113 第三批修复）——= 页眉高度 + tab 条高度（约 2.375rem≈38px），使锚点列 stuck 在 tab 条下方、
+   不被页眉/tab 遮住。tab 条高度无 Mantine 变量，按其实测高度取近似常量。补 max-height + 自滚动防溢出。 */
 .anchor-nav-sticky {
-  max-height: calc(100vh - 72px);
+  top: calc(var(--app-shell-header-height, 56px) + 2.375rem);
+  max-height: calc(100vh - var(--app-shell-header-height, 56px) - 2.375rem);
   overflow-y: auto;
 }
 

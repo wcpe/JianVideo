@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MantineProvider } from '@mantine/core'
 
-import AnchorNav, { pickActiveByScroll, type SectionOffset } from './AnchorNav'
+import AnchorNav, { pickActiveByScroll, measureStickyOffset, type SectionOffset } from './AnchorNav'
 
 // 在 MantineProvider 下渲染锚点导航（组件用到 Mantine 样式）
 function renderNav(props: Parameters<typeof AnchorNav>[0]) {
@@ -46,16 +46,68 @@ describe('pickActiveByScroll（纯逻辑：按滚动位置选高亮锚点，无�
     expect(pickActiveByScroll(offsets, 1679, 'tools', true)).toBe('diag')
   })
 
-  it('恰好越过区块顶部（含阈值提前量）即归属该区块', () => {
-    // 阈值 SPY_THRESHOLD=8：scrollY=892 → 892+8=900 >= tools.top(900) → tools
+  it('恰好越过区块顶部（含小提前量）即归属该区块', () => {
+    // 默认 stickyOffset=0，小提前量 SPY_LEAD=8：scrollY=892 → 892+8=900 >= tools.top(900) → tools
     expect(pickActiveByScroll(offsets, 892, 'account')).toBe('tools')
     // scrollY=891 → 891+8=899 < 900 → 仍为 account
     expect(pickActiveByScroll(offsets, 891, 'account')).toBe('account')
   })
 
+  it('判定线含吸顶偏移：扣除吸顶高度后，可读区顶部所在区块被高亮（不偏前一个）', () => {
+    // 吸顶偏移 100：判定线 = scrollPos + 100 + 8。
+    // scrollY=800（绝对顶部仍在 account 区，但可读区顶部已进 tools）：800+100+8=908 >= tools.top(900) → tools
+    expect(pickActiveByScroll(offsets, 800, 'account', false, 100)).toBe('tools')
+    // 同一 scrollY 若不计吸顶偏移（=0）则仍判为 account（这正是修复前高亮偏前一个的根因）
+    expect(pickActiveByScroll(offsets, 800, 'account', false, 0)).toBe('account')
+    // scrollY=1700 + 吸顶 100：1700+100+8=1808 >= diag.top(1800) → diag
+    expect(pickActiveByScroll(offsets, 1700, 'tools', false, 100)).toBe('diag')
+  })
+
+  it('吸顶偏移下仍守住死区/触底语义：触底钳末项、空 offsets 保留 active', () => {
+    // 触底优先于判定线：即便吸顶偏移使末节顶部未越线，atBottom 仍钳到最后一个
+    expect(pickActiveByScroll(offsets, 1500, 'tools', true, 100)).toBe('diag')
+    // 空 offsets：无论吸顶偏移多少都保留当前 active，不回退首项
+    expect(pickActiveByScroll([], 500, 'tools', false, 100)).toBe('tools')
+  })
+
   it('offsets 为空（DOM 未就绪/无区块）：保留当前 active，不强行回退首项', () => {
     expect(pickActiveByScroll([], 500, 'tools')).toBe('tools')
     expect(pickActiveByScroll([], 0, 'diag')).toBe('diag')
+  })
+})
+
+// 用桩定 offsetHeight 的方式构造「固定页眉 + sticky 一级 tab 条」结构，供 measureStickyOffset 测量。
+// measureStickyOffset 返回稳定值 = 页眉 offsetHeight + tab 条 offsetHeight（与滚动无关），故桩高度即可。
+function stubOffsetHeight(el: HTMLElement, value: number) {
+  Object.defineProperty(el, 'offsetHeight', { value, configurable: true })
+}
+function mountHeaderAndTabs(headerH: number, tabH: number) {
+  const header = document.createElement('div')
+  header.className = 'mantine-AppShell-header'
+  stubOffsetHeight(header, headerH)
+  const tabs = document.createElement('div')
+  tabs.className = 'console-tabs'
+  const list = document.createElement('div')
+  list.className = 'mantine-Tabs-list'
+  stubOffsetHeight(list, tabH)
+  tabs.appendChild(list)
+  document.body.appendChild(header)
+  document.body.appendChild(tabs)
+}
+
+describe('measureStickyOffset（稳定吸顶偏移 = 页眉高度 + tab 条高度）', () => {
+  afterEach(() => {
+    for (const el of Array.from(document.querySelectorAll('.console-tabs, .mantine-AppShell-header'))) el.remove()
+  })
+
+  it('无控制台 tab 条/页眉时返回 0（无吸顶场景）', () => {
+    expect(measureStickyOffset()).toBe(0)
+  })
+
+  it('返回固定页眉高度 + sticky tab 条高度（与当前滚动无关的稳定值）', () => {
+    mountHeaderAndTabs(56, 38)
+    // 56 + 38 = 94：可读区顶部 = 页眉下沿 + tab 条高度
+    expect(measureStickyOffset()).toBe(94)
   })
 })
 
@@ -86,9 +138,26 @@ describe('AnchorNav（锚点导航交互）', () => {
     // jsdom 的 requestAnimationFrame 由 setup 提供（setTimeout 0），这里无需额外桩
   })
 
+  // 桩定「固定页眉 + 一级 tab 条」，使 measureStickyOffset 返回指定吸顶偏移（= 二者 offsetHeight 之和、稳定值）
+  function mountStickyChrome(offset: number) {
+    const header = document.createElement('div')
+    header.className = 'mantine-AppShell-header'
+    Object.defineProperty(header, 'offsetHeight', { value: offset, configurable: true })
+    const tabs = document.createElement('div')
+    tabs.className = 'console-tabs'
+    const list = document.createElement('div')
+    list.className = 'mantine-Tabs-list'
+    // 页眉已占满目标偏移，tab 条高度桩为 0，使合计正好等于 offset（简化用例断言）
+    Object.defineProperty(list, 'offsetHeight', { value: 0, configurable: true })
+    tabs.appendChild(list)
+    document.body.appendChild(header)
+    document.body.appendChild(tabs)
+  }
+
   afterEach(() => {
-    // 清理本用例插入的区块元素
+    // 清理本用例插入的区块元素与桩定页眉/tab 条
     for (const el of Array.from(document.querySelectorAll('div[id^="sec-"]'))) el.remove()
+    for (const el of Array.from(document.querySelectorAll('.console-tabs, .mantine-AppShell-header'))) el.remove()
     if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
   })
 
@@ -133,6 +202,45 @@ describe('AnchorNav（锚点导航交互）', () => {
 
     expect(screen.getByRole('button', { name: '工具路径' })).toHaveAttribute('data-active', 'true')
     expect(screen.getByRole('button', { name: '账户安全' })).not.toHaveAttribute('data-active', 'true')
+  })
+
+  // 吸顶偏移纳入高亮：存在吸顶条时，可读区顶部所在区块被高亮（绝对顶部仍在上一区块时不偏前一个）
+  it('存在吸顶条时按吸顶偏移高亮可读区顶部所在区块（不偏前一个）', async () => {
+    mountStickyChrome(100) // 吸顶偏移 100px（页眉 + tab 条合计）
+    mountSections([
+      { id: 'sec-account', absoluteTop: 0 },
+      { id: 'sec-tools', absoluteTop: 900 },
+    ])
+    renderNav({
+      sections: [
+        { id: 'sec-account', label: '账户安全' },
+        { id: 'sec-tools', label: '工具路径' },
+      ],
+    })
+
+    // scrollY=850：绝对顶部(850)仍在 account 区，但加吸顶偏移后判定线=850+100+8=958 已进 tools 区
+    await act(async () => {
+      setScrollY(850)
+      window.dispatchEvent(new Event('scroll'))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    expect(screen.getByRole('button', { name: '工具路径' })).toHaveAttribute('data-active', 'true')
+    expect(screen.getByRole('button', { name: '账户安全' })).not.toHaveAttribute('data-active', 'true')
+  })
+
+  // 点击定位扣除吸顶偏移：被点区块设 scroll-margin-top = 吸顶高度，使落点在吸顶条下方
+  it('点击锚点给目标区块设 scroll-margin-top 为吸顶偏移（落点不被吸顶条遮住）', async () => {
+    mountStickyChrome(96)
+    mountSections([{ id: 'sec-tools', absoluteTop: 900 }])
+    const user = userEvent.setup()
+    renderNav({ sections: [{ id: 'sec-tools', label: '工具路径' }] })
+
+    await user.click(screen.getByRole('button', { name: '工具路径' }))
+
+    const el = document.getElementById('sec-tools')!
+    expect(el.scrollIntoView).toHaveBeenCalled()
+    expect(el.style.scrollMarginTop).toBe('96px')
   })
 
   // 点击锁定：点击后即时高亮被点项，且锁定窗内发生的滚动事件不把高亮抢回首项

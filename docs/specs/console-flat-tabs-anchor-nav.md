@@ -80,3 +80,29 @@
 - 点「工具路径」后高亮稳定停在「工具路径」、不被抢回「账户安全」。
 - 运行环境区块「复制」按钮可把运行环境信息复制到剪贴板。
 - `npm run build` + vitest 全绿；真机维度（点击锚点高亮稳定、复制内容完整）标「待真机验」。
+
+## 9. 真机走查第三批后续修复（v0.19.0 之后）
+
+> v0.19.0 真机走查反馈两处对齐问题。属本 FR 后续修复（不改 PRD FR-113 状态行，记 CHANGELOG）。
+
+### 9.1 内容标题与一级 tab 不一致（bug）
+- **现象**：`SystemPage` 内容区 order-2 标题对四个系统 tab（env/hwaccel/codec/update）恒显「系统诊断」——点「应用更新」tab 内容标题却是「系统诊断」，与上方 tab 名不符（设置 tab 标题为「设置」，正确）。
+- **修复**：抽出 `SECTION_TITLES: Record<SystemSection, string>`（env→运行环境、hwaccel→硬件加速、codec→编解码、update→应用更新），`SystemPage` 的 order-2 标题改为 `SECTION_TITLES[section]`；`ConsolePage` 的 `Tabs.Tab` 文案亦复用同一映射（与各区块内容标题单一真源、不再各写一份硬编码）。设置 tab 仍为「设置」。
+- **测试**：`SystemPage.test.tsx` 加各 section 内容区标题断言（update section 标题为「应用更新」而非「系统诊断」，codec/hwaccel 同理）；`ConsolePage.test.tsx` env tab 内容断言改为命中内容区 order-2「运行环境」标题。
+
+### 9.2 锚点高亮不准 + 点击定位偏移 + 滚动后 tab 条被页眉遮住（吸顶布局根因，bug）
+
+> 注：本节先有一版「运行时实测吸顶偏移取 `tabsList.bottom`」的修复，真机复验仍不对——根因在更底层的布局（sticky tab 条被固定页眉遮住、且测量随 stuck 状态变化而点击/滚动取值不一致）。下文为修正后的最终方案。
+
+- **真机 inspect 实测（scrollY=609）**：固定页眉 `.mantine-AppShell-header` position:fixed、top:0、高 56px、占 y=0..56；sticky tab 条 `.console-tabs > .mantine-Tabs-list` 原 `top:0`、stuck 时 rect y=0..38——正好被固定页眉盖住（滚动后整条 tab 不可见）。`tabsList.bottom` 读得 38（其实被页眉遮），而实际可读区顶部应是 页眉 56 + tab 38 = 94；点击时（未 stuck）测得 ~94、滚动高亮判定用 38 → 点「网络」落 y=109、高亮却判成「扫描」。
+- **根因**：sticky tab 条 `top:0` 让它 stuck 在固定页眉下方被遮；且吸顶偏移测量随 stuck 状态变化，点击瞬间与滚动后取值不一致。
+- **修复（让 sticky 元素让开固定页眉 + 测量改为稳定 stuck 偏移）**：
+  - **sticky tab 条让开页眉**：`.console-tabs > .mantine-Tabs-list` 的 `top` 由 `0` 改为 `var(--app-shell-header-height, 56px)`（Mantine AppShell 在根元素暴露的页眉高度变量，由 `header={{height:56}}` 经 `rem()` 算出 `3.5rem`，随配置/安全区变化；缺省兜底 56px、不写死）。tab 条 stuck 在页眉正下方、滚动时可见。
+  - **左侧锚点列让开页眉 + tab 条**：`.anchor-nav-sticky` 的 `top` 改为 `calc(var(--app-shell-header-height,56px) + 2.375rem)`（tab 条高度无 Mantine 变量，取实测近似 2.375rem≈38px），`max-height` 同步扣除，使锚点列 stuck 在 tab 条下方不被遮。原内联 `top:56` 从 `SystemPage`/`SettingsPage` 移除（仅保留 `position:sticky` 内联供 jsdom 单测断言）。
+  - **`measureStickyOffset` 返回稳定 stuck 偏移**：= 固定页眉 `offsetHeight` + tab 条 `offsetHeight`（均与当前滚动无关），不再读随 stuck 变化的 `getBoundingClientRect().bottom`。保证「点击时（页面或在顶部、tab 尚未 stuck）」与「滚动后（tab 已 stuck）」测得同一值——点击设的 `scroll-margin-top` 与 scroll-spy 判定线用同一值、点哪个锚点就高亮哪个且区块落在 tab 条正下方完整可见。
+  - **scroll-spy 判定线**：`pickActiveByScroll` 的可注入 `stickyOffset` 参数不变，判定线 = `scrollPos + stickyOffset + 小提前量(SPY_LEAD=8)`；死区/触底/空集语义不回归（空 offsets 保留 active、触底钳末项、绝不回退首项）。
+- **验收硬指标**：① 滚动后一级 tab 条可见（不再被页眉盖住）；② 点「网络」→「网络」标题落在 tab 条正下方、完整可见，且左侧「网络」锚点 `data-active=true`、不再高亮「扫描」；③ 任意位置高亮 = 可读区顶部所见区块；④ 死区/触底场景仍正确。
+- **测试**：`AnchorNav.test.tsx` 的 `measureStickyOffset` 用例改为桩定固定页眉 + tab 条 `offsetHeight` 验「= 二者之和的稳定值」；组件级吸顶高亮（绝对顶部仍在上一区块时不偏前一个）、点击设 `scroll-margin-top` 用例随之以 `offsetHeight` 桩定，保留死区/触底/空集用例。真机维度（tab 条可见、点击落点对齐、高亮与肉眼一致）标「待真机验」。
+
+### 9.3 验收补充
+- `npm run build` + vitest 全绿；真机维度（tab 条不被遮、高亮对齐可读区、点击落点完整可见、死区/触底正确）标「待真机验」。

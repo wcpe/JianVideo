@@ -230,11 +230,12 @@ export default function SettingsPage() {
     <Group align="flex-start" gap="lg" wrap="nowrap">
       {/* 左侧锚点导航（FR-113）：窄屏隐藏、点击滚动定位到对应分区。
           sticky 常驻（FR-113 修复）：内容随页面滚动时锚点列吸顶常驻可见、不随内容滚走；
-          top 留出顶部一级 tab 高度的偏移，max-height + 自滚动防锚点项过多时溢出。 */}
+          position 内联（便于 jsdom 单测断言），top 由 .anchor-nav-sticky 设为「页眉 + 一级 tab 条」高度，
+          让开固定页眉与 sticky tab 条（FR-113 第三批修复），max-height + 自滚动防锚点项过多时溢出。 */}
       <Box
         w={160}
         className="anchor-nav-sticky"
-        style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'sticky', top: 56 }}
+        style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'sticky' }}
         visibleFrom="sm"
       >
         <AnchorNav sections={SETTINGS_ANCHORS} />

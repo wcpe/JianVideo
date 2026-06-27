@@ -4,7 +4,7 @@ import { Tabs } from '@mantine/core'
 import {
   IconDeviceDesktop, IconCpu, IconTestPipe, IconCloudDownload, IconAdjustments,
 } from '@tabler/icons-react'
-import SystemPage, { type SystemSection } from './SystemPage'
+import SystemPage, { type SystemSection, SECTION_TITLES } from './SystemPage'
 import SettingsPage from './SettingsPage'
 
 // 一级 tab 取值（FR-113）：运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置。
@@ -51,10 +51,11 @@ export default function ConsolePage() {
   return (
     <Tabs className="console-tabs" value={activeTab} onChange={handleTabChange} keepMounted={false}>
       <Tabs.List mb="md">
-        <Tabs.Tab value={TAB_ENV} leftSection={<IconDeviceDesktop size={16} />}>运行环境</Tabs.Tab>
-        <Tabs.Tab value={TAB_HWACCEL} leftSection={<IconCpu size={16} />}>硬件加速</Tabs.Tab>
-        <Tabs.Tab value={TAB_CODEC} leftSection={<IconTestPipe size={16} />}>编解码</Tabs.Tab>
-        <Tabs.Tab value={TAB_UPDATE} leftSection={<IconCloudDownload size={16} />}>应用更新</Tabs.Tab>
+        {/* tab 文案复用 SystemPage 的 SECTION_TITLES（FR-113 后续修复），与各区块内容标题单一真源、不再各写一份 */}
+        <Tabs.Tab value={TAB_ENV} leftSection={<IconDeviceDesktop size={16} />}>{SECTION_TITLES[TAB_ENV]}</Tabs.Tab>
+        <Tabs.Tab value={TAB_HWACCEL} leftSection={<IconCpu size={16} />}>{SECTION_TITLES[TAB_HWACCEL]}</Tabs.Tab>
+        <Tabs.Tab value={TAB_CODEC} leftSection={<IconTestPipe size={16} />}>{SECTION_TITLES[TAB_CODEC]}</Tabs.Tab>
+        <Tabs.Tab value={TAB_UPDATE} leftSection={<IconCloudDownload size={16} />}>{SECTION_TITLES[TAB_UPDATE]}</Tabs.Tab>
         <Tabs.Tab value={TAB_SETTINGS} leftSection={<IconAdjustments size={16} />}>设置</Tabs.Tab>
       </Tabs.List>
 
