@@ -62,6 +62,9 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	// 落库成功后，把网络代理设置应用到后端出站 HTTP 运行期，保存即生效（FR-80）。
 	applyNetworkProxySettings(req.Settings)
 
+	// 落库成功后，把调试日志开关应用到 GORM 日志运行期，保存即生效（FR-110）。
+	h.applyDebugLogSetting(req.Settings)
+
 	// 通知设置变更，让定时扫描周期等运行期配置即时生效（FR-28）。
 	if h.settingsReload != nil {
 		h.settingsReload()
@@ -95,6 +98,15 @@ func applyFFmpegPathSettings(values map[string]string) {
 func applyMagickPathSettings(values map[string]string) {
 	if p, ok := values[settings.KeyMagickPath]; ok && p != "" {
 		library.SetMagickPath(p)
+	}
+}
+
+// applyDebugLogSetting 把本次保存的调试日志开关应用到 GORM 日志运行期（FR-110）。
+// 仅当 debug_log 键出现时处理：按 "1"/"true"=开、其余=关，调用注入的切级别回调即时生效。
+// 未注入回调时仅落库（启动时仍会读取该设置决定初始级别）。
+func (h *Handler) applyDebugLogSetting(values map[string]string) {
+	if v, ok := values[settings.KeyDebugLog]; ok && h.debugLogApply != nil {
+		h.debugLogApply(settings.ParseDebugLog(v))
 	}
 }
 

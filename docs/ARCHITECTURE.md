@@ -58,6 +58,7 @@
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
+| `dblog` | 可运行时切级别的 GORM 日志器（FR-110，`SetEnabled` 原子开关：默认安静、开启 Info 级） | 仅依赖 gorm logger |
 
 **依赖方向**：`web` → `api` → `library` / `playback` / `player` / `transcoder` → `db`，严格单向，禁止反向。`config` 和 `auth` 为横切关注点。
 
@@ -456,6 +457,7 @@
 - **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
 - **后端出站网络代理（FR-80）**：`network_proxy` 让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决直连 GitHub 下载 CDN 不可达。新增独立无业务依赖的 `netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h}（均为标准库 `net/http` Transport 原生支持，**无新依赖**）后原子更新、空串清空、非法不覆盖；`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 走直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各设 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，各自 Timeout 语义不变（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则 `SetProxy` 注入；`PUT /api/settings` 含 `network_proxy` 时落库后即时 `netproxy.SetProxy`，非法 URL 仅记 WARN 不阻断保存（与工具路径空值守卫风格一致）。依赖方向单向（`api`/`update`/`main` → `netproxy`，`netproxy` 不依赖任何业务模块）。
 - **自更新下载进度与失败重试（FR-90，扩 FR-46）**：给 FR-46 原本无反馈的下载链路加进度可观测性与失败可恢复性，**不动 `replaceAndRestart`**（Windows 覆盖运行中 exe / spawn 失败回退）正常逻辑。`downloadToTemp` 用计数 `io.Writer`（`countingWriter`）包装 `io.Copy`，每次写入后回调上报累计已下载字节（总字节取 `resp.ContentLength`，≤0 视为未知报 0）。`update.Service` 新增互斥量保护的进程内进度单例 `progressTracker`（状态机 `idle/downloading/verifying/done/failed`），**与 FR-46 检测结果的 TTL 缓存单例同构、不落库**（自更新本就用户显式触发、单次互斥，无需持久化），`Apply` 把回调接到 `setProgressDownloading` 并在进入校验 / 失败 / 完成时切状态。新增轮询端点 `GET /api/system/update/progress`（见 [docs/API.md](API.md)）读快照返回 `{state, downloaded, total, percent}`（`percent` 在 `total>0` 时即时算出、否则 0），鉴权随 `/api/*` 的 APIGuard、无外部依赖恒可用。前端「应用更新」子 tab 更新进行中每 ~800ms 轮询、以 Mantine `<Progress>` 展示百分比（总字节未知退化为展示已下载字节），失败后展示显式「重试」按钮直接重触发 apply。**只用 Go 标准库 + 内存状态轮询，不引 SSE/WebSocket/消息队列**（守架构不变量禁重型中间件），无新依赖、无新架构决策、无新 ADR（机制见 [docs/specs/update-progress.md](specs/update-progress.md)）。
+- **运行时调试日志开关（FR-110）**：`debug_log` 让 GORM 日志在运行期可切换详细 / 安静。新增独立无业务依赖的 `dblog` 包以 `atomic.Bool` 持有开关：默认安静（Error 级 + 忽略 record-not-found，不刷普通 SQL 与「查无记录」噪音），开启切 Info 级（输出 SQL 与慢查询）。`dblog.Logger` 实现 `gorm/logger.Interface` 并预建「安静 / 详细」两委托 logger，按原子开关选择实际输出者；`LogMode` 以自身开关为唯一真源、忽略 GORM 启动期重设。`main.go` 在 `gorm.Open` 时把该 logger 注入 `gorm.Config.Logger`，启动后读 `settings.DebugLog()` 决定初始级别（重启保持）；`PUT /api/settings` 含 `debug_log` 时落库后即时调注入的 `dbLogger.SetEnabled`（经 `WithDebugLogApply` 回调）切级别，保存即生效、无需重启。区别于启动期只读的 `JIANVIDEO_DEBUG`（gin 模式，运行期不可切，保持原样）。依赖方向单向（`main`/`api` → `dblog`，`dblog` 仅依赖 gorm logger）。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。
 
 ### 5.9 分享链接（FR-43；密码/限次增强见 FR-78）

@@ -32,6 +32,8 @@ const (
 	KeyMagickPath = "magick_path"
 	// KeyNetworkProxy 后端出站网络代理 URL（FR-80），空=直连；保存即生效，后端外部 HTTP 出站经此代理。
 	KeyNetworkProxy = "network_proxy"
+	// KeyDebugLog 运行时调试日志开关（FR-110），值 "1"=开启详细日志、其余=安静；保存即生效，启动读取决定初始级别。
+	KeyDebugLog = "debug_log"
 )
 
 // Service 运行期设置业务逻辑。
@@ -69,6 +71,21 @@ func (s *Service) ScanInterval() time.Duration {
 		return 0
 	}
 	return time.Duration(secs) * time.Second
+}
+
+// DebugLog 读取运行时调试日志开关（FR-110）：值为 "1"/"true" 视为开启，其余（含空/缺失/出错）视为关闭。
+func (s *Service) DebugLog() bool {
+	raw, err := s.Get(KeyDebugLog)
+	if err != nil {
+		return false
+	}
+	return ParseDebugLog(raw)
+}
+
+// ParseDebugLog 解析调试日志开关字符串：忽略首尾空白，"1"/"true" 为开启，其余为关闭。
+func ParseDebugLog(raw string) bool {
+	v := strings.TrimSpace(raw)
+	return v == "1" || v == "true"
 }
 
 // GetAll 读取全部设置，返回 key → value 映射。

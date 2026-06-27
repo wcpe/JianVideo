@@ -345,6 +345,61 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.ffmpeg_path).toBe('D:/tools/ffmpeg.exe')
   })
 
+  it('渲染调试日志开关，默认按现有设置关闭（FR-110）', async () => {
+    renderPage()
+    const sw = await screen.findByRole('switch', { name: '调试日志' })
+    expect(sw).toBeInTheDocument()
+    // 默认 mock 设置未含 debug_log，应为关闭
+    expect(sw).not.toBeChecked()
+  })
+
+  it('打开调试日志开关并保存，PUT 提交 debug_log=1（FR-110）', async () => {
+    const user = userEvent.setup()
+    let putBody: { settings: Record<string, string> } | null = null
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: putBody.settings })
+      }),
+    )
+    renderPage()
+
+    const sw = await screen.findByRole('switch', { name: '调试日志' })
+    await user.click(sw)
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      )
+    })
+    expect(putBody).not.toBeNull()
+    expect(putBody!.settings.debug_log).toBe('1')
+  })
+
+  it('调试日志默认关闭时保存提交 debug_log=0（FR-110）', async () => {
+    const user = userEvent.setup()
+    let putBody: { settings: Record<string, string> } | null = null
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = await request.json() as { settings: Record<string, string> }
+        return HttpResponse.json({ settings: putBody.settings })
+      }),
+    )
+    renderPage()
+
+    await screen.findByRole('switch', { name: '调试日志' })
+    await user.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      )
+    })
+    expect(putBody).not.toBeNull()
+    expect(putBody!.settings.debug_log).toBe('0')
+  })
+
   it('账户安全卡展示修改密码表单（FR-108）', async () => {
     renderPage()
     expect(await screen.findByRole('heading', { name: '账户安全' })).toBeVisible()

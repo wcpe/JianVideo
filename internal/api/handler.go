@@ -58,6 +58,9 @@ type Handler struct {
 
 	settingsReload func() // 设置变更后回调，用于定时扫描周期热生效（FR-28），可空
 
+	// debugLogApply 调试日志开关应用回调（FR-110）：设置保存含 debug_log 时调用，运行期即时切换 GORM 日志级别。可空。
+	debugLogApply func(bool)
+
 	// 运行环境信息（FR-60）：由 main 注入，用于系统诊断「运行环境」展示。
 	startTime time.Time // 进程启动时刻，用于计算运行时长；零值表示未注入（运行时长退化为 0）
 	dbPath    string    // SQLite 数据库文件路径，未注入时为空串
@@ -125,6 +128,13 @@ func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
 // 用于让定时扫描周期等运行期配置即时生效，无需重启。
 func (h *Handler) WithSettingsReload(fn func()) *Handler {
 	h.settingsReload = fn
+	return h
+}
+
+// WithDebugLogApply 注入调试日志开关应用回调（FR-110）：设置保存含 debug_log 时调用，
+// 运行期即时切换 GORM 日志级别（开启=详细、关闭=安静），无需重启。未注入时仅落库不即时切换。
+func (h *Handler) WithDebugLogApply(fn func(bool)) *Handler {
+	h.debugLogApply = fn
 	return h
 }
 

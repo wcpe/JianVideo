@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Stack, Title, Card, TextInput, Button, Alert, Skeleton, Text, Table, Badge, Group, Code, ActionIcon,
+  Stack, Title, Card, TextInput, Button, Alert, Skeleton, Text, Table, Badge, Group, Code, ActionIcon, Switch,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconAlertCircle, IconTrash, IconPlus } from '@tabler/icons-react'
@@ -13,6 +13,7 @@ import {
   SETTING_KEY_FFPROBE_PATH,
   SETTING_KEY_MAGICK_PATH,
   SETTING_KEY_NETWORK_PROXY,
+  SETTING_KEY_DEBUG_LOG,
 } from '@/api/settings'
 import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system'
 import { changePassword } from '@/api/auth'
@@ -34,6 +35,8 @@ export default function SettingsPage() {
   const [ffprobePath, setFfprobePath] = useState('')
   const [magickPath, setMagickPath] = useState('')
   const [networkProxy, setNetworkProxy] = useState('')
+  // 调试日志开关（FR-110）：开启输出 GORM 详细 SQL/慢查询日志，关闭恢复安静；保存即生效
+  const [debugLog, setDebugLog] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -72,6 +75,7 @@ export default function SettingsPage() {
         setFfprobePath(data[SETTING_KEY_FFPROBE_PATH] ?? '')
         setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '')
         setNetworkProxy(data[SETTING_KEY_NETWORK_PROXY] ?? '')
+        setDebugLog((data[SETTING_KEY_DEBUG_LOG] ?? '') === '1')
       })
       .catch((err) => { if (active) setLoadError(extractErrorMessage(err, '加载设置失败')) })
       .finally(() => { if (active) setLoading(false) })
@@ -125,6 +129,7 @@ export default function SettingsPage() {
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
         [SETTING_KEY_MAGICK_PATH]: magickPath,
         [SETTING_KEY_NETWORK_PROXY]: networkProxy,
+        [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
       })
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '')
@@ -133,6 +138,7 @@ export default function SettingsPage() {
       setFfprobePath(updated[SETTING_KEY_FFPROBE_PATH] ?? '')
       setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '')
       setNetworkProxy(updated[SETTING_KEY_NETWORK_PROXY] ?? '')
+      setDebugLog((updated[SETTING_KEY_DEBUG_LOG] ?? '') === '1')
       notifications.show({ title: '保存成功', message: '设置已保存', color: 'green', autoClose: 3000 })
     } catch (err) {
       notifications.show({
@@ -144,7 +150,7 @@ export default function SettingsPage() {
     } finally {
       setSaving(false)
     }
-  }, [scanInterval, recycleBinRows, ffmpegPath, ffprobePath, magickPath, networkProxy])
+  }, [scanInterval, recycleBinRows, ffmpegPath, ffprobePath, magickPath, networkProxy, debugLog])
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
   const handleDetect = useCallback(async () => {
@@ -389,6 +395,20 @@ export default function SettingsPage() {
               >
                 添加盘符
               </Button>
+            </Stack>
+          </Card>
+
+          {/* 诊断分区（FR-110）：运行时调试日志开关，开启输出 GORM 详细 SQL/慢查询日志，随「保存设置」一并保存、保存即生效 */}
+          <Title order={3}>诊断</Title>
+          <Card withBorder padding="md" radius="md">
+            <Stack gap="xs">
+              <Switch
+                label="调试日志"
+                aria-label="调试日志"
+                description="开启后输出数据库 SQL 与慢查询详细日志，便于排查问题；默认关闭以保持日志安静。保存后即时生效、重启保留。"
+                checked={debugLog}
+                onChange={(e) => setDebugLog(e.currentTarget.checked)}
+              />
             </Stack>
           </Card>
 

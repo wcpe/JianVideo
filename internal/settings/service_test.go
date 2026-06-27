@@ -137,3 +137,42 @@ func TestSetManyAtomicAndPersist(t *testing.T) {
 		t.Fatalf("回收站路径未持久化, 实际 %q", all[KeyRecycleBinPaths])
 	}
 }
+
+// TestDebugLog 调试日志开关读取（FR-110）：缺失=关、"1"/"true"=开、其余=关。
+func TestDebugLog(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+
+	// 缺失时默认关闭
+	if svc.DebugLog() {
+		t.Fatalf("未设置时应为关闭")
+	}
+
+	// 写入 "1" 开启
+	if err := svc.Set(KeyDebugLog, "1"); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if !svc.DebugLog() {
+		t.Fatalf("写入 1 后应为开启")
+	}
+
+	// 写入 "0" 关闭
+	if err := svc.Set(KeyDebugLog, "0"); err != nil {
+		t.Fatalf("写入失败: %v", err)
+	}
+	if svc.DebugLog() {
+		t.Fatalf("写入 0 后应为关闭")
+	}
+}
+
+// TestParseDebugLog 纯函数解析各取值。
+func TestParseDebugLog(t *testing.T) {
+	cases := map[string]bool{
+		"1": true, "true": true, " 1 ": true,
+		"0": false, "false": false, "": false, "yes": false,
+	}
+	for in, want := range cases {
+		if got := ParseDebugLog(in); got != want {
+			t.Errorf("ParseDebugLog(%q)=%v, 期望 %v", in, got, want)
+		}
+	}
+}

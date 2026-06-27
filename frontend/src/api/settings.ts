@@ -16,6 +16,8 @@ export const SETTING_KEY_FFPROBE_PATH = 'ffprobe_path'
 export const SETTING_KEY_MAGICK_PATH = 'magick_path'
 // 后端出站网络代理 URL（FR-80），空=直连；与后端 settings 常量一致
 export const SETTING_KEY_NETWORK_PROXY = 'network_proxy'
+// 运行时调试日志开关（FR-110），"1"=开启详细日志、其余=安静；与后端 settings 常量一致
+export const SETTING_KEY_DEBUG_LOG = 'debug_log'
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
