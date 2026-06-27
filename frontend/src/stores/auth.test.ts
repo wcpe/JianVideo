@@ -21,11 +21,15 @@ Object.defineProperty(globalThis, 'localStorage', {
 const mockLogin = vi.fn()
 const mockLogout = vi.fn()
 const mockGetMe = vi.fn()
+const mockGetSetupStatus = vi.fn()
+const mockSetup = vi.fn()
 
 vi.mock('@/api/auth', () => ({
   login: (...args: unknown[]) => mockLogin(...args),
   logout: (...args: unknown[]) => mockLogout(...args),
   getMe: (...args: unknown[]) => mockGetMe(...args),
+  getSetupStatus: (...args: unknown[]) => mockGetSetupStatus(...args),
+  setup: (...args: unknown[]) => mockSetup(...args),
 }))
 
 describe('auth store', () => {
@@ -36,11 +40,15 @@ describe('auth store', () => {
       isAuthenticated: false,
       loading: false,
       error: null,
+      needsSetup: false,
+      initialized: false,
     })
     // 清理 localStorage 模拟
     mockLocalStorage.clear()
     // 清理 mock
     vi.clearAllMocks()
+    // 默认：系统已初始化（无需 setup），需 setup 的用例各自覆盖
+    mockGetSetupStatus.mockResolvedValue({ needs_setup: false })
   })
 
   afterEach(() => {
@@ -142,5 +150,46 @@ describe('auth store', () => {
     await useAuthStore.getState().init()
 
     expect(useAuthStore.getState().initialized).toBe(true)
+  })
+
+  it('init 检测到需初始化时置 needsSetup 并跳过登录态恢复（FR-109）', async () => {
+    mockGetSetupStatus.mockResolvedValue({ needs_setup: true })
+    // 即便本地有旧凭据，也应被忽略并导向初始化
+    localStorage.setItem('jianvideo_auth', '1')
+
+    await useAuthStore.getState().init()
+
+    const state = useAuthStore.getState()
+    expect(state.needsSetup).toBe(true)
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.initialized).toBe(true)
+    expect(mockGetMe).not.toHaveBeenCalled()
+    expect(localStorage.getItem('jianvideo_auth')).toBeNull()
+  })
+
+  it('setup 成功创建账户并自动登录（FR-109）', async () => {
+    useAuthStore.setState({ needsSetup: true })
+    mockSetup.mockResolvedValue(undefined)
+
+    await useAuthStore.getState().setup('alice', 'secret123')
+
+    const state = useAuthStore.getState()
+    expect(mockSetup).toHaveBeenCalledWith('alice', 'secret123')
+    expect(state.isAuthenticated).toBe(true)
+    expect(state.username).toBe('alice')
+    expect(state.needsSetup).toBe(false)
+    expect(state.loading).toBe(false)
+    expect(localStorage.getItem('jianvideo_auth')).toBe('1')
+  })
+
+  it('setup 失败设置错误', async () => {
+    mockSetup.mockRejectedValue(new Error('系统已初始化'))
+
+    await expect(useAuthStore.getState().setup('alice', 'secret123')).rejects.toThrow('系统已初始化')
+
+    const state = useAuthStore.getState()
+    expect(state.error).toBe('系统已初始化')
+    expect(state.isAuthenticated).toBe(false)
+    expect(state.loading).toBe(false)
   })
 })

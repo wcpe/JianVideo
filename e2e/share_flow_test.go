@@ -68,6 +68,7 @@ func newShareTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 
 	hlsMgr := player.NewHLSManager(hlsDir)
 	srv := web.NewRouter(cfg, gormDB, hlsMgr, frontendFS, handler, pbSvc)
+	seedAdmin(t, gormDB, cfg.JWTSecret)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

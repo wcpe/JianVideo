@@ -67,10 +67,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	// 必须在注册业务路由之前挂上，确保库 / 播放 / HLS / 设置 / 相册等全部受保护。
 	r.Use(auth.APIGuard(cfg.JWTSecret))
 
-	// 确保默认用户存在
-	if err := svc.CreateDefaultUser(); err != nil {
-		gin.DefaultErrorWriter.Write([]byte("创建默认用户失败: " + err.Error() + "\n"))
-	}
+	// FR-109：不再自动创建 admin/admin 默认账户。系统无用户时由前端初始化引导页
+	// 经 /api/auth/setup 创建首个账户（见下方认证路由）。
 
 	// 创建 API Handler：优先使用调用方注入的（可能已挂 HLS 预切片依赖），否则新建默认。
 	libSvc := library.NewService(db)
@@ -109,6 +107,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		{
 			authGroup.POST("/login", handleLogin(svc, cfg))
 			authGroup.POST("/logout", handleLogout)
+			// 首次初始化（FR-109）：免登查询是否需初始化 + 无用户时创建首个账户并自动登录
+			authGroup.GET("/setup-status", handleSetupStatus(svc))
+			authGroup.POST("/setup", handleSetup(svc, cfg))
 		}
 
 		// /api/me 由全局 APIGuard 统一保护，无需再单独挂中间件。
@@ -186,6 +187,51 @@ func handleLogin(svc *auth.Service, cfg *config.Config) gin.HandlerFunc {
 func handleLogout(c *gin.Context) {
 	auth.ClearAuthCookie(c)
 	c.Status(http.StatusNoContent)
+}
+
+// handleSetupStatus 返回是否需要首次初始化（系统无任何用户），免登可查（FR-109）。
+func handleSetupStatus(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		need, err := svc.NeedsSetup()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "检查初始化状态失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"needs_setup": need})
+	}
+}
+
+// handleSetup 完成首次初始化：仅在系统无用户时创建首个账户并自动登录（FR-109）。
+// 已初始化返回 409，避免重复初始化劫持。
+func handleSetup(svc *auth.Service, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req loginRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+			return
+		}
+		need, err := svc.NeedsSetup()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "检查初始化状态失败"})
+			return
+		}
+		if !need {
+			c.JSON(http.StatusConflict, gin.H{"code": "ALREADY_INITIALIZED", "message": "系统已初始化"})
+			return
+		}
+		user, err := svc.Setup(req.Username, req.Password)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "SETUP_FAILED", "message": err.Error()})
+			return
+		}
+		token, err := auth.GenerateToken(user.Username, cfg.JWTSecret, cfg.JWTExpiresIn)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL_ERROR", "message": "生成令牌失败"})
+			return
+		}
+		auth.SetAuthCookie(c, token)
+		c.JSON(http.StatusOK, gin.H{"username": user.Username})
+	}
 }
 
 func handleMe(c *gin.Context) {

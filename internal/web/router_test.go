@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/player"
 )
@@ -46,7 +48,41 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 
 	hlsMgr := player.NewHLSManager(t.TempDir())
 
-	return NewRouter(cfg, gormDB, hlsMgr, nil, nil)
+	r := NewRouter(cfg, gormDB, hlsMgr, nil, nil)
+
+	// FR-109 起 NewRouter 不再自动建号；登录类用例显式播种 admin/admin。
+	sqlDB, _ := gormDB.DB()
+	if err := auth.NewService(sqlDB, cfg.JWTSecret).CreateDefaultUser(); err != nil {
+		t.Fatalf("播种默认用户失败: %v", err)
+	}
+	return r
+}
+
+// setupFreshRouter 构建一个「尚无任何用户」的路由（独立临时文件库，不播种），
+// 用于首次初始化（FR-109）相关用例。
+func setupFreshRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	dbPath := filepath.Join(t.TempDir(), "fresh.db")
+	gormDB, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gormDB.AutoMigrate(
+		&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{},
+		&models.User{}, &models.PlaybackSession{},
+	); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
+	}
+	cfg := &config.Config{ServerPort: 8080, JWTSecret: "test-secret", JWTExpiresIn: 72 * time.Hour, DBPath: dbPath}
+	// 关闭 DB，避免 Windows 下临时文件被占用致 TempDir 清理失败
+	t.Cleanup(func() {
+		if sqlDB, err := gormDB.DB(); err == nil {
+			sqlDB.Close()
+		}
+	})
+	return NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), nil, nil)
 }
 
 // setupTestRouterWithFrontend 同上，但注入桩内嵌前端（含 PWA 根资源），用于静态服务测试。
@@ -221,6 +257,74 @@ func TestProtectedRoute_Authorized(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["username"] != "admin" {
 		t.Errorf("期望 username=admin, 得到 %q", resp["username"])
+	}
+}
+
+func TestSetupStatus_NeedsSetupWhenNoUser(t *testing.T) {
+	r := setupFreshRouter(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/auth/setup-status", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 得到 %d", w.Code)
+	}
+	var resp map[string]bool
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp["needs_setup"] {
+		t.Error("无用户时 needs_setup 应为 true")
+	}
+}
+
+func TestSetup_CreatesUserAndAutoLogin(t *testing.T) {
+	r := setupFreshRouter(t)
+
+	// 首次初始化：设置账号密码
+	body := `{"username":"alice","password":"secret123"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 得到 %d, body: %s", w.Code, w.Body.String())
+	}
+	cookie := w.Header().Get("Set-Cookie")
+	if !strings.Contains(cookie, "HttpOnly") {
+		t.Error("初始化应自动登录并下发 HttpOnly cookie")
+	}
+
+	// 自动登录：带 cookie 可访问受保护的 /api/me
+	meW := httptest.NewRecorder()
+	meReq, _ := http.NewRequest("GET", "/api/me", nil)
+	meReq.Header.Set("Cookie", cookie)
+	r.ServeHTTP(meW, meReq)
+	if meW.Code != http.StatusOK {
+		t.Errorf("初始化后应已登录, /api/me 得到 %d", meW.Code)
+	}
+
+	// 初始化后 setup-status 变 false
+	sW := httptest.NewRecorder()
+	sReq, _ := http.NewRequest("GET", "/api/auth/setup-status", nil)
+	r.ServeHTTP(sW, sReq)
+	var resp map[string]bool
+	json.Unmarshal(sW.Body.Bytes(), &resp)
+	if resp["needs_setup"] {
+		t.Error("初始化后 needs_setup 应为 false")
+	}
+}
+
+func TestSetup_RejectsWhenInitialized(t *testing.T) {
+	r := setupTestRouter(t) // 已播种 admin
+
+	body := `{"username":"mallory","password":"evil"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/auth/setup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("已初始化应返回 409, 得到 %d, body: %s", w.Code, w.Body.String())
 	}
 }
 

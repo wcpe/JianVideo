@@ -10,10 +10,14 @@ interface AuthState {
   error: string | null
   /** 是否已完成首次认证初始化（init 执行完毕后置 true） */
   initialized: boolean
+  /** 系统是否需要首次初始化（尚无任何用户，FR-109） */
+  needsSetup: boolean
   /** JWT token（可选，用于 Authorization header） */
   token?: string
   /** 登录 */
   login: (username: string, password: string) => Promise<void>
+  /** 首次初始化：创建首个账户并自动登录（FR-109） */
+  setup: (username: string, password: string) => Promise<void>
   /** 登出 */
   logout: () => Promise<void>
   /** 初始化认证状态 */
@@ -30,6 +34,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loading: false,
   error: null,
   initialized: false,
+  needsSetup: false,
 
   login: async (username, password) => {
     set({ loading: true, error: null })
@@ -45,6 +50,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  setup: async (username, password) => {
+    set({ loading: true, error: null })
+    try {
+      await authApi.setup(username, password)
+      // 初始化成功：后端已签发 cookie 自动登录，标记已认证、不再需初始化
+      localStorage.setItem(AUTH_KEY, '1')
+      set({ username, isAuthenticated: true, needsSetup: false, loading: false })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '初始化失败'
+      set({ loading: false, error: msg })
+      throw err
+    }
+  },
+
   logout: async () => {
     await authApi.logout()
     set({ username: null, isAuthenticated: false, error: null })
@@ -52,10 +71,22 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   init: async () => {
+    // 先查是否需首次初始化（FR-109）：无任何用户则导向初始化引导，跳过登录态恢复
+    try {
+      const { needs_setup } = await authApi.getSetupStatus()
+      if (needs_setup) {
+        localStorage.removeItem(AUTH_KEY)
+        set({ needsSetup: true, isAuthenticated: false, username: null, initialized: true })
+        return
+      }
+    } catch {
+      // 查询失败不阻塞登录流程：按「无需初始化」继续走认证恢复
+    }
+
     const authed = localStorage.getItem(AUTH_KEY) === '1'
     if (!authed) {
       // 未认证分支：初始化完成
-      set({ isAuthenticated: false, initialized: true })
+      set({ needsSetup: false, isAuthenticated: false, initialized: true })
       return
     }
     try {

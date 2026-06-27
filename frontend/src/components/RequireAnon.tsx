@@ -3,9 +3,9 @@ import { Navigate } from 'react-router-dom'
 import { Center, Loader } from '@mantine/core'
 import { useAuthStore } from '@/stores/auth'
 
-/** 匿名路由：已登录用户访问 /login 时跳转首页，避免重复登录 */
+/** 匿名路由：已登录跳首页；需初始化跳 /setup，避免在登录页停留 */
 export default function RequireAnon({ children }: { children: React.ReactNode }) {
-  const { initialized, isAuthenticated, init } = useAuthStore()
+  const { initialized, isAuthenticated, needsSetup, init } = useAuthStore()
 
   // 仅在尚未初始化时触发一次认证恢复
   useEffect(() => {
@@ -19,6 +19,11 @@ export default function RequireAnon({ children }: { children: React.ReactNode })
         <Loader />
       </Center>
     )
+  }
+
+  // 系统尚未初始化（无任何用户）：导向首次初始化引导页（FR-109）
+  if (needsSetup) {
+    return <Navigate to="/setup" replace />
   }
 
   // 已认证：重定向到首页

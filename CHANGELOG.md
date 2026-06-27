@@ -6,6 +6,9 @@
 
 ## 未发布
 
+### 新增
+- **首次初始化引导（FR-109）**：取消「启动自动创建 admin/admin 默认账户」（消除默认弱口令隐患），改为首次初始化引导——系统无任何用户时，首次访问自动进入 `/setup` 引导页，由用户设置管理员用户名+密码创建首个账户并自动登录；已有用户的实例行为不变（直接进登录页）。后端新增免登端点 `GET /api/auth/setup-status`（查是否需初始化）与 `POST /api/auth/setup`（无用户时创建首个账户并签发 Cookie，已初始化返回 409）；`auth.Service` 增 `NeedsSetup`/`Setup`，`CreateDefaultUser` 保留仅供测试播种。前端新增 `/setup` 路由、`SetupPage`、`RequireSetup` 守卫，`auth` store 增 `needsSetup`/`setup`，`ProtectedRoute`/`RequireAnon` 在需初始化时导向 `/setup`。决策见 ADR-0040（部分取代 ADR-0016 的默认账户创建）。**行为变更**：全新部署不再有 admin/admin 默认账户，须在引导页设置。
+
 ### 修复
 - **在线更新误把更旧的预发布版报为可更新（FR-46）**：测试版（prerelease）频道的 `hasUpdate`（`internal/update/service.go`）此前只判「最新版与当前不同即提示」，未比较新旧——当前为正式版 `0.16.x` 时，频道里更旧的滚动 dev（如 `0.14.1-dev`）也被误报为「可更新」（顶栏常驻提示、更新页显示有可用更新）。改为按 `MAJOR.MINOR.PATCH` 基线比较：基线更高才有更新、**基线更低绝不降级**、同基线下预发布标识不同才提示（仍支持正式版↔同基线 dev 切换与 dev→新 dev 滚动，同一 dev 不提示）。新增纯函数 `baselineCmp` 与 `TestHasUpdate_PrereleaseNoBaselineDowngrade` 守护，既有预发布选版/同 dev 不更新等用例不回归。真机实测：当前 `0.16.1`、测试版 latest `0.14.1-dev` → `has_update=false`、更新页显示「已是最新」。
 - **应用更新页需手动点检查、未缓存更新日志（FR-46）**：系统页「应用更新」子 tab 此前进入后停在「点击检查更新」占位、必须手动点按钮才显示版本与发布说明。改为进入即展示：新增本地缓存工具 `frontend/src/utils/update-cache.ts`（按频道持久化上次检查结果含发布说明到 `localStorage`，损坏/缺失安全兜底），`SystemPage` 在进入/切换频道时先用缓存即时回填版本与更新日志、再后台非强制刷新（命中后端 TTL 缓存即廉价返回，失败保留缓存静默不打扰），切换频道改由 `[channel]` 副作用按频道回填缓存。新增 `update-cache.test.ts` 与 SystemPage「进入即自动展示」「命中缓存即时展示发布说明」断言。纯前端、无新依赖、无新 ADR。

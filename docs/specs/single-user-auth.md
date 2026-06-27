@@ -8,7 +8,7 @@ FR-13 属于第一期（MVP）范围。系统为单用户模式，需要极简�
 
 ## 2. 需求（要什么）
 
-- 首次启动若无用户，自动创建默认用户（admin/admin），密码使用 bcrypt 哈希存储
+- 首次初始化（无用户时）由用户经引导页设置首个账户（FR-109 / ADR-0040 取代原 admin/admin 默认建号），密码使用 bcrypt 哈希存储；详见 [first-run-setup.md](first-run-setup.md)
 - 登录接口 `POST /api/auth/login`：验证用户名和密码，成功后设置 HttpOnly + Secure Cookie
 - 登出接口 `POST /api/auth/logout`：清除 Cookie
 - JWT HS256 签名，密钥从环境变量 `JWT_SECRET` 读取（默认值仅用于开发），有效期 72 小时

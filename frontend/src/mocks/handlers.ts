@@ -66,6 +66,21 @@ export const handlers = [
     return HttpResponse.json({ username: 'admin' })
   }),
 
+  // 首次初始化（FR-109）：默认已初始化（admin 存在），不打扰常规用例
+  http.get('*/api/auth/setup-status', async () => {
+    await delay(50)
+    return HttpResponse.json({ needs_setup: false })
+  }),
+
+  http.post('*/api/auth/setup', async ({ request }) => {
+    await delay(200)
+    const body = await request.json() as { username: string; password: string }
+    return HttpResponse.json(
+      { username: body.username },
+      { headers: { 'Set-Cookie': 'auth_token=mock_jwt; Path=/; HttpOnly; Secure; Max-Age=259200' } },
+    )
+  }),
+
   // ─── 媒体库目录 ─────────────────────────────────────
 
   http.get('*/api/library/paths', async () => {

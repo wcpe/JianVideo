@@ -64,6 +64,89 @@ func TestCreateDefaultUser(t *testing.T) {
 	}
 }
 
+func TestNeedsSetup(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+
+	// 全新库无用户：需要初始化
+	need, err := svc.NeedsSetup()
+	if err != nil {
+		t.Fatalf("NeedsSetup 失败: %v", err)
+	}
+	if !need {
+		t.Fatal("无用户时应需要初始化")
+	}
+
+	// 创建用户后：不再需要初始化
+	if _, err := svc.Setup("alice", "secret123"); err != nil {
+		t.Fatalf("Setup 失败: %v", err)
+	}
+	need, err = svc.NeedsSetup()
+	if err != nil {
+		t.Fatalf("NeedsSetup 失败: %v", err)
+	}
+	if need {
+		t.Fatal("已有用户时不应再需要初始化")
+	}
+}
+
+func TestSetup_CreatesFirstUser(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	user, err := svc.Setup("alice", "secret123")
+	if err != nil {
+		t.Fatalf("Setup 失败: %v", err)
+	}
+	if user.Username != "alice" {
+		t.Errorf("期望用户名 alice, 得到 %q", user.Username)
+	}
+	// 用初始化设置的凭据可登录
+	if _, err := svc.Login("alice", "secret123"); err != nil {
+		t.Fatalf("初始化后应能登录: %v", err)
+	}
+	// 不应存在 admin/admin 默认账户
+	admin, _ := models.FindUserByUsername(d, "admin")
+	if admin != nil {
+		t.Fatal("不应自动创建 admin 默认账户")
+	}
+}
+
+func TestSetup_RejectsWhenUserExists(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	if _, err := svc.Setup("alice", "secret123"); err != nil {
+		t.Fatalf("首次 Setup 失败: %v", err)
+	}
+	// 已有用户后再次初始化应被拒绝（防重复初始化劫持）
+	if _, err := svc.Setup("mallory", "evil"); err == nil {
+		t.Fatal("已初始化后再次 Setup 应被拒绝")
+	}
+	var count int
+	d.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if count != 1 {
+		t.Errorf("应只有 1 个用户, 得到 %d", count)
+	}
+}
+
+func TestSetup_RejectsEmpty(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	svc := NewService(d, "test-secret")
+	if _, err := svc.Setup("", "secret123"); err == nil {
+		t.Error("空用户名应被拒绝")
+	}
+	if _, err := svc.Setup("alice", ""); err == nil {
+		t.Error("空密码应被拒绝")
+	}
+}
+
 func TestLogin_Success(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()

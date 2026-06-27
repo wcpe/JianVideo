@@ -5,7 +5,7 @@
 ## 1. 通用约定
 
 - **协议**：HTTP/HTTPS RESTful API
-- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`
+- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/api/auth/setup-status`、`/api/auth/setup`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`
 - **编码**：请求/响应体使用 JSON（`Content-Type: application/json`），视频流使用 `video/mp2t`
 - **分页**：列表接口支持 `page`（从 1 开始）和 `page_size`（默认 20，最大 100）参数
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
@@ -54,6 +54,30 @@
 
 - **方法 / 路径**：`POST /api/auth/logout`
 - **响应**（200）：空
+
+### 首次初始化状态（FR-109）
+
+- **方法 / 路径**：`GET /api/auth/setup-status`（免登）
+- **响应**（200）：`needs_setup` 为 `true` 表示系统尚无任何用户、需首次初始化
+  ```json
+  { "needs_setup": true }
+  ```
+
+### 首次初始化（FR-109）
+
+- **方法 / 路径**：`POST /api/auth/setup`（免登；仅在系统无用户时可用）
+- **请求**：
+  ```json
+  {
+    "username": "string",
+    "password": "string"
+  }
+  ```
+- **响应**（200）：创建首个账户并自动登录（下发 `Set-Cookie`）
+  ```json
+  { "username": "string" }
+  ```
+- **错误**：`400` 参数错误；`409` 系统已初始化（已存在用户）
 
 ### 获取媒体库目录列表
 

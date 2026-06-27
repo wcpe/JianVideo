@@ -18,6 +18,15 @@ async function realGetMe(): Promise<{ username: string }> {
   return res.data
 }
 
+async function realGetSetupStatus(): Promise<{ needs_setup: boolean }> {
+  const res = await client.get('/api/auth/setup-status')
+  return res.data
+}
+
+async function realSetup(username: string, password: string): Promise<void> {
+  await client.post('/api/auth/setup', { username, password })
+}
+
 // ─── Mock API ────────────────────────────────────────
 
 function mockDelay(ms: number): Promise<void> {
@@ -39,8 +48,20 @@ async function mockGetMe(): Promise<{ username: string }> {
   return { username: 'admin' }
 }
 
+async function mockGetSetupStatus(): Promise<{ needs_setup: boolean }> {
+  await mockDelay(100)
+  // mock 模式默认视为已初始化（admin 存在），不打扰本地开发
+  return { needs_setup: false }
+}
+
+async function mockSetup(_username: string, _password: string): Promise<void> {
+  await mockDelay(300)
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function login(username: string, password: string) { return useMock ? mockLogin(username, password) : realLogin(username, password) }
 export function logout() { return useMock ? mockLogout() : realLogout() }
 export function getMe() { return useMock ? mockGetMe() : realGetMe() }
+export function getSetupStatus() { return useMock ? mockGetSetupStatus() : realGetSetupStatus() }
+export function setup(username: string, password: string) { return useMock ? mockSetup(username, password) : realSetup(username, password) }

@@ -1,7 +1,7 @@
 # ADR-0016：单用户认证
 
 ## 状态
-已接受
+已接受（「首次启动自动创建默认用户 admin/admin」一条已被 [ADR-0040](0040-first-run-setup.md) 取代为首次初始化引导；本 ADR 其余决策继续有效）
 
 ## 背景
 JianVideo 是单用户私有视频媒体服务器，需要保护媒体库和播放接口不被未授权访问。候选方案包括：基于 Cookie 的 JWT 会话、HTTP Basic Auth、OAuth2、API Key。需要权衡安全性、实现复杂度和浏览器兼容性。

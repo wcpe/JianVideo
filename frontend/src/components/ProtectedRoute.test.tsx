@@ -21,6 +21,7 @@ function renderGuarded() {
             }
           />
           <Route path="/login" element={<div>登录页占位</div>} />
+          <Route path="/setup" element={<div>初始化引导占位</div>} />
         </Routes>
       </MemoryRouter>
     </MantineProvider>,
@@ -30,7 +31,17 @@ function renderGuarded() {
 describe('ProtectedRoute', () => {
   beforeEach(() => {
     // 直接设置 initialized:true 跳过 init，避免触发真实认证恢复
-    useAuthStore.setState({ initialized: true, isAuthenticated: false, username: null })
+    useAuthStore.setState({ initialized: true, isAuthenticated: false, username: null, needsSetup: false })
+  })
+
+  it('需首次初始化时重定向到 /setup（FR-109）', () => {
+    useAuthStore.setState({ initialized: true, isAuthenticated: false, needsSetup: true })
+
+    renderGuarded()
+
+    expect(screen.getByText('初始化引导占位')).toBeInTheDocument()
+    expect(screen.queryByText('受保护内容')).toBeNull()
+    expect(screen.queryByText('登录页占位')).toBeNull()
   })
 
   it('已初始化但未认证时重定向到 /login', () => {

@@ -7,7 +7,9 @@ import RouteTransition from './components/RouteTransition'
 import TopProgressBar from './components/TopProgressBar'
 import ProtectedRoute from './components/ProtectedRoute'
 import RequireAnon from './components/RequireAnon'
+import RequireSetup from './components/RequireSetup'
 import LoginPage from './pages/LoginPage'
+import SetupPage from './pages/SetupPage'
 import LibraryManagerPage from './pages/LibraryManagerPage'
 import TimelinePage from './pages/TimelinePage'
 import BrowsePage from './pages/BrowsePage'
@@ -44,6 +46,8 @@ export default function App() {
         {/* 路由切换过渡（FR-96）：以路径为 key 包裹页面，轻量渐入 */}
         <RouteTransition>
         <Routes>
+          {/* 首次初始化引导（FR-109）：系统无用户时配置账号密码，免登 */}
+          <Route path="/setup" element={<RequireSetup><SetupPage /></RequireSetup>} />
           <Route path="/login" element={<RequireAnon><LoginPage /></RequireAnon>} />
           {/* 公开分享查看页（FR-43）：免登、不套 AppLayout / ProtectedRoute */}
           <Route path="/s/:token" element={<SharePage />} />

@@ -19,10 +19,24 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/web"
 )
+
+// seedAdmin 播种默认 admin/admin 账户。
+// FR-109 起 NewRouter 不再自动建号，依赖 admin 登录的 e2e 用例在搭建后显式播种。
+func seedAdmin(t *testing.T, gormDB *gorm.DB, secret string) {
+	t.Helper()
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		t.Fatalf("获取 sql.DB 失败: %v", err)
+	}
+	if err := auth.NewService(sqlDB, secret).CreateDefaultUser(); err != nil {
+		t.Fatalf("播种默认用户失败: %v", err)
+	}
+}
 
 // newTestServer 创建完整的测试服务器。
 func newTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
@@ -58,6 +72,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 
 	hlsMgr := player.NewHLSManager(hlsDir)
 	srv := web.NewRouter(cfg, gormDB, hlsMgr, nil, nil)
+	seedAdmin(t, gormDB, cfg.JWTSecret)
 
 	// 使用 httptest 启动真实 HTTP 服务器
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
