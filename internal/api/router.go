@@ -85,6 +85,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 媒体库总量聚合（FR-117）：媒体总数、视频/图片拆分、占用空间、总时长、启用库数与各库分组，供首页概览看板
 		lib.GET("/summary", h.LibrarySummary)
 
+		// 媒体增长趋势（FR-118）：按 added_at 本地时区天分桶的新增 count/SUM(size)/SUM(duration) 全时段序列，供统计页媒体增长曲线
+		lib.GET("/trends", h.MediaTrends)
+
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
 		lib.POST("/scan/:id", h.ScanLibrary)

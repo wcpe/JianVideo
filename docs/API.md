@@ -298,6 +298,21 @@
   ```
 - **说明**：媒体库总量聚合，供首页概览看板（`/`）展示。全部维度 `WHERE deleted_at IS NULL`；视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致）；`total_size`=`SUM(file_size)`（字节）、`total_duration`=`SUM(duration)`（秒）；`library_count` 取启用库数；`by_library` 按 `library_id` 分组（`label` 取自 `library_paths`）。空库返回各项为零、`by_library` 为空数组，HTTP 200。一次聚合查询完成，避免 N+1。
 
+### 媒体增长趋势（FR-118）
+
+- **方法 / 路径**：`GET /api/library/trends`
+- **查询参数**：无
+- **响应**（200）：
+  ```json
+  {
+    "media_added": [
+      {"date": "2026-05-01", "count": 10, "size": 1000000000, "duration": 3000.0},
+      {"date": "2026-05-03", "count": 5, "size": 500000000, "duration": 1500.0}
+    ]
+  }
+  ```
+- **说明**：按 `added_at` 本地时区天分桶的「按天新增媒体」全时段序列，供统计页「媒体」tab 算累计增长曲线（媒体数 / 容量 / 时长）。仅含有新增的天、升序；`count`=当天新增数、`size`=`SUM(file_size)`、`duration`=`SUM(duration)`；全程 `deleted_at IS NULL`。空库返回 `{"media_added": []}`。观看活跃趋势复用 `GET /api/library/stats` 的 `recent_timeline`（不另设端点）。
+
 ### 重命名媒体文件
 
 - **方法 / 路径**：`PUT /api/library/media/:id/rename`
