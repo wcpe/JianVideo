@@ -49,3 +49,34 @@
 ## 6. 风险 / 待定
 
 - `IntersectionObserver` 在 jsdom 缺失，测试需注入 stub（参考既有测试对 `navigator.clipboard` 的注入）。高亮逻辑下沉为可单测的纯逻辑，滚动行为只做 smoke。
+
+## 7. 真机走查后续修复（v0.18.0 之后）：锚点列 sticky 常驻
+
+> v0.18.0 发布后真机走查反馈：在某 tab 内点左侧锚点滚到下方后，锚点列本身随内容一起滚走、滚到底即不可见。属本 FR 后续修复（不改 PRD FR-113 状态行，记 CHANGELOG）。
+
+- **根因**：滚动容器为 `AppShell.Main`（页面整体滚动）；锚点列容器（`SettingsPage`/`SystemPage` 内 `Box w={160}`）此前为普通流内元素，随内容一起滚出视口。
+- **修复**：
+  - 锚点列容器改 `position: sticky`（内联 `position/top`，便于 jsdom 单测断言）+ `.anchor-nav-sticky` 类补 `max-height: calc(100vh - 72px)` + `overflow-y: auto`（锚点项过多时自滚动不溢出）。`top` 取 56px（略大于一级 tab 头部，使锚点列落在 tab 之下不被遮挡）。
+  - 一并把控制台一级 tab 头部（`Tabs.List`）改为吸顶：`ConsolePage` 的 `<Tabs className="console-tabs">`，`.console-tabs > .mantine-Tabs-list` 设 `position: sticky; top: 0`（补 `--mantine-color-body` 背景遮挡其下滚动内容），避免锚点定位后一级 tab 被滚走。
+- **验收硬指标**：设置/系统各 tab 内左侧锚点列滚动时常驻可见、点击定位与当前区块高亮正常。
+- 测试：`SettingsPage.test.tsx` 加「锚点列容器带 sticky 定位」断言（`getComputedStyle(...).position === 'sticky'`）。真机维度（滚到底锚点仍可见、吸顶不遮挡）标「待真机验」。
+
+## 8. 真机走查第二批后续修复（v0.18.0 之后）
+
+> v0.18.0 第二批真机走查反馈。属本 FR 后续修复（不改 PRD FR-113 状态行，记 CHANGELOG）。
+
+### 8.1 锚点点击高亮被平滑滚动抢回（bug，含死区根因）
+- **根因（深层·死区）**：原实现用 `IntersectionObserver`（`rootMargin: '0px 0px -66% 0px'`，有效观测带仅视口顶部 ~34%）+ `pickActiveSection`「可见集为空时回退首个」。当滚动到某些位置（真机证据：点「工具路径」滚到 `scrollY≈973`），恰无任何区块目标落在窄带内 → 可见集为空 → 回退首项「账户安全」，高亮 snap 回去。这是**死区 bug**，仅加 700ms 点击锁治标——锁过期后必然复现。
+- **修复（健壮 scroll-spy，消除死区）**：放弃「窄带 + 空集回退首个」，改为**基于滚动位置**判定。纯函数 `pickActiveByScroll(offsets, scrollPos, currentActive)`：取「顶部已越过 `scrollPos + 阈值` 的**最后一个**区块」（即视口顶部当前所在区块）；滚到最顶取第一个、滚到最底取最后一个；`offsets` 为空（DOM 未就绪）时**保留传入的 `currentActive`**——**任何位置都有确定结果、绝不回退到无关首项**。组件在 `scroll`（rAF 节流）+ `resize` 时用 `getBoundingClientRect + window.scrollY` 实测各区块绝对偏移并重算。
+- **点击锚点**：点击即高亮被点项并加 700ms 锁（屏蔽平滑滚动途中跳变），落定后解锁由 scroll-spy 接管；落定后其结果**正好等于被点项**（滚动已停在被点区块，一致无跳变）。
+- **测试**：`AnchorNav.test.tsx` 改为覆盖新纯函数的死区场景——`scrollY=973` 取工具路径（不回退账户安全）、中部空隙归属上一已越过区块、空 `offsets` 保留当前 active；组件级模拟滚动到工具路径区后高亮稳定、点击锁定窗内滚动不被抢回、落定后一致。
+
+### 8.2 运行环境区块加「复制」按钮（增强）
+- 运行环境 tab 的「运行环境」卡片头部新增**复制按钮**（与编解码「复制结果」同风格：`useClipboard`、复制后绿勾 + 「已复制」文案）。
+- 点击把当前展示的运行环境字段（应用版本/操作系统/架构/CPU/主机名/Go 版本/运行时信息/FFmpeg 等）拼成纯文本报告（`buildEnvReport`）写入剪贴板。
+- **测试**：`SystemPage.test.tsx` 新增——按钮存在、点击调用 `clipboard.writeText` 且报告含关键字段。
+
+### 8.3 验收补充
+- 点「工具路径」后高亮稳定停在「工具路径」、不被抢回「账户安全」。
+- 运行环境区块「复制」按钮可把运行环境信息复制到剪贴板。
+- `npm run build` + vitest 全绿；真机维度（点击锚点高亮稳定、复制内容完整）标「待真机验」。

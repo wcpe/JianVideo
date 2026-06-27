@@ -49,7 +49,7 @@ export default function ConsolePage() {
   }, [setSearchParams])
 
   return (
-    <Tabs value={activeTab} onChange={handleTabChange} keepMounted={false}>
+    <Tabs className="console-tabs" value={activeTab} onChange={handleTabChange} keepMounted={false}>
       <Tabs.List mb="md">
         <Tabs.Tab value={TAB_ENV} leftSection={<IconDeviceDesktop size={16} />}>运行环境</Tabs.Tab>
         <Tabs.Tab value={TAB_HWACCEL} leftSection={<IconCpu size={16} />}>硬件加速</Tabs.Tab>

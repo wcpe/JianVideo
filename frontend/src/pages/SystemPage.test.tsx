@@ -573,4 +573,26 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
       expect(screen.getByRole('button', { name: '已复制' })).toBeVisible()
     })
   })
+
+  it('运行环境区块提供「复制」按钮，点击把运行环境信息写入剪贴板（FR-113 后续增强）', async () => {
+    const user = userEvent.setup()
+    renderSection('env')
+
+    // 等系统信息加载完成（出现应用版本）
+    await screen.findByText('0.3.0')
+    const copyBtn = screen.getByRole('button', { name: '复制' })
+    await user.click(copyBtn)
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1)
+    })
+    // 报告含运行环境关键字段：应用版本、Go 版本、FFmpeg
+    const report = writeText.mock.calls[0][0] as string
+    expect(report).toContain('运行环境')
+    expect(report).toContain('0.3.0')
+    expect(report).toContain('go1.22.5')
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '已复制' })).toBeVisible()
+    })
+  })
 })

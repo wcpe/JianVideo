@@ -85,6 +85,34 @@ function formatUptime(seconds: number): string {
   return parts.join(' ')
 }
 
+/** 把运行环境信息整理为可粘贴的纯文本报告（FR-113 后续增强：运行环境区块「复制」） */
+function buildEnvReport(info: SystemInfo): string {
+  const lines: string[] = []
+  lines.push('===== JianVideo 运行环境 =====')
+  lines.push(`应用版本: ${info.app_version}`)
+  lines.push(`操作系统: ${info.os}/${info.arch}`)
+  lines.push(`CPU 核心数: ${info.num_cpu}`)
+  lines.push(`主机名: ${info.hostname}`)
+  lines.push(`Go 版本: ${info.go_version}`)
+  if (info.runtime) {
+    const rt = info.runtime
+    lines.push(`GOMAXPROCS: ${rt.gomaxprocs}`)
+    lines.push(`进程 PID: ${rt.pid}`)
+    lines.push(`运行时长: ${formatUptime(rt.uptime_seconds)}`)
+    lines.push(`运行内存（已用/申请）: ${formatBytes(rt.mem_alloc)} / ${formatBytes(rt.mem_sys)}`)
+    lines.push(`GC 次数: ${rt.num_gc}`)
+    lines.push(`数据库路径: ${rt.db_path || '—'}`)
+    lines.push(`工作目录: ${rt.work_dir || '—'}`)
+    lines.push(`可执行文件: ${rt.executable || '—'}`)
+  }
+  lines.push(`FFmpeg 可用: ${info.ffmpeg.available ? '是' : '否'}`)
+  if (info.ffmpeg.available) {
+    lines.push(`FFmpeg 路径: ${info.ffmpeg.path}`)
+    lines.push(`FFmpeg 版本: ${info.ffmpeg.version}`)
+  }
+  return lines.join('\n')
+}
+
 /** 把系统信息与编解码器结果整理为可粘贴的纯文本报告 */
 function buildReport(info: SystemInfo | null, codec: CodecTestResult | null): string {
   const lines: string[] = []
@@ -243,6 +271,11 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     clipboard.copy(buildReport(info, codec))
   }, [clipboard, info, codec])
 
+  // 复制运行环境信息（FR-113 后续增强）：把当前展示的运行环境字段拼成纯文本写入剪贴板
+  const handleCopyEnv = useCallback(() => {
+    if (info) clipboard.copy(buildEnvReport(info))
+  }, [clipboard, info])
+
   // 「检查更新」强制直连重查（FR-112：单按钮 = force 强制重查，绕后端 TTL 缓存）
   const handleCheckUpdate = useCallback(async (force: boolean) => {
     setUpdateChecking(true)
@@ -365,7 +398,13 @@ export default function SystemPage({ section }: { section: SystemSection }) {
       {/* 运行环境区块（FR-113）：运行环境信息 + FFmpeg，左侧锚点导航定位两区块 */}
       {section === 'env' && (
         <Group align="flex-start" gap="lg" wrap="nowrap">
-          <Box w={160} style={{ flexShrink: 0 }} visibleFrom="sm">
+          {/* 左侧锚点 sticky 常驻（FR-113 修复）：滚动时锚点列吸顶可见、不随内容滚走 */}
+          <Box
+            w={160}
+            className="anchor-nav-sticky"
+            style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'sticky', top: 56 }}
+            visibleFrom="sm"
+          >
             <AnchorNav sections={ENV_ANCHORS} />
           </Box>
           <Box style={{ flex: 1, minWidth: 0 }}>
@@ -375,7 +414,19 @@ export default function SystemPage({ section }: { section: SystemSection }) {
             <Stack gap="md">
               {/* 运行环境 */}
               <Card id="sys-env" withBorder padding="md" radius="md">
-                <Title order={4} mb="sm">运行环境</Title>
+                <Group justify="space-between" mb="sm">
+                  <Title order={4}>运行环境</Title>
+                  {/* 复制运行环境报告（FR-113 后续增强）：与编解码「复制结果」同风格，复制后绿勾 + 文案切换 */}
+                  <Button
+                    variant="light"
+                    color={clipboard.copied ? 'green' : 'gray'}
+                    size="xs"
+                    leftSection={clipboard.copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                    onClick={handleCopyEnv}
+                  >
+                    {clipboard.copied ? '已复制' : '复制'}
+                  </Button>
+                </Group>
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
                   <InfoRow label="应用版本" value={info.app_version} mono />
                   <InfoRow label="操作系统" value={`${info.os}/${info.arch}`} mono />

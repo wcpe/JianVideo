@@ -153,34 +153,40 @@ describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
     expect(document.querySelector('footer')).toBeNull()
   })
 
-  it('展开态导航底部展示当前版本号（取自系统信息）', async () => {
+  it('页眉品牌处展示当前版本号（取自系统信息，移到页眉）', async () => {
     renderLayout()
 
-    // 版本来自 MSW 的 /api/system/info（app_version=0.3.0）
+    // 版本来自 MSW 的 /api/system/info（app_version=0.3.0）；移到页眉品牌右侧后以 v 前缀小号 dimmed 展示
     await waitFor(() => {
-      expect(screen.getByText(/0\.3\.0/)).toBeInTheDocument()
+      expect(screen.getByTestId('app-version')).toHaveTextContent(/v0\.3\.0/)
     })
   })
 
   it('展开态导航底部提供「开源协议」链接，指向 /licenses', async () => {
     renderLayout()
 
-    const link = await screen.findByRole('link', { name: '开源协议' })
+    const link = await within(getNavbar()).findByRole('link', { name: '开源协议' })
     expect(link).toHaveAttribute('href', '/licenses')
   })
 
-  it('收缩态：导航底部仍提供开源协议入口（图标 + Tooltip），无版本号长文本', async () => {
+  it('导航底部不再平铺版本号长文本（版本已移至页眉）', () => {
+    renderLayout()
+
+    // navbar 内不应再出现版本号文本（已移到页眉）
+    expect(within(getNavbar()).queryByText(/0\.3\.0/)).not.toBeInTheDocument()
+  })
+
+  it('收缩态：导航底部不再展示开源协议入口（仅留收缩/展开按钮）', async () => {
     const user = userEvent.setup()
     renderLayout()
 
     await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
-    // 收缩态以「开源协议」无障碍标签的链接承载入口（图标态）
-    const link = await screen.findByRole('link', { name: '开源协议' })
-    expect(link).toHaveAttribute('href', '/licenses')
-    // 收缩态不平铺版本号长文本，避免 64px 内截断
-    expect(screen.queryByText(/0\.3\.0/)).not.toBeInTheDocument()
+    // 收缩态完全隐藏开源协议入口（FR-115 后续修复），navbar 内不再有该链接
+    expect(within(getNavbar()).queryByRole('link', { name: '开源协议' })).toBeNull()
+    // 收缩/展开按钮仍在底部
+    expect(within(getNavbar()).getByRole('button', { name: '展开导航' })).toBeInTheDocument()
   })
 
   it('移动端抽屉底部含版本号与「开源协议」链接', async () => {
@@ -404,6 +410,68 @@ describe('AppLayout 影院模式（FR-85）', () => {
     await user.click(screen.getByRole('button', { name: /切影院:true/ }))
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
     expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('1')
+  })
+})
+
+describe('AppLayout 导航可拖拽调宽（FR-115 扩展）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('展开态在 navbar 提供拖拽手柄（role=separator + 调宽无障碍名）', () => {
+    renderLayout()
+
+    const handle = within(getNavbar()).getByRole('separator', { name: '拖拽调整导航宽度' })
+    expect(handle).toBeInTheDocument()
+    expect(handle).toHaveAttribute('aria-valuemin', '160')
+    expect(handle).toHaveAttribute('aria-valuemax', '360')
+  })
+
+  it('拖拽手柄按下并移动指针，更新展开宽度并持久化（夹紧 160–360）', () => {
+    renderLayout()
+
+    const handle = within(getNavbar()).getByRole('separator', { name: '拖拽调整导航宽度' })
+    // 模拟一次拖拽：按下手柄 → 移动指针到 X=240 → 松开
+    fireEvent.mouseDown(handle)
+    fireEvent.mouseMove(window, { clientX: 240 })
+    fireEvent.mouseUp(window)
+
+    expect(localStorage.getItem('jianvideo.nav.width')).toBe('240')
+    expect(handle).toHaveAttribute('aria-valuenow', '240')
+  })
+
+  it('拖拽到超出上限被夹紧到 360', () => {
+    renderLayout()
+
+    const handle = within(getNavbar()).getByRole('separator', { name: '拖拽调整导航宽度' })
+    fireEvent.mouseDown(handle)
+    fireEvent.mouseMove(window, { clientX: 1000 })
+    fireEvent.mouseUp(window)
+
+    expect(localStorage.getItem('jianvideo.nav.width')).toBe('360')
+  })
+
+  it('收缩态不显示拖拽手柄（固定图标宽度，不可拖）', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    expect(within(getNavbar()).queryByRole('separator', { name: '拖拽调整导航宽度' })).toBeNull()
+  })
+
+  it('预置持久宽度，mount 后 navbar 采用该宽度（CSS 变量）', () => {
+    localStorage.setItem('jianvideo.nav.width', '300')
+    renderLayout()
+
+    // Mantine AppShell 把 navbar 宽度写入 --app-shell-navbar-width CSS 变量
+    const handle = within(getNavbar()).getByRole('separator', { name: '拖拽调整导航宽度' })
+    expect(handle).toHaveAttribute('aria-valuenow', '300')
   })
 })
 

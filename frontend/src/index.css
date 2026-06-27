@@ -82,6 +82,62 @@ a:not([data-active]) .nav-link:hover {
   background-color: var(--mantine-color-default-hover);
 }
 
+/* 控制台一级 tab 头部吸顶（FR-113 修复）：随内容滚动时一级 tab 常驻顶部，避免锚点定位后 tab 被滚走。
+   吸到 AppShell.Main 滚动容器顶部，补半透明背景遮挡其下滚动内容、加微弱底边界分隔。 */
+.console-tabs > .mantine-Tabs-list {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background-color: var(--mantine-color-body);
+}
+
+/* 设置/系统页左侧锚点列 sticky 常驻（FR-113 修复）：内容滚动时锚点列吸顶可见、不随内容滚走。
+   position/top 由组件内联（便于 jsdom 单测断言）；此处补 max-height + 自滚动，防锚点项过多溢出。 */
+.anchor-nav-sticky {
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+}
+
+/* 导航右边缘拖拽手柄（FR-115 扩展）：窄竖条贴 navbar 右缘，col-resize 光标，hover/拖拽出品牌紫提示条。
+   navbar 内绝对定位到右缘并纵向铺满；用透明背景扩大可抓取区，伪元素画 2px 提示条。 */
+.nav-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  background-color: transparent;
+}
+.nav-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 2px;
+  height: 100%;
+  background-color: transparent;
+  transition: background-color 140ms ease;
+}
+.nav-resize-handle:hover::after,
+.nav-resizing .nav-resize-handle::after {
+  background-color: var(--mantine-color-purple-4);
+}
+/* 导航收缩↔展开切换的宽度过渡动画（FR-115 后续修复）：给 navbar 宽度加平滑过渡，
+   切换收/展时宽度渐变而非突变。约 180ms ease。拖拽调宽时由 .nav-resizing 关闭此过渡（拖拽不要动画）。 */
+.mantine-AppShell-navbar {
+  transition: width 180ms ease;
+}
+/* 图标↔文字标签随切换轻微淡入（最小改动）：仅过渡透明度，不引入位移避免抖动 */
+.nav-link .mantine-Text-root {
+  transition: opacity 180ms ease;
+}
+/* 拖拽中关闭 navbar 宽度过渡（避免逐帧过渡卡顿）：拖拽时强制去掉宽度过渡 */
+.nav-resizing {
+  transition: none !important;
+}
+
 /* 全局顶部加载条爬升动画（FR-96）：用于进度条「爬升中」阶段的脉冲微动 */
 @keyframes jianvideo-topbar-pulse {
   0% {
@@ -105,6 +161,14 @@ a:not([data-active]) .nav-link:hover {
   .mantine-Button-root,
   .mantine-NavLink-root,
   .nav-link {
+    transition: none;
+  }
+  .nav-resize-handle::after {
+    transition: none;
+  }
+  /* 导航收/展宽度过渡与标签淡入在减少动态下关闭（FR-115 后续修复） */
+  .mantine-AppShell-navbar,
+  .nav-link .mantine-Text-root {
     transition: none;
   }
   .mantine-Card-root:hover {

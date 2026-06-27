@@ -5,6 +5,7 @@ import { useDisclosure, useHotkeys } from '@mantine/hooks'
 import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
+import { useNavWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX } from '@/hooks/useNavWidth'
 import { CinemaContext } from '@/hooks/cinema-context'
 import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
@@ -12,8 +13,8 @@ import UpdateIndicator from './UpdateIndicator'
 import CommandPalette, { type Command } from './CommandPalette'
 import RouteTransition from './RouteTransition'
 
-// 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
-const NAVBAR_WIDTH_EXPANDED = 180
+// 桌面导航收缩态的 navbar 宽度（像素）：仅留图标。
+// 展开态宽度改由 useNavWidth 提供（可拖拽调整、持久化），不再固定。
 const NAVBAR_WIDTH_COLLAPSED = 64
 
 /** 全局布局 — Mantine AppShell */
@@ -27,6 +28,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [paletteOpened, { open: openPalette, close: closePalette }] = useDisclosure(false)
   // 桌面导航收缩态（FR-54）：持久化到 localStorage，刷新后保持；仅影响桌面 Navbar，移动端抽屉不受影响
   const [navCollapsed, toggleNavCollapsed] = useNavCollapsed()
+  // 桌面导航展开态宽度（FR-115 扩展）：可拖拽调整、夹紧 160–360、持久化；仅展开态生效，收缩态固定图标宽度、移动端不受影响
+  const [navWidth, setNavWidth] = useNavWidth()
+  // 拖拽中标记：拖拽过程关闭 navbar 宽度过渡动画，避免逐帧过渡造成的卡顿
+  const [navResizing, setNavResizing] = useState(false)
   // 影院模式（FR-85）：播放页临时收起导航的本地会话态，不写 localStorage、不改 navCollapsed 持久语义。
   // 自持本地态并经 CinemaContext 下发给子页面（如播放页）；不消费自身 Provider，便于下方计算有效收缩态。
   const [cinema, setCinemaState] = useState(false)
@@ -44,6 +49,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 不整页 reload、不重载导航/页眉、不触动登录态。
   const [refreshNonce, setRefreshNonce] = useState(0)
   const handleRefresh = useCallback(() => setRefreshNonce((n) => n + 1), [])
+
+  // 拖拽调整导航宽度（FR-115 扩展）：按下手柄后监听全局 mousemove，按指针 X 设置宽度（useNavWidth 内部夹紧）；
+  // 松开则解绑监听并结束拖拽态。拖拽期间关闭过渡动画，避免卡顿。仅展开态可拖。
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setNavResizing(true)
+    const onMove = (ev: MouseEvent) => setNavWidth(ev.clientX)
+    const onUp = () => {
+      setNavResizing(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [setNavWidth])
 
   // 拉取应用版本用于导航底部展示；失败仅静默（版本缺省，不影响其余布局）
   useEffect(() => {
@@ -175,38 +195,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Stack>
     ))
 
-  // 版本号 + 「开源协议」入口（FR-61）：取代原页脚展示。
-  // collapsed 收缩态仅渲染协议图标 + Tooltip（含版本号），避免 64px 内文字截断；
-  // onNavigate 用于移动端抽屉点击后关闭抽屉。
-  const versionLabel = `JianVideo${appVersion ? ` v${appVersion}` : ''}`
-  const renderVersionLicense = (collapsed = false, onNavigate?: () => void) => {
-    if (collapsed) {
-      // 收缩态：图标态协议入口，hover 出 Tooltip 同时展示版本号与「开源协议」
-      return (
-        <Group justify="center" mb="xs">
-          <Tooltip label={`${versionLabel} · 开源协议`} position="right" withArrow>
-            <Link to="/licenses" aria-label="开源协议" style={{ textDecoration: 'none' }}>
-              <IconLicense size={16} style={{ color: 'var(--mantine-color-dimmed)' }} />
-            </Link>
-          </Tooltip>
-        </Group>
-      )
-    }
-    // 展开态：版本号文本 + 「开源协议」链接
-    return (
-      <Group justify="space-between" mb="xs" px={4}>
-        <Text size="xs" c="dimmed">{versionLabel}</Text>
-        <Link to="/licenses" onClick={onNavigate} style={{ textDecoration: 'none' }}>
-          <Text size="xs" c="dimmed">开源协议</Text>
-        </Link>
-      </Group>
+  // 版本号短标签（FR-61）：版本号移到页眉品牌右侧展示（取自系统信息，缺省不显）
+  const versionLabel = appVersion ? `v${appVersion}` : ''
+  // 移动端抽屉底部仍保留「版本号 + 开源协议」（不受导航宽度/收缩影响）：
+  // 抽屉宽度充裕，沿用原样左右分布。
+  const renderDrawerVersionLicense = (onNavigate?: () => void) => (
+    <Group justify="space-between" mb="xs" px={4}>
+      <Text size="xs" c="dimmed">JianVideo{versionLabel ? ` ${versionLabel}` : ''}</Text>
+      <Link to="/licenses" onClick={onNavigate} style={{ textDecoration: 'none' }}>
+        <Text size="xs" c="dimmed">开源协议</Text>
+      </Link>
+    </Group>
+  )
+  // navbar 底部「开源协议」入口（FR-115 重排）：版本号已移至页眉，底部仅留协议链接，
+  // 与右下角收缩按钮同处一行（左协议、右收缩），不再换行。
+  // collapsed 收缩态完全不显示协议入口（FR-115 后续修复）：64px 图标态底部仅留收缩/展开按钮，
+  // 避免图标拥挤；展开态保留左下「开源协议」文字链接。
+  const renderLicenseLink = (collapsed = false) =>
+    collapsed ? null : (
+      <Link to="/licenses" style={{ textDecoration: 'none' }}>
+        <Text size="xs" c="dimmed">开源协议</Text>
+      </Link>
     )
-  }
 
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: effectiveCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED, breakpoint: 'sm' }}
+      navbar={{ width: effectiveCollapsed ? NAVBAR_WIDTH_COLLAPSED : navWidth, breakpoint: 'sm' }}
       padding="md"
     >
       <AppShell.Header>
@@ -245,6 +260,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </Text>
               </Group>
             </UnstyledButton>
+            {/* 当前版本号（FR-61）：移到品牌「JianVideo」右侧，小号 dimmed，与 logo 同一行；取自系统信息，缺省不显 */}
+            {versionLabel && (
+              <Text size="xs" c="dimmed" data-testid="app-version">{versionLabel}</Text>
+            )}
           </Group>
 
           <Group gap="sm">
@@ -322,12 +341,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Stack gap="xs">
           {/* 分组导航（FR-83）：抽屉内固定展开，点击后关闭抽屉（跳转由各项 Link 负责） */}
           {renderNavGroups(closeDrawer, false)}
-          {/* 版本号 + 「开源协议」入口（FR-61）：原页脚在移动端可见，移除后于抽屉底部补回 */}
-          {renderVersionLicense(false, closeDrawer)}
+          {/* 版本号 + 「开源协议」入口（FR-61）：移动端抽屉不受导航宽度/收缩影响，底部保留版本号 + 协议 */}
+          {renderDrawerVersionLicense(closeDrawer)}
         </Stack>
       </Drawer>
 
-      <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={effectiveCollapsed}>
+      {/* 拖拽中关闭 navbar 宽度过渡动画（避免逐帧过渡卡顿）：给 navbar 加 no-transition 标记，由 index.css 关闭其过渡 */}
+      <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={effectiveCollapsed} className={navResizing ? 'nav-resizing' : undefined}>
         {/* 导航列表滚动区：navbar 为定高 flex 列，列表项多 + 视口矮时会溢出。
             flex:1 占据中间剩余高度、minHeight:0 允许收缩到内容以下、overflowY:auto 触发内部滚动，
             从而顶部收起按钮与底部版本/协议常驻、中间列表可纵向滚动（修复导航栏无法滚动） */}
@@ -335,12 +355,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
           {renderNavGroups(undefined, effectiveCollapsed)}
         </Stack>
-        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于 navbar 底部，适配有效收缩态 */}
-        {renderVersionLicense(effectiveCollapsed)}
-        {/* 收缩 / 展开切换按钮（FR-54；FR-115 移至底部右下角）：置于 navbar 最底部并靠右下，
-            随状态切换图标与无障碍标签；收缩态居中兜底避免 64px 内破版。
+        {/* 导航底部一行（FR-115 重排）：展开态左为「开源协议」入口、右为收缩/展开按钮，单行不换行（版本号已移至页眉）。
+            收缩态（64px）完全不显示协议入口，整行仅居中放收缩/展开按钮（FR-115 后续修复）。
             影院态（FR-85）下 navCollapsed 仍为持久态语义，故按钮文案/图标按 navCollapsed 判定 */}
-        <Group justify={effectiveCollapsed ? 'center' : 'flex-end'} mt="xs">
+        <Group justify={effectiveCollapsed ? 'center' : 'space-between'} align="center" wrap="nowrap" mt="xs">
+          {renderLicenseLink(effectiveCollapsed)}
           <ActionIcon
             variant="subtle"
             color="gray"
@@ -351,6 +370,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {navCollapsed ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
           </ActionIcon>
         </Group>
+        {/* 右边缘拖拽手柄（FR-115 扩展）：窄竖条，hover 反馈 + col-resize 光标，按下后拖拽调整展开态宽度（夹紧 160–360）。
+            仅展开态显示（收缩态固定图标宽度，不可拖）；移动端抽屉无 navbar 故不受影响。无障碍：role=separator + 范围语义。 */}
+        {!effectiveCollapsed && (
+          <div
+            className="nav-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖拽调整导航宽度"
+            aria-valuemin={NAV_WIDTH_MIN}
+            aria-valuemax={NAV_WIDTH_MAX}
+            aria-valuenow={navWidth}
+            onMouseDown={handleResizeStart}
+          />
+        )}
       </AppShell.Navbar>
 
       {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}

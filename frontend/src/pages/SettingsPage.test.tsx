@@ -52,6 +52,17 @@ describe('SettingsPage', () => {
     expect(screen.getAllByRole('button', { name: '保存设置' })).toHaveLength(1)
   })
 
+  it('左侧锚点列容器带 sticky 常驻样式（FR-113 修复：滚动时锚点常驻可见）', async () => {
+    renderPage()
+    await screen.findByLabelText('扫描周期（秒）')
+
+    // 锚点导航以 <nav aria-label="区块导航"> 呈现，其外层容器挂 anchor-nav-sticky（position: sticky）
+    const nav = screen.getByRole('navigation', { name: '区块导航' })
+    const stickyBox = nav.closest('.anchor-nav-sticky') as HTMLElement
+    expect(stickyBox).not.toBeNull()
+    expect(getComputedStyle(stickyBox).position).toBe('sticky')
+  })
+
   it('回收站编辑器：增行后多一组盘符/路径输入', async () => {
     const user = userEvent.setup()
     renderPage()
