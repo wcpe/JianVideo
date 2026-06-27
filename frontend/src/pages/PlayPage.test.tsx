@@ -252,6 +252,21 @@ describe('PlayPage', () => {
     vi.unstubAllGlobals()
   })
 
+  it('挂载时记录最近查看（PUT /viewed，FR-120）', async () => {
+    let viewedId: number | null = null
+    server.use(
+      http.put('*/api/library/media/1/viewed', () => {
+        viewedId = 1
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+
+    renderPlayPage('/play/1')
+
+    // 进入播放页即记录最近查看（失败静默、不阻塞播放）
+    await waitFor(() => expect(viewedId).toBe(1))
+  })
+
   it('协商失败时回退 H.264：沿用 master 探测 → stream（不报错）', async () => {
     server.use(
       http.get('*/api/library/media/4', () =>

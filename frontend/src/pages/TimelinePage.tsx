@@ -11,6 +11,7 @@ import MediaFilterBar from '@/components/MediaFilterBar'
 import MediaQueryFilters from '@/components/MediaQueryFilters'
 import ContinueWatching from '@/components/ContinueWatching'
 import OnThisDay from '@/components/OnThisDay'
+import RecentlyViewed from '@/components/RecentlyViewed'
 import MediaDetailPanel from '@/components/MediaDetailPanel'
 import ConfirmModal from '@/components/ConfirmModal'
 import BatchActionsModals from '@/components/BatchActionsModals'
@@ -48,9 +49,11 @@ export default function TimelinePage() {
   useScanProgress(() => infinite.reload())
 
   // 点击媒体（图片与视频统一）打开文件详情面板（FR-34）
+  // 同时记录最近查看（FR-120）：打开即标记 last_viewed_at，失败静默不阻塞打开
   const handleOpen = useCallback((f: MediaFile) => {
     const i = infinite.items.findIndex(x => x.id === f.id)
     if (i >= 0) setDetailIndex(i)
+    void libApi.setMediaViewed(f.id).catch(() => {})
   }, [infinite.items])
 
   // 搜索/筛选是否生效（FR-98）：用于区分「无结果」与「空库」空态
@@ -122,7 +125,7 @@ export default function TimelinePage() {
         </Stack>
       </Box>
 
-      {/* 视图组（FR-100）：时间轴缩放（FR-32）日/月/年粒度切换 */}
+      {/* 视图组（FR-100）：时间轴缩放（FR-32 + FR-120）年/月/日/所有粒度切换 */}
       <Box aria-label="视图" role="group">
         <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>视图</Text>
         <Group gap="xs" align="center">
@@ -133,9 +136,10 @@ export default function TimelinePage() {
             value={granularity}
             onChange={(v) => setGranularity(v as TimelineGranularity)}
             data={[
-              { value: 'day', label: '日' },
-              { value: 'month', label: '月' },
               { value: 'year', label: '年' },
+              { value: 'month', label: '月' },
+              { value: 'day', label: '日' },
+              { value: 'all', label: '所有' },
             ]}
           />
         </Group>
@@ -163,6 +167,9 @@ export default function TimelinePage() {
 
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
       <ContinueWatching />
+
+      {/* 最近查看（FR-120）：最近打开过的媒体回忆，空列表时自动隐藏 */}
+      <RecentlyViewed />
 
       {/* 那年今日（FR-72）：往年同一天拍摄的媒体回忆，空列表时自动隐藏 */}
       <OnThisDay />

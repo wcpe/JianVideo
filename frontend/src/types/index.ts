@@ -39,6 +39,8 @@ export interface MediaFile {
   last_watched_at?: string | null
   /** 观看次数（FR-75）：每看完一次 +1，旧数据可能缺省 */
   view_count?: number
+  /** 最近一次查看（打开）时间（FR-120）：覆盖图片+视频的「打开」，旧数据可能缺省 */
+  last_viewed_at?: string | null
 
   /** 媒体时间与 EXIF（FR-31 提取、FR-38 展示），旧数据可能缺省 */
   media_time?: string | null

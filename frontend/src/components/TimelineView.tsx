@@ -89,30 +89,32 @@ function DateGroupRow({
   const primary = monthDay || year
   const secondary = monthDay ? year : ''
   return (
-    <Group align="flex-start" wrap="nowrap" gap="md" pb="xl">
-      {/* 左侧竖向日期轴（FR-100 时间锚视觉）：实心紫圆点 + 竖线 + 醒目年/月日 */}
-      <Box style={{ width: 88, flexShrink: 0, position: 'relative' }}>
+    <Group align="flex-start" wrap="nowrap" gap="md" pb="lg">
+      {/* 左侧竖向日期轴（FR-100 时间锚视觉）：紫圆点 + 竖线 + 年/月日。
+          苹果风收紧（FR-120）：分组头更轻——更小圆点、收窄字号、更紧间距。 */}
+      <Box style={{ width: 80, flexShrink: 0, position: 'relative' }}>
         {/* 次标签（年）在锚点上方，弱化处理 */}
-        {secondary && <Text size="xs" c="dimmed" pl={24} mb={2}>{secondary}</Text>}
+        {secondary && <Text size="xs" c="dimmed" pl={20} mb={2}>{secondary}</Text>}
         <Group gap={8} wrap="nowrap" align="center">
-          {/* 锚点圆点：加大并用品牌紫实心 + 浅紫光晕环，强化时间锚 */}
+          {/* 锚点圆点：品牌紫实心 + 浅紫光晕环，收小更克制 */}
           <Box
             style={{
-              width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+              width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
               background: 'var(--mantine-color-purple-6)',
-              boxShadow: '0 0 0 4px var(--mantine-color-purple-light)',
+              boxShadow: '0 0 0 3px var(--mantine-color-purple-light)',
             }}
           />
-          {/* 主标签（月-日 / 年）：醒目时间锚 */}
-          <Text fw={700} size="lg" style={{ lineHeight: 1.1 }}>{primary}</Text>
+          {/* 主标签（月-日 / 年）：时间锚，收窄字号更轻 */}
+          <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>{primary}</Text>
         </Group>
         {/* 竖线营造时间线视觉：起点对齐圆点中心 */}
-        <Box style={{ position: 'absolute', left: 6, top: 22, bottom: -24, width: 2, background: 'var(--mantine-color-default-border)' }} />
+        <Box style={{ position: 'absolute', left: 4, top: 18, bottom: -20, width: 2, background: 'var(--mantine-color-default-border)' }} />
       </Box>
 
-      {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列 */}
+      {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列。
+          苹果风收紧（FR-120）：列数更密、间距更小，配合方形密铺更紧致。 */}
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <SimpleGrid type="container" cols={{ '180px': 2, '480px': 3, '760px': 4, '1040px': 5, '1360px': 6 }}>
+        <SimpleGrid type="container" cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }} spacing="xs" verticalSpacing="xs">
           {group.files.map((file) => {
             const isImage = isImageFile(file, customImageExtensions)
             const selected = selection.enabled && selection.isSelected(file.id)
@@ -141,6 +143,7 @@ function DateGroupRow({
                   <MediaThumbnail
                     mediaID={file.id}
                     fileName={file.file_name}
+                    aspectRatio="1"
                     objectFit="cover"
                     overlay={<MediaCardOverlay file={file} isImage={isImage} selected={selected} checkboxMode={selection.checkboxMode} />}
                   />

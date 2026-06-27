@@ -4,27 +4,27 @@ import { MantineProvider } from '@mantine/core'
 import TimelineScrubber from './TimelineScrubber'
 import type { DateGroup } from '@/utils/timeline'
 
-/** 构造一个分组，date 为分组键，files 至少含一项用于浮层缩略图 */
-function makeGroup(date: string, id: number): DateGroup {
+/** 构造一个分组，date 为分组键，files 含若干项用于浮层九宫格缩略图 */
+function makeGroup(date: string, ids: number[]): DateGroup {
   return {
     date,
-    files: [{
+    files: ids.map((id) => ({
       id, library_id: 1,
       file_path: `D:\\Photos\\${id}.jpg`, file_name: `${id}.jpg`,
       file_size: 0, format: 'jpg',
       video_codec: '', audio_codec: '', duration: 0,
       width: 0, height: 0, bitrate: 0, subtitle_tracks: '',
       added_at: `${date}T00:00:00Z`, modified_at: `${date}T00:00:00Z`,
-    }],
+    })),
   }
 }
 
 const groups: DateGroup[] = [
-  makeGroup('2025-03-15', 1), // 顶部=最新
-  makeGroup('2025-02-10', 2),
-  makeGroup('2025-01-05', 3),
-  makeGroup('2024-12-20', 4),
-  makeGroup('2024-11-01', 5), // 底部=最旧
+  makeGroup('2025-03-15', [1, 11, 12]), // 顶部=最新（3 张，用于九宫格）
+  makeGroup('2025-02-10', [2]),
+  makeGroup('2025-01-05', [3]),
+  makeGroup('2024-12-20', [4]),
+  makeGroup('2024-11-01', [5]), // 底部=最旧
 ]
 
 function renderScrubber(onSeek = vi.fn()) {
@@ -77,9 +77,28 @@ describe('TimelineScrubber', () => {
     expect(screen.getByText('2025-01-05')).toBeInTheDocument()
   })
 
-  it('未拖动时不渲染浮层', () => {
+  it('未交互时不渲染浮层', () => {
     renderScrubber()
     expect(screen.queryByText('2025-03-15')).not.toBeInTheDocument()
+  })
+
+  // FR-120：hover（未按下）即在指针处弹出该时段预览
+  it('hover 移动（未按下）即弹出该时段预览，移出隐藏', () => {
+    const { slider } = renderScrubber()
+    // 指针进入并在顶部移动（未 pointerDown）→ 弹出最新分组预览
+    fireEvent.pointerMove(slider, { clientY: 0, pointerId: 1 })
+    expect(screen.getByText('2025-03-15')).toBeInTheDocument()
+    // 浮层带数量与无障碍标签（日期 + 数量）
+    expect(screen.getByRole('img', { name: /2025-03-15.*3/ })).toBeInTheDocument()
+    // 移出轨道 → 预览隐藏
+    fireEvent.pointerLeave(slider)
+    expect(screen.queryByText('2025-03-15')).not.toBeInTheDocument()
+  })
+
+  it('hover 到底部预览最旧分组', () => {
+    const { slider } = renderScrubber()
+    fireEvent.pointerMove(slider, { clientY: 500, pointerId: 1 })
+    expect(screen.getByText('2024-11-01')).toBeInTheDocument()
   })
 
   it('方向键下移一个分组并触发 onSeek', () => {

@@ -6,11 +6,14 @@ export interface DateGroup {
   files: MediaFile[]
 }
 
-/** 时间轴分组粒度（FR-32 缩放）：日 / 月 / 年 */
-export type TimelineGranularity = 'day' | 'month' | 'year'
+/** 时间轴分组粒度（FR-32 缩放 + FR-120 扩展）：日 / 月 / 年 / 所有（不分组、方形密铺） */
+export type TimelineGranularity = 'day' | 'month' | 'year' | 'all'
 
 /** 未知日期分组标识，始终排在最后 */
 const UNKNOWN_DATE = '未知日期'
+
+/** “所有”粒度的单组键（FR-120）：不按日期分组，全部媒体并入一组方形密铺 */
+const ALL_GROUP = '全部'
 
 /**
  * 按时间对媒体文件分组（FR-32）。
@@ -20,6 +23,10 @@ const UNKNOWN_DATE = '未知日期'
  * - 组内保持输入顺序（调用方已按 media_time 倒序）。
  */
 export function groupMediaByDate(files: MediaFile[], granularity: TimelineGranularity = 'day'): DateGroup[] {
+  // “所有”粒度（FR-120）：不按日期分组，全部并入单组、保持输入顺序（调用方已倒序）；空输入返回空数组
+  if (granularity === 'all') {
+    return files.length === 0 ? [] : [{ date: ALL_GROUP, files: [...files] }]
+  }
   const groups = new Map<string, MediaFile[]>()
   for (const file of files) {
     const date = extractDateKey(file, granularity)

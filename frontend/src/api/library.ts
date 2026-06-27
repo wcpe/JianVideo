@@ -131,6 +131,20 @@ async function realGetOnThisDay(limit = 12): Promise<MediaFile[]> {
   return res.data.items
 }
 
+// ─── 最近查看（FR-120）────────────────────────────────
+
+// 记录媒体查看：媒体在查看器/播放页被打开时调用，把 last_viewed_at 置为当前时间。
+// 失败由调用方静默处理（不阻塞打开），此处不吞异常。
+async function realSetMediaViewed(id: number): Promise<void> {
+  await client.put(`/api/library/media/${id}/viewed`)
+}
+
+// 最近查看列表：返回 last_viewed_at 非空、未软删的媒体，按 last_viewed_at 倒序。
+async function realGetRecentlyViewed(limit = 12): Promise<MediaFile[]> {
+  const res = await client.get<{ items: MediaFile[] }>('/api/library/recently-viewed', { params: { limit } })
+  return res.data.items
+}
+
 async function realGetMediaFile(id: number): Promise<MediaFile> {
   const res = await client.get(`/api/library/media/${id}`)
   return res.data
@@ -387,6 +401,24 @@ async function mockGetOnThisDay(limit = 12): Promise<MediaFile[]> {
       return md === monthDay && d.getFullYear() !== thisYear
     })
     .sort((a, b) => (b.media_time ?? '').localeCompare(a.media_time ?? ''))
+    .slice(0, limit)
+}
+
+// ─── 最近查看 mock（FR-120）──────────────────────────
+
+// 记录查看：把该媒体 last_viewed_at 置为当前时间（不存在则静默忽略）。
+async function mockSetMediaViewed(id: number): Promise<void> {
+  await mockDelay(80)
+  const f = mockMediaFiles.find(m => m.id === id)
+  if (f) f.last_viewed_at = new Date().toISOString()
+}
+
+// 最近查看列表：last_viewed_at 非空、未软删，按 last_viewed_at 倒序取前 limit 条。
+async function mockGetRecentlyViewed(limit = 12): Promise<MediaFile[]> {
+  await mockDelay(100)
+  return mockMediaFiles
+    .filter(m => !mockDeletedIds.has(m.id) && !!m.last_viewed_at)
+    .sort((a, b) => (b.last_viewed_at ?? '').localeCompare(a.last_viewed_at ?? ''))
     .slice(0, limit)
 }
 
@@ -650,6 +682,9 @@ export function markWatched(id: number) { return useMock ? mockMarkWatched(id) :
 export function getContinueWatching(limit = 12) { return useMock ? mockGetContinueWatching(limit) : realGetContinueWatching(limit) }
 // 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
 export function getOnThisDay(limit = 12) { return useMock ? mockGetOnThisDay(limit) : realGetOnThisDay(limit) }
+// 最近查看（FR-120）：记录媒体打开时间 + 拉取最近查看列表
+export function setMediaViewed(id: number) { return useMock ? mockSetMediaViewed(id) : realSetMediaViewed(id) }
+export function getRecentlyViewed(limit = 12) { return useMock ? mockGetRecentlyViewed(limit) : realGetRecentlyViewed(limit) }
 export function addMediaExtension(libraryID: number, extension: string, type: MediaExtensionType) { return useMock ? mockAddMediaExtension(libraryID, extension, type) : realAddMediaExtension(libraryID, extension, type) }
 export function listMediaExtensions(libraryID: number) { return useMock ? mockListMediaExtensions(libraryID) : realListMediaExtensions(libraryID) }
 export function deleteMediaExtension(libraryID: number, extension: string) { return useMock ? mockDeleteMediaExtension(libraryID, extension) : realDeleteMediaExtension(libraryID, extension) }

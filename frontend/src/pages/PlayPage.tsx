@@ -73,6 +73,9 @@ export default function PlayPage() {
       .catch(() => setError('媒体文件不存在'))
       .finally(() => setLoading(false))
 
+    // 记录最近查看（FR-120）：进入播放页即标记 last_viewed_at，失败静默不阻塞播放
+    void libApi.setMediaViewed(mediaId).catch(() => {})
+
     // 加载字幕轨道列表
     subtitleApi.getSubtitles(mediaId)
       .then((tracks) => setSubtitleTracks(tracks))

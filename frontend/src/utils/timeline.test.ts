@@ -112,6 +112,21 @@ describe('groupMediaByDate', () => {
     const groups = groupMediaByDate([f])
     expect(groups[0].date).toBe('未知日期')
   })
+
+  // FR-120：“所有”粒度——不按日期分组，全部并入单组、保持输入顺序
+  it('“所有”粒度不分组：全部并入单组并保持输入顺序', () => {
+    const groups = groupMediaByDate([
+      makeFile(1, '2025-03-15T20:00:00Z'),
+      makeFile(2, '2025-01-01T08:00:00Z'),
+      makeFile(3, '2024-12-31T00:00:00Z'),
+    ], 'all')
+    expect(groups).toHaveLength(1)
+    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3])
+  })
+
+  it('“所有”粒度空输入返回空数组', () => {
+    expect(groupMediaByDate([], 'all')).toEqual([])
+  })
 })
 
 // FR-68 scrubber 位置 → 目标分组映射

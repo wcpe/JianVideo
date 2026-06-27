@@ -255,4 +255,107 @@ describe('TimelinePage', () => {
     expect(within(dialog).getByRole('img', { name: '封面.foo' })).toHaveAttribute('src', '/api/library/media/99/raw')
     expect(mockNavigate).not.toHaveBeenCalledWith('/play/99')
   })
+
+  // FR-120：缩放含「所有」粒度
+  it('缩放控件包含 年/月/日/所有 四档（FR-120）', async () => {
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })),
+    )
+
+    renderPage()
+
+    for (const name of ['年', '月', '日', '所有']) {
+      expect(await screen.findByRole('radio', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('切到「所有」粒度不按日期分组、密铺单组（FR-120）', async () => {
+    // 两条不同日期媒体：日粒度两组（两个日期轴标签），「所有」粒度并入单组
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({
+        items: [
+          {
+            id: 401, library_id: 1, file_path: 'D:\\Photos\\a.jpg', file_name: 'a.jpg',
+            file_size: 1000, format: 'jpg', video_codec: '', audio_codec: '', duration: 0,
+            width: 100, height: 100, bitrate: 0, subtitle_tracks: '',
+            added_at: '2025-03-15T00:00:00Z', modified_at: '2025-03-15T00:00:00Z',
+          },
+          {
+            id: 402, library_id: 1, file_path: 'D:\\Photos\\b.jpg', file_name: 'b.jpg',
+            file_size: 1000, format: 'jpg', video_codec: '', audio_codec: '', duration: 0,
+            width: 100, height: 100, bitrate: 0, subtitle_tracks: '',
+            added_at: '2025-01-05T00:00:00Z', modified_at: '2025-01-05T00:00:00Z',
+          },
+        ],
+        total: 2, page: 1, page_size: 20,
+      })),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    // 默认日粒度：两个日期轴主标签 03-15 / 01-05
+    await screen.findByText('03-15')
+    expect(screen.getByText('01-05')).toBeInTheDocument()
+
+    // 切到「所有」：合并为单组（不再出现按日的日期轴标签），两张缩略图仍都在
+    await user.click(screen.getByRole('radio', { name: '所有' }))
+    await waitFor(() => {
+      expect(screen.queryByText('03-15')).not.toBeInTheDocument()
+      expect(screen.queryByText('01-05')).not.toBeInTheDocument()
+    })
+    expect(screen.getByAltText('a.jpg')).toBeInTheDocument()
+    expect(screen.getByAltText('b.jpg')).toBeInTheDocument()
+  })
+
+  // FR-120：顶部「最近查看」区块（有数据时横向卡片流）
+  it('顶部展示「最近查看」回忆区块（有数据时，FR-120）', async () => {
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })),
+      http.get('*/api/library/recently-viewed', () => HttpResponse.json({
+        items: [{
+          id: 9, library_id: 1, file_path: 'D:\\Photos\\海报.jpg', file_name: '海报.jpg',
+          file_size: 1200, format: 'jpg', video_codec: '', audio_codec: '', duration: 0,
+          width: 1200, height: 800, bitrate: 0, subtitle_tracks: '',
+          added_at: '2025-01-09T12:00:00Z', modified_at: '2025-01-09T12:00:00Z',
+          last_viewed_at: '2025-06-01T12:00:00Z',
+        }],
+      })),
+    )
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByText('最近查看')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /最近查看 海报\.jpg/ })).toBeInTheDocument()
+    })
+  })
+
+  // FR-120：打开媒体即记录最近查看（handleOpen 触发 PUT /viewed）
+  it('点击媒体打开详情时记录最近查看（PUT /viewed，FR-120）', async () => {
+    let viewedId: number | null = null
+    server.use(
+      http.get('*/api/library/media', () => HttpResponse.json({
+        items: [{
+          id: 88, library_id: 1, file_path: 'D:\\Photos\\海报.jpg', file_name: '海报.jpg',
+          file_size: 1200, format: 'jpg', video_codec: '', audio_codec: '', duration: 0,
+          width: 1200, height: 800, bitrate: 0, subtitle_tracks: '',
+          added_at: '2025-01-09T12:00:00Z', modified_at: '2025-01-09T12:00:00Z',
+        }],
+        total: 1, page: 1, page_size: 20,
+      })),
+      http.put('*/api/library/media/:id/viewed', ({ params }) => {
+        viewedId = Number(params.id)
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    // 点击图片打开详情（FR-34）即记录最近查看（FR-120）
+    await user.click(await screen.findByAltText('海报.jpg'))
+
+    await waitFor(() => expect(viewedId).toBe(88))
+  })
 })

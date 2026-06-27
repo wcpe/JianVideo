@@ -277,6 +277,31 @@ export const handlers = [
     return HttpResponse.json({ items })
   }),
 
+  // ─── 最近查看（FR-120）────────────────────────────────
+
+  // 记录媒体查看：把 last_viewed_at 置为当前时间（不存在 → 404）
+  http.put('*/api/library/media/:id/viewed', async ({ params }) => {
+    await delay(80)
+    const id = Number(params.id)
+    const file = mediaFiles.find(m => m.id === id)
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+    }
+    file.last_viewed_at = new Date().toISOString()
+    return HttpResponse.json({ ok: true })
+  }),
+
+  // 最近查看列表：last_viewed_at 非空、未软删，按 last_viewed_at 倒序
+  http.get('*/api/library/recently-viewed', async ({ request }) => {
+    await delay(100)
+    const limit = Number(new URL(request.url).searchParams.get('limit') || '12')
+    const items = mediaFiles
+      .filter(m => !deletedMediaIds.has(m.id) && !!m.last_viewed_at)
+      .sort((a, b) => (b.last_viewed_at ?? '').localeCompare(a.last_viewed_at ?? ''))
+      .slice(0, limit)
+    return HttpResponse.json({ items })
+  }),
+
   // 编码协商（FR-53）：默认返回 h264/TS 描述符，使既有播放流程沿用 master 探测；
   // 需要 fMP4 路径的用例在测试中用 server.use 覆盖。
   http.post('*/api/play/:id/negotiate', async ({ params }) => {

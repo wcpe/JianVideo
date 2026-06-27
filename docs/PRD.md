@@ -209,6 +209,7 @@
 - **AC-21**（FR-117，需用户确认）：根路由 `/` 渲染「概览」数据看板——KPI（媒体总数 + 视频/图片拆分、视频总时长、占用空间、媒体库数、相册数）、媒体构成与各库分布、观看概览（可跳 `/stats`）、系统状态、任务队列、继续观看；空库时各卡显示零值而非报错。`GET /api/library/summary` 单次聚合返回 total/video_count/image_count/total_size/total_duration/library_count/by_library。
 - **AC-22**（FR-118，需用户确认）：`/stats` 顶部「观看 / 媒体」两 tab 可切换并经 `?tab=` 记忆；观看 tab 含已看/未看/追看中当前值卡 + 观看活跃趋势折线 + 既有续播热力/各库各格式分布/Top 榜；媒体 tab 含媒体总数/视频/图片/总时长/占用当前值卡 + 媒体增长与累计容量/时长折线 + 媒体构成；折线可 hover 显示精确值；空库整页空态、空趋势显占位不报错。`GET /api/library/trends` 返回按天新增媒体序列（date/count/size/duration，升序）。
 - **AC-23**（FR-119，需用户确认）：`/monitor` 展示 CPU/内存/磁盘/转码并发当前值卡 + 时序折线（range 1h/24h/7d 可切、折线可 hover 看精确值），刚启动无样本时显占位不报错；导航「系统」组含「监控」入口。`GET /api/system/metrics?range=` 由后台采样器（15s 周期、SQLite `metric_samples`、7 天保留）下采样返回 points + current 快照。
+- **AC-24**（FR-120，需用户确认）：`/timeline` 右侧时间标尺鼠标 hover（非仅拖动）即在指针处弹出该时段日期 + 数量 + 缩略图预览，点击/松手跳转该分组；缩放支持年/月/日/所有；顶部展示「最近查看」（有数据横向卡片流可点击进入、空则不渲染），打开媒体后其进入「最近查看」；多选/详情/批量既有交互不回归。`PUT /api/library/media/:id/viewed` 记录查看、`GET /api/library/recently-viewed` 倒序返回。
 
 ## 7. 分期（路线）
 
