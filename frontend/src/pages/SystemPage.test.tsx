@@ -476,6 +476,14 @@ describe('SystemPage', () => {
     const user = userEvent.setup()
     let rollbackCalled = false
     server.use(
+      // 有可回滚的上一版（.old 存在）→ 回滚按钮渲染（FIX-2）
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json({
+          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+          rollback_available: true,
+        }),
+      ),
       http.post('*/api/system/update/rollback', () => {
         rollbackCalled = true
         return HttpResponse.json({ status: 'rolling_back', message: '' })
@@ -508,6 +516,58 @@ describe('SystemPage', () => {
     await waitFor(() => {
       expect(rollbackCalled).toBe(true)
     })
+  })
+
+  it('更新下载网络失败时展示友好提示并引导配代理（FIX-1）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('*/api/system/update/apply', () =>
+        HttpResponse.json(
+          { code: 'UPDATE_FAILED', message: '更新失败：下载失败: Get "https://github.com/wcpe/JianVideo/releases/download/v0.17.0/jianvideo-windows-amd64.exe": read tcp 192.168.31.123:2946->140.82.112.4:443: wsarecv: A connection attempt failed because the connected party did not properly respond' },
+          { status: 500 },
+        ),
+      ),
+    )
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '立即更新并重启' })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: '立即更新并重启' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认更新' }))
+
+    // 展示友好提示 + 引导去「设置→网络」配代理，且不回显裸 wsarecv 技术串
+    await waitFor(() => {
+      expect(screen.getByText(/设置 → 网络/)).toBeVisible()
+    })
+    expect(screen.queryByText(/wsarecv/)).toBeNull()
+  })
+
+  it('无可回滚版本（rollback_available=false）时隐藏回滚按钮（FIX-2）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json({
+          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+          rollback_available: false,
+        }),
+      ),
+    )
+    renderPage()
+    await screen.findByText('0.3.0')
+
+    await user.click(screen.getByRole('tab', { name: '应用更新' }))
+    await user.click(screen.getByRole('button', { name: '检查更新' }))
+    // 检查结果已渲染（最新版本可见），但回滚按钮不应出现
+    await waitFor(() => {
+      expect(screen.getByText('v0.6.3')).toBeVisible()
+    })
+    expect(screen.queryByRole('button', { name: /回滚到上一版/ })).toBeNull()
   })
 
   it('更新进行中轮询进度端点并展示下载进度条与百分比（FR-90）', async () => {

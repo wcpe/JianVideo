@@ -409,6 +409,8 @@ export interface UpdateCheckResult {
   channel: 'stable' | 'prerelease'
   notes: string
   asset_name: string
+  /** 是否存在可回滚的上一版（.old 备份），用于回滚按钮显隐（FIX-2） */
+  rollback_available?: boolean
 }
 
 // 自更新下载进度（FR-90）：前端轮询 GET /api/system/update/progress 展示进度条

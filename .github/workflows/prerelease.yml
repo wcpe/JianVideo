@@ -14,10 +14,10 @@ permissions:
   contents: write
 
 jobs:
-  # 预发布版本号 = 上个正式版 tag 的下一修订号 + dev + 短 SHA。
-  # 不用 VERSION 文件：VERSION 是「已发布版本」真源，发版后不上抬，直接拼 dev 会得到
-  # 形如 0.7.0-dev 的预发布——它在语义化版本里小于已发布的 0.7.0（即比正式版还旧）。
-  # 改为基于最新正式版 tag 自增修订号，dev 始终领先于上个正式版（如 v0.7.0 → 0.7.1-dev.<sha>）。
+  # 预发布版本号 = max(最新正式版 tag, VERSION 文件) 的下一修订号 + dev + 短 SHA（FIX-3）。
+  # 取 tag 与 VERSION 中较高者自增：既保证 dev 始终领先于上个正式版（不倒挂），
+  # 又不因版本 tag 未推送到远端而偏低（dev 跟随 VERSION 文件，解耦 tag 推送时机）。
+  # 推导逻辑收敛到 scripts/dev-version.sh（带本地测试 scripts/dev-version_test.sh），CI 与本地一致。
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -25,16 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 取全部 tag 供 git describe 推导下一个版本号（默认浅克隆无 tag）。
+          # 取全部 tag 供 git describe 推导（默认浅克隆无 tag）。
           fetch-depth: 0
       - id: ver
-        name: 生成预发布版本号（最新正式版 tag 的下一修订号 + dev + 短 SHA）
+        name: 生成预发布版本号（max(最新正式版 tag, VERSION) 的下一修订号 + dev + 短 SHA）
         run: |
-          latest="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo v0.0.0)"
-          base="${latest#v}"
-          IFS=. read -r major minor patch <<< "$base"
-          next="${major}.${minor}.$((patch + 1))"
-          echo "version=${next}-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          base="$(bash scripts/dev-version.sh)"
+          echo "version=${base}-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   # 复用构建工作流产出各平台二进制工件。
   build:

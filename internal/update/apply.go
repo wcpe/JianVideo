@@ -50,6 +50,12 @@ func landBinary(exePath, newPath string) error {
 	return nil
 }
 
+// rollbackAvailableAt 报告 exePath 是否存在 .old 备份（可回滚，FIX-2）。
+func rollbackAvailableAt(exePath string) bool {
+	_, err := os.Stat(exePath + oldSuffix)
+	return err == nil
+}
+
 // rollback 用 .old 备份恢复上一版并重启。
 func rollback() error {
 	exe, err := os.Executable()
@@ -57,7 +63,7 @@ func rollback() error {
 		return fmt.Errorf("定位当前可执行文件失败: %w", err)
 	}
 	old := exe + oldSuffix
-	if _, err := os.Stat(old); err != nil {
+	if !rollbackAvailableAt(exe) {
 		return fmt.Errorf("无可回滚的旧版本")
 	}
 	failed := exe + ".failed"

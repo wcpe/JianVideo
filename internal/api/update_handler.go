@@ -43,6 +43,8 @@ func (h *Handler) CheckUpdate(c *gin.Context) {
 		})
 		return
 	}
+	// 实时计算「是否可回滚」（不入缓存，避免 .old 状态过期），供前端决定回滚按钮显隐（FIX-2）
+	res.RollbackAvailable = h.updateSvc.RollbackAvailable()
 	c.JSON(http.StatusOK, res)
 }
 

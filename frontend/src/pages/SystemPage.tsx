@@ -150,6 +150,20 @@ function updateCheckErrorMessage(err: unknown): string {
   return UPDATE_CHECK_FALLBACK
 }
 
+// 更新（检查/下载/应用）网络类失败特征：直连 GitHub 常见的超时、连接失败、DNS、连接重置等。
+const UPDATE_NETWORK_ERR_RE = /下载失败|超时|timeout|wsarecv|wsasend|dial|connection|connect|refused|reset|EOF|no such host|did not properly respond|网络不可达|网络异常|i\/o timeout/i
+
+/**
+ * friendlyUpdateError 把更新的网络类失败映射为友好文案并引导配置代理（FIX-1）；
+ * 非网络类错误原样返回。国内直连 GitHub 下载 CDN 常超时，配置出站代理（FR-80）可解。
+ */
+function friendlyUpdateError(raw: string): string {
+  if (UPDATE_NETWORK_ERR_RE.test(raw)) {
+    return '更新失败：连接 GitHub 超时或网络不可达。国内直连 GitHub 下载常被限速或阻断，可在「设置 → 网络」配置出站代理后重试。'
+  }
+  return raw
+}
+
 /** 系统诊断页：展示运行环境、FFmpeg/硬件加速信息，并支持编解码器测试 */
 export default function SystemPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null)
@@ -321,7 +335,7 @@ export default function SystemPage() {
       await waitForRestart('更新')
     } catch (err) {
       stopProgressPoll()
-      setUpdateError(extractErrorMessage(err, '更新失败'))
+      setUpdateError(friendlyUpdateError(extractErrorMessage(err, '更新失败')))
       setApplyFailed(true)
       setUpdateBusy(false)
     }
@@ -624,14 +638,17 @@ export default function SystemPage() {
               >
                 立即更新并重启
               </Button>
-              <Button
-                variant="default"
-                leftSection={<IconArrowBackUp size={16} />}
-                onClick={rollbackModal.open}
-                disabled={updateBusy}
-              >
-                回滚到上一版
-              </Button>
+              {/* 仅当存在可回滚的上一版（.old 备份）时显示回滚按钮（FIX-2） */}
+              {updateInfo.rollback_available && (
+                <Button
+                  variant="default"
+                  leftSection={<IconArrowBackUp size={16} />}
+                  onClick={rollbackModal.open}
+                  disabled={updateBusy}
+                >
+                  回滚到上一版
+                </Button>
+              )}
             </Group>
           </Stack>
             ) : (

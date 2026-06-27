@@ -4,6 +4,13 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 修复
+- **无可回滚版本时仍显示回滚按钮（FR-46）**：系统页「应用更新」的「回滚到上一版」按钮此前恒显示，但仅当存在上一版备份（`.old`）时回滚才有效——无备份时点按钮会失败报「无可回滚的旧版本」。后端 `update.Service` 新增 `RollbackAvailable()`（探测 `os.Executable()+".old"` 是否存在，纯函数 `rollbackAvailableAt` 便于单测），更新检查响应（`CheckResult`）新增实时计算的 `rollback_available` 字段（不入缓存，避免 `.old` 状态过期）；前端据此条件渲染回滚按钮（无备份则不显示）。新增 `TestRollbackAvailableAt` 与 SystemPage「无回滚版本隐藏按钮」断言。
+- **更新下载失败回显裸技术错误、未引导配代理（FR-46/FR-80）**：自更新下载/应用失败时前端直接回显底层串（如 `wsarecv: A connection attempt failed...`），用户无从下手。新增前端 `friendlyUpdateError`：将网络类失败（超时/连接失败/DNS/重置等）映射为友好文案并引导「可在 设置 → 网络 配置出站代理后重试」（国内直连 GitHub 下载 CDN 常超时；全局代理 FR-80 本就覆盖更新下载，配上即可）。新增 SystemPage「下载网络失败展示友好提示并引导配代理」断言。
+- **预发布 dev 版本号偏低（FR-48）**：`prerelease.yml` 此前仅按远端 `git describe` 最新 tag 自增推导 dev 号，版本 tag 未推全时偏低（如已发 0.17.0 仍显示 `0.15.1-dev`，且在线更新页「最新版本」反比当前版本旧、令人困惑）。改为取 `max(最新正式版 tag, VERSION 文件)` 的下一修订号作 dev 基线——dev 跟随 VERSION 文件、解耦 tag 推送时机，且仍领先于上个正式版（不倒挂）。推导逻辑收敛到 `scripts/dev-version.sh`（带 `scripts/dev-version_test.sh` 本地测试，CI 与本地一致）。注：在线更新「误把更旧版本报为可更新」已于 v0.17.0（FR-46 基线比较）修复。
+
 ## 0.17.0（2026-06-27）
 
 ### 新增

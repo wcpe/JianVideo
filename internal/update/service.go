@@ -55,6 +55,8 @@ type CheckResult struct {
 	Channel    Channel `json:"channel"`
 	Notes      string  `json:"notes"`
 	AssetName  string  `json:"asset_name"`
+	// RollbackAvailable 是否存在可回滚的上一版（.old 备份），供前端决定回滚按钮显隐（FIX-2）
+	RollbackAvailable bool `json:"rollback_available"`
 }
 
 // cachedCheck 一条按频道缓存的检测结果及其写入时间。
@@ -297,4 +299,13 @@ func (s *Service) Apply(ctx context.Context, current, channel string) error {
 // Rollback 回滚到上一版（.old 备份）并重启。
 func (s *Service) Rollback() error {
 	return rollback()
+}
+
+// RollbackAvailable 报告当前是否有可回滚的上一版（.old 备份存在，FIX-2）。
+func (s *Service) RollbackAvailable() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return rollbackAvailableAt(exe)
 }

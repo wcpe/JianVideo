@@ -659,6 +659,7 @@ export const handlers = [
       channel,
       notes: '示例发布说明',
       asset_name: 'jianvideo-linux-amd64',
+      rollback_available: false,
     })
   }),
   http.post('*/api/system/update/apply', async () => {

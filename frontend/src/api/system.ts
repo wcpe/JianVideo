@@ -163,6 +163,7 @@ async function mockCheckUpdate(channel: string, _force = false): Promise<UpdateC
     channel: prerelease ? 'prerelease' : 'stable',
     notes: '示例发布说明：修复若干问题。',
     asset_name: 'jianvideo-linux-amd64',
+    rollback_available: false,
   }
 }
 

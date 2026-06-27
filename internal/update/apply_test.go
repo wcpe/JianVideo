@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+// TestRollbackAvailableAt 校验「是否可回滚」判定：仅当 .old 备份存在时为真（FIX-2）。
+func TestRollbackAvailableAt(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "app.exe")
+	if err := os.WriteFile(exe, []byte("cur"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rollbackAvailableAt(exe) {
+		t.Error("无 .old 备份时应不可回滚")
+	}
+	if err := os.WriteFile(exe+oldSuffix, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !rollbackAvailableAt(exe) {
+		t.Error("有 .old 备份时应可回滚")
+	}
+}
+
 // TestLandBinary_PersistsNewContent 复现「重启后失效」根因：
 // 落地后 exePath 的磁盘内容必须等于新二进制内容（持久化正确），
 // 且旧内容应备份到 .old。这是自更新「重启仍为新版」的前提。
