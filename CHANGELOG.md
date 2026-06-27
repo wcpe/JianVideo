@@ -6,6 +6,8 @@
 
 ## 未发布
 
+## 0.19.0（2026-06-27）
+
 ### 新增
 - **运行环境区块「复制」按钮（FR-113 后续增强）**：系统页「运行环境」tab 的「运行环境」卡片头部新增复制按钮（与编解码「复制结果」同风格，`useClipboard`、复制后绿勾 + 「已复制」文案）。点击把当前展示的运行环境字段（应用版本/操作系统/架构/CPU/主机名/Go 版本/运行时信息/FFmpeg 等）拼成纯文本报告（`buildEnvReport`）写入剪贴板，便于反馈环境信息。纯前端、无新依赖、无新 ADR。`SystemPage.test.tsx` 加按钮存在、点击写入剪贴板且报告含关键字段断言。机制见 [docs/specs/console-flat-tabs-anchor-nav.md](docs/specs/console-flat-tabs-anchor-nav.md)。
 - **左侧导航可拖拽调宽（FR-115 扩展，扩 FR-54）**：navbar 右边缘新增拖拽手柄（窄竖条，hover 出品牌紫提示条、`col-resize` 光标），拖动调整**展开态**宽度并夹紧 **160–360px**，宽度持久化到 `localStorage`（键 `jianvideo.nav.width`）、刷新后保留。新增 `useNavWidth` hook（与 `useNavCollapsed` 同风格，含纯函数 `clampNavWidth` 夹紧/取整/非有限数兜底）；展开态宽度此前固定 180px，改为读 `useNavWidth`（默认值仍取 180）。仅展开态生效——收缩态固定 64px 图标态、移动端抽屉均不受拖拽影响；拖拽过程关闭 navbar 宽度过渡动画避免卡顿，`prefers-reduced-motion` 下手柄提示条过渡关闭。纯前端、无新依赖、无新 ADR。新增 `useNavWidth.test.ts`（夹紧/持久化/越界），`AppLayout.test.tsx` 加拖拽手柄存在、模拟拖拽更新宽度与持久化、收缩态无手柄断言。机制见 [docs/specs/nav-interaction.md](docs/specs/nav-interaction.md)。
