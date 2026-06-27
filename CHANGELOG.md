@@ -6,17 +6,18 @@
 
 ## 未发布
 
+## 0.18.0（2026-06-27）
+
 ### 新增
 - **页眉刷新按钮（FR-114）**：全局页眉新增刷新按钮（`IconRefresh`，无障碍名「刷新当前页面」），点击仅重载当前路由页面的内容数据——不整页 `reload`、不重载导航/页眉、不重置登录态。机制：`AppLayout` 持 `refreshNonce` 状态，刷新按钮自增之；`AppShell.Main` 内主内容区包裹元素 key 由 `${pathname}:${refreshNonce}` 组成，序号变化使当前路由内容区重挂载、重跑各页数据拉取副作用（导航/页眉在 Main 之外不受影响，登录态由 store/Cookie 持有不触动）。与 FR-67 时间轴页内刷新并存。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：刷新按钮存在、点击使内容区重挂载且登录态不变、不触发路由跳转。机制见 [docs/specs/header-refresh.md](docs/specs/header-refresh.md)。
 
 ### 变更
+- **系统/设置页改一级 tab + 每 tab 左侧锚点导航（FR-113）**：控制台页（`ConsolePage`）去掉「系统信息 / 设置」两级 tab，拍平为一级 tab——运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置（「设置」并入为同级 tab）。`SystemPage` 改为按 `section` 渲染单个区块（不再有内层 tab），`ConsolePage` 以新式 `?tab=env|hwaccel|codec|update|settings` 控制选中并**向后兼容旧深链**（`?tab=system&sys=update`、`?tab=settings` 仍能正确定位）；页眉 `UpdateIndicator` 跳转改 `?tab=update`。新增通用组件 `AnchorNav`（`IntersectionObserver` 观测区块、滚动高亮当前，点击 `scrollIntoView` 平滑定位），运行环境 tab（运行环境/FFmpeg）与设置 tab（账户安全/扫描/网络/工具路径/回收站/诊断/环境变量）各配左侧锚点列。纯前端、无新依赖、无新 ADR。新增 `AnchorNav.test.tsx`，重写 `ConsolePage.test.tsx`/`SystemPage.test.tsx` 覆盖一级 tab 与旧深链兼容。
+- **应用更新面板单按钮化 + 缓存优先不自动联网（FR-112）**：「应用更新」区块把「检查更新（走缓存）」「获取更新（强制）」两个按钮合并为**单个「检查更新」按钮**，点击 = `force` 强制直连重查 GitHub。进入「应用更新」tab 时**仅展示上次本地缓存**——有缓存直接显示缓存版本与发布说明、无缓存则不显示更新区，**进入不自动联网**（去掉原「进入即后台 force=false 刷新」逻辑，缓解直连 GitHub 慢拖累页面）；执行更新成功后清理该频道本地缓存（新增 `update-cache.ts` 的 `clearCachedUpdate`），下次进入需重新点检查更新强制重拉。页眉 `UpdateIndicator` 提示逻辑不变、缓存契约兼容。纯前端、无新依赖、无新 ADR。`update-cache.test.ts` 加 `clearCachedUpdate` 用例，`SystemPage.test.tsx` 更新区断言改为单按钮 force / 无缓存不显示 / 有缓存不联网 / 更新成功清缓存。
 - **导航交互完善（FR-115）**：左侧导航的「展开/收缩」按钮由 navbar 顶部移到底部右下角；点击顶栏 logo 改为切换导航展开/收缩并持久化（`localStorage`），**移除 logo「点击回首页」**——回首页改由导航「时间轴」项（`/`）进入；补齐所有导航项的 hover 背景与过渡态（非激活项也有可见浅底 + 平滑过渡，复用 `--mantine-color-default-hover` 设计 token，激活项保持品牌紫浅底不被覆盖，`prefers-reduced-motion` 下过渡关闭）。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：收缩按钮居底、点 logo 切换收展且持久化、「时间轴」指向首页、导航项带 hover 类。机制见 [docs/specs/nav-interaction.md](docs/specs/nav-interaction.md)。
 
 ### 修复
 - **测试版频道「一直有更新」（FR-46/FR-48）**：dev 版本号策略此前取 `max(最新 tag, VERSION)` 的**下一修订号**，使发完正式版（如 0.17.1）后 dev 恒为 `0.17.2-dev.<SHA>`——主干无新提交也凭空高一位；后端 `hasUpdate` 同基线判定按短 SHA 比较（`pre != pre`），每次 push main 重建 dev 即误报「有更新」。本次两端同修：① dev 版本号改为 `<最新正式版 tag 基线>-dev.<提交距离>.g<短SHA>`（基线不再 +1，提交距离 = `git rev-list --count <tag>..HEAD` 反映真实主干），提交距离为 0（发完正式版无新提交）时 `scripts/dev-version.sh` 退出码非 0、`prerelease.yml` 据此跳过发布；② 后端同基线更新判定改按「提交距离序号」比较——仅序号增大（主干真有新提交）才提示，短 SHA churn 不误报，旧格式 dev 走保守兜底。新增 `TestHasUpdate_PrereleaseSameBaselineCompareBySeq`、`TestCheck_PrereleaseSeqNoChurn`、`TestCheck_PrereleaseAfterStableReleaseNoNewCommit` 及更新后的 `scripts/dev-version_test.sh` 守护。决策见 ADR-0042（扩展 ADR-0032）。真实发布链路端到端「发版后频道不再误报」待真机验。
-### 变更
-- **系统/设置页改一级 tab + 每 tab 左侧锚点导航（FR-113）**：控制台页（`ConsolePage`）去掉「系统信息 / 设置」两级 tab，拍平为一级 tab——运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置（「设置」并入为同级 tab）。`SystemPage` 改为按 `section` 渲染单个区块（不再有内层 tab），`ConsolePage` 以新式 `?tab=env|hwaccel|codec|update|settings` 控制选中并**向后兼容旧深链**（`?tab=system&sys=update`、`?tab=settings` 仍能正确定位）；页眉 `UpdateIndicator` 跳转改 `?tab=update`。新增通用组件 `AnchorNav`（`IntersectionObserver` 观测区块、滚动高亮当前，点击 `scrollIntoView` 平滑定位），运行环境 tab（运行环境/FFmpeg）与设置 tab（账户安全/扫描/网络/工具路径/回收站/诊断/环境变量）各配左侧锚点列。纯前端、无新依赖、无新 ADR。新增 `AnchorNav.test.tsx`，重写 `ConsolePage.test.tsx`/`SystemPage.test.tsx` 覆盖一级 tab 与旧深链兼容。
-- **应用更新面板单按钮化 + 缓存优先不自动联网（FR-112）**：「应用更新」区块把「检查更新（走缓存）」「获取更新（强制）」两个按钮合并为**单个「检查更新」按钮**，点击 = `force` 强制直连重查 GitHub。进入「应用更新」tab 时**仅展示上次本地缓存**——有缓存直接显示缓存版本与发布说明、无缓存则不显示更新区，**进入不自动联网**（去掉原「进入即后台 force=false 刷新」逻辑，缓解直连 GitHub 慢拖累页面）；执行更新成功后清理该频道本地缓存（新增 `update-cache.ts` 的 `clearCachedUpdate`），下次进入需重新点检查更新强制重拉。页眉 `UpdateIndicator` 提示逻辑不变、缓存契约兼容。纯前端、无新依赖、无新 ADR。`update-cache.test.ts` 加 `clearCachedUpdate` 用例，`SystemPage.test.tsx` 更新区断言改为单按钮 force / 无缓存不显示 / 有缓存不联网 / 更新成功清缓存。
 - **路由切换整页淡入（FIX-2）**：此前 `App.tsx` 用 `<RouteTransition>` 包住整个 `<Routes>`，路由切换时左侧导航与页眉随主内容一起淡入/闪动。将淡入容器（`.route-fade`）下移到 `AppLayout` 的 `AppShell.Main` 内，仅以路径为 key 重挂载主内容区——导航栏与页眉位于 Main 之外，不再跟随淡入；`prefers-reduced-motion` 兜底保留。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：淡入容器仅含主内容、不含导航栏与页眉入口。
 
 ## 0.17.1（2026-06-27）
