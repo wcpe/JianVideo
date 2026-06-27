@@ -33,6 +33,9 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# 备份文件（不入库）
+*.bak
+
 # 过程性文档与临时文件（不入库）
 /.tmp/
 
