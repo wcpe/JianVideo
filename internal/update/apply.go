@@ -25,19 +25,29 @@ func replaceAndRestart(newPath string) error {
 	if err != nil {
 		return fmt.Errorf("定位当前可执行文件失败: %w", err)
 	}
-	old := exe + oldSuffix
+	if err := landBinary(exe, newPath); err != nil {
+		return err
+	}
+	return spawnAndExit(exe)
+}
+
+// landBinary 把 newPath 的新二进制落地到 exePath：先把原 exe 备份为 .old，再把新文件移到原路径。
+// 落地失败即就地回退（用 .old 恢复）。抽成纯文件操作（不含 os.Executable / 进程启动），便于单测
+// 断言「落地后 exePath 内容 = 新二进制」（持久化正确，重启后仍为新版）。
+func landBinary(exePath, newPath string) error {
+	old := exePath + oldSuffix
 	_ = os.Remove(old) // 清理上一次备份（若有）
-	if err := os.Rename(exe, old); err != nil {
+	if err := os.Rename(exePath, old); err != nil {
 		return fmt.Errorf("备份当前二进制失败: %w", err)
 	}
-	if err := moveFile(newPath, exe); err != nil {
-		_ = os.Rename(old, exe) // 落地失败即就地回退
+	if err := moveFile(newPath, exePath); err != nil {
+		_ = os.Rename(old, exePath) // 落地失败即就地回退
 		return fmt.Errorf("落地新二进制失败: %w", err)
 	}
 	if runtime.GOOS != "windows" {
-		_ = os.Chmod(exe, 0o755)
+		_ = os.Chmod(exePath, 0o755)
 	}
-	return spawnAndExit(exe)
+	return nil
 }
 
 // rollback 用 .old 备份恢复上一版并重启。
@@ -84,24 +94,44 @@ func spawnAndExit(exe string) error {
 }
 
 // moveFile 移动文件，跨设备 rename 失败时退化为复制 + 删除。
+// 注意：复制完成后必须先关闭 src 句柄再删除——Windows 下文件被本进程打开时无法删除，
+// 若用 defer 关闭，os.Remove(src) 会在句柄仍开时执行而失败，进而让跨卷落地整体失败、
+// 触发上层回退到旧二进制（即「在线更新重启后失效」的根因）。
 func moveFile(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
+	return copyAndRemove(src, dst)
+}
+
+// copyAndRemove 复制 src 到 dst 后删除 src（moveFile 的跨卷退化路径，独立便于直测）。
+func copyAndRemove(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
 	out, err := os.Create(dst)
 	if err != nil {
+		in.Close()
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		in.Close()
+		return err
+	}
+	// 先刷盘再关闭，保证新二进制完整落地到磁盘（重启后仍是新版）。
+	if err := out.Sync(); err != nil {
+		out.Close()
+		in.Close()
 		return err
 	}
 	if err := out.Close(); err != nil {
+		in.Close()
+		return err
+	}
+	// 关键：删除源前先关闭 src 句柄，否则 Windows 下删除失败导致整体落地失败。
+	if err := in.Close(); err != nil {
 		return err
 	}
 	return os.Remove(src)
