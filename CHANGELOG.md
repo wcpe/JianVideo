@@ -6,6 +6,9 @@
 
 ## 未发布
 
+### 变更
+- **导航交互完善（FR-115）**：左侧导航的「展开/收缩」按钮由 navbar 顶部移到底部右下角；点击顶栏 logo 改为切换导航展开/收缩并持久化（`localStorage`），**移除 logo「点击回首页」**——回首页改由导航「时间轴」项（`/`）进入；补齐所有导航项的 hover 背景与过渡态（非激活项也有可见浅底 + 平滑过渡，复用 `--mantine-color-default-hover` 设计 token，激活项保持品牌紫浅底不被覆盖，`prefers-reduced-motion` 下过渡关闭）。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：收缩按钮居底、点 logo 切换收展且持久化、「时间轴」指向首页、导航项带 hover 类。机制见 [docs/specs/nav-interaction.md](docs/specs/nav-interaction.md)。
+
 ### 修复
 - **测试版频道「一直有更新」（FR-46/FR-48）**：dev 版本号策略此前取 `max(最新 tag, VERSION)` 的**下一修订号**，使发完正式版（如 0.17.1）后 dev 恒为 `0.17.2-dev.<SHA>`——主干无新提交也凭空高一位；后端 `hasUpdate` 同基线判定按短 SHA 比较（`pre != pre`），每次 push main 重建 dev 即误报「有更新」。本次两端同修：① dev 版本号改为 `<最新正式版 tag 基线>-dev.<提交距离>.g<短SHA>`（基线不再 +1，提交距离 = `git rev-list --count <tag>..HEAD` 反映真实主干），提交距离为 0（发完正式版无新提交）时 `scripts/dev-version.sh` 退出码非 0、`prerelease.yml` 据此跳过发布；② 后端同基线更新判定改按「提交距离序号」比较——仅序号增大（主干真有新提交）才提示，短 SHA churn 不误报，旧格式 dev 走保守兜底。新增 `TestHasUpdate_PrereleaseSameBaselineCompareBySeq`、`TestCheck_PrereleaseSeqNoChurn`、`TestCheck_PrereleaseAfterStableReleaseNoNewCommit` 及更新后的 `scripts/dev-version_test.sh` 守护。决策见 ADR-0042（扩展 ADR-0032）。真实发布链路端到端「发版后频道不再误报」待真机验。
 ### 变更

@@ -131,6 +131,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           gap={8}
           p="xs"
           justify={collapsed ? 'center' : undefined}
+          className="nav-link"
           style={{
             borderRadius: 'var(--mantine-radius-sm)',
             cursor: 'pointer',
@@ -214,8 +215,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               aria-label="导航菜单"
               hiddenFrom="sm"
             />
-            {/* 品牌标志（FR-95 放大 logo）：图标加大并以紫浅底圆框托底，提对比、增品牌存在感 */}
-            <Link to="/" style={{ textDecoration: 'none' }}>
+            {/* 品牌标志（FR-95 放大 logo；FR-115 点击切换导航收展）：
+                点击 logo 切换左侧导航展开/收缩（不再回首页，回首页改走「时间轴」导航项）。 */}
+            <UnstyledButton
+              onClick={toggleNavCollapsed}
+              aria-label={navCollapsed ? '展开导航' : '收起导航'}
+              title={navCollapsed ? '展开导航' : '收起导航'}
+            >
               <Group gap={8}>
                 <Group
                   justify="center"
@@ -233,7 +239,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   JianVideo
                 </Text>
               </Group>
-            </Link>
+            </UnstyledButton>
           </Group>
 
           <Group gap="sm">
@@ -306,9 +312,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </Drawer>
 
       <AppShell.Navbar p="xs" visibleFrom="sm" data-collapsed={effectiveCollapsed}>
-        {/* 收缩 / 展开切换按钮（FR-54，FR-95 入口前移）：置于 navbar 顶部更易发现，
-            随状态切换图标与无障碍标签 */}
-        <Group justify={navCollapsed ? 'center' : 'flex-end'} mb="xs">
+        {/* 导航列表滚动区：navbar 为定高 flex 列，列表项多 + 视口矮时会溢出。
+            flex:1 占据中间剩余高度、minHeight:0 允许收缩到内容以下、overflowY:auto 触发内部滚动，
+            从而顶部收起按钮与底部版本/协议常驻、中间列表可纵向滚动（修复导航栏无法滚动） */}
+        <Stack gap="xs" data-testid="nav-scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
+          {renderNavGroups(undefined, effectiveCollapsed)}
+        </Stack>
+        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于 navbar 底部，适配有效收缩态 */}
+        {renderVersionLicense(effectiveCollapsed)}
+        {/* 收缩 / 展开切换按钮（FR-54；FR-115 移至底部右下角）：置于 navbar 最底部并靠右下，
+            随状态切换图标与无障碍标签；收缩态居中兜底避免 64px 内破版。
+            影院态（FR-85）下 navCollapsed 仍为持久态语义，故按钮文案/图标按 navCollapsed 判定 */}
+        <Group justify={effectiveCollapsed ? 'center' : 'flex-end'} mt="xs">
           <ActionIcon
             variant="subtle"
             color="gray"
@@ -319,15 +335,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {navCollapsed ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
           </ActionIcon>
         </Group>
-        {/* 导航列表滚动区：navbar 为定高 flex 列，列表项多 + 视口矮时会溢出。
-            flex:1 占据中间剩余高度、minHeight:0 允许收缩到内容以下、overflowY:auto 触发内部滚动，
-            从而顶部收起按钮与底部版本/协议常驻、中间列表可纵向滚动（修复导航栏无法滚动） */}
-        <Stack gap="xs" data-testid="nav-scroll-area" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          {/* 分组导航（FR-83）：随有效收缩态（持久收缩 或 影院态，FR-85）切换展开/收缩态渲染 */}
-          {renderNavGroups(undefined, effectiveCollapsed)}
-        </Stack>
-        {/* 版本号 + 「开源协议」入口（FR-61）：取代原页脚，置于 navbar 底部，适配有效收缩态 */}
-        {renderVersionLicense(effectiveCollapsed)}
       </AppShell.Navbar>
 
       {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}

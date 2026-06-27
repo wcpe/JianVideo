@@ -84,19 +84,19 @@ describe('AppLayout 收缩导航（FR-54）', () => {
     // 展开态导航名文字可见（侧边栏 + 抽屉各一份，至少一处）
     expect(screen.getAllByText('时间轴').length).toBeGreaterThan(0)
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'false')
-    // 默认应提供「收起导航」按钮
-    expect(screen.getByRole('button', { name: '收起导航' })).toBeInTheDocument()
+    // 默认应提供「收起导航」按钮（FR-115 后 logo 与 navbar 底部各一个同名按钮，限定 navbar 内断言）
+    expect(within(getNavbar()).getByRole('button', { name: '收起导航' })).toBeInTheDocument()
   })
 
   it('点切换按钮进入收缩态：navbar 收缩、桌面导航名文字隐藏、按钮 aria 切换', async () => {
     const user = userEvent.setup()
     renderLayout()
 
-    await user.click(screen.getByRole('button', { name: '收起导航' }))
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
     // 收缩态切换按钮变为「展开导航」
-    expect(screen.getByRole('button', { name: '展开导航' })).toBeInTheDocument()
+    expect(within(getNavbar()).getByRole('button', { name: '展开导航' })).toBeInTheDocument()
     // 桌面侧边栏导航名文字隐藏；移动端抽屉默认关闭不渲染，故文字应完全不在文档中
     expect(screen.queryByText('时间轴')).not.toBeInTheDocument()
   })
@@ -105,7 +105,7 @@ describe('AppLayout 收缩导航（FR-54）', () => {
     const user = userEvent.setup()
     renderLayout()
 
-    await user.click(screen.getByRole('button', { name: '收起导航' }))
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('1')
   })
@@ -116,7 +116,7 @@ describe('AppLayout 收缩导航（FR-54）', () => {
     renderLayout()
 
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
-    expect(screen.getByRole('button', { name: '展开导航' })).toBeInTheDocument()
+    expect(within(getNavbar()).getByRole('button', { name: '展开导航' })).toBeInTheDocument()
     expect(screen.queryByText('时间轴')).not.toBeInTheDocument()
   })
 
@@ -172,7 +172,7 @@ describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
     const user = userEvent.setup()
     renderLayout()
 
-    await user.click(screen.getByRole('button', { name: '收起导航' }))
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
     // 收缩态以「开源协议」无障碍标签的链接承载入口（图标态）
@@ -259,7 +259,7 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     const user = userEvent.setup()
     renderLayout()
 
-    await user.click(screen.getByRole('button', { name: '收起导航' }))
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     const navbar = getNavbar()
     expect(navbar).toHaveAttribute('data-collapsed', 'true')
@@ -539,7 +539,7 @@ describe('AppLayout 侧栏激活态 pill（FR-95）', () => {
     const user = userEvent.setup()
     renderLayoutAt('/albums')
 
-    await user.click(screen.getByRole('button', { name: '收起导航' }))
+    await user.click(within(getNavbar()).getByRole('button', { name: '收起导航' }))
 
     const navbar = getNavbar()
     expect(navbar).toHaveAttribute('data-collapsed', 'true')
@@ -574,7 +574,7 @@ describe('AppLayout 路由切换淡入范围（FIX-2）', () => {
   })
 })
 
-describe('AppLayout 收起导航入口前移（FR-95）', () => {
+describe('AppLayout 导航交互完善（FR-115）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -583,15 +583,61 @@ describe('AppLayout 收起导航入口前移（FR-95）', () => {
 
   const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
 
-  it('「收起导航」按钮位于 navbar 顶部（先于首个导航链接出现）', () => {
+  it('「收起导航」按钮位于 navbar 底部（晚于最后一个导航链接出现）', () => {
     renderLayout()
 
     const navbar = getNavbar()
     const collapseBtn = within(navbar).getByRole('button', { name: '收起导航' })
-    const firstNavLink = navbar.querySelector('a[href="/"]') as HTMLElement
+    const systemNavLink = navbar.querySelector('a[href="/system"]') as HTMLElement
 
-    // 文档顺序：收起按钮在第一个导航链接之前
-    const pos = collapseBtn.compareDocumentPosition(firstNavLink)
-    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 文档顺序：收起按钮在最后一个导航链接（系统）之后（底部）
+    const pos = collapseBtn.compareDocumentPosition(systemNavLink)
+    expect(pos & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  })
+
+  it('点击 logo 切换导航收缩态并持久化（不再回首页）', async () => {
+    const user = userEvent.setup()
+    renderLayout()
+
+    // logo 以「收起导航」无障碍标签的按钮承载（展开态）；点击后进入收缩态
+    const logoBtn = screen.getAllByRole('button', { name: '收起导航' })[0]
+    await user.click(logoBtn)
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('1')
+    // logo 不再触发路由跳转
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('点击 logo 再次切换可展开（两态切换）', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('jianvideo-nav-collapsed', '1')
+    renderLayout()
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'true')
+    // 收缩态 logo 标签为「展开导航」
+    const logoBtn = screen.getAllByRole('button', { name: '展开导航' })[0]
+    await user.click(logoBtn)
+
+    expect(getNavbar()).toHaveAttribute('data-collapsed', 'false')
+    expect(localStorage.getItem('jianvideo-nav-collapsed')).toBe('0')
+  })
+
+  it('「时间轴」导航项指向 / 首页（回首页入口）', () => {
+    renderLayout()
+
+    const navbar = getNavbar()
+    const timeline = within(navbar).getByRole('link', { name: '时间轴' })
+    expect(timeline).toHaveAttribute('href', '/')
+  })
+
+  it('所有导航项均带 hover 反馈类 nav-link（非激活项亦有可见 hover 背景）', () => {
+    renderLayoutAt('/browse')
+
+    const navbar = getNavbar()
+    // 11 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(11)
+    // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
+    expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1)
   })
 })

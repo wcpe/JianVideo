@@ -73,6 +73,15 @@ body {
   }
 }
 
+/* 左侧导航项 hover 反馈（FR-115）：非激活项 hover 出可见浅底 + 平滑过渡；
+   激活项（其外层 <a data-active>）保持品牌紫浅底，不被 hover 浅底覆盖。复用设计 token，不写死颜色。 */
+.nav-link {
+  transition: background-color 140ms ease, color 140ms ease;
+}
+a:not([data-active]) .nav-link:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
 /* 全局顶部加载条爬升动画（FR-96）：用于进度条「爬升中」阶段的脉冲微动 */
 @keyframes jianvideo-topbar-pulse {
   0% {
@@ -94,7 +103,8 @@ body {
   }
   .mantine-Card-root,
   .mantine-Button-root,
-  .mantine-NavLink-root {
+  .mantine-NavLink-root,
+  .nav-link {
     transition: none;
   }
   .mantine-Card-root:hover {
