@@ -548,6 +548,32 @@ describe('AppLayout 侧栏激活态 pill（FR-95）', () => {
   })
 })
 
+describe('AppLayout 路由切换淡入范围（FIX-2）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' })
+  })
+
+  const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement
+
+  it('淡入容器 .route-fade 仅包裹主内容区，不包含导航栏与页眉', () => {
+    renderLayout()
+
+    const fade = document.querySelector('.route-fade') as HTMLElement
+    // 淡入容器存在且包裹页面内容
+    expect(fade).not.toBeNull()
+    expect(within(fade).getByText('页面内容')).toBeInTheDocument()
+
+    // 导航栏（侧边栏）与页眉（含 logo）不在淡入容器内，避免随路由切换一起淡入/闪动
+    const navbar = getNavbar()
+    expect(fade.contains(navbar)).toBe(false)
+    // 页眉 logo 与命令面板入口均在淡入容器之外
+    const commandBtn = screen.getByRole('button', { name: '命令面板' })
+    expect(fade.contains(commandBtn)).toBe(false)
+  })
+})
+
 describe('AppLayout 收起导航入口前移（FR-95）', () => {
   beforeEach(() => {
     vi.clearAllMocks()

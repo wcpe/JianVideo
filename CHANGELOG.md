@@ -11,6 +11,7 @@
 ### 变更
 - **系统/设置页改一级 tab + 每 tab 左侧锚点导航（FR-113）**：控制台页（`ConsolePage`）去掉「系统信息 / 设置」两级 tab，拍平为一级 tab——运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置（「设置」并入为同级 tab）。`SystemPage` 改为按 `section` 渲染单个区块（不再有内层 tab），`ConsolePage` 以新式 `?tab=env|hwaccel|codec|update|settings` 控制选中并**向后兼容旧深链**（`?tab=system&sys=update`、`?tab=settings` 仍能正确定位）；页眉 `UpdateIndicator` 跳转改 `?tab=update`。新增通用组件 `AnchorNav`（`IntersectionObserver` 观测区块、滚动高亮当前，点击 `scrollIntoView` 平滑定位），运行环境 tab（运行环境/FFmpeg）与设置 tab（账户安全/扫描/网络/工具路径/回收站/诊断/环境变量）各配左侧锚点列。纯前端、无新依赖、无新 ADR。新增 `AnchorNav.test.tsx`，重写 `ConsolePage.test.tsx`/`SystemPage.test.tsx` 覆盖一级 tab 与旧深链兼容。
 - **应用更新面板单按钮化 + 缓存优先不自动联网（FR-112）**：「应用更新」区块把「检查更新（走缓存）」「获取更新（强制）」两个按钮合并为**单个「检查更新」按钮**，点击 = `force` 强制直连重查 GitHub。进入「应用更新」tab 时**仅展示上次本地缓存**——有缓存直接显示缓存版本与发布说明、无缓存则不显示更新区，**进入不自动联网**（去掉原「进入即后台 force=false 刷新」逻辑，缓解直连 GitHub 慢拖累页面）；执行更新成功后清理该频道本地缓存（新增 `update-cache.ts` 的 `clearCachedUpdate`），下次进入需重新点检查更新强制重拉。页眉 `UpdateIndicator` 提示逻辑不变、缓存契约兼容。纯前端、无新依赖、无新 ADR。`update-cache.test.ts` 加 `clearCachedUpdate` 用例，`SystemPage.test.tsx` 更新区断言改为单按钮 force / 无缓存不显示 / 有缓存不联网 / 更新成功清缓存。
+- **路由切换整页淡入（FIX-2）**：此前 `App.tsx` 用 `<RouteTransition>` 包住整个 `<Routes>`，路由切换时左侧导航与页眉随主内容一起淡入/闪动。将淡入容器（`.route-fade`）下移到 `AppLayout` 的 `AppShell.Main` 内，仅以路径为 key 重挂载主内容区——导航栏与页眉位于 Main 之外，不再跟随淡入；`prefers-reduced-motion` 兜底保留。纯前端、无新依赖、无新 ADR。`AppLayout.test.tsx` 加断言：淡入容器仅含主内容、不含导航栏与页眉入口。
 
 ## 0.17.1（2026-06-27）
 

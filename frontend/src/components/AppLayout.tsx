@@ -10,6 +10,7 @@ import { getSystemInfo } from '@/api/system'
 import ScanTaskIndicator from './ScanTaskIndicator'
 import UpdateIndicator from './UpdateIndicator'
 import CommandPalette, { type Command } from './CommandPalette'
+import RouteTransition from './RouteTransition'
 
 // 桌面导航展开 / 收缩两态的 navbar 宽度（像素）：收缩仅留图标，展开容纳图标 + 文字
 const NAVBAR_WIDTH_EXPANDED = 180
@@ -331,7 +332,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* 影院模式上下文（FR-85）：仅向页面内容下发本地态，让播放页可临时收起导航扩大视频区 */}
       <AppShell.Main>
-        <CinemaContext.Provider value={cinemaValue}>{children}</CinemaContext.Provider>
+        {/* 路由切换淡入（FR-96/FIX-2）：仅包裹主内容区，
+            以路径为 key 重挂载触发渐入；导航栏与页眉在 Main 之外，不跟随淡入/闪动 */}
+        <RouteTransition>
+          <CinemaContext.Provider value={cinemaValue}>{children}</CinemaContext.Provider>
+        </RouteTransition>
       </AppShell.Main>
 
       {/* 全局命令面板（FR-74）：Ctrl/Cmd+K 或 header 入口打开 */}

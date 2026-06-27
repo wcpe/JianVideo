@@ -3,7 +3,6 @@ import { MantineProvider, localStorageColorSchemeManager } from '@mantine/core'
 import { appTheme, themeCssVariablesResolver } from './theme'
 import { Notifications } from '@mantine/notifications'
 import AppLayout from './components/AppLayout'
-import RouteTransition from './components/RouteTransition'
 import TopProgressBar from './components/TopProgressBar'
 import ProtectedRoute from './components/ProtectedRoute'
 import RequireAnon from './components/RequireAnon'
@@ -43,8 +42,8 @@ export default function App() {
       <BrowserRouter>
         {/* 全局顶部加载条（FR-96）：路由切换时顶部进度反馈 */}
         <TopProgressBar />
-        {/* 路由切换过渡（FR-96）：以路径为 key 包裹页面，轻量渐入 */}
-        <RouteTransition>
+        {/* 路由切换过渡（FR-96/FIX-2）：淡入由 AppLayout 的 AppShell.Main 内部承接，
+            仅主内容区渐入，导航栏与页眉不跟随淡入/闪动 */}
         <Routes>
           {/* 首次初始化引导（FR-109）：系统无用户时配置账号密码，免登 */}
           <Route path="/setup" element={<RequireSetup><SetupPage /></RequireSetup>} />
@@ -74,7 +73,6 @@ export default function App() {
           <Route path="/licenses" element={<ProtectedRoute><AppLayout><LicensesPage /></AppLayout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </RouteTransition>
       </BrowserRouter>
     </MantineProvider>
   )
