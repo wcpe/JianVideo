@@ -154,6 +154,38 @@ func TestCheck_PrereleaseSameDevNoUpdate(t *testing.T) {
 	}
 }
 
+// TestCheck_PrereleaseSeqNoChurn 回归 FIX-1：dev 版本号采用 <基线>-dev.<提交距离>.g<SHA> 后，
+// ① 装上最新 dev 再检查不提示更新；② 仅短 SHA 改写（序号未变）不误报；③ 序号增大（主干新提交）仍提示。
+func TestCheck_PrereleaseSeqNoChurn(t *testing.T) {
+	// CI 列表：正式版 v0.17.1 + 滚动 dev（内嵌 0.17.1-dev.3.gabc1234）
+	s := mockService(t, devReleaseList("v0.17.1", "0.17.1-dev.3.gabc1234"), "", "")
+
+	// ① 当前即最新 dev → 无更新
+	if res, _ := s.Check(context.Background(), "0.17.1-dev.3.gabc1234", "prerelease", true); res.HasUpdate {
+		t.Errorf("装上最新 dev 不应提示更新，得到 %+v", res)
+	}
+	// ② 当前 dev 同序号、仅短 SHA 不同（历史改写）→ 不误报
+	if res, _ := s.Check(context.Background(), "0.17.1-dev.3.gold9999", "prerelease", true); res.HasUpdate {
+		t.Errorf("同序号仅短 SHA 不同不应误报更新，得到 %+v", res)
+	}
+	// ③ 当前 dev 序号更小（主干已新增提交，latest 序号更大）→ 提示更新
+	if res, _ := s.Check(context.Background(), "0.17.1-dev.1.gold1111", "prerelease", true); !res.HasUpdate {
+		t.Errorf("主干新提交（序号增大）应提示更新，得到 %+v", res)
+	}
+}
+
+// TestCheck_PrereleaseAfterStableReleaseNoNewCommit 回归 FIX-1 验收②：
+// 发布正式版后主干无新提交时，dev 预发布基线低于新正式版 → 测试版频道不提示 dev 更新。
+// （提交距离为 0 时 CI 不会重建 dev，旧 dev 仍指向上个基线，对已升到新正式版的用户即基线更低。）
+func TestCheck_PrereleaseAfterStableReleaseNoNewCommit(t *testing.T) {
+	// 已发布 v0.18.0，旧 dev 仍内嵌上个基线 0.17.1-dev.3.gabc1234（无新提交未重建）
+	s := mockService(t, devReleaseList("v0.18.0", "0.17.1-dev.3.gabc1234"), "", "")
+	// 用户已在正式版 0.18.0，测试版频道看到更旧基线的 dev → 不降级、不提示
+	if res, _ := s.Check(context.Background(), "0.18.0", "prerelease", true); res.HasUpdate {
+		t.Errorf("发完正式版且主干无新提交时不应提示 dev 更新，得到 %+v", res)
+	}
+}
+
 // TestReleaseVersion 校验：语义 tag 原样用；非语义 tag（dev）从名提取内嵌版本。
 func TestReleaseVersion(t *testing.T) {
 	if v := releaseVersion(&Release{TagName: "v0.7.0"}); v != "v0.7.0" {

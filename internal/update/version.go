@@ -17,8 +17,27 @@ func extractSemverish(s string) string {
 // parsedVersion 解析后的版本：主/次/修订三段 + 预发布标识。
 type parsedVersion struct {
 	major, minor, patch int
-	pre                 string // 预发布标识（如 "dev.abc1234"），无则为空
+	pre                 string // 预发布标识（如 "dev.3.gabc1234"），无则为空
 	ok                  bool   // 是否成功解析为 MAJOR.MINOR.PATCH
+}
+
+// devSeqPattern 提取 dev 预发布标识中的「提交距离序号」：
+// 新版本号格式 <基线>-dev.<提交距离>.g<短SHA>，序号即自上个正式版 tag 起的真实提交数。
+// 该序号随主干新增实质提交单调递增，是判断「测试版是否真有更新」的可靠依据
+// （短 SHA 仅在序号相同时表示同一提交点的不同改写，不应视为更新）。
+var devSeqPattern = regexp.MustCompile(`^dev\.(\d+)\.`)
+
+// devSeq 从预发布标识中解析提交距离序号；非 dev.N.g<sha> 形态时 ok=false。
+func devSeq(pre string) (int, bool) {
+	m := devSeqPattern.FindStringSubmatch(pre)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // parseVersion 解析 "v1.2.3" / "1.2.3" / "1.2.3-dev.abc" 为结构；无法解析时 ok=false。

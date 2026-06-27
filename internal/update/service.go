@@ -214,8 +214,11 @@ func copyResult(r *CheckResult) *CheckResult {
 // hasUpdate 判断目标版本相对当前版本是否应提示更新。
 // 正式版（stable）：按语义版本比较，仅更高才提示。
 // 测试版（prerelease，dev 滚动）：按 MAJOR.MINOR.PATCH 基线比较——基线更高才有更新、
-// 基线更低绝不降级（修复「更旧的 dev 误报可更新」）、同基线下标识不同即提示
-// （既支持从正式版切到同基线测试版，也支持 dev→同基线的新 dev；同一 dev 则不提示）。
+// 基线更低绝不降级（修复「更旧的 dev 误报可更新」）。同基线下进一步用「dev 提交距离序号」判定：
+//   - 当前为同基线正式版（无预发布标识）→ 可切换到 dev，视为有更新；
+//   - 双方均为 dev.<序号>.g<sha>：仅当 latest 序号严格大于 current 序号才有更新——
+//     这样「主干无新提交、仅短 SHA 改写」时序号不变即不误报（修复 FIX-1）；
+//   - 序号无法解析时退回「标识不同即更新」的保守兜底。
 func hasUpdate(latest, current string, ch Channel) bool {
 	latest = strings.TrimSpace(latest)
 	if latest == "" {
@@ -234,10 +237,31 @@ func hasUpdate(latest, current string, ch Channel) bool {
 		case -1:
 			return false // 基线更低：不降级
 		default:
-			return l.pre != c.pre // 同基线：预发布标识不同即可切换
+			return samBaselinePrereleaseHasUpdate(l, c)
 		}
 	}
 	return isNewer(latest, current)
+}
+
+// samBaselinePrereleaseHasUpdate 处理「同基线」下测试版是否有更新（hasUpdate 的子判定）。
+// 仅当确有更新（dev 序号增大，或当前是同基线正式版可切 dev）才返回 true。
+func samBaselinePrereleaseHasUpdate(l, c parsedVersion) bool {
+	// 完全相同的预发布标识：必然无更新（含同一 dev 重复检测）
+	if l.pre == c.pre {
+		return false
+	}
+	// 当前为同基线正式版：可切换到 dev 预发布，视为有更新
+	if c.pre == "" {
+		return l.pre != ""
+	}
+	// 双方均为 dev：比较提交距离序号，仅严格更新（序号更大）才提示，避免短 SHA churn 误报
+	ls, lok := devSeq(l.pre)
+	cs, cok := devSeq(c.pre)
+	if lok && cok {
+		return ls > cs
+	}
+	// 序号无法解析：保守兜底——标识不同即视为有更新
+	return l.pre != c.pre
 }
 
 // Apply 下载目标频道最新版、校验 sha256 后替换二进制并重启。

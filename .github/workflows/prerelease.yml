@@ -14,9 +14,11 @@ permissions:
   contents: write
 
 jobs:
-  # 预发布版本号 = max(最新正式版 tag, VERSION 文件) 的下一修订号 + dev + 短 SHA（FIX-3）。
-  # 取 tag 与 VERSION 中较高者自增：既保证 dev 始终领先于上个正式版（不倒挂），
-  # 又不因版本 tag 未推送到远端而偏低（dev 跟随 VERSION 文件，解耦 tag 推送时机）。
+  # 预发布版本号 = <最新正式版 tag 基线>-dev.<提交距离>.g<短SHA>（FIX-1，取代 FIX-3 的「下一修订号」策略）。
+  # 基线取 tag 版本号本身（不再 +1），让 dev 反映真实主干进度而非凭空高一位；
+  # 提交距离（自该 tag 起的提交数）作序号，后端据此区分「主干真有新提交」与「仅短 SHA 改写」。
+  # 提交距离为 0（发完正式版后主干无新提交）时脚本退出码非 0，本 job 输出 version 为空，
+  # 后续 build / prerelease 据此跳过，避免凭空滚动出一个「更高的 dev」。
   # 推导逻辑收敛到 scripts/dev-version.sh（带本地测试 scripts/dev-version_test.sh），CI 与本地一致。
   prepare:
     runs-on: ubuntu-latest
@@ -28,21 +30,27 @@ jobs:
           # 取全部 tag 供 git describe 推导（默认浅克隆无 tag）。
           fetch-depth: 0
       - id: ver
-        name: 生成预发布版本号（max(最新正式版 tag, VERSION) 的下一修订号 + dev + 短 SHA）
+        name: 生成预发布版本号（<最新正式版 tag 基线>-dev.<提交距离>.g<短SHA>）
         run: |
-          base="$(bash scripts/dev-version.sh)"
-          echo "version=${base}-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          # 脚本退出码非 0（提交距离为 0）时不写 version，使后续 job 跳过。
+          if version="$(bash scripts/dev-version.sh)"; then
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+          else
+            echo "主干自上个正式版起无新提交，跳过 dev 预发布。"
+          fi
 
-  # 复用构建工作流产出各平台二进制工件。
+  # 复用构建工作流产出各平台二进制工件；prepare 未产出版本号（无新提交）时跳过。
   build:
     needs: prepare
+    if: ${{ needs.prepare.outputs.version != '' }}
     uses: ./.github/workflows/build.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
 
-  # 汇总工件，删除旧 dev 预发布后重建（滚动指向最新主干）。
+  # 汇总工件，删除旧 dev 预发布后重建（滚动指向最新主干）；无新提交时跳过。
   prerelease:
     needs: [prepare, build]
+    if: ${{ needs.prepare.outputs.version != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

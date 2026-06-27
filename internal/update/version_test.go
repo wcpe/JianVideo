@@ -52,6 +52,34 @@ func TestHasUpdate_PrereleaseNoBaselineDowngrade(t *testing.T) {
 	}
 }
 
+// TestHasUpdate_PrereleaseSameBaselineCompareBySeq 回归 FIX-1 核心 bug：
+// 同基线下，仅凭短 SHA 变化（dev 序号未增）不得误报「有更新」；
+// 只有 dev 序号（自上个正式版 tag 起的真实提交距离）增大才算有更新。
+// 新 dev 版本号格式：<基线>-dev.<提交距离>.g<短SHA>。
+func TestHasUpdate_PrereleaseSameBaselineCompareBySeq(t *testing.T) {
+	cases := []struct {
+		name            string
+		latest, current string
+		want            bool
+	}{
+		// 同基线、同提交距离、仅短 SHA 不同（如 force-push/amend 改写历史）→ 不误报
+		{"同基线同序号仅SHA变化不更新", "0.17.1-dev.3.gdef5678", "0.17.1-dev.3.gabc1234", false},
+		// 同基线、提交距离增大（主干有新实质提交）→ 有更新
+		{"同基线序号增大有更新", "0.17.1-dev.5.gabc1234", "0.17.1-dev.3.gdef5678", true},
+		// 同基线、提交距离减小（主干被回退/构建更旧）→ 不降级
+		{"同基线序号减小不降级", "0.17.1-dev.3.gabc1234", "0.17.1-dev.5.gdef5678", false},
+		// 完全相同的 dev → 不更新
+		{"完全相同dev不更新", "0.17.1-dev.3.gabc1234", "0.17.1-dev.3.gabc1234", false},
+		// 同基线正式版切到 dev → 视为有更新（正式→同基线预发布可切换）
+		{"同基线正式切dev有更新", "0.17.1-dev.3.gabc1234", "0.17.1", true},
+	}
+	for _, c := range cases {
+		if got := hasUpdate(c.latest, c.current, ChannelPrerelease); got != c.want {
+			t.Errorf("%s: hasUpdate(%q, %q, prerelease)=%v, 期望 %v", c.name, c.latest, c.current, got, c.want)
+		}
+	}
+}
+
 // TestParseVersion 校验解析的成功与失败用例。
 func TestParseVersion(t *testing.T) {
 	if v := parseVersion("v1.2.3"); !v.ok || v.major != 1 || v.minor != 2 || v.patch != 3 || v.pre != "" {

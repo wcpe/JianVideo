@@ -1,38 +1,44 @@
 #!/usr/bin/env bash
-# 计算预发布 dev 版本的「基线版本号」（FIX-3，FR-48）。
+# 计算预发布 dev 版本号（FIX-1，取代 FIX-3 的「下一修订号」策略）。
 #
-# 取「最新正式版 tag」与「VERSION 文件」中较高者的下一修订号作为基线，使 dev：
-#   ① 始终领先于上个正式版（不会出现 0.7.0-dev < 已发布 0.7.0 的倒挂）；
-#   ② 不因版本 tag 未推送到远端而偏低（解耦 tag 推送时机）——
-#      只要 VERSION 文件随发版上抬，dev 号即跟随，不依赖 CI 端能否看到最新 tag。
+# 旧策略以 max(最新 tag, VERSION) 的「下一修订号」作基线，使 dev 恒比上个正式版高一位——
+# 发布正式版这一动作本身就凭空制造一个更高的 dev，导致测试版频道「一直有更新」。
 #
-# 用法：dev-version.sh [latest-tag] [version-override]
-#   latest-tag       省略时用 git describe 推导最新正式版 tag；
-#   version-override 省略时读仓库根 VERSION 文件（测试可传入以解耦）。
-# 输出：基线版本号（如 0.17.1）。调用方自行拼接 -dev.<sha>。
+# 新策略让 dev 版本号反映「真实主干进度」：
+#   基线 = 最新正式版 tag 的版本号（不再 +1）；
+#   序号 = 自该 tag 起的提交距离（git rev-list --count）；
+#   输出 = <基线>-dev.<提交距离>.g<短SHA>。
+# 语义版本上 <基线>-dev.* 介于「已发布的 <基线>」与「下个正式版」之间，既不倒挂、
+# 又能用「提交距离序号」区分「主干真有新提交」与「仅短 SHA 改写」（后端 hasUpdate 据此判定）。
+#
+# 提交距离为 0（HEAD 正是该 tag 所指提交、主干无新提交）时退出码 1 且不输出版本号，
+# 由调用方（prerelease.yml）据此跳过发布，避免「发完正式版后无新提交仍滚动 dev」。
+#
+# 用法：dev-version.sh [latest-tag] [count-override] [sha-override]
+#   latest-tag    省略时用 git describe 推导最新正式版 tag；
+#   count-override 省略时用 git rev-list --count <tag>..HEAD（测试可传入以解耦 git 状态）；
+#   sha-override  省略时用 git rev-parse 取 HEAD 短 SHA。
+# 输出：完整 dev 版本号（如 0.17.1-dev.3.gabc1234）。
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-
 tag="${1:-$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo v0.0.0)}"
-tagbase="${tag#v}"
+base="${tag#v}"
 
+# 提交距离：未传入时按 tag..HEAD 计数；无 tag（v0.0.0）时退回总提交数。
 if [ "${2:-}" != "" ]; then
-  verbase="$2"
+  count="$2"
+elif git rev-parse -q --verify "refs/tags/${tag}" >/dev/null 2>&1; then
+  count="$(git rev-list --count "${tag}..HEAD" 2>/dev/null || echo 0)"
 else
-  verbase="$(tr -d '[:space:]' < "$repo_root/VERSION" 2>/dev/null || echo 0.0.0)"
+  count="$(git rev-list --count HEAD 2>/dev/null || echo 0)"
 fi
 
-IFS=. read -r tj tn tp <<< "$tagbase"
-IFS=. read -r vj vn vp <<< "$verbase"
-tj=${tj:-0}; tn=${tn:-0}; tp=${tp:-0}
-vj=${vj:-0}; vn=${vn:-0}; vp=${vp:-0}
-
-# 取较高者（语义版本主.次.修订数值比较）作为基线
-if (( tj > vj || (tj == vj && tn > vn) || (tj == vj && tn == vn && tp > vp) )); then
-  bj=$tj; bn=$tn; bp=$tp
-else
-  bj=$vj; bn=$vn; bp=$vp
+# 提交距离为 0：主干无新提交，无可发布的 dev，退出码 1（调用方据此跳过发布）。
+if [ "$count" -eq 0 ]; then
+  echo "提交距离为 0：主干自 ${tag} 起无新提交，跳过 dev 预发布。" >&2
+  exit 1
 fi
 
-echo "${bj}.${bn}.$((bp + 1))"
+sha="${3:-$(git rev-parse --short=7 HEAD 2>/dev/null || echo 0000000)}"
+
+echo "${base}-dev.${count}.g${sha}"

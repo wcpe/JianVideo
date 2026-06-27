@@ -1,7 +1,7 @@
 # ADR-0032：发布工程——CI 原生矩阵构建 + GitHub Releases 分发 + 二进制自更新
 
 ## 状态
-已接受
+已接受（预发布版本号策略与同基线更新判定语义由 [ADR-0042](0042-prerelease-version-strategy.md) 扩展/取代）
 
 ## 背景
 项目走向公开分发，需要：① 自动产出 Windows/Linux 两套单二进制；② 用户能便捷获取更新。
