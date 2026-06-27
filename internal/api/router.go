@@ -82,6 +82,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 观看热力与统计（FR-75）：已看/未看、最近观看时间线、续播位置热力、各库/类型分布、观看次数 Top N
 		lib.GET("/stats", h.WatchStats)
 
+		// 媒体库总量聚合（FR-117）：媒体总数、视频/图片拆分、占用空间、总时长、启用库数与各库分组，供首页概览看板
+		lib.GET("/summary", h.LibrarySummary)
+
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
 		lib.POST("/scan/:id", h.ScanLibrary)

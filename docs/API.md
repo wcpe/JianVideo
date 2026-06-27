@@ -278,6 +278,26 @@
   ```
 - **说明**：聚合观看统计，各维度均仅统计未软删媒体。`watched`/`unwatched` 为看完/未看完计数；`recent_timeline` 按 `last_watched_at` 本地时区天分桶（倒序、最近 30 天有观看的天）；`position_heatmap` 为续播进度（`last_position/duration`，`duration>0`）落入 10 档（下标 0=0-10%…9=90-100%）的媒体数；`by_library`/`by_format` 为各库/各格式已看媒体数；`top_viewed` 为观看次数（`view_count`，看完一次 +1）Top 10。供观看统计页（`/stats`）展示。
 
+### 媒体库概览汇总（FR-117）
+
+- **方法 / 路径**：`GET /api/library/summary`
+- **查询参数**：无
+- **响应**（200）：
+  ```json
+  {
+    "total": 12480,
+    "video_count": 3210,
+    "image_count": 9270,
+    "total_size": 1979900000000,
+    "total_duration": 2311200.0,
+    "library_count": 5,
+    "by_library": [
+      {"library_id": 1, "label": "电影", "media_count": 3460, "video_count": 3460, "image_count": 0, "total_size": 580000000000, "total_duration": 1980000.0}
+    ]
+  }
+  ```
+- **说明**：媒体库总量聚合，供首页概览看板（`/`）展示。全部维度 `WHERE deleted_at IS NULL`；视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致）；`total_size`=`SUM(file_size)`（字节）、`total_duration`=`SUM(duration)`（秒）；`library_count` 取启用库数；`by_library` 按 `library_id` 分组（`label` 取自 `library_paths`）。空库返回各项为零、`by_library` 为空数组，HTTP 200。一次聚合查询完成，避免 N+1。
+
 ### 重命名媒体文件
 
 - **方法 / 路径**：`PUT /api/library/media/:id/rename`
