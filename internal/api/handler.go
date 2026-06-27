@@ -496,6 +496,8 @@ func (h *Handler) UpdateDisplayName(c *gin.Context) {
 }
 
 // BrowseDirectory GET /api/library/browse
+// 按真实磁盘路径跨库浏览（FR-121）：parent_path 必填；sort 可选（name/size/type/time，缺省 name）；
+// library_id 已弃用，仍接受但忽略（导航按真实路径跨库聚合，向后兼容）。
 func (h *Handler) BrowseDirectory(c *gin.Context) {
 	parentPath := c.Query("parent_path")
 	if parentPath == "" {
@@ -503,18 +505,9 @@ func (h *Handler) BrowseDirectory(c *gin.Context) {
 		return
 	}
 
-	// 聚合虚拟根（FR-66）：parent_path 为虚拟根标记时忽略 library_id，列出所有启用库
-	var libraryID int64
-	if parentPath != library.BrowseRootMarker {
-		id, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
-		if err != nil || id <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
-			return
-		}
-		libraryID = id
-	}
+	sortKey := c.DefaultQuery("sort", library.BrowseSortName)
 
-	resp, err := h.library.BrowseDirectory(libraryID, parentPath)
+	resp, err := h.library.BrowseDirectory(parentPath, sortKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "BROWSE_FAILED", "message": "浏览目录失败"})
 		return

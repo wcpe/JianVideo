@@ -1,7 +1,7 @@
 # ADR-0037：目录浏览聚合多库（单一虚拟根逐库下钻）
 
 ## 状态
-提议中
+已被 [ADR-0046](0046-realpath-tree-directory-browse.md) 取代
 
 ## 背景
 

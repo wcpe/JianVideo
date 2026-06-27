@@ -75,21 +75,12 @@ func TestBrowseDirectory_Subdir_API(t *testing.T) {
 	}
 }
 
-func TestBrowseDirectory_MissingParams(t *testing.T) {
+func TestBrowseDirectory_MissingParentPath(t *testing.T) {
 	router, _ := setupTestRouter(t)
 
-	// 缺少 library_id
-	req := httptest.NewRequest("GET", "/api/library/browse?parent_path=/media", nil)
+	// 缺少 parent_path → 400
+	req := httptest.NewRequest("GET", "/api/library/browse", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("缺少 library_id 期望 400, 实际 %d", w.Code)
-	}
-
-	// 缺少 parent_path
-	req = httptest.NewRequest("GET", "/api/library/browse?library_id=1", nil)
-	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -97,27 +88,74 @@ func TestBrowseDirectory_MissingParams(t *testing.T) {
 	}
 }
 
-func TestBrowseDirectory_InvalidLibraryID(t *testing.T) {
-	router, _ := setupTestRouter(t)
+// TestBrowseDirectory_LibraryIDIgnored library_id 已弃用（FR-121）：
+// 不带 library_id 也能浏览，跨库合并返回结果。
+func TestBrowseDirectory_LibraryIDIgnored(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	// 不同库的同目录文件
+	_, _ = svc.CreateMediaFile(1, "/media/movies/电影A.mkv", 1024)
+	_, _ = svc.CreateMediaFile(2, "/media/movies/电影B.mkv", 2048)
 
-	req := httptest.NewRequest("GET", "/api/library/browse?library_id=abc&parent_path=/media", nil)
+	// 不带 library_id（旧版会 400，新版应 200 并跨库合并）
+	req := httptest.NewRequest("GET", "/api/library/browse?parent_path=/media/movies", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("无效 library_id 期望 400, 实际 %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("不带 library_id 期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := parseJSON(w.Body, &resp); err != nil {
+		t.Fatalf("JSON 解析失败: %v", err)
+	}
+	files, ok := resp["files"].([]interface{})
+	if !ok || len(files) != 2 {
+		t.Fatalf("期望跨库合并 2 个文件, 实际: %v", resp["files"])
 	}
 }
 
 func TestBrowseDirectory_EmptyResult(t *testing.T) {
 	router, _ := setupTestRouter(t)
 
-	req := httptest.NewRequest("GET", "/api/library/browse?library_id=1&parent_path=/nonexistent", nil)
+	req := httptest.NewRequest("GET", "/api/library/browse?parent_path=/nonexistent", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("空目录期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBrowseDirectory_SortParam sort 参数透传后端（FR-121）：按大小升序返回文件。
+func TestBrowseDirectory_SortParam(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	_, _ = svc.CreateMediaFile(1, "/s/big.mp4", 300)
+	_, _ = svc.CreateMediaFile(1, "/s/small.mp4", 100)
+	_, _ = svc.CreateMediaFile(1, "/s/mid.mp4", 200)
+
+	req := httptest.NewRequest("GET", "/api/library/browse?parent_path=/s&sort=size", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("sort=size 期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Files []struct {
+			FileName string `json:"file_name"`
+			FileSize int64  `json:"file_size"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("JSON 解析失败: %v", err)
+	}
+	if len(resp.Files) != 3 {
+		t.Fatalf("期望 3 个文件, 实际 %d", len(resp.Files))
+	}
+	// 按大小升序：small(100) < mid(200) < big(300)
+	want := []string{"small.mp4", "mid.mp4", "big.mp4"}
+	for i, f := range resp.Files {
+		if f.FileName != want[i] {
+			t.Fatalf("sort=size 文件[%d] 期望 %s, 实际 %s", i, want[i], f.FileName)
+		}
 	}
 }
 

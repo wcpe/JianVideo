@@ -52,10 +52,22 @@ const (
 	ScanModeFull = "full"
 )
 
-// BrowseRootMarker 目录浏览聚合虚拟根标记（FR-66）。
-// parent_path 取此哨兵值时进入聚合根分支：忽略 library_id，列出所有启用库作为顶层目录。
+// BrowseRootMarker 目录浏览顶层根标记（FR-121，取代 ADR-0037 虚拟库根）。
+// parent_path 取此哨兵值时进入顶层根分支：列出各启用库推导出的卷根/共享根（去重排序）。
 // 真实文件路径不含该串，故不与任何实际目录冲突。
 const BrowseRootMarker = "__root__"
+
+// 目录浏览文件排序键（FR-121）。缺省按名（BrowseSortName）。
+const (
+	// BrowseSortName 按文件名升序。
+	BrowseSortName = "name"
+	// BrowseSortSize 按文件大小升序。
+	BrowseSortSize = "size"
+	// BrowseSortType 按文件类型（格式后缀）升序，同类型再按名。
+	BrowseSortType = "type"
+	// BrowseSortTime 按修改时间升序。
+	BrowseSortTime = "time"
+)
 
 // NormalizeScanMode 规范化扫描模式：仅 full 视为全量，其余（含空串/非法值）按增量。
 // 供端点解析查询参数时回退，保证向后兼容。
@@ -465,14 +477,14 @@ func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath stri
 	return s.db.Where("library_id = ? AND file_path = ?", libraryID, filePath).Delete(&models.MediaFile{}).Error
 }
 
-// BrowseDirectory 浏览指定目录下的子目录和媒体文件。
-// 通过 file_path 前缀匹配一次查询所有文件，Go 层按第一级子目录分组。
-// 聚合虚拟根（FR-66）：parentPath==BrowseRootMarker 时忽略 libraryID，
-// 列出所有启用库作为顶层目录（见 ADR-0037）。
-func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.BrowseResponse, error) {
-	// 聚合虚拟根分支：列出所有启用库作为顶层目录，各项携带 library_id
+// BrowseDirectory 按真实磁盘路径跨库浏览子目录与媒体文件（FR-121，取代 ADR-0037）。
+// 顶层根（parentPath==BrowseRootMarker）列出各启用库推导出的卷根/共享根；
+// 其余按真实路径 P 跨所有库前缀聚合：子目录 = P 下一级目录去重、文件 = 目录恰为 P 的项。
+// sortKey 控制文件排序（name/size/type/time，缺省 name）；目录恒在文件前、按名排序。
+func (s *Service) BrowseDirectory(parentPath, sortKey string) (*models.BrowseResponse, error) {
+	// 顶层根分支：列出各盘符/共享根，子目录不带 library_id
 	if parentPath == BrowseRootMarker {
-		return s.browseAggregateRoot()
+		return s.browseVolumeRoots()
 	}
 
 	// 统一路径分隔符为 /，防止 Windows filepath.Clean 把 / 转成 \
@@ -482,41 +494,38 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 		return nil, fmt.Errorf("非法路径: parentPath 不能包含 ..")
 	}
 
-	// 规范化路径：确保以 / 结尾，用于前缀匹配
+	// 规范化路径：去尾斜杠，加 / 用于前缀匹配
 	trimmedPath := strings.TrimRight(parentPath, "/")
 	prefix := trimmedPath + "/"
 
-	// 一次 SQL 查询：获取所有 file_path 以 prefix 开头的媒体文件
+	// 一次 SQL 查询：跨所有库取 file_path 以 prefix 开头、未软删的媒体文件（不按 library_id 收窄）
 	var allFiles []models.MediaFile
-	if err := s.db.Where("file_path LIKE ? AND library_id = ?", prefix+"%", libraryID).
+	if err := s.db.Where("file_path LIKE ? AND deleted_at IS NULL", prefix+"%").
 		Order("file_path ASC").Find(&allFiles).Error; err != nil {
 		return nil, err
 	}
 
-	// 构建面包屑
+	// 构建面包屑（保持 D:/... 正斜杠，不加前导 /）
 	breadcrumbs := buildBreadcrumbs(trimmedPath)
 
-	// Go 层聚合：按第一级子目录分组
+	// Go 层聚合：按下一级目录段分组（跨库去重），目录恰为 P 的项归为直属文件
 	dirSet := make(map[string]bool)
 	files := make([]models.MediaFile, 0)
-
 	for _, f := range allFiles {
-		// 去掉 parentPath 前缀，得到相对路径；Windows 路径需要兼容盘符大小写差异
+		// 去掉 prefix 前缀得相对路径；Windows 路径兼容盘符大小写差异
 		rel, ok := trimPathPrefix(f.FilePath, prefix)
 		if !ok {
 			continue
 		}
-		// 如果包含 / 说明在子目录中
 		if idx := strings.Index(rel, "/"); idx != -1 {
-			dirName := rel[:idx]
-			dirSet[dirName] = true
+			// 含 / 说明在子目录中，取第一级目录段
+			dirSet[rel[:idx]] = true
 		} else {
-			// 直接文件
 			files = append(files, f)
 		}
 	}
 
-	// 子目录排序
+	// 子目录恒在前、按名升序；子目录跨库故不填 library_id
 	dirs := make([]models.DirInfo, 0, len(dirSet))
 	for name := range dirSet {
 		dirs = append(dirs, models.DirInfo{
@@ -526,6 +535,9 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 	}
 	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
 
+	// 文件按 sortKey 服务端排序
+	sortBrowseFiles(files, sortKey)
+
 	return &models.BrowseResponse{
 		Breadcrumbs: breadcrumbs,
 		Directories: dirs,
@@ -533,33 +545,99 @@ func (s *Service) BrowseDirectory(libraryID int64, parentPath string) (*models.B
 	}, nil
 }
 
-// browseAggregateRoot 构建聚合虚拟根响应（FR-66）：
-// 列出所有启用库作为顶层目录项（name=label/回退 path、path=库 path、library_id=库 ID），
-// 面包屑为单段虚拟根，顶层不含文件。
-func (s *Service) browseAggregateRoot() (*models.BrowseResponse, error) {
+// browseVolumeRoots 构建顶层根响应（FR-121）：取所有启用库 path 推导卷根/共享根，
+// 去重排序作为顶层目录项（不带 library_id，子目录跨库），面包屑单段 {全部, __root__}，顶层无文件。
+func (s *Service) browseVolumeRoots() (*models.BrowseResponse, error) {
 	var paths []models.LibraryPath
 	if err := s.db.Where("enabled = ?", 1).Order("id").Find(&paths).Error; err != nil {
 		return nil, err
 	}
 
-	dirs := make([]models.DirInfo, 0, len(paths))
+	// 卷根去重：同盘符/共享下的多个库只列一个根
+	seen := make(map[string]bool, len(paths))
+	roots := make([]string, 0, len(paths))
 	for _, lp := range paths {
-		name := lp.Label
-		if name == "" {
-			name = lp.Path
+		root := volumeRoot(lp.Path)
+		if root == "" || seen[root] {
+			continue
 		}
-		dirs = append(dirs, models.DirInfo{
-			Name:      name,
-			Path:      lp.Path,
-			LibraryID: lp.ID,
-		})
+		seen[root] = true
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+
+	dirs := make([]models.DirInfo, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, models.DirInfo{Name: root, Path: root})
 	}
 
 	return &models.BrowseResponse{
-		Breadcrumbs: []models.BreadcrumbItem{{Name: "全部存储库", Path: BrowseRootMarker}},
+		Breadcrumbs: []models.BreadcrumbItem{{Name: "全部", Path: BrowseRootMarker}},
 		Directories: dirs,
 		Files:       make([]models.MediaFile, 0),
 	}, nil
+}
+
+// volumeRoot 从库路径推导其卷根/共享根（FR-121），结果不含尾斜杠：
+//   - UNC/共享：//host/share/... → //host/share（仅取 host+share 两段）
+//   - 本地盘符：D:/媒体/... 或 D: → D:
+//   - 其余（已是根或无盘符的绝对路径）：返回去尾斜杠后的原值
+//
+// 纯函数、无副作用，便于穷举测试。
+func volumeRoot(path string) string {
+	// 统一分隔符为 /，便于按段切分
+	p := strings.ReplaceAll(path, `\`, "/")
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+
+	// UNC/共享根：以 // 开头，取 host + share 两段
+	if strings.HasPrefix(p, "//") {
+		rest := strings.TrimLeft(p, "/")
+		segs := strings.SplitN(rest, "/", 3)
+		if len(segs) >= 2 && segs[0] != "" && segs[1] != "" {
+			return "//" + segs[0] + "/" + segs[1]
+		}
+		// 不足两段（信息不全），回退去尾斜杠原值
+		return strings.TrimRight(p, "/")
+	}
+
+	// 本地盘符根：首段形如 D:，取盘符段
+	first := p
+	if idx := strings.Index(p, "/"); idx != -1 {
+		first = p[:idx]
+	}
+	if isWindowsDrivePart(first) {
+		return first
+	}
+
+	// 其余：去尾斜杠（保留根 /）后返回
+	if trimmed := strings.TrimRight(p, "/"); trimmed != "" {
+		return trimmed
+	}
+	return p
+}
+
+// sortBrowseFiles 按 sortKey 就地排序目录浏览的文件列表（FR-121）。
+// name/size/type/time 升序，缺省/未知键按 name；用 sort.SliceStable 保证同键稳定。
+func sortBrowseFiles(files []models.MediaFile, sortKey string) {
+	less := func(i, j int) bool { return files[i].FileName < files[j].FileName }
+	switch sortKey {
+	case BrowseSortSize:
+		less = func(i, j int) bool { return files[i].FileSize < files[j].FileSize }
+	case BrowseSortType:
+		less = func(i, j int) bool {
+			// 同类型再按名，保证类型内有序
+			if files[i].Format == files[j].Format {
+				return files[i].FileName < files[j].FileName
+			}
+			return files[i].Format < files[j].Format
+		}
+	case BrowseSortTime:
+		less = func(i, j int) bool { return files[i].ModifiedAt.Before(files[j].ModifiedAt) }
+	}
+	sort.SliceStable(files, less)
 }
 
 // buildBreadcrumbs 将路径拆分为面包屑段。

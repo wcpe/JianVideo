@@ -137,44 +137,37 @@
 
 - **方法 / 路径**：`GET /api/library/browse`
 - **查询参数**：
-  - `library_id`：媒体库 ID（`parent_path` 非虚拟根时必填）
-  - `parent_path`：父目录路径（必填）。取哨兵值 `__root__` 时进入**聚合虚拟根**（FR-66）：忽略 `library_id`，列出所有启用存储库作为顶层目录项
-- **聚合虚拟根响应**（200，`parent_path=__root__`）：每个 `directories` 项额外携带 `library_id`（标识点进去用哪个库），面包屑为单段 `{"name":"全部存储库","path":"__root__"}`，`files` 为空：
+  - `parent_path`：父目录的**真实磁盘路径**（必填）。取哨兵值 `__root__` 时返回**各盘符 / 共享根**（FR-121）作为顶层目录项
+  - `sort`：文件排序（可选）：`name` / `size` / `type` / `time`（修改时间），缺省 `name`；目录恒在文件前、按名排序
+  - `library_id`：可选、已弃用——目录导航按真实路径**跨库聚合**，不再按库收窄（仍接受以向后兼容，被忽略）
+- **真实路径树聚合（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 ADR-0037）**：按真实磁盘路径跨所有启用库合并成单一目录树。浏览路径 P 时，子目录 = `media_files` 中 `file_path LIKE 'P/%'`（跨库、未软删）的下一级目录去重，文件 = 目录恰为 P 的项；有路径包含关系的库在公共上级自然合并（加 `D:\1` 与 `D:\1\2` → `D: → 1 → 2`；加 `D:\` 库则整盘可浏览）。
+- **根响应**（200，`parent_path=__root__`）：`directories` 为各盘符 / 共享根，面包屑单段 `{"name":"全部","path":"__root__"}`，`files` 为空：
   ```json
   {
-    "breadcrumbs": [{"name": "全部存储库", "path": "__root__"}],
+    "breadcrumbs": [{"name": "全部", "path": "__root__"}],
     "directories": [
-      {"name": "电影库", "path": "D:/Videos/Movies", "library_id": 1},
-      {"name": "动漫库", "path": "D:/Videos/Anime", "library_id": 2}
+      {"name": "D:", "path": "D:"},
+      {"name": "E:", "path": "E:"}
     ],
     "files": []
   }
   ```
-- **单库响应**（200）：
+- **路径响应**（200，如 `parent_path=D:/1`）：子目录跨库合并、不带 `library_id`；文件各带自身 `library_id`，按 `sort` 排序：
   ```json
   {
     "breadcrumbs": [
-      {"name": "media", "path": "/media"},
-      {"name": "movies", "path": "/media/movies"}
+      {"name": "D:", "path": "D:"},
+      {"name": "1", "path": "D:/1"}
     ],
     "directories": [
-      {"name": "动作片", "path": "/media/movies/动作片"}
+      {"name": "2", "path": "D:/1/2"}
     ],
     "files": [
-      {
-        "id": 1,
-        "file_name": "电影名.mkv",
-        "file_path": "/media/movies/电影名.mkv",
-        "file_size": 10737418240,
-        "format": "mkv",
-        "duration": 7200.0,
-        "width": 1920,
-        "height": 1080
-      }
+      {"id": 1, "library_id": 1, "file_name": "a.png", "file_path": "D:/1/a.png", "file_size": 2400000, "format": "png", "modified_at": "2026-06-20T10:00:00Z"}
     ]
   }
   ```
-- **说明**：通过 `file_path` 前缀匹配一次查询，Go 层按第一级子目录聚合分组。Windows 盘符路径使用正斜杠规范化，面包屑不会添加额外前导 `/`（例如 `D:/Videos`）。
+- **说明**：`file_path` 前缀匹配一次查询（大小写不敏感，复用 `file_path` 索引满足 NFR-08），Go 层按下一级目录去重分组。Windows 盘符路径正斜杠规范化、面包屑不加前导 `/`（如 `D:/1`）。顶层盘符 / 共享根由各启用库 `path` 推导（本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`）去重。
 
 ### 获取媒体文件列表
 
