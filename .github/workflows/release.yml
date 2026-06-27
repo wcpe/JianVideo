@@ -43,6 +43,8 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
+      # 需检出仓库以读取 CHANGELOG.md 与抽取脚本（download-artifact 不含源码）。
+      - uses: actions/checkout@v4
       - name: 下载全部平台工件
         uses: actions/download-artifact@v4
         with:
@@ -53,11 +55,23 @@ jobs:
           find artifacts -type f -name 'jianvideo-*-amd64*' ! -name '*.sha256' -exec cp {} release/ \;
           cat artifacts/*/jianvideo-*-amd64.sha256 > release/checksums.txt
           ls -l release
+      - name: 生成发布说明（抽取 CHANGELOG 对应版本段）
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          # 从 CHANGELOG.md 抽取「## VERSION（日期）」段作为 Release 正文（替代自动生成）。
+          # 与预发布共用同一抽取脚本，保证测试与 CI 行为一致。
+          bash scripts/changelog-extract.sh "$VERSION" CHANGELOG.md > release-notes.md
+          # 段为空（CHANGELOG 漏记该版本）时兜底，避免发布空正文。
+          if [ ! -s release-notes.md ]; then
+            echo "_（本版本未在 CHANGELOG 中记录变更）_" > release-notes.md
+          fi
       - name: 创建正式 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: release-notes.md
           files: release/*

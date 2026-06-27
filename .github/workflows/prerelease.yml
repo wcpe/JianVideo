@@ -62,9 +62,9 @@ jobs:
         env:
           PRE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          # 从 CHANGELOG 抽取「## 未发布版本」到下一个 ## 之间的内容。
-          # fence 状态机：代码块（``` 围栏）内的 ## 行不计为段落结束；### 子标题本就不匹配 /^## /。
-          notes="$(awk '/^```/{fence=!fence} /^## 未发布版本/{f=1;next} !fence&&/^## /{f=0} f' CHANGELOG.md)"
+          # 从 CHANGELOG 抽取「## 未发布」段内容（与正式发布共用同一抽取脚本，行为一致）。
+          # 注意：CHANGELOG 实际标题是「## 未发布」（无「版本」二字），脚本据实匹配，修复此前抽空 bug。
+          notes="$(bash scripts/changelog-extract.sh unreleased CHANGELOG.md)"
           {
             echo "> ⚠️ 这是**滚动开发预览**，由 main 分支最新提交自动构建，可能不稳定，仅供尝鲜测试。正式使用请选「正式版」频道。"
             echo ""

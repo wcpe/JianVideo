@@ -148,7 +148,7 @@
 | FR-108 | 登录用户修改密码：已登录用户校验当前密码后设置新密码（后端 change-password 端点 + 前端设置/系统页入口），bcrypt 存储、即时生效（扩 FR-13） | P10 | 开发中 |
 | FR-109 | 首次初始化引导：取消 admin/admin 默认建号，无用户时首次访问展示初始化引导页配置用户名+密码并创建首个账户登录；加「是否需初始化」检测与「完成初始化」端点及前端路由守卫（扩 FR-13，见 ADR-0040） | P10 | 开发中 |
 | FR-110 | 运行时调试日志开关与默认安静日志：默认降噪 GORM 日志（不刷 record-not-found/SQL），设置页加运行时「调试日志」开关（区别于启动期只读的 JIANVIDEO_DEBUG），开启输出详细日志、关闭恢复安静，开关持久化并启动读取（扩 FR-56/FR-63） | P10 | 开发中 |
-| FR-111 | 发布说明源自 CHANGELOG：正式发布从 CHANGELOG 对应版本段抽取作为 Release notes（替代 generate_release_notes），并修预发布抽取标题不匹配（`## 未发布版本`→`## 未发布`）（扩 FR-47/FR-48） | P10 | 计划 |
+| FR-111 | 发布说明源自 CHANGELOG：正式发布从 CHANGELOG 对应版本段抽取作为 Release notes（替代 generate_release_notes），并修预发布抽取标题不匹配（`## 未发布版本`→`## 未发布`）（扩 FR-47/FR-48） | P10 | 开发中 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
