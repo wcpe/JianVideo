@@ -29,3 +29,12 @@ export function saveCachedUpdate(channel: string, info: UpdateCheckResult): void
     // localStorage 不可用（配额/隐私模式）时静默，不影响功能
   }
 }
+
+// clearCachedUpdate 清除某频道缓存（FR-112）：执行更新成功后调用，使下次进入重新强制拉取最新。
+export function clearCachedUpdate(channel: string): void {
+  try {
+    localStorage.removeItem(KEY_PREFIX + channel)
+  } catch {
+    // localStorage 不可用时静默，不影响功能
+  }
+}

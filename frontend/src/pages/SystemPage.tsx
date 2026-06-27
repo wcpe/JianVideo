@@ -5,14 +5,14 @@ import {
 } from '@mantine/core'
 import { useClipboard, useDisclosure } from '@mantine/hooks'
 import {
-  IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp, IconCloudUp,
+  IconAlertCircle, IconCopy, IconCheck, IconRefresh, IconDownload, IconArrowBackUp,
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as systemApi from '@/api/system'
 import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings'
 import { extractErrorMessage } from '@/utils/error'
-import { loadCachedUpdate, saveCachedUpdate } from '@/utils/update-cache'
+import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from '@/utils/update-cache'
 import AnchorNav from '@/components/AnchorNav'
 import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types'
 
@@ -218,21 +218,12 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     return () => { active = false }
   }, [])
 
-  // 进入 / 切换频道即展示更新信息（FR-46）：先用本地缓存即时回填上次的版本与发布说明（免手动点检查），
-  // 再后台非强制刷新（命中后端 TTL 缓存即廉价返回）保持最新；后台失败保留缓存、静默不打扰。
+  // 进入 / 切换频道仅展示本地缓存（FR-112）：有缓存直接显示缓存版本与发布说明，无缓存则不显示更新区；
+  // 进入不自动联网（去掉原后台 force=false 刷新），需用户显式点「检查更新」才强制直连重查。
   useEffect(() => {
-    // 即时展示该频道缓存（含发布说明）；无缓存则清空，避免切频道时残留另一频道旧数据
+    // 即时展示该频道缓存（含发布说明）；无缓存则清空（updateInfo 为 null → 不渲染更新区）
     setUpdateInfo(loadCachedUpdate(channel))
     setUpdateError(null)
-    let active = true
-    systemApi.checkUpdate(channel, false)
-      .then((res) => {
-        if (!active) return
-        setUpdateInfo(res)
-        saveCachedUpdate(channel, res)
-      })
-      .catch(() => { /* 后台刷新失败：保留已展示的缓存，静默不打扰 */ })
-    return () => { active = false }
   }, [channel])
 
   // 默认走缓存（force 为 false），「重新测试」强制重跑（force 为 true）
@@ -252,13 +243,13 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     clipboard.copy(buildReport(info, codec))
   }, [clipboard, info, codec])
 
-  // 「检查更新」默认走缓存（force 为 false），「获取更新」强制绕缓存重查（force 为 true，FR-62）
+  // 「检查更新」强制直连重查（FR-112：单按钮 = force 强制重查，绕后端 TTL 缓存）
   const handleCheckUpdate = useCallback(async (force: boolean) => {
     setUpdateChecking(true)
     setUpdateError(null)
     setUpdateInfo(null)
     try {
-      // 默认走后端 TTL 缓存（force 为 false），命中即时返回，缓解直连 GitHub 慢导致的超时
+      // force 强制绕后端缓存直连 GitHub 重查最新
       const res = await systemApi.checkUpdate(channel, force)
       setUpdateInfo(res)
       // 写入本地缓存（含发布说明），供下次进入即时展示，免再手动点检查
@@ -324,6 +315,9 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     try {
       await systemApi.applyUpdate(channel)
       stopProgressPoll()
+      // 更新成功：清理本地缓存（FR-112），使下次进入不展示过期版本、需用户重新点「检查更新」强制重拉
+      clearCachedUpdate(channel)
+      setUpdateInfo(null)
       await waitForRestart('更新')
     } catch (err) {
       stopProgressPoll()
@@ -524,26 +518,16 @@ export default function SystemPage({ section }: { section: SystemSection }) {
               data={[{ label: '正式版', value: 'stable' }, { label: '测试版', value: 'prerelease' }]}
               disabled={updateBusy}
             />
-            {/* 「检查更新」默认走缓存命中即时返回；「获取更新」强制绕缓存重查 GitHub（FR-62，仿编解码测试双钮模式） */}
+            {/* 单按钮「检查更新」（FR-112）：点击 = force 强制直连重查；进入仅展缓存、不自动联网 */}
             <Button
               variant="light"
               color="purple"
               leftSection={<IconRefresh size={16} />}
-              onClick={() => handleCheckUpdate(false)}
-              loading={updateChecking}
-              disabled={updateBusy}
-            >
-              检查更新
-            </Button>
-            <Button
-              variant="light"
-              color="purple"
-              leftSection={<IconCloudUp size={16} />}
               onClick={() => handleCheckUpdate(true)}
               loading={updateChecking}
               disabled={updateBusy}
             >
-              获取更新
+              检查更新
             </Button>
           </Group>
         </Group>
@@ -642,8 +626,9 @@ export default function SystemPage({ section }: { section: SystemSection }) {
             </Group>
           </Stack>
             ) : (
+              // FR-112：无本地缓存时不显示版本/更新区，仅留一行操作引导（不含任何版本或更新提示）
               !updateError && (
-                <Text size="sm" c="dimmed">选择频道后点击「检查更新」（默认走缓存）或「获取更新」（强制重查），从 GitHub Releases 检测新版本。</Text>
+                <Text size="sm" c="dimmed">暂无本地缓存的检查结果。点击「检查更新」从 GitHub Releases 强制重查最新版本。</Text>
               )
             )}
           </Card>

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { loadCachedUpdate, saveCachedUpdate } from './update-cache'
+import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from './update-cache'
 import type { UpdateCheckResult } from '@/types'
 
 const sample: UpdateCheckResult = {
@@ -38,5 +38,18 @@ describe('update-cache（更新结果本地缓存）', () => {
   it('损坏的缓存安全返回 null（不抛异常）', () => {
     localStorage.setItem('jianvideo.update.check.stable', '{不是合法 json')
     expect(loadCachedUpdate('stable')).toBeNull()
+  })
+
+  it('clearCachedUpdate 清除该频道缓存、不影响其他频道（FR-112）', () => {
+    saveCachedUpdate('stable', sample)
+    saveCachedUpdate('prerelease', { ...sample, channel: 'prerelease' })
+    clearCachedUpdate('stable')
+    expect(loadCachedUpdate('stable')).toBeNull()
+    // 仅清目标频道，prerelease 仍在
+    expect(loadCachedUpdate('prerelease')).not.toBeNull()
+  })
+
+  it('clearCachedUpdate 对无缓存频道安全无操作（不抛异常）', () => {
+    expect(() => clearCachedUpdate('stable')).not.toThrow()
   })
 })

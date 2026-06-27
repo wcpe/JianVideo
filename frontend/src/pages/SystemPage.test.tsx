@@ -37,6 +37,11 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
       disconnect() {}
       takeRecords() { return [] }
     })
+    // 频道默认稳定：共享 MSW settingsStore 会被「切换到测试版」用例写入 update_channel=prerelease 并跨用例残留，
+    // 这里每例重置 GET /api/settings 返回 stable，保证各更新用例频道确定（不受用例顺序污染）。
+    server.use(
+      http.get('*/api/settings', () => HttpResponse.json({ settings: { update_channel: 'stable' } })),
+    )
   })
 
   it('运行环境区块渲染系统信息（含应用版本/Go 版本）', async () => {
@@ -234,13 +239,18 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     expect(screen.getByText('预发布')).toBeVisible()
   })
 
-  it('「检查更新」默认走缓存（不带 force query，FR-62）', async () => {
+  it('面板仅一个「检查更新」按钮，无「获取更新」（FR-112）', async () => {
+    renderSection('update')
+    expect(screen.getByRole('button', { name: '检查更新' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '获取更新' })).toBeNull()
+  })
+
+  it('「检查更新」单按钮点击走 force=true 强制重查（FR-112）', async () => {
     const user = userEvent.setup()
-    // 进入即有一次自动检查（force=false），故收集全部 force 取值再断言「检查更新」未带 force
-    const seen: (string | null)[] = []
+    let forceParam: string | null = null
     server.use(
       http.get('*/api/system/update/check', ({ request }) => {
-        seen.push(new URL(request.url).searchParams.get('force'))
+        forceParam = new URL(request.url).searchParams.get('force')
         return HttpResponse.json({
           current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
           prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
@@ -254,50 +264,92 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     await waitFor(() => {
       expect(screen.getByText('v0.6.3')).toBeVisible()
     })
-    // 「检查更新」与自动检查均走缓存：从未带 force=true
-    expect(seen).not.toContain('true')
+    // 单按钮即 force 强制重查（无自动联网干扰，唯一请求带 force=true）
+    expect(forceParam).toBe('true')
   })
 
-  it('「获取更新」强制刷新走 force=true（FR-62）', async () => {
-    const user = userEvent.setup()
-    // 进入有一次自动检查（force=false），点击「获取更新」应另发一次 force=true，故收集全部取值断言含 true
-    const seen: (string | null)[] = []
+  it('无本地缓存进入：不显示版本/更新区，且不自动联网（FR-112）', async () => {
+    let checkCalled = false
     server.use(
-      http.get('*/api/system/update/check', ({ request }) => {
-        seen.push(new URL(request.url).searchParams.get('force'))
+      http.get('*/api/system/update/check', () => {
+        checkCalled = true
         return HttpResponse.json({
-          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
-          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+          current: '0.16.0', latest: 'v0.16.9', has_update: true, tag: 'v0.16.9',
+          prerelease: false, channel: 'stable', notes: '不该出现', asset_name: '',
         })
       }),
     )
 
     renderSection('update')
-    const forceBtn = screen.getByRole('button', { name: '获取更新' })
-    expect(forceBtn).toBeVisible()
-    await user.click(forceBtn)
 
+    // 等频道设置（getSettings）落定，给潜在自动检查留出机会
     await waitFor(() => {
-      expect(seen).toContain('true')
+      expect(screen.getByText(/暂无本地缓存的检查结果/)).toBeVisible()
     })
+    // 无缓存：不展示版本，且未自动发起检查请求
+    expect(screen.queryByText('v0.16.9')).toBeNull()
+    expect(screen.queryByText('不该出现')).toBeNull()
+    expect(screen.queryByText('有可用更新')).toBeNull()
+    expect(checkCalled).toBe(false)
   })
 
-  it('命中本地缓存时进入即时展示缓存的发布说明（不依赖网络）', async () => {
+  it('命中本地缓存进入：直接显示缓存版本与发布说明，且不联网（FR-112）', async () => {
     localStorage.setItem('jianvideo.update.check.stable', JSON.stringify({
       current: '0.16.0', latest: 'v0.16.1', has_update: true, tag: 'v0.16.1',
       prerelease: false, channel: 'stable', notes: '缓存的更新日志要点', asset_name: 'jianvideo-windows-amd64',
     }))
+    let checkCalled = false
     server.use(
-      http.get('*/api/system/update/check', async () => {
-        await delay(10000) // 网络迟迟不返回，验证缓存能先行展示
+      http.get('*/api/system/update/check', () => {
+        checkCalled = true
         return HttpResponse.json({ current: '0.16.0', latest: 'v0.16.1', has_update: true, tag: 'v0.16.1', prerelease: false, channel: 'stable', notes: '', asset_name: '' })
       }),
     )
 
     renderSection('update')
 
+    // 缓存在挂载时同步注入，版本与发布说明无需联网即可见
     expect(await screen.findByText('缓存的更新日志要点')).toBeVisible()
     expect(screen.getByText('v0.16.1')).toBeVisible()
+    // 进入不自动联网
+    await waitFor(() => {
+      expect(screen.getByText('缓存的更新日志要点')).toBeVisible()
+    })
+    expect(checkCalled).toBe(false)
+  })
+
+  it('更新成功后清理本地缓存（下次进入需重新拉取，FR-112）', async () => {
+    const user = userEvent.setup()
+    // 预置缓存，验证 apply 成功后被清
+    localStorage.setItem('jianvideo.update.check.stable', JSON.stringify({
+      current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+      prerelease: false, channel: 'stable', notes: '旧缓存', asset_name: '',
+    }))
+    server.use(
+      http.get('*/api/system/update/check', () =>
+        HttpResponse.json({
+          current: '0.3.0', latest: 'v0.6.3', has_update: true, tag: 'v0.6.3',
+          prerelease: false, channel: 'stable', notes: '', asset_name: 'jianvideo-linux-amd64',
+        }),
+      ),
+      http.post('*/api/system/update/apply', () =>
+        HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' }),
+      ),
+    )
+
+    renderSection('update')
+    // 有缓存进入即显示版本，可直接点更新
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /立即更新并重启/ })).toBeEnabled()
+    })
+    await user.click(screen.getByRole('button', { name: /立即更新并重启/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认更新' }))
+
+    // apply 成功后本地缓存被清（清理发生在等待重启之前，故快速可断言）
+    await waitFor(() => {
+      expect(localStorage.getItem('jianvideo.update.check.stable')).toBeNull()
+    })
   })
 
   it('点「立即更新并重启」弹 Mantine 模态框，确认才触发更新（FR-62）', async () => {
@@ -385,7 +437,8 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     })
     expect(rollbackCalled).toBe(false)
 
-    await user.click(screen.getByRole('button', { name: /回滚到上一版/ }))
+    // 模态框关闭动画后回滚按钮重新可点，用 findByRole（放宽超时）等其就绪再点（避免关闭过渡期偶发查不到）
+    await user.click(await screen.findByRole('button', { name: /回滚到上一版/ }, { timeout: 3000 }))
     dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: '确认回滚' }))
     await waitFor(() => {
