@@ -50,6 +50,10 @@ type MediaFile struct {
 	Watched       bool       `gorm:"default:false" json:"watched"`
 	LastWatchedAt *time.Time `json:"last_watched_at,omitempty"`
 
+	// 最近查看（FR-120）：媒体被打开（详情面板/播放页）时置为当前时间，供时间轴「最近查看」回忆区块倒序展示。
+	// 与 LastWatchedAt 语义不同：后者仅视频播放进度，前者覆盖图片+视频的「打开」动作。
+	LastViewedAt *time.Time `gorm:"index" json:"last_viewed_at,omitempty"`
+
 	// 观看次数（FR-75）：每「看完」一次 +1（由 MarkWatched 自增），位置上报不计数。
 	// 供观看统计页的「观看次数 Top N」与各维度聚合，默认 0。
 	ViewCount int `gorm:"default:0" json:"view_count"`

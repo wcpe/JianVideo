@@ -1,0 +1,46 @@
+package library
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/wcpe/JianVideo/internal/db/models"
+)
+
+// SetMediaViewed 记录媒体被「打开」（详情面板/播放页）的时刻（FR-120）：把 last_viewed_at 置为当前时间。
+// 媒体不存在（含已软删）返回 gorm.ErrRecordNotFound。仅写入查看时间，不改动续播/观看次数等其他状态。
+func (s *Service) SetMediaViewed(id int64) error {
+	now := time.Now()
+	result := s.db.Model(&models.MediaFile{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("last_viewed_at", now)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// RecentlyViewed 查询「最近查看」的媒体（FR-120），按 last_viewed_at 倒序，供时间轴回忆区块展示。
+// 命中条件：last_viewed_at 非空、未软删（deleted_at 为空），不论进度与类型（图片+视频）。
+// limit 小于 1 时回退默认 12，超过上限时收敛到上限（复用继续观看的最大条数上限）。
+func (s *Service) RecentlyViewed(limit int) ([]models.MediaFile, error) {
+	if limit < 1 {
+		limit = 12
+	}
+	if limit > continueWatchingMaxLimit {
+		limit = continueWatchingMaxLimit
+	}
+	var items []models.MediaFile
+	if err := s.db.
+		Where("last_viewed_at IS NOT NULL AND deleted_at IS NULL").
+		Order("last_viewed_at DESC").
+		Limit(limit).
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}

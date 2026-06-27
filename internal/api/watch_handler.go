@@ -85,3 +85,37 @@ func (h *Handler) OnThisDay(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
+
+// MarkMediaViewed PUT /api/library/media/:id/viewed
+// 记录媒体被打开（详情面板/播放页）的时刻（FR-120）：把 last_viewed_at 置为当前时间。
+// 成功 200 {"ok":true}；非法 id → 400，媒体不存在 → 404。
+func (h *Handler) MarkMediaViewed(c *gin.Context) {
+	id, ok := parseMediaID(c)
+	if !ok {
+		return
+	}
+	if err := h.library.SetMediaViewed(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "UPDATE_FAILED", "message": "记录最近查看失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// RecentlyViewed GET /api/library/recently-viewed?limit=N
+// 返回最近打开过的媒体列表（FR-120，按 last_viewed_at 倒序、排除软删），供时间轴「最近查看」回忆区块展示。
+func (h *Handler) RecentlyViewed(c *gin.Context) {
+	limit := 12
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	items, err := h.library.RecentlyViewed(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
