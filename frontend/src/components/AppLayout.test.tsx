@@ -223,12 +223,12 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     expect(navbar.getAllByText('系统').length).toBeGreaterThan(0)
   })
 
-  it('展开态：12 个导航项全部仍在桌面 navbar 中渲染', () => {
+  it('展开态：13 个导航项全部仍在桌面 navbar 中渲染', () => {
     renderLayout()
 
     const navbar = within(getNavbar())
-    // 概览（FR-117）置于浏览组首项；时间轴随之保留
-    const labels = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    // 概览（FR-117）置于浏览组首项；时间轴随之保留；监控（FR-119）置于系统组、系统诊断之前
+    const labels = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '监控', '系统']
     labels.forEach((label) => {
       // 「系统」既是组标题又是导航项，故只断言至少存在
       expect(navbar.getAllByText(label).length).toBeGreaterThan(0)
@@ -261,6 +261,10 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
       expect(i).toBeGreaterThan(idxManage)
       expect(i).toBeLessThan(idxSystem)
     })
+    // 监控（FR-119）属系统组、位于「系统」诊断项之前：落在「管理」标题之后、「系统」标题/项之前
+    const idxMonitor = text.indexOf('监控')
+    expect(idxMonitor).toBeGreaterThan(idxManage)
+    expect(idxMonitor).toBeLessThan(idxSystem)
   })
 
   it('收缩态：组标题文字隐藏、以分隔线区分组、图标态链接仍可达且不破版', async () => {
@@ -275,8 +279,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     expect(within(navbar).queryByText('浏览')).toBeNull()
     expect(within(navbar).queryByText('管理')).toBeNull()
     expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2)
-    // 12 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）；概览 '/' 与时间轴 '/timeline'（FR-117）
-    const paths = ['/', '/timeline', '/browse', '/albums', '/map', '/stats', '/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode', '/system']
+    // 13 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）；概览 '/' 与时间轴 '/timeline'（FR-117）；监控 '/monitor'（FR-119）
+    const paths = ['/', '/timeline', '/browse', '/albums', '/map', '/stats', '/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode', '/monitor', '/system']
     paths.forEach((p) => {
       expect(navbar.querySelector(`a[href="${p}"]`)).not.toBeNull()
     })
@@ -288,8 +292,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     renderLayout()
 
     const navbar = within(getNavbar())
-    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）；含概览（FR-117）
-    const names = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '系统']
+    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）；含概览（FR-117）、监控（FR-119）
+    const names = ['概览', '时间轴', '目录', '相册', '地图', '统计', '管理', '回收站', '巡检', '重复项', '转码', '监控', '系统']
     names.forEach((name) => {
       expect(navbar.getByRole('link', { name }).getAttribute('href')).toBeTruthy()
     })
@@ -776,8 +780,8 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     renderLayoutAt('/browse')
 
     const navbar = getNavbar()
-    // 12 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）
-    expect(navbar.querySelectorAll('.nav-link').length).toBe(12)
+    // 13 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(13)
     // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1)
   })

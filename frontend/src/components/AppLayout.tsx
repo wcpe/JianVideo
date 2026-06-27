@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { AppShell, Text, Group, ActionIcon, Burger, Drawer, Stack, Tooltip, Divider, Menu, Avatar, UnstyledButton, useMantineColorScheme, useComputedColorScheme } from '@mantine/core'
 import { useDisclosure, useHotkeys } from '@mantine/hooks'
-import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie, IconLayoutDashboard } from '@tabler/icons-react'
+import { IconVideo, IconLogout, IconSettings, IconClock, IconFolderOpen, IconPhoto, IconSun, IconMoon, IconDeviceDesktopAnalytics, IconTrash, IconMapPin, IconStethoscope, IconCopy, IconChartBar, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLicense, IconCommand, IconSearch, IconRefresh, IconPalette, IconMovie, IconLayoutDashboard, IconActivity } from '@tabler/icons-react'
 import { useAuthStore } from '@/stores/auth'
 import { useNavCollapsed } from '@/hooks/useNavCollapsed'
 import { useNavWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX } from '@/hooks/useNavWidth'
@@ -103,6 +103,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/stats', label: '统计', icon: IconChartBar },
     // 转码预设与预生成队列（FR-77）：自定义编码/分辨率预设、预热首播
     { path: '/transcode', label: '转码', icon: IconMovie },
+    // 系统监控（FR-119）：CPU/内存/磁盘/转码并发当前值与时序折线
+    { path: '/monitor', label: '监控', icon: IconActivity },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
   ]
@@ -113,7 +115,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navGroups = [
     { title: '浏览', items: ['/', '/timeline', '/browse', '/albums', '/map', '/stats'].map(navItemByPath) },
     { title: '管理', items: ['/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode'].map(navItemByPath) },
-    { title: '系统', items: ['/system'].map(navItemByPath) },
+    { title: '系统', items: ['/monitor', '/system'].map(navItemByPath) },
   ]
 
   // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；useHotkeys 默认对匹配事件 preventDefault

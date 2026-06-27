@@ -21,6 +21,8 @@ import DuplicatesPage from './pages/DuplicatesPage'
 // 统计页懒加载（ADR-0045）：仅此页引入 Recharts 图表库，按路由 code-split，
 // 让 recharts 落入独立 chunk、不进主包（否则主包超 PWA 预缓存 2MiB 上限）。
 const StatsPage = lazy(() => import('./pages/StatsPage'))
+// 系统监控页懒加载（FR-119）：同样复用 Recharts，按路由 code-split 落独立 chunk、不进主包。
+const MonitorPage = lazy(() => import('./pages/MonitorPage'))
 import PlayPage from './pages/PlayPage'
 import ConsolePage from './pages/ConsolePage'
 import SharePage from './pages/SharePage'
@@ -75,6 +77,8 @@ export default function App() {
           <Route path="/play/:id" element={<ProtectedRoute><AppLayout><PlayPage /></AppLayout></ProtectedRoute>} />
           {/* 系统信息与设置合并为单页两 tab（FR-55）：/system 进控制台页 */}
           <Route path="/system" element={<ProtectedRoute><AppLayout><ConsolePage /></AppLayout></ProtectedRoute>} />
+          {/* 系统监控页（FR-119）：CPU/内存/磁盘/转码并发当前值 + 时序折线，懒加载，套 Suspense 给图表 chunk 加载兜底 */}
+          <Route path="/monitor" element={<ProtectedRoute><AppLayout><Suspense fallback={<Center py="xl"><Loader color="purple" /></Center>}><MonitorPage /></Suspense></AppLayout></ProtectedRoute>} />
           {/* 旧 /settings 链接重定向到控制台页的设置 tab，避免死链 */}
           <Route path="/settings" element={<Navigate to="/system?tab=settings" replace />} />
           {/* 开源协议页（FR-57）：页脚「开源协议」链接进入 */}

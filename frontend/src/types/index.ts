@@ -304,6 +304,36 @@ export interface MediaTrends {
   media_added: MediaTrendPoint[]
 }
 
+/** 系统指标采样点（FR-119）：一个时间桶的 CPU / 内存 / 磁盘 / 转码并发 / goroutine 快照 */
+export interface MetricPoint {
+  /** 采样时刻（RFC3339，UTC） */
+  t: string
+  /** 系统 CPU 使用率 %（0-100） */
+  cpu_percent: number
+  /** 进程已用内存（runtime MemStats Alloc，字节） */
+  mem_used_bytes: number
+  /** 进程向 OS 申请内存（Sys，字节） */
+  mem_sys_bytes: number
+  /** 数据盘已用（字节） */
+  disk_used_bytes: number
+  /** 数据盘总量（字节） */
+  disk_total_bytes: number
+  /** 活跃转码 / 播放会话数 */
+  transcode_active: number
+  /** goroutine 数 */
+  goroutines: number
+}
+
+/** 系统监控时序（FR-119）：下采样后的时序点 + 最新一条原始样本快照（current） */
+export interface SystemMetrics {
+  /** 时间范围标识：1h / 24h / 7d */
+  range: string
+  /** 下采样时序点（按时间升序，点数有界） */
+  points: MetricPoint[]
+  /** 当前值快照（最新一条原始样本，≤15s 旧）；刚启动无样本时为 null */
+  current: MetricPoint | null
+}
+
 /** 媒体库后缀类型 */
 export type MediaExtensionType = 'video' | 'image'
 

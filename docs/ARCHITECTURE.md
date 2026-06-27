@@ -480,6 +480,13 @@
 - 看板总量维度由 `GET /api/library/summary` 提供：一次聚合（`COUNT`/`SUM` + 一次 `GROUP BY library_id`）返回媒体总数、视频/图片拆分、`SUM(file_size)`、`SUM(duration)`、启用库数与各库明细；全程 `deleted_at IS NULL`，视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致），避免 N+1。聚合在 library 服务层、`db` 仅读写。
 - 其余维度复用既有端点（观看统计 FR-75 / 系统信息 FR-21 / 健康巡检 FR-73 / 扫描任务 FR-29 / 转码任务 FR-77 / 继续观看 FR-44）；前端各数据源独立降级，空库零值不崩。
 
+### 5.12 系统指标采样与监控（FR-119，[ADR-0044](adr/0044-metrics-sampling-persistence.md)）
+
+- `/monitor` 页展示 CPU / 内存 / 磁盘 / 转码并发的当前值 + 时序折线（range 1h/24h/7d），前端复用 FR-118 的 Recharts `TrendChart`、15s 轮询。
+- **采集**：引入 `gopsutil/v4` 取系统 CPU% 与数据盘用量；进程内存/goroutine 用标准库 `runtime`；转码并发取播放服务 `ActiveSessions()`（只读 `len(sessions)`，经 `func() int` provider 注入，`metrics → playback` 不反向依赖）。
+- **采样与持久化**：`internal/metrics` 采样器后台 `time.Ticker` 每 15s 采一行写入 SQLite `metric_samples` 表；按 7 天保留期裁剪防膨胀；随服务 `Start`/`Stop`（main 装配，注入 db + dataDir + 转码计数 provider），不泄漏 goroutine。采样逻辑在 metrics 服务层、`db` 仅 `metric_samples` 读写，依赖方向 `metrics → db` 单向。只落 SQLite，不引时序库 / Redis。
+- **查询**：`GET /api/system/metrics?range=` 按 range 选窗口与桶大小下采样（`unixepoch(sampled_at) / 桶秒` GROUP BY + AVG/MAX），点数有界；`current` 为最新一条原始样本（按 `id DESC` 取，回避 mattn/go-sqlite3 的 time 文本序列化比较不可靠）。
+
 ## 6. 部署
 
 - **运行形态**：单个可执行文件，内嵌前端静态资源。
