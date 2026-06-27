@@ -26,9 +26,12 @@ async function realRunCodecTest(force?: boolean): Promise<CodecTestResult> {
 
 async function realCheckUpdate(channel: string, force = false): Promise<UpdateCheckResult> {
   // 检查更新需直连 GitHub，国内常较慢；单请求超时放宽到 60s（覆盖全局 15s），避免前端先于后端超时。
+  // silent：网络失败不弹全局 toast——页眉后台检查（UpdateIndicator）本就静默降级，
+  // 显式「检查更新」按钮（SystemPage）有自身内联错误提示，无需全局 toast 叠加堆积。
   const res = await client.get<UpdateCheckResult>('/api/system/update/check', {
     params: { channel, ...(force ? { force: 'true' } : {}) },
     timeout: 60000,
+    silent: true,
   })
   return res.data
 }
@@ -43,8 +46,9 @@ async function realRollbackUpdate(): Promise<void> {
 }
 
 async function realGetUpdateProgress(): Promise<UpdateProgress> {
-  // 进度轮询：短超时即可，进度端点为进程内单例读取、恒快速返回
-  const res = await client.get<UpdateProgress>('/api/system/update/progress', { timeout: 5000 })
+  // 进度轮询：短超时即可，进度端点为进程内单例读取、恒快速返回；
+  // silent：后台轮询失败不弹全局 toast，避免反复失败时 toast 堆积致白屏
+  const res = await client.get<UpdateProgress>('/api/system/update/progress', { timeout: 5000, silent: true })
   return res.data
 }
 

@@ -203,7 +203,9 @@ async function realScanLibrary(id: number, mode: ScanMode = 'incremental'): Prom
 // ─── 扫描任务队列（FR-29）──────────────────────────────
 
 async function realGetScanTasks(): Promise<ScanTasksResponse> {
-  const res = await client.get<ScanTasksResponse>('/api/library/scan/tasks')
+  // silent：页眉扫描任务指示器每 2s 轮询本端点，网络失败不弹全局 toast，
+  // 避免持续失败时网络 toast 无上限堆积撑爆 DOM 致白屏（FR-115 后续修复·通知白屏）
+  const res = await client.get<ScanTasksResponse>('/api/library/scan/tasks', { silent: true })
   return res.data
 }
 

@@ -38,7 +38,9 @@ export default function App() {
       defaultColorScheme="dark"
       colorSchemeManager={colorSchemeManager}
     >
-      <Notifications position="top-right" />
+      {/* 全局通知（FR-115 后续修复·通知白屏）：限制同时渲染数量 limit=4，
+          防轮询/后台请求反复失败时 toast 无上限堆积撑爆 DOM 导致白屏；位置保持右上 */}
+      <Notifications position="top-right" limit={4} />
       <BrowserRouter>
         {/* 全局顶部加载条（FR-96）：路由切换时顶部进度反馈 */}
         <TopProgressBar />
