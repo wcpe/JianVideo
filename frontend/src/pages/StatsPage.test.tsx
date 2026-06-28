@@ -107,6 +107,23 @@ describe('StatsPage', () => {
     expect(screen.getByText(/已看 4 \/ 共 10/)).toBeVisible()
   })
 
+  it('观看统计数组字段为 null 时不白屏（防御性兜底回归）', async () => {
+    // 模拟后端稀疏态把切片回成 JSON null（修复前 .map 会整页白屏）
+    server.use(
+      http.get('*/api/library/stats', () => HttpResponse.json({
+        total: 5, watched: 0, unwatched: 5,
+        recent_timeline: null, position_heatmap: null,
+        by_library: null, by_format: null, top_viewed: null,
+      })),
+    )
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('统计')).toBeVisible()
+    })
+    // 不崩、仍渲染观看进度概览（已看 0 / 共 5）
+    expect(screen.getByText(/已看 0 \/ 共 5/)).toBeVisible()
+  })
+
   it('观看 tab 顶部渲染当前值卡（已看/未看/追看中）', async () => {
     useDefaultHandlers()
     renderPage()

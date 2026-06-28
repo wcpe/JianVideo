@@ -118,6 +118,16 @@ export default function StatsPage() {
     )
   }
 
+  // 防御性兜底：即便后端某数组字段回 null（稀疏态/历史/异常），也归一为空数组，绝不让 .map 白屏整页
+  const safeStats: WatchStats = {
+    ...stats,
+    recent_timeline: stats.recent_timeline ?? [],
+    position_heatmap: stats.position_heatmap ?? [],
+    by_library: stats.by_library ?? [],
+    by_format: stats.by_format ?? [],
+    top_viewed: stats.top_viewed ?? [],
+  }
+
   return (
     <Stack gap="lg">
       <Title order={2}>统计</Title>
@@ -128,7 +138,7 @@ export default function StatsPage() {
         </Tabs.List>
 
         <Tabs.Panel value={TAB_WATCH}>
-          <WatchTab stats={stats} continueCount={continueCount} />
+          <WatchTab stats={safeStats} continueCount={continueCount} />
         </Tabs.Panel>
         <Tabs.Panel value={TAB_MEDIA}>
           <MediaTab summary={summary} trends={trends} />
@@ -338,8 +348,9 @@ function MediaTab({ summary, trends }: { summary: LibrarySummary | null; trends:
   const composeTotal = summary.video_count + summary.image_count
   const videoPct = composeTotal > 0 ? Math.round((summary.video_count / composeTotal) * 100) : 0
   const imagePct = composeTotal > 0 ? 100 - videoPct : 0
-  // 各库 media_count 横条最大值
-  const libMax = Math.max(0, ...summary.by_library.map((l) => l.media_count))
+  // 各库 media_count 横条最大值（防御性兜底：by_library 即便回 null 也归一为空数组）
+  const byLibrary = summary.by_library ?? []
+  const libMax = Math.max(0, ...byLibrary.map((l) => l.media_count))
 
   return (
     <Stack gap="lg">
@@ -413,11 +424,11 @@ function MediaTab({ summary, trends }: { summary: LibrarySummary | null; trends:
 
         <Card withBorder padding="md" radius="md">
           <Text fw={600} mb="xs">各存储库媒体数</Text>
-          {summary.by_library.length === 0 ? (
+          {byLibrary.length === 0 ? (
             <Text size="sm" c="dimmed">暂无媒体库。</Text>
           ) : (
             <Stack gap="xs">
-              {summary.by_library.map((l) => (
+              {byLibrary.map((l) => (
                 <div key={l.library_id}>
                   <Group justify="space-between" mb={2}>
                     <Text size="sm" truncate>{l.label || `库 #${l.library_id}`}</Text>
