@@ -101,6 +101,12 @@ export function loadVolumePref(): VolumePref | null {
   }
 }
 
+/** 把音量夹取到 [0,1]（纯函数，FR-104）。非有限数归 0，防止越界值赋给 video.volume 触发 IndexSizeError。 */
+export function clampVolume(val: number): number {
+  if (!Number.isFinite(val)) return 0
+  return Math.min(1, Math.max(0, val))
+}
+
 /** 写入音量 / 静音偏好（纯函数，FR-104）。失败静默忽略（如隐私模式禁写）。 */
 export function saveVolumePref(pref: VolumePref): void {
   try {
@@ -428,10 +434,12 @@ export default function VideoPlayer({
   const handleSeek = (val: number) => { const v = videoRef.current; if (v && duration) v.currentTime = (val / 100) * duration }
   const handleVolume = (val: number) => {
     const v = videoRef.current; if (!v) return
-    v.volume = val; v.muted = val === 0
-    setVolume(val); setIsMuted(val === 0); setAutoMuted(false)
+    // 夹取到 [0,1]：滑块域为 [0,1]，但仍兜底任何越界来源，杜绝 v.volume 触发 IndexSizeError
+    const next = clampVolume(val)
+    v.volume = next; v.muted = next === 0
+    setVolume(next); setIsMuted(next === 0); setAutoMuted(false)
     // FR-104：用户主动调音量 → 记忆其偏好
-    saveVolumePref({ volume: val, muted: val === 0 })
+    saveVolumePref({ volume: next, muted: next === 0 })
   }
   const toggleMute = () => {
     const v = videoRef.current; if (!v) return
@@ -691,7 +699,7 @@ export default function VideoPlayer({
           <ActionIcon variant="subtle" color="gray" onClick={toggleMute} aria-label={isMuted ? '取消静音' : '静音'}>
             {isMuted || volume === 0 ? <IconVolumeOff size={18} /> : <IconVolume size={18} />}
           </ActionIcon>
-          <Slider value={isMuted ? 0 : volume} onChange={handleVolume} size={4} color="purple" radius="xl" showLabelOnHover={false} style={{ width: '5rem' }} />
+          <Slider value={isMuted ? 0 : volume} onChange={handleVolume} min={0} max={1} step={0.05} size={4} color="purple" radius="xl" showLabelOnHover={false} aria-label="音量" style={{ width: '5rem' }} />
         </Box>
 
         {/* FR-104：画中画（浏览器不支持则隐藏） */}

@@ -2,7 +2,7 @@ import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MantineProvider } from '@mantine/core'
-import VideoPlayer, { loadVolumePref, saveVolumePref, VOLUME_PREF_KEY } from './VideoPlayer'
+import VideoPlayer, { loadVolumePref, saveVolumePref, clampVolume, VOLUME_PREF_KEY } from './VideoPlayer'
 
 // 走 streamType='mp4' 原生 video 分支，避免依赖 mpegts.js / hls.js 真实内核
 vi.mock('mpegts.js', () => ({ default: { createPlayer: () => ({}) } }))
@@ -62,6 +62,25 @@ describe('记忆音量纯函数（FR-104）', () => {
   it('越界 volume 被夹取到 [0,1]', () => {
     saveVolumePref({ volume: 5, muted: false })
     expect(loadVolumePref()?.volume).toBe(1)
+  })
+
+  it('clampVolume 把越界 / 非有限值夹取到 [0,1]', () => {
+    expect(clampVolume(50)).toBe(1)
+    expect(clampVolume(0.5)).toBe(0.5)
+    expect(clampVolume(-0.2)).toBe(0)
+    expect(clampVolume(Number.NaN)).toBe(0)
+  })
+})
+
+describe('音量滑块域（FR-104 修复 IndexSizeError）', () => {
+  beforeEach(() => { localStorage.clear(); stubVideoPlay() })
+
+  it('音量滑块域为 [0,1]，避免 onChange 输出 0-100 致 video.volume 越界崩溃', () => {
+    renderPlayer()
+    // 修复前音量 Slider 用 Mantine 默认 max=100，拖动时 onChange 给 0-100、handleVolume 直接赋给 v.volume 触发 IndexSizeError；
+    // 修复后音量 Slider min=0 max=1，故必有一个滑块 aria-valuemax 为 '1'
+    const sliders = screen.getAllByRole('slider')
+    expect(sliders.some((s) => s.getAttribute('aria-valuemax') === '1')).toBe(true)
   })
 })
 
