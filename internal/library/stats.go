@@ -84,6 +84,21 @@ func (s *Service) GetWatchStats() (*WatchStats, error) {
 	if err := s.fillTopViewed(stats); err != nil {
 		return nil, err
 	}
+	// 兜底：各 fill 用 `var rows []T` 承接查询，零行时 rows 为 nil，会覆盖上面的非空初始化、
+	// 进而序列化成 JSON null 让前端 .map 崩溃（如「有媒体但无任何观看记录」的稀疏态）。
+	// 这里统一把 nil 收敛为空切片，保证契约「这些字段恒为数组、非 null」（与 empty-states.md 一致）。
+	if stats.RecentTimeline == nil {
+		stats.RecentTimeline = []TimelineBucket{}
+	}
+	if stats.ByLibrary == nil {
+		stats.ByLibrary = []LibraryWatchCount{}
+	}
+	if stats.ByFormat == nil {
+		stats.ByFormat = []FormatWatchCount{}
+	}
+	if stats.TopViewed == nil {
+		stats.TopViewed = []models.MediaFile{}
+	}
 	return stats, nil
 }
 

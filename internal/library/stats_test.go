@@ -63,6 +63,40 @@ func TestMarkWatchedIncrementsViewCount(t *testing.T) {
 	}
 }
 
+// TestGetWatchStats_SparseArraysNonNil 回归（统计页白屏修复）：有媒体但无任何观看活动时，
+// 各 fill 用 nil 切片承接零行查询会覆盖非空初始化、序列化成 JSON null，前端 .map 整页白屏。
+// 验证稀疏态下 RecentTimeline/ByLibrary/ByFormat/TopViewed 恒为非 nil 空切片（契约：永远是数组）。
+func TestGetWatchStats_SparseArraysNonNil(t *testing.T) {
+	svc := newWatchTestService(t)
+	// 入库媒体但完全不产生观看活动（不 MarkWatched、不上报位置、无 view_count）
+	seedStatsMedia(t, svc, "a.mp4", 1, "mp4", 100)
+	seedStatsMedia(t, svc, "b.jpg", 1, "jpg", 0)
+
+	stats, err := svc.GetWatchStats()
+	if err != nil {
+		t.Fatalf("GetWatchStats 失败: %v", err)
+	}
+	if stats.Total != 2 || stats.Watched != 0 {
+		t.Fatalf("期望 total=2 watched=0, 实际 total=%d watched=%d", stats.Total, stats.Watched)
+	}
+	// 关键断言：稀疏态下这些切片必须非 nil（否则 JSON null → 前端崩）
+	if stats.RecentTimeline == nil {
+		t.Error("RecentTimeline 不应为 nil（应为空切片）")
+	}
+	if stats.ByLibrary == nil {
+		t.Error("ByLibrary 不应为 nil（应为空切片）")
+	}
+	if stats.ByFormat == nil {
+		t.Error("ByFormat 不应为 nil（应为空切片）")
+	}
+	if stats.TopViewed == nil {
+		t.Error("TopViewed 不应为 nil（应为空切片）")
+	}
+	if len(stats.PositionHeatmap) != positionHeatmapBuckets {
+		t.Errorf("PositionHeatmap 应为 %d 长定长切片, 实际长度 %d", positionHeatmapBuckets, len(stats.PositionHeatmap))
+	}
+}
+
 // TestGetWatchStats_WatchedCounts 验证已看/未看/总数计数（排除软删）。
 func TestGetWatchStats_WatchedCounts(t *testing.T) {
 	svc := newWatchTestService(t)
