@@ -6,6 +6,8 @@
 
 ## 未发布
 
+## 0.20.0（2026-06-28）
+
 ### 新增
 - **首页概览数据看板（FR-117，[ADR-0043](docs/adr/0043-homepage-overview-dashboard.md)）**：根路由 `/` 由时间轴改为「概览」系统总览看板，时间轴迁至 `/timeline`（导航「浏览」组并列「概览」「时间轴」两入口）。看板含 KPI（媒体总数 + 视频/图片拆分、视频总时长、占用空间、媒体库数、相册数）、媒体构成与各库分布、观看概览（跳 `/stats`）、系统状态（FFmpeg/硬件加速/运行时长/内存 + 巡检问题数）、任务队列（扫描进度 + 转码计数）、继续观看，各数据源独立降级、空库零值不崩。新增后端聚合端点 `GET /api/library/summary`（一次 `GROUP BY` 取总量/视频图片拆分/`SUM(file_size)`/`SUM(duration)`/各库明细，视频图片口径复用 `builtInImageExtensionList()`、全程 `deleted_at IS NULL`、避免 N+1）；前端新增 `OverviewPage` 与 `api/summary.ts`，并把 `formatBytes`/`formatUptime` 抽到 `utils/format.ts` 去重。修订 AC-13 + 新增 AC-21。后端 6 单测、前端 OverviewPage 8 组件测试，受影响前端全量测试与生产构建通过。机制见 [docs/specs/overview-dashboard.md](docs/specs/overview-dashboard.md)。
 - **统计页内容趋势扩展（FR-118，扩 FR-75，[ADR-0045](docs/adr/0045-recharts-charting-library.md)）**：`/stats` 顶部分「观看 / 媒体」两 tab（`?tab=` 经 `useSearchParams` 记忆），每 tab = 当前值卡（含 sparkline + 涨跌）+ 时序折线图。观看 tab：已看/未看/追看中当前值 + 观看活跃趋势折线（复用 `stats.recent_timeline`）+ 保留既有续播热力/各库各格式/Top 榜；媒体 tab：媒体总数/视频/图片/总时长/占用当前值（复用 `/api/library/summary`）+ 媒体增长与累计容量/时长折线 + 媒体构成。新增后端端点 `GET /api/library/trends`（按天新增媒体 count/size/duration，一次 `GROUP BY`、升序、`deleted_at IS NULL`）；前端引入 **Recharts** 图表库（新增 `TrendChart`/`MetricCard` 复用组件、`api/trends.ts`），StatsPage 改 `lazy()` 使 recharts 落入独立 chunk、主包不超 PWA 预缓存上限。新增 AC-22。后端 4 单测、前端 TrendChart/MetricCard/StatsPage 共 22 用例，受影响前端全量测试与生产构建通过。机制见 [docs/specs/stats-content-trends.md](docs/specs/stats-content-trends.md)。
