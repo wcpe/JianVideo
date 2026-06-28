@@ -159,6 +159,13 @@
 | FR-119 | 系统监控页：新增 `/monitor` 页展示 CPU/内存/磁盘/转码并发当前值 + 时序折线（range 1h/24h/7d）；新增定时采样器 + SQLite 样本表 + 保留期裁剪 + `GET /api/system/metrics`（采样只落 SQLite、不引时序库，采样器独立服务层、`db` 仅样本读写，见 ADR-0044） | P12 | 已交付@v0.20.0 |
 | FR-120 | 时间轴页苹果风重设计：右侧时间标尺悬停即弹出该时段缩略图预览（升级 FR-68 拖动浮层）、年/月/日/所有缩放、方形密铺日期分组网格；顶部「那年今日」+「最近查看」（新增媒体打开 `viewed_at` 记录 + `recently-viewed` 端点）（扩 FR-14/FR-32/FR-68/FR-72） | P12 | 已交付@v0.20.0 |
 | FR-121 | 目录浏览重做为资源管理器：左导航树 + 可点地址栏 + 工具栏 + 名称/修改日期/类型/大小详情列 + 状态栏 + 视图模式；聚合改为按真实磁盘路径前缀跨库重建单一目录树（盘符/共享为根，传 `D:\` 库即整盘可浏览），排序后端参数化；移除全局页级面包屑 `PageBreadcrumbs`；只读浏览，不做真动磁盘文件操作（取代 ADR-0037，见 ADR-0046） | P12 | 已交付@v0.20.0 |
+| FR-122 | Go 静态检查门禁：新增 `.golangci.yml`（全套 linter：govet/staticcheck/errcheck/ineffassign/revive/bodyclose/sqlclosecheck 等），Makefile 加 `lint` 目标（gofmt 检查 + goimports 检查 + golangci-lint run，help 列出，只管 Go）并固定工具版本，修复全部存量告警至全绿（落地 static-analysis.md 既定工具链） | P13 | 计划 |
+| FR-123 | 前端 Prettier 落地与 ESLint 告警清零：引入 prettier + eslint-config-prettier 及配置、format/format:check/lint:fix 脚本，eslint 配置接入 eslint-config-prettier 关闭冲突格式规则，全量 `prettier --write` 格式化（format-only 独立提交、行为不变）并修复全部 eslint 告警（落地 static-analysis.md 既定工具链，扩 eslint 现有配置） | P13 | 计划 |
+| FR-124 | 前端 Mock API 端点补全：审计 `frontend/src/api` 实际调用的全部后端端点，补齐 MSW handlers 至 100% 覆盖、消除未处理请求，并校准 mock 数据形状贴近真实响应（扩现有 MSW 测试基建） | P13 | 计划 |
+| FR-125 | 前端关键浅测补强：审计 render-only 浅测，对关键页面/组件补行为与交互断言（点击/表单/API 往返/状态转换），提升测试有效性（扩 FR-H 测试基线） | P13 | 计划 |
+| FR-126 | 前端测试覆盖率阈值门禁：引入 @vitest/coverage-v8，vitest 覆盖率配置加 thresholds（lines/statements/functions 70%、branches 按实测约 60%），先实测当前值定档，覆盖率不达标即失败（扩 FR-125） | P13 | 计划 |
+| FR-127 | 前端 E2E 接入 CI 并扩关键场景：现有 Playwright E2E 接入 CI 回归门，并补关键流程 spec（播放/转码、目录浏览、设置等），复用已配 retries/SW 禁用/独立 DB（扩现有 e2e 基线） | P13 | 计划 |
+| FR-128 | CI 质量门工作流：新增 `.github/workflows/ci.yml`（PR 与 push main 触发）统一执行 Go（make lint + go test）与前端（lint + format:check + 覆盖率门禁）质量门、E2E 独立 job 失败挡合并，build.yml 仍专管发版（首次在 CI 设质量门，见 ADR-0047） | P13 | 计划 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
@@ -211,6 +218,13 @@
 - **AC-23**（FR-119，需用户确认）：`/monitor` 展示 CPU/内存/磁盘/转码并发当前值卡 + 时序折线（range 1h/24h/7d 可切、折线可 hover 看精确值），刚启动无样本时显占位不报错；导航「系统」组含「监控」入口。`GET /api/system/metrics?range=` 由后台采样器（15s 周期、SQLite `metric_samples`、7 天保留）下采样返回 points + current 快照。
 - **AC-24**（FR-120，需用户确认）：`/timeline` 右侧时间标尺鼠标 hover（非仅拖动）即在指针处弹出该时段日期 + 数量 + 缩略图预览，点击/松手跳转该分组；缩放支持年/月/日/所有；顶部展示「最近查看」（有数据横向卡片流可点击进入、空则不渲染），打开媒体后其进入「最近查看」；多选/详情/批量既有交互不回归。`PUT /api/library/media/:id/viewed` 记录查看、`GET /api/library/recently-viewed` 倒序返回。
 - **AC-25**（FR-121，需用户确认）：`/browse` 为资源管理器布局（左导航树 + 可点地址栏 + 工具栏 + 名称/修改日期/类型/大小详情列 + 状态栏 + 视图模式）；目录树按**真实磁盘路径跨库合并**（加 `D:\1` 与 `D:\1\2` 在 `D:` 下合成 `1 → 2` 单一树；加 `D:\` 库则整盘可浏览）；排序经后端 `sort`（name/size/type/time）生效；地址栏路径段可点跳转；多选/详情/批量/筛选既有交互不回归；全局页级面包屑 `PageBreadcrumbs` 已移除。`GET /api/library/browse?parent_path=&sort=` 跨库前缀聚合（见 ADR-0046 取代 ADR-0037）。
+- **AC-26**（FR-122）：`make lint` 在本地与 CI 均全绿——`gofmt -l`/`goimports -l` 无输出、`golangci-lint run`（全套 linter）0 issue；修复后受影响 Go 包 `go test` 仍全绿（证明修复未改变行为）。
+- **AC-27**（FR-123）：`npm run format:check` 全绿、`npm run lint` 0 error/warning；全量格式化为独立提交、与 eslint 告警修复提交分开；`npm run build`（tsc -b + vite build）与 `npm test` 均通过（格式化未破坏行为）。
+- **AC-28**（FR-124）：可列出 `frontend/src/api` 全部后端端点清单且 MSW handlers 100% 覆盖；测试在 `onUnhandledRequest:'error'` 下运行无未处理请求；`npm test` 全绿。
+- **AC-29**（FR-125）：选定的关键浅测均含实质行为/交互断言（非仅渲染存在性）；`npm test` 全绿；覆盖率较补强前不下降。
+- **AC-30**（FR-126，需先实测定档）：`npm run test:coverage` 产出覆盖率且不低于配置阈值（lines/statements/functions 70%、branches 约 60% 按实测校准）；阈值写入 vitest 覆盖率配置；构造低于阈值用例可使其失败（门禁生效）。
+- **AC-31**（FR-127）：新增关键流程 spec 本地 `npm run e2e` 通过；CI 中 E2E job（headless Chromium）通过、失败时阻断合并；覆盖播放/转码、目录浏览、设置等关键流程。
+- **AC-32**（FR-128，需 CI 实跑确认）：`ci.yml` 在 PR 与 push main 触发，依次跑 Go、前端、E2E 门；任一门失败即整体 fail 并阻断合并（构造失败用例验证）；本地 `make lint` 与 `npm run lint/format:check/test:coverage/e2e` 与 CI 行为一致；`build.yml` 发版职责不变（见 ADR-0047）。
 
 ## 7. 分期（路线）
 
@@ -228,6 +242,7 @@
 - **第十期（账户安全与运维完善）**：账户安全与运维体验补齐——登录用户修改密码、首次初始化引导（取消 admin/admin 默认建号、由用户配置账号密码）、运行时调试日志开关与默认安静日志、发布说明源自 CHANGELOG（正式版读取 + 修预发布抽取标题不匹配）；并修在线更新「重启后失效」缺陷（FR-108~111 + 自更新持久化修复）。
 - **第十一期（界面交互打磨与发布渠道修复）**：基于使用反馈的界面交互打磨与更新渠道修复——应用更新面板单按钮化与缓存展示规则、系统/设置页改一级 tab + 每 tab 左侧锚点导航、页眉刷新当前页、路由淡入仅内容区、导航收缩入口移底部右下与 logo 切换收展及 hover 补齐、左侧导航可拖拽调宽（FR-112~116）；并修测试版频道「一直有更新」（dev 版本号策略 + 后端比较逻辑，配套 ADR 取代/扩展 ADR-0032）与路由淡入范围缺陷。v0.19.0 续做真机走查打磨：版本号入页眉、协议入底/收缩态隐藏、收缩动画、按钮配色统一、锚点 sticky 与高亮死区/触底修复、运行环境复制按钮、通知堆积白屏修复。
 - **第十二期（首页概览与数据可视化 + 浏览体验重做）**：把首页从时间轴改为系统总览看板（新增库存储/时长/类型聚合接口，时间轴移至 `/timeline`），统计页扩为「观看 / 媒体」分 tab 的结果 + 趋势可视化、新增系统资源实时监控页（指标采样持久化于 SQLite），时间轴重做为苹果「照片」式侧栏标尺悬停预览 + 最近查看，目录浏览重做为 Windows 资源管理器式真实路径树聚合（FR-117~121，引入 Recharts 图表库，配 ADR-0043 取代时间轴首页决策 / ADR-0044 指标采样 / ADR-0045 Recharts / ADR-0046 取代 ADR-0037 目录聚合）。
+- **第十三期（工程质量门禁与 CI 自动化）**：把 `.claude/rules/static-analysis.md` 与 `testing-and-quality.md` 既定但尚未自动化的质量要求落到工具与 CI——Go 静态检查门禁（golangci-lint 全套 + make lint）、前端 Prettier 落地与 ESLint 告警清零、前端 Mock API 端点补全与关键浅测补强、单测覆盖率阈值门禁、Playwright E2E 接入 CI 并扩关键场景，最后由新增 `ci.yml`（PR 与 push main 触发）统一门禁、E2E 独立 job 失败挡合并（FR-122~128，首次在 CI 设质量门，配 ADR-0047；build.yml 发版职责不变）。
 
 > **分期不会堆到上百**：期是粗粒度路线图横轴，数量很少（走到成熟通常 3~6 个），一期含很多 FR、跨很多版本。**产品成熟（1.0 后稳态迭代）就不再加"第 N 期"**，改按版本（CHANGELOG / tag）+ 功能（FR 表 / specs）组织。
 
