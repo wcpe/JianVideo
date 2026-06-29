@@ -45,7 +45,7 @@ FFMPEG_DIR ?= third_party/ffmpeg/$(GOOS)
 # 链接参数：去符号表与调试信息（-s -w）减小体积，并注入版本号。
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help frontend build build-hwaccel package clean
+.PHONY: help frontend build build-hwaccel package clean lint
 
 # 默认目标：打印帮助。
 help:
@@ -55,8 +55,10 @@ help:
 	@echo "  make build-hwaccel  同 build，额外启用 libav 硬件检测（需 libavcodec 等开发库）"
 	@echo "  make package        在 build 基础上组装并压缩发布包到 $(DIST_DIR)/"
 	@echo "  make clean          删除 $(DIST_DIR)/"
+	@echo "  make lint           Go 静态检查门禁（golangci-lint：gofmt/goimports + 全套 linter，只管 Go）"
 	@echo ""
 	@echo "ffmpeg/ffprobe 请自备放入 $(FFMPEG_DIR)/（package 时拷入发布包）。"
+	@echo "make lint 前需先 make frontend（golangci-lint 分析 main 包依赖 go:embed 的 frontend/dist）。"
 
 # 构建前端：产出 frontend/dist，供后端 go:embed 内嵌。
 frontend:
@@ -130,3 +132,9 @@ endif
 clean:
 	rm -rf $(DIST_DIR)
 	@echo "已删除 $(DIST_DIR)/"
+
+# Go 静态检查门禁：golangci-lint 一次跑齐格式（gofmt/goimports）+ 全套 linter（见 .golangci.yml / FR-122 / ADR-0047）。
+# 只管 Go。前提：分析 main 包需 go:embed 的 frontend/dist，请先 make frontend（CI 在 lint 前构建前端）。
+lint:
+	golangci-lint run ./...
+	@echo "Go 静态检查通过"
