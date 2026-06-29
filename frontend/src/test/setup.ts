@@ -11,6 +11,20 @@ const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
+// 挂载 navigator：react-dom 在模块求值期读取 navigator，Node 21+ 才有此全局，
+// Node 20（CI）缺失会抛 "navigator is not defined"。用可扩展的纯对象（不含 clipboard，
+// 与 Node 全局 navigator 一致）跨 Node 版本统一行为，使依赖注入 navigator.clipboard 的
+// 用例可照常 defineProperty 覆盖。
+Object.defineProperty(globalThis, 'navigator', {
+  value: {
+    userAgent: dom.window.navigator.userAgent,
+    language: dom.window.navigator.language,
+    languages: dom.window.navigator.languages,
+  },
+  writable: true,
+  configurable: true,
+});
+
 // 挂载 DOM 类型到 globalThis
 const domTypes = [
   'HTMLElement',
