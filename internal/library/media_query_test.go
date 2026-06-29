@@ -71,7 +71,7 @@ func TestListMediaFilesFiltered_SearchSpansDisplayNameAndEXIF(t *testing.T) {
 	svc, gdb := newTagTestService(t)
 	a, _ := svc.CreateMediaFile(1, "D:/pics/IMG_001.jpg", 1000) // 显示名命中
 	b, _ := svc.CreateMediaFile(1, "D:/pics/IMG_002.jpg", 1000) // 相机命中
-	c, _ := svc.CreateMediaFile(1, "D:/pics/海边.jpg", 1000)     // 文件名命中
+	c, _ := svc.CreateMediaFile(1, "D:/pics/海边.jpg", 1000)      // 文件名命中
 	d, _ := svc.CreateMediaFile(1, "D:/pics/IMG_003.jpg", 1000) // 镜头命中
 	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", a.ID).
 		Update("display_name", "毕业典礼").Error; err != nil {
