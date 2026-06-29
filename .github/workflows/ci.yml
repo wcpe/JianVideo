@@ -1,0 +1,86 @@
+# 质量门工作流：在 PR 与 push main 时统一执行 Go 静态检查/测试、前端 lint/格式/覆盖率、E2E。
+# 任一 job 失败即整体失败、阻断合并。发版工作流（build/release/prerelease）职责不变（见 ADR-0047 / FR-128）。
+name: 质量门
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# 同一 ref 仅保留最新一次运行，旧的进行中运行自动取消，降低资源占用。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Go 静态检查门禁 + 测试。golangci-lint 与 go test 分析 main 包，依赖 go:embed 的 frontend/dist，须先构建前端。
+  go-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Go（按 go.mod 版本）
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 构建前端（供 go:embed 内嵌）
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+      - name: Go 静态检查门禁（golangci-lint）
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.2
+          args: run ./...
+      - name: Go 测试
+        run: go test ./...
+
+  # 前端 lint + 格式检查 + 覆盖率门禁。
+  web-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装前端依赖
+        run: npm --prefix frontend ci
+      - name: 前端 lint
+        run: npm --prefix frontend run lint
+      - name: 前端格式检查
+        run: npm --prefix frontend run format:check
+      - name: 前端测试与覆盖率门禁
+        run: npm --prefix frontend run test:coverage
+
+  # Playwright 端到端：webServer 自行构建前端 + go run，用隔离 DB；CI 环境启用 retries:2 与单 worker。
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Go（按 go.mod 版本）
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装根依赖（@playwright/test 等）
+        run: npm ci
+      - name: 安装前端依赖（webServer 构建前端用）
+        run: npm --prefix frontend ci
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+      - name: 运行端到端测试
+        run: npm run e2e
