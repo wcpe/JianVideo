@@ -3,6 +3,7 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
+import eslintConfigPrettier from 'eslint-config-prettier'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
@@ -39,4 +40,7 @@ export default defineConfig([
       '@typescript-eslint/ban-ts-comment': 'off',
     },
   },
+  // eslint-config-prettier 置于数组最后：关闭 ESLint 中与 Prettier 冲突的格式类规则，
+  // 由 Prettier 统一负责代码格式，避免二者就缩进 / 引号 / 行宽等互相打架。
+  eslintConfigPrettier,
 ])
