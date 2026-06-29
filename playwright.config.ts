@@ -20,8 +20,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // 先构建前端（go:embed frontend/dist 需最新产物），再起服务，确保测的是当次源码
-    command: 'npm --prefix frontend run build && go run .',
+    // 先确保隔离库目录存在（.tmp 被 gitignore，CI 全新检出时不存在，SQLite 不会自建父目录），
+    // 再构建前端（go:embed frontend/dist 需最新产物），最后起服务，确保测的是当次源码
+    command:
+      'node -e "require(\'fs\').mkdirSync(\'.tmp\',{recursive:true})" && npm --prefix frontend run build && go run .',
     url: 'http://localhost:8080/health',
     // E2E 始终拉起独立实例：用 .tmp 下的隔离库，避免污染开发库 jianvideo.db
     reuseExistingServer: false,
