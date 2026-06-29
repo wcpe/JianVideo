@@ -117,6 +117,6 @@ Object.defineProperty(globalThis, 'localStorage', {
 import '@testing-library/jest-dom';
 import { server } from '../mocks/beforeAll';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }));
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());

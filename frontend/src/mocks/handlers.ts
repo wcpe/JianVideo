@@ -1,6 +1,18 @@
 import { http, HttpResponse, delay } from 'msw';
 import { mockPaths, mockMediaFiles } from './data';
-import type { LibraryPath, MediaFile, MediaExtension, Album, Tag, ScanTask } from '@/types';
+import type {
+  LibraryPath,
+  MediaFile,
+  MediaExtension,
+  Album,
+  Tag,
+  ScanTask,
+  Share,
+  TranscodePreset,
+  TranscodeTask,
+  ShareResourceType,
+  TranscodeCodec,
+} from '@/types';
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths];
@@ -33,6 +45,18 @@ const deletedMediaIds = new Set<number>();
 // 扫描任务队列（FR-29）内存数据
 const scanTasks: ScanTask[] = [];
 let nextScanTaskId = 1;
+
+// 公开分享（FR-43/FR-78）内存数据
+let shares: Share[] = [];
+let nextShareTokenSeq = 1;
+
+// 转码预设与预生成任务（FR-77）内存数据
+let transcodePresets: TranscodePreset[] = [];
+const transcodeTasks: TranscodeTask[] = [];
+let nextPresetId = 1;
+let nextTranscodeTaskId = 1;
+// 支持的目标编码（与 api 层 KNOWN_CODECS 对齐）
+const KNOWN_TRANSCODE_CODECS: TranscodeCodec[] = ['h264', 'h265', 'av1', 'vp9'];
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -971,5 +995,366 @@ export const handlers = [
     const mediaId = Number(params.mediaId);
     albumItems = albumItems.filter((it) => !(it.album_id === id && it.media_id === mediaId));
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // ─── 那年今日（FR-72）──────────────────────────────────
+
+  // 往年同一天的媒体回忆：mock 不复刻真实拍摄日匹配，默认返回空列表（与「最近查看」一致，
+  // 避免污染依赖空回忆区的页面用例）；需要回忆数据的用例用 server.use 覆盖。
+  http.get('*/api/library/on-this-day', async () => {
+    await delay(100);
+    return HttpResponse.json({ items: [] });
+  }),
+
+  // ─── 感知哈希去重（FR-70）──────────────────────────────
+
+  // 触发去重扫描：mock 直接返回一个非零的本次新算条数
+  http.post('*/api/library/duplicates/scan', async () => {
+    await delay(300);
+    return HttpResponse.json({ computed: 2 });
+  }),
+
+  // 查询重复组：mock 默认无重复组（需要重复组的用例用 server.use 覆盖）
+  http.get('*/api/library/duplicates', async () => {
+    await delay(150);
+    return HttpResponse.json({ groups: [] });
+  }),
+
+  // ─── 观看统计 / 概览 / 趋势 ─────────────────────────────
+
+  // 观看统计（FR-75）：与 api 层 mock 形状一致，便于离线 demo 展示各维度
+  http.get('*/api/library/stats', async () => {
+    await delay(120);
+    return HttpResponse.json({
+      total: 42,
+      watched: 18,
+      unwatched: 24,
+      recent_timeline: [
+        { date: '2026-06-24', count: 5 },
+        { date: '2026-06-23', count: 3 },
+        { date: '2026-06-22', count: 8 },
+        { date: '2026-06-20', count: 2 },
+      ],
+      position_heatmap: [3, 1, 0, 2, 1, 4, 0, 1, 2, 6],
+      by_library: [
+        { library_id: 1, label: '电影', watched: 12 },
+        { library_id: 2, label: '剧集', watched: 6 },
+      ],
+      by_format: [
+        { format: 'mp4', watched: 11 },
+        { format: 'mkv', watched: 7 },
+      ],
+      top_viewed: [],
+    });
+  }),
+
+  // 媒体库概览（FR-117）：未软删媒体的数量与体量聚合
+  http.get('*/api/library/summary', async () => {
+    await delay(120);
+    return HttpResponse.json({
+      total: 12480,
+      video_count: 3210,
+      image_count: 9270,
+      total_size: 1979900000000,
+      total_duration: 2311200,
+      library_count: 3,
+      by_library: [
+        {
+          library_id: 1,
+          label: '电影',
+          media_count: 3460,
+          video_count: 3460,
+          image_count: 0,
+          total_size: 580000000000,
+          total_duration: 1980000,
+        },
+        {
+          library_id: 2,
+          label: '照片',
+          media_count: 8200,
+          video_count: 120,
+          image_count: 8080,
+          total_size: 320000000000,
+          total_duration: 28800,
+        },
+        {
+          library_id: 3,
+          label: '剧集',
+          media_count: 820,
+          video_count: 820,
+          image_count: 0,
+          total_size: 1079900000000,
+          total_duration: 302400,
+        },
+      ],
+    });
+  }),
+
+  // 媒体增长趋势（FR-118）：按天的新增数量 / 体量 / 时长
+  http.get('*/api/library/trends', async () => {
+    await delay(120);
+    return HttpResponse.json({
+      media_added: [
+        { date: '2026-05-01', count: 10, size: 1000000000, duration: 3000 },
+        { date: '2026-05-03', count: 5, size: 500000000, duration: 1500 },
+        { date: '2026-05-08', count: 8, size: 820000000, duration: 2400 },
+        { date: '2026-05-15', count: 3, size: 300000000, duration: 900 },
+        { date: '2026-06-02', count: 12, size: 1500000000, duration: 4200 },
+        { date: '2026-06-20', count: 6, size: 640000000, duration: 1800 },
+      ],
+    });
+  }),
+
+  // ─── 媒体健康巡检（FR-73）──────────────────────────────
+
+  // 触发巡检：mock 巡检为空操作，直接回 scanning
+  http.post('*/api/library/health/scan', async () => {
+    await delay(200);
+    return HttpResponse.json({ status: 'scanning' });
+  }),
+
+  // 巡检进度：mock 直接 completed、无问题
+  http.get('*/api/library/health/status', async () => {
+    await delay(80);
+    return HttpResponse.json({
+      status: 'completed',
+      total: 0,
+      checked: 0,
+      issue_count: 0,
+      error: '',
+      started_at: '',
+      completed_at: new Date().toISOString(),
+    });
+  }),
+
+  // 巡检问题列表：mock 默认无问题
+  http.get('*/api/library/health/issues', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: [] });
+  }),
+
+  // ─── 系统监控指标（FR-119）──────────────────────────────
+
+  // 系统指标时序：mock 给一组多点示例 + current 快照
+  http.get('*/api/system/metrics', async ({ request }) => {
+    await delay(120);
+    const range = new URL(request.url).searchParams.get('range') || '1h';
+    const current = {
+      t: '2026-06-27T14:00:00Z',
+      cpu_percent: 47.2,
+      mem_used_bytes: 202000000,
+      mem_sys_bytes: 540000000,
+      disk_used_bytes: 1980900000000,
+      disk_total_bytes: 2600000000000,
+      transcode_active: 2,
+      goroutines: 122,
+    };
+    return HttpResponse.json({
+      range,
+      points: [
+        {
+          t: '2026-06-27T10:00:00Z',
+          cpu_percent: 32.5,
+          mem_used_bytes: 180000000,
+          mem_sys_bytes: 520000000,
+          disk_used_bytes: 1979900000000,
+          disk_total_bytes: 2600000000000,
+          transcode_active: 1,
+          goroutines: 110,
+        },
+        {
+          t: '2026-06-27T12:00:00Z',
+          cpu_percent: 28.3,
+          mem_used_bytes: 188000000,
+          mem_sys_bytes: 530000000,
+          disk_used_bytes: 1980300000000,
+          disk_total_bytes: 2600000000000,
+          transcode_active: 0,
+          goroutines: 112,
+        },
+        current,
+      ],
+      current,
+    });
+  }),
+
+  // ─── 公开分享（FR-43/FR-78）─────────────────────────────
+
+  // 创建分享：返回新建的 Share 对象（与后端一致，不包裹）
+  http.post('*/api/shares', async ({ request }) => {
+    await delay(120);
+    const body = (await request.json()) as {
+      resource_type: ShareResourceType;
+      resource_id: number;
+      expires_in_hours?: number;
+      password?: string;
+      max_uses?: number;
+    };
+    const now = new Date();
+    const expiresInHours = body.expires_in_hours ?? 0;
+    const share: Share = {
+      token: `mock-token-${nextShareTokenSeq++}`,
+      resource_type: body.resource_type,
+      resource_id: body.resource_id,
+      expires_at:
+        expiresInHours > 0
+          ? new Date(now.getTime() + expiresInHours * 3600_000).toISOString()
+          : null,
+      max_uses: body.max_uses ?? 0,
+      used_count: 0,
+      created_at: now.toISOString(),
+    };
+    shares.unshift(share);
+    return HttpResponse.json(share, { status: 201 });
+  }),
+
+  // 分享列表：以 { shares } 包裹返回（与后端一致）
+  http.get('*/api/shares', async () => {
+    await delay(120);
+    return HttpResponse.json({ shares: [...shares] });
+  }),
+
+  // 撤销分享：删除对应 token
+  http.delete('*/api/shares/:token', async ({ params }) => {
+    await delay(120);
+    const token = String(params.token);
+    shares = shares.filter((s) => s.token !== token);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // 分享元信息（FR-43/FR-78）：媒体分享带 media，相册分享带空 items；不存在返回 404
+  http.get('*/api/share/:token', async ({ params }) => {
+    await delay(120);
+    const token = String(params.token);
+    const share = shares.find((s) => s.token === token);
+    if (!share) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: '分享不存在或已过期' },
+        { status: 404 },
+      );
+    }
+    if (share.resource_type === 'media') {
+      const media = mediaFiles.find((m) => m.id === share.resource_id);
+      return HttpResponse.json({
+        resource_type: 'media',
+        expires_at: share.expires_at,
+        media,
+      });
+    }
+    return HttpResponse.json({
+      resource_type: 'album',
+      expires_at: share.expires_at,
+      items: [],
+    });
+  }),
+
+  // ─── 转码预设与预生成任务（FR-77）───────────────────────
+
+  http.get('*/api/transcode/presets', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: [...transcodePresets] });
+  }),
+
+  http.post('*/api/transcode/presets', async ({ request }) => {
+    await delay(80);
+    const body = (await request.json()) as {
+      name: string;
+      codec: TranscodeCodec;
+      width: number;
+      height: number;
+    };
+    const name = (body.name || '').trim();
+    if (!name) {
+      return HttpResponse.json(
+        { code: 'INVALID_INPUT', message: '预设名不能为空' },
+        { status: 400 },
+      );
+    }
+    if (!KNOWN_TRANSCODE_CODECS.includes(body.codec)) {
+      return HttpResponse.json(
+        { code: 'INVALID_CODEC', message: '不支持的目标编码' },
+        { status: 400 },
+      );
+    }
+    const now = new Date().toISOString();
+    const preset: TranscodePreset = {
+      id: nextPresetId++,
+      name,
+      codec: body.codec,
+      width: body.width,
+      height: body.height,
+      created_at: now,
+      updated_at: now,
+    };
+    transcodePresets.unshift(preset);
+    return HttpResponse.json(preset, { status: 201 });
+  }),
+
+  http.put('*/api/transcode/presets/:id', async ({ request, params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const preset = transcodePresets.find((p) => p.id === id);
+    if (!preset) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '预设不存在' }, { status: 404 });
+    }
+    const body = (await request.json()) as {
+      name: string;
+      codec: TranscodeCodec;
+      width: number;
+      height: number;
+    };
+    preset.name = (body.name || '').trim();
+    preset.codec = body.codec;
+    preset.width = body.width;
+    preset.height = body.height;
+    preset.updated_at = new Date().toISOString();
+    return HttpResponse.json({ ...preset });
+  }),
+
+  http.delete('*/api/transcode/presets/:id', async ({ params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    transcodePresets = transcodePresets.filter((p) => p.id !== id);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post('*/api/transcode/tasks', async ({ request }) => {
+    await delay(80);
+    const body = (await request.json()) as { media_id: number; preset_id: number };
+    const preset = transcodePresets.find((p) => p.id === body.preset_id);
+    if (!preset) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '预设不存在' }, { status: 404 });
+    }
+    const now = new Date().toISOString();
+    const task: TranscodeTask = {
+      id: nextTranscodeTaskId++,
+      media_id: body.media_id,
+      preset_id: body.preset_id,
+      codec: preset.codec,
+      width: preset.width,
+      height: preset.height,
+      status: 'completed',
+      error: '',
+      created_at: now,
+      started_at: now,
+      completed_at: now,
+    };
+    transcodeTasks.unshift(task);
+    return HttpResponse.json({ status: 'queued', task_id: task.id }, { status: 202 });
+  }),
+
+  http.get('*/api/transcode/tasks', async ({ request }) => {
+    await delay(80);
+    const status = new URL(request.url).searchParams.get('status') || '';
+    const tasks = status ? transcodeTasks.filter((t) => t.status === status) : [...transcodeTasks];
+    return HttpResponse.json({ tasks });
+  }),
+
+  // ─── 健康探活 ───────────────────────────────────────────
+
+  // 服务在线探测（自更新/回滚重启后轮询恢复用）
+  http.get('*/health', async () => {
+    await delay(20);
+    return HttpResponse.json({ status: 'ok' });
   }),
 ];
