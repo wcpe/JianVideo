@@ -1,17 +1,17 @@
-import { Paper, Group, Text, Button, ActionIcon, Tooltip } from '@mantine/core'
-import { IconTrash, IconPhotoPlus, IconTag, IconDownload, IconX } from '@tabler/icons-react'
+import { Paper, Group, Text, Button, ActionIcon, Tooltip } from '@mantine/core';
+import { IconTrash, IconPhotoPlus, IconTag, IconDownload, IconX } from '@tabler/icons-react';
 
 interface SelectionBatchBarProps {
   // 当前选中数量，0 时不渲染
-  count: number
+  count: number;
   // 清除选择（必有）
-  onClear?: () => void
+  onClear?: () => void;
   // 批量删除（必有）
-  onDelete?: () => void
+  onDelete?: () => void;
   // 批量操作（FR-91）：提供才渲染对应按钮
-  onAddToAlbum?: () => void
-  onAddTag?: () => void
-  onDownload?: () => void
+  onAddToAlbum?: () => void;
+  onAddTag?: () => void;
+  onDownload?: () => void;
 }
 
 /**
@@ -20,9 +20,14 @@ interface SelectionBatchBarProps {
  * 本组件只展示与转发，不持有任何多选逻辑。
  */
 export default function SelectionBatchBar({
-  count, onClear, onDelete, onAddToAlbum, onAddTag, onDownload,
+  count,
+  onClear,
+  onDelete,
+  onAddToAlbum,
+  onAddTag,
+  onDownload,
 }: SelectionBatchBarProps) {
-  if (count <= 0) return null
+  if (count <= 0) return null;
 
   return (
     <Paper
@@ -53,24 +58,48 @@ export default function SelectionBatchBar({
           已选 {count} 项
         </Text>
         {onAddToAlbum && (
-          <Button size="xs" variant="light" color="purple" leftSection={<IconPhotoPlus size={14} />} onClick={onAddToAlbum}>
+          <Button
+            size="xs"
+            variant="light"
+            color="purple"
+            leftSection={<IconPhotoPlus size={14} />}
+            onClick={onAddToAlbum}
+          >
             加入相册
           </Button>
         )}
         {onAddTag && (
-          <Button size="xs" variant="light" color="purple" leftSection={<IconTag size={14} />} onClick={onAddTag}>
+          <Button
+            size="xs"
+            variant="light"
+            color="purple"
+            leftSection={<IconTag size={14} />}
+            onClick={onAddTag}
+          >
             打标签
           </Button>
         )}
         {onDownload && (
-          <Button size="xs" variant="light" color="purple" leftSection={<IconDownload size={14} />} onClick={onDownload}>
+          <Button
+            size="xs"
+            variant="light"
+            color="purple"
+            leftSection={<IconDownload size={14} />}
+            onClick={onDownload}
+          >
             打包下载
           </Button>
         )}
-        <Button size="xs" variant="light" color="red" leftSection={<IconTrash size={14} />} onClick={onDelete}>
+        <Button
+          size="xs"
+          variant="light"
+          color="red"
+          leftSection={<IconTrash size={14} />}
+          onClick={onDelete}
+        >
           删除
         </Button>
       </Group>
     </Paper>
-  )
+  );
 }

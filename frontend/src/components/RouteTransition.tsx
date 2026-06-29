@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react'
-import { useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 
 interface RouteTransitionProps {
-  children: ReactNode
+  children: ReactNode;
 }
 
 /**
@@ -11,10 +11,10 @@ interface RouteTransitionProps {
  * `prefers-reduced-motion: reduce` 下动画由 index.css 兜底关闭。
  */
 export default function RouteTransition({ children }: RouteTransitionProps) {
-  const { pathname } = useLocation()
+  const { pathname } = useLocation();
   return (
     <div key={pathname} className="route-fade">
       {children}
     </div>
-  )
+  );
 }

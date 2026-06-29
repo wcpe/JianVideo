@@ -1,211 +1,259 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { Button, Text, Group, Badge, Skeleton, Alert, Box, Title, Menu, Drawer } from '@mantine/core'
-import { notifications } from '@mantine/notifications'
-import { IconArrowLeft, IconAlertCircle, IconSubtitles, IconPencil, IconFileText, IconDownload, IconShare, IconExternalLink, IconMovie, IconDots, IconMaximize, IconMinimize, IconInfoCircle } from '@tabler/icons-react'
-import VideoPlayer from '@/components/VideoPlayer'
-import NameEditModal from '@/components/NameEditModal'
-import ShareDialog from '@/components/ShareDialog'
-import ExternalPlayerDialog from '@/components/ExternalPlayerDialog'
-import PregenDialog from '@/components/PregenDialog'
-import { parseWebVTT } from '@/utils/subtitle'
-import { mediaDisplayName } from '@/utils/media'
-import { mediaStreamUrl, mediaHlsMasterUrl } from '@/utils/media-url'
-import { probeClientCapabilities } from '@/utils/codec-capability'
-import { useCinemaMode } from '@/hooks/cinema-context'
-import * as libApi from '@/api/library'
-import * as playApi from '@/api/play'
-import * as subtitleApi from '@/api/subtitle'
-import type { MediaFile, SubtitleTrack, SubtitleEntry, PlaybackDescriptor } from '@/types'
+import { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Button,
+  Text,
+  Group,
+  Badge,
+  Skeleton,
+  Alert,
+  Box,
+  Title,
+  Menu,
+  Drawer,
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import {
+  IconArrowLeft,
+  IconAlertCircle,
+  IconSubtitles,
+  IconPencil,
+  IconFileText,
+  IconDownload,
+  IconShare,
+  IconExternalLink,
+  IconMovie,
+  IconDots,
+  IconMaximize,
+  IconMinimize,
+  IconInfoCircle,
+} from '@tabler/icons-react';
+import VideoPlayer from '@/components/VideoPlayer';
+import NameEditModal from '@/components/NameEditModal';
+import ShareDialog from '@/components/ShareDialog';
+import ExternalPlayerDialog from '@/components/ExternalPlayerDialog';
+import PregenDialog from '@/components/PregenDialog';
+import { parseWebVTT } from '@/utils/subtitle';
+import { mediaDisplayName } from '@/utils/media';
+import { mediaStreamUrl, mediaHlsMasterUrl } from '@/utils/media-url';
+import { probeClientCapabilities } from '@/utils/codec-capability';
+import { useCinemaMode } from '@/hooks/cinema-context';
+import * as libApi from '@/api/library';
+import * as playApi from '@/api/play';
+import * as subtitleApi from '@/api/subtitle';
+import type { MediaFile, SubtitleTrack, SubtitleEntry, PlaybackDescriptor } from '@/types';
 
 // 双模式改名弹窗类型：显示名（仅库内）/ 真实文件名（磁盘改名）
-type NameEditKind = 'display' | 'real'
+type NameEditKind = 'display' | 'real';
 
 /** 视频播放页 — Mantine + VideoPlayer */
 export default function PlayPage() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   // 影院模式（FR-85）：临时收起左导航扩大视频区，播放页本地态（不污染全站持久态）
-  const { cinema, setCinema } = useCinemaMode()
-  const [media, setMedia] = useState<MediaFile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { cinema, setCinema } = useCinemaMode();
+  const [media, setMedia] = useState<MediaFile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // 字幕状态
-  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([])
-  const [selectedTrack, setSelectedTrack] = useState<number | null>(null)
-  const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([])
-  const [subtitleVisible, setSubtitleVisible] = useState(false)
-  const [subtitleMenuOpened, setSubtitleMenuOpened] = useState(false)
+  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
+  const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
+  const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([]);
+  const [subtitleVisible, setSubtitleVisible] = useState(false);
+  const [subtitleMenuOpened, setSubtitleMenuOpened] = useState(false);
 
   // 播放器 URL / ABR 模式：探测 master.m3u8 是否可用；不可用时降级到 /api/play/:id/stream
-  const [playerUrl, setPlayerUrl] = useState<string | null>(null)
-  const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null)
+  const [playerUrl, setPlayerUrl] = useState<string | null>(null);
+  const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null);
   // 编码协商描述符（FR-53）：协商出高级编码（fMP4）时交自适应播放器；
   // 协商出 h264 / 协商失败则为 null，沿用下方 master 探测的 H.264/TS 路径（不报错）。
-  const [descriptor, setDescriptor] = useState<PlaybackDescriptor | null>(null)
+  const [descriptor, setDescriptor] = useState<PlaybackDescriptor | null>(null);
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
-  const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null)
+  const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null);
 
   // 分享弹窗开关（FR-43）
-  const [shareOpened, setShareOpened] = useState(false)
+  const [shareOpened, setShareOpened] = useState(false);
   // 外部播放器深链弹窗开关（FR-79）
-  const [extPlayerOpened, setExtPlayerOpened] = useState(false)
+  const [extPlayerOpened, setExtPlayerOpened] = useState(false);
   // 加入预生成队列弹窗开关（FR-77）
-  const [pregenOpened, setPregenOpened] = useState(false)
+  const [pregenOpened, setPregenOpened] = useState(false);
   // 媒体信息抽屉开关（FR-103）：信息移出文档流、收进右侧抽屉，经「更多」菜单「详情」打开
-  const [infoOpened, setInfoOpened] = useState(false)
-  const [nameEditSaving, setNameEditSaving] = useState(false)
+  const [infoOpened, setInfoOpened] = useState(false);
+  const [nameEditSaving, setNameEditSaving] = useState(false);
 
   useEffect(() => {
-    if (!id) return
-    const mediaId = parseInt(id, 10)
+    if (!id) return;
+    const mediaId = parseInt(id, 10);
     if (isNaN(mediaId) || mediaId <= 0) {
-      setError('无效的媒体 ID')
-      setLoading(false)
-      return
+      setError('无效的媒体 ID');
+      setLoading(false);
+      return;
     }
 
-    libApi.getMediaFile(mediaId)
+    libApi
+      .getMediaFile(mediaId)
       .then((data) => setMedia(data))
       .catch(() => setError('媒体文件不存在'))
-      .finally(() => setLoading(false))
+      .finally(() => setLoading(false));
 
     // 记录最近查看（FR-120）：进入播放页即标记 last_viewed_at，失败静默不阻塞播放
-    void libApi.setMediaViewed(mediaId).catch(() => {})
+    void libApi.setMediaViewed(mediaId).catch(() => {});
 
     // 加载字幕轨道列表
-    subtitleApi.getSubtitles(mediaId)
+    subtitleApi
+      .getSubtitles(mediaId)
       .then((tracks) => setSubtitleTracks(tracks))
-      .catch(() => setSubtitleTracks([]))
+      .catch(() => setSubtitleTracks([]));
 
     // 绝对 URL 由共享构造器给出（FR-107），避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
-    const hlsUrl = mediaHlsMasterUrl(mediaId)
-    const streamUrl = mediaStreamUrl(mediaId)
+    const hlsUrl = mediaHlsMasterUrl(mediaId);
+    const streamUrl = mediaStreamUrl(mediaId);
 
     // master 探测 → mpegts.js（ABR）或 stream（原生 mp4），既有 H.264/TS 路径不变。
     const probeMaster = () => {
-      fetch(hlsUrl, { method: 'GET' }).then((resp) => {
-        // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
-        if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
-          setPlayerUrl(hlsUrl)
-          setPlayerIsABR(true)
-        } else {
-          setPlayerUrl(streamUrl)
-          setPlayerIsABR(false)
-        }
-      }).catch(() => {
-        setPlayerUrl(streamUrl)
-        setPlayerIsABR(false)
-      })
-    }
+      fetch(hlsUrl, { method: 'GET' })
+        .then((resp) => {
+          // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
+          if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
+            setPlayerUrl(hlsUrl);
+            setPlayerIsABR(true);
+          } else {
+            setPlayerUrl(streamUrl);
+            setPlayerIsABR(false);
+          }
+        })
+        .catch(() => {
+          setPlayerUrl(streamUrl);
+          setPlayerIsABR(false);
+        });
+    };
 
     // 端到端编码协商（FR-53）：探测客户端能力 → 请求协商 → 拿描述符。
     // 协商出高级编码（fMP4）→ 交自适应播放器；协商出 h264 / 协商失败 → 回退既有 master 探测（不报错）。
-    playApi.negotiate(mediaId, probeClientCapabilities())
+    playApi
+      .negotiate(mediaId, probeClientCapabilities())
       .then((desc) => {
         if (desc.path === 'fmp4') {
-          setDescriptor(desc)
-          setPlayerUrl(desc.url)
-          setPlayerIsABR(true)
+          setDescriptor(desc);
+          setPlayerUrl(desc.url);
+          setPlayerIsABR(true);
         } else {
-          probeMaster()
+          probeMaster();
         }
       })
-      .catch(() => probeMaster())
-  }, [id])
+      .catch(() => probeMaster());
+  }, [id]);
 
   // 影院模式（FR-85）：离开播放页（卸载）时自动恢复全站导航，避免影院态泄漏到其它页面
   useEffect(() => {
-    return () => setCinema(false)
-  }, [setCinema])
+    return () => setCinema(false);
+  }, [setCinema]);
 
   // 全屏沉浸布局（FR-103）：播放路由挂载时给 body 加 play-immersive 类，
   // index.css 据此去掉 AppShell.Main 的 padding 并锁高、禁外层滚动；卸载时移除，仅作用播放路由。
   useEffect(() => {
-    document.body.classList.add('play-immersive')
-    return () => document.body.classList.remove('play-immersive')
-  }, [])
+    document.body.classList.add('play-immersive');
+    return () => document.body.classList.remove('play-immersive');
+  }, []);
 
   // 选择字幕轨道
   const selectTrack = async (trackIndex: number) => {
-    if (!media) return
-    setSelectedTrack(trackIndex)
-    setSubtitleVisible(true)
-    setSubtitleMenuOpened(false)
+    if (!media) return;
+    setSelectedTrack(trackIndex);
+    setSubtitleVisible(true);
+    setSubtitleMenuOpened(false);
 
     try {
-      const vttContent = await subtitleApi.getSubtitleContent(media.id, trackIndex)
-      setSubtitleEntries(parseWebVTT(vttContent))
+      const vttContent = await subtitleApi.getSubtitleContent(media.id, trackIndex);
+      setSubtitleEntries(parseWebVTT(vttContent));
     } catch {
-      setSubtitleEntries([])
+      setSubtitleEntries([]);
     }
-  }
+  };
 
   // 关闭字幕
   const disableSubtitles = () => {
-    setSelectedTrack(null)
-    setSubtitleVisible(false)
-    setSubtitleEntries([])
-    setSubtitleMenuOpened(false)
-  }
+    setSelectedTrack(null);
+    setSubtitleVisible(false);
+    setSubtitleEntries([]);
+    setSubtitleMenuOpened(false);
+  };
 
   // 续播与观看状态（FR-44）：上报播放位置、看完标记。失败仅静默忽略，不打断播放。
-  const handlePositionReport = useCallback((position: number) => {
-    if (!media) return
-    void libApi.updateWatchPosition(media.id, position).catch(() => {})
-  }, [media])
+  const handlePositionReport = useCallback(
+    (position: number) => {
+      if (!media) return;
+      void libApi.updateWatchPosition(media.id, position).catch(() => {});
+    },
+    [media],
+  );
 
   const handleEnded = useCallback(() => {
-    if (!media) return
-    void libApi.markWatched(media.id).catch(() => {})
-  }, [media])
+    if (!media) return;
+    void libApi.markWatched(media.id).catch(() => {});
+  }, [media]);
 
   // 确认改名（FR-30）：display 仅改库内显示名，real 走磁盘改名
   const confirmNameEdit = async (value: string) => {
-    if (!media || !nameEditKind) return
-    setNameEditSaving(true)
+    if (!media || !nameEditKind) return;
+    setNameEditSaving(true);
     try {
-      const updated = nameEditKind === 'display'
-        ? await libApi.updateDisplayName(media.id, value)
-        : await libApi.renameMediaFile(media.id, value)
-      setMedia(updated)
-      setNameEditKind(null)
+      const updated =
+        nameEditKind === 'display'
+          ? await libApi.updateDisplayName(media.id, value)
+          : await libApi.renameMediaFile(media.id, value);
+      setMedia(updated);
+      setNameEditKind(null);
       notifications.show({
         title: '修改成功',
         message: nameEditKind === 'display' ? '已更新显示名' : '已修改真实文件名',
         color: 'green',
         autoClose: 2500,
-      })
+      });
     } catch (err) {
       notifications.show({
         title: '修改失败',
         message: err instanceof Error ? err.message : '请稍后重试',
         color: 'red',
         autoClose: 3000,
-      })
+      });
     } finally {
-      setNameEditSaving(false)
+      setNameEditSaving(false);
     }
-  }
+  };
 
   if (loading) {
-    return <Skeleton height={400} radius="md" />
+    return <Skeleton height={400} radius="md" />;
   }
 
   if (error || !media) {
     return (
-      <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={() => navigate(-1)}>
+      <Alert
+        icon={<IconAlertCircle size={16} />}
+        color="red"
+        withCloseButton
+        onClose={() => navigate(-1)}
+      >
         {error || '媒体文件不存在'}
       </Alert>
-    )
+    );
   }
 
   return (
     // 全屏沉浸容器（FR-103）：100dvh 铺满视口、列向 flex、overflow hidden 锁纵向滚动；
     // 用 dvh 避开移动端地址栏高度抖动。头部 flex-shrink，视频区 flex:1 吃满剩余高度。
-    <Box data-testid="play-immersive-root" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: 'var(--mantine-spacing-sm)' }}>
+    <Box
+      data-testid="play-immersive-root"
+      style={{
+        height: '100dvh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        gap: 'var(--mantine-spacing-sm)',
+      }}
+    >
       {/* 头部（FR-85 操作收纳）：外露返回 + 标题 + 影院 + 更多，次要操作收进「更多 ⋯」菜单；
           wrap="nowrap" + 标题截断，窄屏不换行铺满、不挤出按钮。右侧保留字幕菜单。 */}
       <Group gap="sm" justify="space-between" wrap="nowrap">
@@ -219,7 +267,9 @@ export default function PlayPage() {
           >
             返回
           </Button>
-          <Title order={3} lineClamp={1} style={{ wordBreak: 'break-all' }}>{mediaDisplayName(media)}</Title>
+          <Title order={3} lineClamp={1} style={{ wordBreak: 'break-all' }}>
+            {mediaDisplayName(media)}
+          </Title>
           {/* 影院模式（FR-85）：临时收起左导航扩大视频区，切出/离开播放页自动恢复 */}
           <Button
             variant={cinema ? 'light' : 'subtle'}
@@ -245,14 +295,23 @@ export default function PlayPage() {
             </Menu.Target>
             <Menu.Dropdown>
               {/* 媒体信息详情（FR-103）：信息移出文档流后由此入口打开右侧抽屉查看 */}
-              <Menu.Item leftSection={<IconInfoCircle size={14} />} onClick={() => setInfoOpened(true)}>
+              <Menu.Item
+                leftSection={<IconInfoCircle size={14} />}
+                onClick={() => setInfoOpened(true)}
+              >
                 详情
               </Menu.Item>
               {/* 双模式改名入口（FR-30）：均需二次确认 */}
-              <Menu.Item leftSection={<IconPencil size={14} />} onClick={() => setNameEditKind('display')}>
+              <Menu.Item
+                leftSection={<IconPencil size={14} />}
+                onClick={() => setNameEditKind('display')}
+              >
                 改显示名
               </Menu.Item>
-              <Menu.Item leftSection={<IconFileText size={14} />} onClick={() => setNameEditKind('real')}>
+              <Menu.Item
+                leftSection={<IconFileText size={14} />}
+                onClick={() => setNameEditKind('real')}
+              >
                 改文件名
               </Menu.Item>
               {/* 下载原文件（FR-42）：附件下载磁盘原始文件 */}
@@ -269,11 +328,17 @@ export default function PlayPage() {
                 分享
               </Menu.Item>
               {/* 外部播放器深链（FR-79）：生成 VLC/IINA 可打开的免登网络串流地址 */}
-              <Menu.Item leftSection={<IconExternalLink size={14} />} onClick={() => setExtPlayerOpened(true)}>
+              <Menu.Item
+                leftSection={<IconExternalLink size={14} />}
+                onClick={() => setExtPlayerOpened(true)}
+              >
                 外部播放器
               </Menu.Item>
               {/* 加入预生成（FR-77）：选预设把本媒体加入预生成队列预热首播 */}
-              <Menu.Item leftSection={<IconMovie size={14} />} onClick={() => setPregenOpened(true)}>
+              <Menu.Item
+                leftSection={<IconMovie size={14} />}
+                onClick={() => setPregenOpened(true)}
+              >
                 加入预生成
               </Menu.Item>
             </Menu.Dropdown>
@@ -296,10 +361,7 @@ export default function PlayPage() {
             <Menu.Dropdown>
               <Menu.Item onClick={disableSubtitles}>关闭字幕</Menu.Item>
               {subtitleTracks.map((track) => (
-                <Menu.Item
-                  key={track.index}
-                  onClick={() => selectTrack(track.index)}
-                >
+                <Menu.Item key={track.index} onClick={() => selectTrack(track.index)}>
                   {track.file_name} ({track.format.toUpperCase()})
                 </Menu.Item>
               ))}
@@ -341,23 +403,41 @@ export default function PlayPage() {
       >
         <Group gap="md" wrap="wrap">
           <div>
-            <Text size="xs" c="dimmed">真实文件名</Text>
-            <Text size="sm" truncate maw={400}>{media.file_name}</Text>
+            <Text size="xs" c="dimmed">
+              真实文件名
+            </Text>
+            <Text size="sm" truncate maw={400}>
+              {media.file_name}
+            </Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">路径</Text>
-            <Text size="sm" truncate maw={400}>{media.file_path}</Text>
+            <Text size="xs" c="dimmed">
+              路径
+            </Text>
+            <Text size="sm" truncate maw={400}>
+              {media.file_path}
+            </Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">格式</Text>
-            <Badge size="sm" variant="light" color="blue">{media.format.toUpperCase()}</Badge>
+            <Text size="xs" c="dimmed">
+              格式
+            </Text>
+            <Badge size="sm" variant="light" color="blue">
+              {media.format.toUpperCase()}
+            </Badge>
           </div>
           <div>
-            <Text size="xs" c="dimmed">编码</Text>
-            <Text size="sm">{media.video_codec || '-'} / {media.audio_codec || '-'}</Text>
+            <Text size="xs" c="dimmed">
+              编码
+            </Text>
+            <Text size="sm">
+              {media.video_codec || '-'} / {media.audio_codec || '-'}
+            </Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">分辨率</Text>
+            <Text size="xs" c="dimmed">
+              分辨率
+            </Text>
             <Text size="sm">{media.width > 0 ? `${media.width}x${media.height}` : '-'}</Text>
           </div>
         </Group>
@@ -412,5 +492,5 @@ export default function PlayPage() {
         mediaID={media.id}
       />
     </Box>
-  )
+  );
 }

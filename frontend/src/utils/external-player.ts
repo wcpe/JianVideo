@@ -19,9 +19,9 @@ export function buildExternalStreamURL(
   mediaID: number,
   lastPosition?: number,
 ): string {
-  const url = `${origin}/api/share/${token}/media/${mediaID}/stream`
+  const url = `${origin}/api/share/${token}/media/${mediaID}/stream`;
   if (lastPosition !== undefined && Number.isFinite(lastPosition) && lastPosition > 0) {
-    return `${url}#t=${Math.floor(lastPosition)}`
+    return `${url}#t=${Math.floor(lastPosition)}`;
   }
-  return url
+  return url;
 }

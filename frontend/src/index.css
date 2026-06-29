@@ -1,5 +1,10 @@
 :root {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   /* 跟随当前主题给浏览器原生控件配色，亮色模式不再被强制为深色 */
   color-scheme: light dark;
   -webkit-font-smoothing: antialiased;
@@ -47,7 +52,9 @@ body {
 .media-card-actions {
   opacity: 0;
   transform: translateY(-4px);
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
   pointer-events: none;
 }
 .media-card:hover .media-card-actions,
@@ -76,7 +83,9 @@ body {
 /* 左侧导航项 hover 反馈（FR-115）：非激活项 hover 出可见浅底 + 平滑过渡；
    激活项（其外层 <a data-active>）保持品牌紫浅底，不被 hover 浅底覆盖。复用设计 token，不写死颜色。 */
 .nav-link {
-  transition: background-color 140ms ease, color 140ms ease;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
 }
 a:not([data-active]) .nav-link:hover {
   background-color: var(--mantine-color-default-hover);

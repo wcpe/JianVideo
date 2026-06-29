@@ -1,11 +1,11 @@
-import type { MediaFile } from '@/types'
-import { groupMediaByDate } from './timeline'
+import type { MediaFile } from '@/types';
+import { groupMediaByDate } from './timeline';
 
 /** 一条按天聚合的旅程轨迹（FR-76）：date 为当天日期键，positions 为按时间序的坐标点，color 为折线颜色 */
 export interface DayTrack {
-  date: string
-  positions: [number, number][]
-  color: string
+  date: string;
+  positions: [number, number][];
+  color: string;
 }
 
 /**
@@ -19,13 +19,13 @@ export const TRACK_COLORS = [
   '#fab005', // 黄
   '#40c057', // 绿
   '#fd7e14', // 橙
-] as const
+] as const;
 
 /** 判断媒体是否含有效 GPS 坐标：经纬度均存在且非 0,0 空岛（与后端 has_gps 语义一致） */
 function hasValidGps(file: MediaFile): boolean {
-  const { gps_lat, gps_lon } = file
-  if (gps_lat == null || gps_lon == null) return false
-  return gps_lat !== 0 || gps_lon !== 0
+  const { gps_lat, gps_lon } = file;
+  if (gps_lat == null || gps_lon == null) return false;
+  return gps_lat !== 0 || gps_lon !== 0;
 }
 
 /**
@@ -38,15 +38,19 @@ function hasValidGps(file: MediaFile): boolean {
  * 纯函数，无副作用，便于穷举单测。
  */
 export function buildDayTracks(files: MediaFile[]): DayTrack[] {
-  const geotagged = files.filter(hasValidGps)
-  const groups = groupMediaByDate(geotagged, 'day')
-  return groups
-    .filter((g) => g.files.length >= 2)
-    // groupMediaByDate 按日期键倒序返回，轨迹按日期升序展示并据此取色
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-    .map((g, index) => ({
-      date: g.date,
-      positions: g.files.map((f) => [f.gps_lat as number, f.gps_lon as number] as [number, number]),
-      color: TRACK_COLORS[index % TRACK_COLORS.length],
-    }))
+  const geotagged = files.filter(hasValidGps);
+  const groups = groupMediaByDate(geotagged, 'day');
+  return (
+    groups
+      .filter((g) => g.files.length >= 2)
+      // groupMediaByDate 按日期键倒序返回，轨迹按日期升序展示并据此取色
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .map((g, index) => ({
+        date: g.date,
+        positions: g.files.map(
+          (f) => [f.gps_lat as number, f.gps_lon as number] as [number, number],
+        ),
+        color: TRACK_COLORS[index % TRACK_COLORS.length],
+      }))
+  );
 }

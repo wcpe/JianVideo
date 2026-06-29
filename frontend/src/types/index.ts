@@ -1,570 +1,570 @@
 /** 媒体库目录 */
 export interface LibraryPath {
-  id: number
-  path: string
-  type: string
-  label: string
-  enabled: boolean
-  created_at: string
+  id: number;
+  path: string;
+  type: string;
+  label: string;
+  enabled: boolean;
+  created_at: string;
   /** 该库已索引（未软删）的媒体数量，由 GET /api/library/paths 返回 */
-  media_count?: number
+  media_count?: number;
 }
 
 /** 媒体文件 */
 export interface MediaFile {
-  id: number
-  library_id: number
-  file_path: string
-  file_name: string
-  file_size: number
-  format: string
-  video_codec: string
-  audio_codec: string
-  duration: number
-  width: number
-  height: number
-  bitrate: number
-  subtitle_tracks: string
-  added_at: string
-  modified_at: string
+  id: number;
+  library_id: number;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  format: string;
+  video_codec: string;
+  audio_codec: string;
+  duration: number;
+  width: number;
+  height: number;
+  bitrate: number;
+  subtitle_tracks: string;
+  added_at: string;
+  modified_at: string;
   /** 库内显示名（FR-30）：空则展示回退到 file_name，不影响磁盘真实文件名；旧数据可能缺省 */
-  display_name?: string
+  display_name?: string;
   /** 收藏标记（FR-41），旧数据可能缺省 */
-  favorite?: boolean
+  favorite?: boolean;
   /** 上次播放位置（秒，FR-44），旧数据可能缺省 */
-  last_position?: number
+  last_position?: number;
   /** 是否已看完（FR-44），旧数据可能缺省 */
-  watched?: boolean
+  watched?: boolean;
   /** 最近一次观看时间（FR-44），旧数据可能缺省 */
-  last_watched_at?: string | null
+  last_watched_at?: string | null;
   /** 观看次数（FR-75）：每看完一次 +1，旧数据可能缺省 */
-  view_count?: number
+  view_count?: number;
   /** 最近一次查看（打开）时间（FR-120）：覆盖图片+视频的「打开」，旧数据可能缺省 */
-  last_viewed_at?: string | null
+  last_viewed_at?: string | null;
 
   /** 媒体时间与 EXIF（FR-31 提取、FR-38 展示），旧数据可能缺省 */
-  media_time?: string | null
+  media_time?: string | null;
   /** 媒体时间来源：exif / filename / created / modified */
-  media_time_source?: string
-  camera?: string
-  lens?: string
-  aperture?: string
-  shutter?: string
-  iso?: number
-  gps_lat?: number
-  gps_lon?: number
+  media_time_source?: string;
+  camera?: string;
+  lens?: string;
+  aperture?: string;
+  shutter?: string;
+  iso?: number;
+  gps_lat?: number;
+  gps_lon?: number;
 }
 
 /** 感知哈希去重重复组（FR-70）：一组互为近似重复的媒体，至少 2 项 */
-export type DuplicateGroup = MediaFile[]
+export type DuplicateGroup = MediaFile[];
 
 /** 标签（FR-41） */
 export interface Tag {
-  id: number
-  name: string
-  created_at?: string
+  id: number;
+  name: string;
+  created_at?: string;
 }
 
 /** 媒体文件列表响应 */
 export interface MediaListResponse {
-  items: MediaFile[]
-  total: number
-  page: number
-  page_size: number
+  items: MediaFile[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 /** 相册（FR-40）：跨目录手动归类媒体的集合 */
 export interface Album {
-  id: number
-  name: string
-  description: string
-  cover_media_id: number
-  created_at: string
-  updated_at: string
+  id: number;
+  name: string;
+  description: string;
+  cover_media_id: number;
+  created_at: string;
+  updated_at: string;
   /** 成员数量（列表接口附带，详情接口可能缺省） */
-  item_count?: number
+  item_count?: number;
 }
 
 /** 登录请求 */
 export interface LoginRequest {
-  username: string
-  password: string
+  username: string;
+  password: string;
 }
 
 /** 分享资源类型（FR-43） */
-export type ShareResourceType = 'media' | 'album'
+export type ShareResourceType = 'media' | 'album';
 
 /** 分享链接（FR-43；密码/限次扩展见 FR-78） */
 export interface Share {
-  token: string
-  resource_type: ShareResourceType
-  resource_id: number
+  token: string;
+  resource_type: ShareResourceType;
+  resource_id: number;
   /** 过期时间；null 表示永不过期 */
-  expires_at: string | null
+  expires_at: string | null;
   /** 最大访问次数（FR-78）；0 表示无限 */
-  max_uses: number
+  max_uses: number;
   /** 已访问次数（FR-78） */
-  used_count: number
-  created_at: string
+  used_count: number;
+  created_at: string;
 }
 
 /** 公开分享元信息（FR-43）：媒体分享含 media，相册分享含 album 与 items */
 export interface ShareInfo {
-  resource_type: ShareResourceType
-  expires_at?: string | null
-  media?: MediaFile
-  album?: Album
-  items?: MediaFile[]
+  resource_type: ShareResourceType;
+  expires_at?: string | null;
+  media?: MediaFile;
+  album?: Album;
+  items?: MediaFile[];
   /** 是否需要访问密码（FR-78）；为 true 且未带正确密码时不含 media/album 内容 */
-  requires_password?: boolean
+  requires_password?: boolean;
 }
 
 /** 扫描模式（FR-27）：增量更新只索引新增文件；全量扫描遍历并对账已删文件 */
-export type ScanMode = 'incremental' | 'full'
+export type ScanMode = 'incremental' | 'full';
 
 /** 扫描响应 */
 export interface ScanResponse {
-  scanned?: number
-  status?: string
-  task_id?: number   // 入队任务 ID（FR-29，队列启用时返回）
+  scanned?: number;
+  status?: string;
+  task_id?: number; // 入队任务 ID（FR-29，队列启用时返回）
 }
 
 /** 扫描进度状态 */
 export interface ScanStatus {
-  status: string        // "idle", "scanning", "completed", "error"
-  library_id: number
-  current_path: string
-  total_files: number
-  scanned_files: number
-  error: string
-  started_at: string
-  completed_at: string
+  status: string; // "idle", "scanning", "completed", "error"
+  library_id: number;
+  current_path: string;
+  total_files: number;
+  scanned_files: number;
+  error: string;
+  started_at: string;
+  completed_at: string;
 }
 
 /** 扫描任务（队列，FR-29） */
 export interface ScanTask {
-  id: number
-  library_id: number
-  scan_type: string     // "full" / "incremental"
-  status: string        // "pending" / "running" / "completed" / "error"
-  scanned_files: number
-  total_files: number
-  error: string
-  created_at: string
-  started_at?: string
-  completed_at?: string
+  id: number;
+  library_id: number;
+  scan_type: string; // "full" / "incremental"
+  status: string; // "pending" / "running" / "completed" / "error"
+  scanned_files: number;
+  total_files: number;
+  error: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
 }
 
 /** 扫描任务列表响应（FR-29） */
 export interface ScanTasksResponse {
-  tasks: ScanTask[]
-  current: ScanTask | null
+  tasks: ScanTask[];
+  current: ScanTask | null;
 }
 
 /** 转码目标编码（FR-77） */
-export type TranscodeCodec = 'h264' | 'h265' | 'av1' | 'vp9'
+export type TranscodeCodec = 'h264' | 'h265' | 'av1' | 'vp9';
 
 /** 转码预设（FR-77）：可复用的目标编码/分辨率模板，width/height 为 0 表示沿用源分辨率 */
 export interface TranscodePreset {
-  id: number
-  name: string
-  codec: TranscodeCodec
-  width: number
-  height: number
-  created_at: string
-  updated_at: string
+  id: number;
+  name: string;
+  codec: TranscodeCodec;
+  width: number;
+  height: number;
+  created_at: string;
+  updated_at: string;
 }
 
 /** 转码预生成任务（FR-77）：把「某媒体 + 某预设」入队，单 worker 串行预转码预热首播 */
 export interface TranscodeTask {
-  id: number
-  media_id: number
-  preset_id: number
-  codec: string
-  width: number
-  height: number
-  status: string        // "pending" / "running" / "completed" / "error"
-  error: string
-  created_at: string
-  started_at?: string
-  completed_at?: string
+  id: number;
+  media_id: number;
+  preset_id: number;
+  codec: string;
+  width: number;
+  height: number;
+  status: string; // "pending" / "running" / "completed" / "error"
+  error: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
 }
 
 /** 媒体健康问题类型（FR-73） */
-export type HealthIssueType = 'broken' | 'zero_byte' | 'missing' | 'no_thumbnail'
+export type HealthIssueType = 'broken' | 'zero_byte' | 'missing' | 'no_thumbnail';
 
 /** 媒体健康问题项（FR-73）：问题记录 + 附带的媒体基本信息 */
 export interface HealthIssue {
-  id: number
-  media_id: number
-  issue_type: HealthIssueType
-  detail: string
-  checked_at: string
+  id: number;
+  media_id: number;
+  issue_type: HealthIssueType;
+  detail: string;
+  checked_at: string;
   /** 以下为巡检接口附带的媒体基本信息，媒体已被删除时可能缺省 */
-  file_name?: string
-  file_path?: string
-  library_id?: number
-  display_name?: string
+  file_name?: string;
+  file_path?: string;
+  library_id?: number;
+  display_name?: string;
 }
 
 /** 健康巡检进度状态（FR-73） */
 export interface HealthScanStatus {
-  status: string        // "idle" / "scanning" / "completed" / "error"
-  total: number
-  checked: number
-  issue_count: number
-  error: string
-  started_at: string
-  completed_at: string
+  status: string; // "idle" / "scanning" / "completed" / "error"
+  total: number;
+  checked: number;
+  issue_count: number;
+  error: string;
+  started_at: string;
+  completed_at: string;
 }
 
 /** 观看时间线的一天（FR-75）：本地日期 YYYY-MM-DD 与当天观看媒体数 */
 export interface TimelineBucket {
-  date: string
-  count: number
+  date: string;
+  count: number;
 }
 
 /** 某存储库的已看媒体数（FR-75） */
 export interface LibraryWatchCount {
-  library_id: number
-  label: string
-  watched: number
+  library_id: number;
+  label: string;
+  watched: number;
 }
 
 /** 某容器格式的已看媒体数（FR-75） */
 export interface FormatWatchCount {
-  format: string
-  watched: number
+  format: string;
+  watched: number;
 }
 
 /** 观看统计聚合（FR-75）：各维度均仅统计未软删媒体 */
 export interface WatchStats {
-  total: number
-  watched: number
-  unwatched: number
+  total: number;
+  watched: number;
+  unwatched: number;
   /** 最近观看时间线（按天，倒序） */
-  recent_timeline: TimelineBucket[]
+  recent_timeline: TimelineBucket[];
   /** 续播位置分布（10 档，下标 0=0-10%…9=90-100%） */
-  position_heatmap: number[]
+  position_heatmap: number[];
   /** 各存储库已看分布 */
-  by_library: LibraryWatchCount[]
+  by_library: LibraryWatchCount[];
   /** 各格式已看分布 */
-  by_format: FormatWatchCount[]
+  by_format: FormatWatchCount[];
   /** 观看次数 Top N */
-  top_viewed: MediaFile[]
+  top_viewed: MediaFile[];
 }
 
 /** 概览看板各库聚合行（FR-117）：单个媒体库的媒体数量与体量统计 */
 export interface LibrarySummaryRow {
-  library_id: number
+  library_id: number;
   /** 库展示名，取自 library_paths（LEFT JOIN） */
-  label: string
+  label: string;
   /** 该库未软删媒体总数 */
-  media_count: number
+  media_count: number;
   /** 该库视频数（format 不在内置图片后缀名单内） */
-  video_count: number
+  video_count: number;
   /** 该库图片数（format 在内置图片后缀名单内） */
-  image_count: number
+  image_count: number;
   /** 该库文件大小求和（字节） */
-  total_size: number
+  total_size: number;
   /** 该库时长求和（秒，图片为 0 不影响） */
-  total_duration: number
+  total_duration: number;
 }
 
 /** 概览看板媒体库总量聚合（FR-117）：一次性聚合，所有计数/求和仅统计未软删媒体 */
 export interface LibrarySummary {
   /** 未软删媒体总数 */
-  total: number
+  total: number;
   /** 视频总数 */
-  video_count: number
+  video_count: number;
   /** 图片总数 */
-  image_count: number
+  image_count: number;
   /** 文件大小求和（字节） */
-  total_size: number
+  total_size: number;
   /** 时长求和（秒） */
-  total_duration: number
+  total_duration: number;
   /** 启用库数（与 /paths 口径一致，enabled=1） */
-  library_count: number
+  library_count: number;
   /** 各库聚合（按 library_id 分组） */
-  by_library: LibrarySummaryRow[]
+  by_library: LibrarySummaryRow[];
 }
 
 /** 按天新增媒体的一天（FR-118）：本地日期 YYYY-MM-DD 与当天新增的数量/体量/时长 */
 export interface MediaTrendPoint {
   /** 本地日期 YYYY-MM-DD */
-  date: string
+  date: string;
   /** 当天新增媒体数 */
-  count: number
+  count: number;
   /** 当天新增媒体文件大小求和（字节） */
-  size: number
+  size: number;
   /** 当天新增媒体时长求和（秒） */
-  duration: number
+  duration: number;
 }
 
 /** 媒体新增趋势（FR-118）：按天分桶、升序，仅含有新增的天；前端据此累加得累计增长曲线 */
 export interface MediaTrends {
-  media_added: MediaTrendPoint[]
+  media_added: MediaTrendPoint[];
 }
 
 /** 系统指标采样点（FR-119）：一个时间桶的 CPU / 内存 / 磁盘 / 转码并发 / goroutine 快照 */
 export interface MetricPoint {
   /** 采样时刻（RFC3339，UTC） */
-  t: string
+  t: string;
   /** 系统 CPU 使用率 %（0-100） */
-  cpu_percent: number
+  cpu_percent: number;
   /** 进程已用内存（runtime MemStats Alloc，字节） */
-  mem_used_bytes: number
+  mem_used_bytes: number;
   /** 进程向 OS 申请内存（Sys，字节） */
-  mem_sys_bytes: number
+  mem_sys_bytes: number;
   /** 数据盘已用（字节） */
-  disk_used_bytes: number
+  disk_used_bytes: number;
   /** 数据盘总量（字节） */
-  disk_total_bytes: number
+  disk_total_bytes: number;
   /** 活跃转码 / 播放会话数 */
-  transcode_active: number
+  transcode_active: number;
   /** goroutine 数 */
-  goroutines: number
+  goroutines: number;
 }
 
 /** 系统监控时序（FR-119）：下采样后的时序点 + 最新一条原始样本快照（current） */
 export interface SystemMetrics {
   /** 时间范围标识：1h / 24h / 7d */
-  range: string
+  range: string;
   /** 下采样时序点（按时间升序，点数有界） */
-  points: MetricPoint[]
+  points: MetricPoint[];
   /** 当前值快照（最新一条原始样本，≤15s 旧）；刚启动无样本时为 null */
-  current: MetricPoint | null
+  current: MetricPoint | null;
 }
 
 /** 媒体库后缀类型 */
-export type MediaExtensionType = 'video' | 'image'
+export type MediaExtensionType = 'video' | 'image';
 
 /** 媒体库后缀配置 */
 export interface MediaExtension {
-  id?: number
-  library_id: number
-  extension: string
-  type: MediaExtensionType
-  is_builtin: number
-  created_at?: string
+  id?: number;
+  library_id: number;
+  extension: string;
+  type: MediaExtensionType;
+  is_builtin: number;
+  created_at?: string;
 }
 
 /** 面包屑路径段 */
 export interface BreadcrumbItem {
-  name: string
-  path: string
+  name: string;
+  path: string;
 }
 
 /** 子目录信息 */
 export interface DirInfo {
-  name: string
-  path: string
+  name: string;
+  path: string;
   /** 仅聚合虚拟根（FR-66）的库目录项填充，标识点进去用哪个媒体库 */
-  library_id?: number
+  library_id?: number;
 }
 
 /** 目录浏览响应 */
 export interface BrowseResponse {
-  breadcrumbs: BreadcrumbItem[]
-  directories: DirInfo[]
-  files: MediaFile[]
+  breadcrumbs: BreadcrumbItem[];
+  directories: DirInfo[];
+  files: MediaFile[];
 }
 
 /** 当前用户 */
 export interface CurrentUser {
-  username: string
+  username: string;
 }
 
 /** 单个编码（codec）的支持情况：编入与试编码结果 */
 export interface CodecSupport {
   /** 编码格式，如 h264 / h265 / av1 / vp9 */
-  codec: string
+  codec: string;
   /** 编码器名，如 h264_amf */
-  encoder: string
+  encoder: string;
   /** 是否编入当前 ffmpeg */
-  compiled: boolean
+  compiled: boolean;
   /** 试编码是否成功 */
-  tested_ok: boolean
+  tested_ok: boolean;
 }
 
 /** 单项硬件加速能力（per-codec：逐家族 × 逐编码） */
 export interface HWAccelCapability {
   /** 家族显示名，如 "AMD AMF"/"软件编码" */
-  name: string
+  name: string;
   /** 家族标识，如 software/amf/nvenc/qsv/vaapi/videotoolbox/vulkan */
-  family: string
+  family: string;
   /** 设备类型，如 d3d11va/cuda/qsv（software 为 ""） */
-  device_type: string
+  device_type: string;
   /** 该家族至少一个编码可用 */
-  available: boolean
+  available: boolean;
   /** 该家族逐编码支持情况 */
-  codecs: CodecSupport[]
+  codecs: CodecSupport[];
 }
 
 /** 硬件加速汇总信息 */
 export interface HWAccelInfo {
-  available: HWAccelCapability[]
-  preferred: string
+  available: HWAccelCapability[];
+  preferred: string;
   /** 系统可输出编码并集，如 ["h264","h265","av1","vp9"] */
-  codecs: string[]
-  intel_gpu: boolean
-  intel_gpu_detail: string
-  software_fallback: boolean
+  codecs: string[];
+  intel_gpu: boolean;
+  intel_gpu_detail: string;
+  software_fallback: boolean;
   /** 结果是否来自缓存 */
-  from_cache: boolean
+  from_cache: boolean;
   /** 实测所用 ffmpeg 版本 */
-  ffmpeg_version: string
+  ffmpeg_version: string;
   /** 实测时间（RFC3339），未测为 "" */
-  tested_at: string
+  tested_at: string;
 }
 
 /** FFmpeg 可用性信息 */
 export interface FFmpegInfo {
-  available: boolean
-  path: string
-  version: string
+  available: boolean;
+  path: string;
+  version: string;
 }
 
 /** 运行环境运行时信息（FR-60）：进程与 Go 运行时层面的诊断字段 */
 export interface RuntimeInfo {
   /** 进程 PID */
-  pid: number
+  pid: number;
   /** 当前工作目录 */
-  work_dir: string
+  work_dir: string;
   /** 可执行文件路径 */
-  executable: string
+  executable: string;
   /** SQLite 数据库文件路径 */
-  db_path: string
+  db_path: string;
   /** 运行时长（秒） */
-  uptime_seconds: number
+  uptime_seconds: number;
   /** 当前堆上已分配且仍在用的字节数 */
-  mem_alloc: number
+  mem_alloc: number;
   /** 进程向 OS 申请的总字节数 */
-  mem_sys: number
+  mem_sys: number;
   /** 已完成的 GC 次数 */
-  num_gc: number
+  num_gc: number;
   /** GOMAXPROCS（最大并行执行的 OS 线程数） */
-  gomaxprocs: number
+  gomaxprocs: number;
 }
 
 /** 系统信息 */
 export interface SystemInfo {
-  app_version: string
-  os: string
-  arch: string
-  num_cpu: number
-  hostname: string
-  go_version: string
-  ffmpeg: FFmpegInfo
-  hwaccel: HWAccelInfo
+  app_version: string;
+  os: string;
+  arch: string;
+  num_cpu: number;
+  hostname: string;
+  go_version: string;
+  ffmpeg: FFmpegInfo;
+  hwaccel: HWAccelInfo;
   /** 运行环境运行时信息（FR-60） */
-  runtime: RuntimeInfo
+  runtime: RuntimeInfo;
 }
 
 /** 单个编码器探测结果 */
 export interface EncoderProbeResult {
-  encoder: string
-  family: string
-  codec: string
-  compiled: boolean
-  tested_ok: boolean
-  detail: string
+  encoder: string;
+  family: string;
+  codec: string;
+  compiled: boolean;
+  tested_ok: boolean;
+  detail: string;
 }
 
 /** 编解码器测试响应 */
 export interface CodecTestResult {
-  ffmpeg_available: boolean
-  results: EncoderProbeResult[]
+  ffmpeg_available: boolean;
+  results: EncoderProbeResult[];
   /** 结果是否来自缓存 */
-  from_cache: boolean
+  from_cache: boolean;
   /** 实测所用 ffmpeg 版本 */
-  ffmpeg_version: string
+  ffmpeg_version: string;
   /** 实测时间（RFC3339），未测为 "" */
-  tested_at: string
+  tested_at: string;
 }
 
 // 自更新检测结果（FR-46）
 export interface UpdateCheckResult {
-  current: string
-  latest: string
-  has_update: boolean
-  tag: string
-  prerelease: boolean
-  channel: 'stable' | 'prerelease'
-  notes: string
-  asset_name: string
+  current: string;
+  latest: string;
+  has_update: boolean;
+  tag: string;
+  prerelease: boolean;
+  channel: 'stable' | 'prerelease';
+  notes: string;
+  asset_name: string;
   /** 是否存在可回滚的上一版（.old 备份），用于回滚按钮显隐（FIX-2） */
-  rollback_available?: boolean
+  rollback_available?: boolean;
 }
 
 // 自更新下载进度（FR-90）：前端轮询 GET /api/system/update/progress 展示进度条
 export interface UpdateProgress {
   /** 进度阶段：idle 空闲 / downloading 下载中 / verifying 校验中 / done 完成 / failed 失败 */
-  state: 'idle' | 'downloading' | 'verifying' | 'done' | 'failed'
+  state: 'idle' | 'downloading' | 'verifying' | 'done' | 'failed';
   /** 已下载字节数 */
-  downloaded: number
+  downloaded: number;
   /** 总字节数（0 表示未知，此时 percent 为 0、退化为展示已下载字节） */
-  total: number
+  total: number;
   /** 下载百分比 0-100（total=0 时为 0） */
-  percent: number
+  percent: number;
 }
 
 /** 运行期设置键值映射（key → value，值统一为字符串） */
-export type SettingsMap = Record<string, string>
+export type SettingsMap = Record<string, string>;
 
 /** 单个环境变量（FR-56）：只读查看，敏感项 value 为掩码、不含明文 */
 export interface EnvVar {
   /** 环境变量名 */
-  key: string
+  key: string;
   /** 中文用途说明 */
-  description: string
+  description: string;
   /** 是否敏感（敏感项 value 为掩码，绝不回显明文） */
-  sensitive: boolean
+  sensitive: boolean;
   /** 当前是否已设置（非空） */
-  set: boolean
+  set: boolean;
   /** 展示值：非敏感为明文，敏感为固定掩码 */
-  value: string
+  value: string;
 }
 
 /** FFmpeg 路径检测结果（FR-56） */
 export interface FFmpegDetectResult {
   /** 指定路径的 ffmpeg 是否可用 */
-  ffmpeg_available: boolean
+  ffmpeg_available: boolean;
   /** 可用时的版本首行，不可用为空串 */
-  ffmpeg_version: string
+  ffmpeg_version: string;
 }
 
 /** 代理连通性测试结果（FR-89） */
 export interface ProxyTestResult {
   /** 经待测代理（或直连）是否能连通探测目标 */
-  reachable: boolean
+  reachable: boolean;
   /** 结果说明：可达为 HTTP 状态、不可达为脱敏后的原因 */
-  detail: string
+  detail: string;
   /** 本次探测耗时（毫秒） */
-  latency_ms: number
+  latency_ms: number;
   /** 探测目标地址 */
-  target: string
+  target: string;
 }
 
 /** 回收站清理结果统计（FR-26）：成功移动数与失败跳过数 */
 export interface RecycleCleanupResult {
-  moved: number
-  failed: number
+  moved: number;
+  failed: number;
 }
 
 /** 外挂字幕轨道 */
 export interface SubtitleTrack {
-  index: number
-  file_name: string
-  format: string
-  url: string
+  index: number;
+  file_name: string;
+  format: string;
+  url: string;
 }
 
 /** 一条解析后的字幕条目 */
 export interface SubtitleEntry {
-  start: number
-  end: number
-  text: string
+  start: number;
+  end: number;
+  text: string;
 }
 
 /**
@@ -578,61 +578,61 @@ export interface SubtitleEntry {
  */
 export interface PlaybackDescriptor {
   /** 目标视频编码（h264/h265/av1/vp9），用于 fmp4 路径前的客户端能力校验 */
-  codec: string
+  codec: string;
   /** 清单 / 流 URL（fmp4 为 index.m3u8，ts 为流地址，mp4 为原文件地址） */
-  url: string
+  url: string;
   /** 播放路径 */
-  path: 'ts' | 'fmp4' | 'mp4'
+  path: 'ts' | 'fmp4' | 'mp4';
   /** 客户端不支持目标编码时的 H.264/TS 回退源（缺省则展示不支持提示，由 FR-53 提供真实回退源） */
-  fallbackUrl?: string
+  fallbackUrl?: string;
 }
 
 /** 项目自身协议信息（FR-57）：开源协议页顶部展示 */
 export interface ProjectLicense {
   /** 项目名 */
-  name: string
+  name: string;
   /** 协议标识（如 MIT） */
-  license: string
+  license: string;
   /** 作者 / 版权方 */
-  author: string
+  author: string;
   /** 协议全文 */
-  text: string
+  text: string;
 }
 
 /** 前端依赖的协议信息（FR-57）：均可拿到全文 */
 export interface FrontendLicense {
   /** 包名 */
-  name: string
+  name: string;
   /** 版本号 */
-  version: string
+  version: string;
   /** 协议标识 */
-  license: string
+  license: string;
   /** 作者 / 发布者，未知为空串 */
-  author: string
+  author: string;
   /** 协议全文，未知为空串 */
-  text: string
+  text: string;
 }
 
 /** 后端依赖的协议信息（FR-57）：全文尽力而为，拿不到给 pkg.go.dev 链接 */
 export interface BackendLicense {
   /** module 路径 */
-  name: string
+  name: string;
   /** 版本号 */
-  version: string
+  version: string;
   /** 协议标识，未知为空串 */
-  license: string
+  license: string;
   /** 协议全文，从本机 module cache 读到则有、否则为空串 */
-  text?: string
+  text?: string;
   /** 无全文时的 pkg.go.dev 协议页外链 */
-  url?: string
+  url?: string;
 }
 
 /** 开源协议清单（FR-57）：构建期生成、嵌入仓库、运行时不联网 */
 export interface LicensesData {
   /** 项目自身 */
-  project: ProjectLicense
+  project: ProjectLicense;
   /** 前端生产依赖 */
-  frontend: FrontendLicense[]
+  frontend: FrontendLicense[];
   /** 后端 go.mod 直接依赖 */
-  backend: BackendLicense[]
+  backend: BackendLicense[];
 }

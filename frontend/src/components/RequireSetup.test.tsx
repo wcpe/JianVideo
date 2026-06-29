@@ -1,10 +1,10 @@
-import { render, screen } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { MantineProvider } from '@mantine/core'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { render, screen } from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MantineProvider } from '@mantine/core';
+import { describe, it, expect, beforeEach } from 'vitest';
 
-import RequireSetup from './RequireSetup'
-import { useAuthStore } from '@/stores/auth'
+import RequireSetup from './RequireSetup';
+import { useAuthStore } from '@/stores/auth';
 
 function renderSetupGuard() {
   return render(
@@ -23,29 +23,34 @@ function renderSetupGuard() {
         </Routes>
       </MemoryRouter>
     </MantineProvider>,
-  )
+  );
 }
 
 describe('RequireSetup', () => {
   beforeEach(() => {
-    useAuthStore.setState({ initialized: true, isAuthenticated: false, username: null, needsSetup: false })
-  })
+    useAuthStore.setState({
+      initialized: true,
+      isAuthenticated: false,
+      username: null,
+      needsSetup: false,
+    });
+  });
 
   it('需初始化时渲染初始化引导', () => {
-    useAuthStore.setState({ initialized: true, needsSetup: true })
+    useAuthStore.setState({ initialized: true, needsSetup: true });
 
-    renderSetupGuard()
+    renderSetupGuard();
 
-    expect(screen.getByText('初始化引导占位')).toBeInTheDocument()
-    expect(screen.queryByText('登录页占位')).toBeNull()
-  })
+    expect(screen.getByText('初始化引导占位')).toBeInTheDocument();
+    expect(screen.queryByText('登录页占位')).toBeNull();
+  });
 
   it('已初始化（无需 setup）时重定向到 /login', () => {
-    useAuthStore.setState({ initialized: true, needsSetup: false })
+    useAuthStore.setState({ initialized: true, needsSetup: false });
 
-    renderSetupGuard()
+    renderSetupGuard();
 
-    expect(screen.getByText('登录页占位')).toBeInTheDocument()
-    expect(screen.queryByText('初始化引导占位')).toBeNull()
-  })
-})
+    expect(screen.getByText('登录页占位')).toBeInTheDocument();
+    expect(screen.queryByText('初始化引导占位')).toBeNull();
+  });
+});

@@ -1,8 +1,8 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
-import path from 'path'
-import { pwaManifest } from './src/utils/pwa-manifest'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
+import path from 'path';
+import { pwaManifest } from './src/utils/pwa-manifest';
 
 export default defineConfig({
   plugins: [
@@ -31,6 +31,13 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['@emotion/react', '@emotion/cache', '@mantine/core', '@mantine/hooks', '@mantine/notifications', '@mantine/form'],
+    include: [
+      '@emotion/react',
+      '@emotion/cache',
+      '@mantine/core',
+      '@mantine/hooks',
+      '@mantine/notifications',
+      '@mantine/form',
+    ],
   },
-})
+});

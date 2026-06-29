@@ -1,16 +1,16 @@
-import { Modal, Text, Button, Group, Stack } from '@mantine/core'
-import { IconAlertTriangle } from '@tabler/icons-react'
+import { Modal, Text, Button, Group, Stack } from '@mantine/core';
+import { IconAlertTriangle } from '@tabler/icons-react';
 
 interface ConfirmModalProps {
-  opened: boolean
-  title: string
-  message: string
-  confirmLabel?: string
-  cancelLabel?: string
-  confirmColor?: string
-  onConfirm: () => void
-  onCancel: () => void
-  loading?: boolean
+  opened: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  confirmColor?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading?: boolean;
 }
 
 /** 确认弹窗组件 */
@@ -42,5 +42,5 @@ export default function ConfirmModal({
         </Group>
       </Stack>
     </Modal>
-  )
+  );
 }

@@ -1,23 +1,23 @@
-import type { ReactNode } from 'react'
-import { Stack, Text, Button } from '@mantine/core'
+import type { ReactNode } from 'react';
+import { Stack, Text, Button } from '@mantine/core';
 
 /** 空态 CTA 配置：按钮文案、点击回调，可选加载态与左侧图标 */
 export interface EmptyStateAction {
-  label: string
-  onClick: () => void
-  loading?: boolean
-  leftIcon?: ReactNode
+  label: string;
+  onClick: () => void;
+  loading?: boolean;
+  leftIcon?: ReactNode;
 }
 
 export interface EmptyStateProps {
   /** 居中图形：不传则用内置原创空盒插画；可传 tabler 图标作居中图标 */
-  icon?: ReactNode
+  icon?: ReactNode;
   /** 主标题 */
-  title: string
+  title: string;
   /** 说明文案（可选） */
-  description?: string
+  description?: string;
   /** 可选的一键 CTA 按钮 */
-  action?: EmptyStateAction
+  action?: EmptyStateAction;
 }
 
 /**
@@ -62,7 +62,7 @@ function EmptyBoxIllustration() {
       <circle cx={33} cy={26} r={2} fill="currentColor" opacity={0.3} />
       <circle cx={63} cy={26} r={2} fill="currentColor" opacity={0.3} />
     </svg>
-  )
+  );
 }
 
 /**
@@ -73,8 +73,14 @@ export default function EmptyState({ icon, title, description, action }: EmptySt
   return (
     <Stack align="center" gap="xs" py="xl" data-testid="empty-state">
       {icon ?? <EmptyBoxIllustration />}
-      <Text fw={600} ta="center">{title}</Text>
-      {description && <Text size="sm" c="dimmed" ta="center" maw={420}>{description}</Text>}
+      <Text fw={600} ta="center">
+        {title}
+      </Text>
+      {description && (
+        <Text size="sm" c="dimmed" ta="center" maw={420}>
+          {description}
+        </Text>
+      )}
       {action && (
         <Button
           mt="sm"
@@ -88,5 +94,5 @@ export default function EmptyState({ icon, title, description, action }: EmptySt
         </Button>
       )}
     </Stack>
-  )
+  );
 }

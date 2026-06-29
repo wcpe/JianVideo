@@ -1,134 +1,185 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { notifications } from '@mantine/notifications'
-import * as libApi from '@/api/library'
-import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types'
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { notifications } from '@mantine/notifications';
+import * as libApi from '@/api/library';
+import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types';
 
-export function useLibraryPaths(
-  onPathsChanged?: () => void,
-) {
-  const [paths, setPaths] = useState<LibraryPath[]>([])
-  const [loading, setLoading] = useState(false)
-  const [newPath, setNewPath] = useState('')
-  const [addingPath, setAddingPath] = useState(false)
-  const addingPathRef = useRef(false)
-  const [scanLoading, setScanLoading] = useState<Record<number, boolean>>({})
-  const [extensionInputs, setExtensionInputs] = useState<Record<number, string>>({})
-  const [extensionTypes, setExtensionTypes] = useState<Record<number, MediaExtensionType>>({})
-  const [extensionLoading, setExtensionLoading] = useState<Record<number, boolean>>({})
-  const [customImageExtensions, setCustomImageExtensions] = useState<Record<number, string[]>>({})
+export function useLibraryPaths(onPathsChanged?: () => void) {
+  const [paths, setPaths] = useState<LibraryPath[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [newPath, setNewPath] = useState('');
+  const [addingPath, setAddingPath] = useState(false);
+  const addingPathRef = useRef(false);
+  const [scanLoading, setScanLoading] = useState<Record<number, boolean>>({});
+  const [extensionInputs, setExtensionInputs] = useState<Record<number, string>>({});
+  const [extensionTypes, setExtensionTypes] = useState<Record<number, MediaExtensionType>>({});
+  const [extensionLoading, setExtensionLoading] = useState<Record<number, boolean>>({});
+  const [customImageExtensions, setCustomImageExtensions] = useState<Record<number, string[]>>({});
   // 各库完整后缀列表（内置 + 自定义），供后缀管理 UI 列出与删除（FR-64）
-  const [extensionsByLibrary, setExtensionsByLibrary] = useState<Record<number, MediaExtension[]>>({})
+  const [extensionsByLibrary, setExtensionsByLibrary] = useState<Record<number, MediaExtension[]>>(
+    {},
+  );
 
   const loadExtensionPolicies = useCallback(async (items: LibraryPath[], replace = true) => {
-    const entries = await Promise.all(items.map(async (path) => {
-      try {
-        const extensions = await libApi.listMediaExtensions(path.id)
-        const imageExts = extensions
-          .filter(ext => ext.type === 'image')
-          .map(ext => ext.extension.toLowerCase().replace(/^\./, ''))
-        return [path.id, { imageExts, all: extensions }] as const
-      } catch {
-        return [path.id, { imageExts: [] as string[], all: [] as MediaExtension[] }] as const
-      }
-    }))
-    const imageNext = Object.fromEntries(entries.map(([id, v]) => [id, v.imageExts]))
-    const allNext = Object.fromEntries(entries.map(([id, v]) => [id, v.all]))
-    setCustomImageExtensions(prev => (replace ? imageNext : { ...prev, ...imageNext }))
-    setExtensionsByLibrary(prev => (replace ? allNext : { ...prev, ...allNext }))
-  }, [])
+    const entries = await Promise.all(
+      items.map(async (path) => {
+        try {
+          const extensions = await libApi.listMediaExtensions(path.id);
+          const imageExts = extensions
+            .filter((ext) => ext.type === 'image')
+            .map((ext) => ext.extension.toLowerCase().replace(/^\./, ''));
+          return [path.id, { imageExts, all: extensions }] as const;
+        } catch {
+          return [path.id, { imageExts: [] as string[], all: [] as MediaExtension[] }] as const;
+        }
+      }),
+    );
+    const imageNext = Object.fromEntries(entries.map(([id, v]) => [id, v.imageExts]));
+    const allNext = Object.fromEntries(entries.map(([id, v]) => [id, v.all]));
+    setCustomImageExtensions((prev) => (replace ? imageNext : { ...prev, ...imageNext }));
+    setExtensionsByLibrary((prev) => (replace ? allNext : { ...prev, ...allNext }));
+  }, []);
 
   const loadPaths = useCallback(async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const items = await libApi.getLibraryPaths()
-      setPaths(items)
-      await loadExtensionPolicies(items)
+      const items = await libApi.getLibraryPaths();
+      setPaths(items);
+      await loadExtensionPolicies(items);
     } catch {
       // 错误由上层处理
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [loadExtensionPolicies])
+  }, [loadExtensionPolicies]);
 
   // 挂载时自动加载路径列表
-  useEffect(() => { loadPaths() }, [loadPaths])
+  useEffect(() => {
+    loadPaths();
+  }, [loadPaths]);
 
   const handleAddPath = useCallback(async () => {
-    if (!newPath.trim() || addingPathRef.current) return
-    addingPathRef.current = true
-    setAddingPath(true)
+    if (!newPath.trim() || addingPathRef.current) return;
+    addingPathRef.current = true;
+    setAddingPath(true);
     try {
-      const created = await libApi.createLibraryPath(newPath.trim())
-      setNewPath('')
-      notifications.show({ title: '添加成功', message: `目录 "${created.label || created.path}" 已添加`, color: 'green', autoClose: 3000 })
-      await loadPaths()
-      await onPathsChanged?.()
+      const created = await libApi.createLibraryPath(newPath.trim());
+      setNewPath('');
+      notifications.show({
+        title: '添加成功',
+        message: `目录 "${created.label || created.path}" 已添加`,
+        color: 'green',
+        autoClose: 3000,
+      });
+      await loadPaths();
+      await onPathsChanged?.();
     } catch (err) {
-      const message = err instanceof Error ? err.message : '无法添加目录，请检查路径是否正确'
-      notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 })
+      const message = err instanceof Error ? err.message : '无法添加目录，请检查路径是否正确';
+      notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 });
     } finally {
-      addingPathRef.current = false
-      setAddingPath(false)
+      addingPathRef.current = false;
+      setAddingPath(false);
     }
-  }, [newPath, loadPaths, onPathsChanged])
+  }, [newPath, loadPaths, onPathsChanged]);
 
-  const handleDeletePath = useCallback(async (path: LibraryPath, onConfirm?: () => Promise<void>) => {
-    try {
-      await onConfirm?.()
-      notifications.show({ title: '删除成功', message: `目录 "${path.label || path.path}" 已删除`, color: 'green', autoClose: 3000 })
-      await loadPaths()
-      await onPathsChanged?.()
-    } catch {
-      notifications.show({ title: '删除失败', message: '无法删除目录', color: 'red', autoClose: 3000 })
-    }
-  }, [loadPaths, onPathsChanged])
+  const handleDeletePath = useCallback(
+    async (path: LibraryPath, onConfirm?: () => Promise<void>) => {
+      try {
+        await onConfirm?.();
+        notifications.show({
+          title: '删除成功',
+          message: `目录 "${path.label || path.path}" 已删除`,
+          color: 'green',
+          autoClose: 3000,
+        });
+        await loadPaths();
+        await onPathsChanged?.();
+      } catch {
+        notifications.show({
+          title: '删除失败',
+          message: '无法删除目录',
+          color: 'red',
+          autoClose: 3000,
+        });
+      }
+    },
+    [loadPaths, onPathsChanged],
+  );
 
   // 触发扫描（FR-27）：mode=incremental 增量更新只索引新增；mode=full 全量扫描并对账已删文件。
-  const handleScan = useCallback(async (id: number, mode: ScanMode = 'incremental', onScanDone?: () => Promise<void>) => {
-    setScanLoading(prev => ({ ...prev, [id]: true }))
-    try {
-      // 扫描已改为后端异步执行，立即返回；实际进度由扫描进度 SSE 推送
-      await libApi.scanLibrary(id, mode)
-      const label = mode === 'full' ? '全量扫描已开始' : '增量更新已开始'
-      notifications.show({ title: label, message: '正在后台扫描，完成后将自动刷新', color: 'blue', autoClose: 3000 })
-      await onPathsChanged?.()
-      await onScanDone?.()
-    } catch {
-      notifications.show({ title: '扫描失败', message: '扫描目录时出错', color: 'red', autoClose: 3000 })
-    } finally {
-      setScanLoading(prev => ({ ...prev, [id]: false }))
-    }
-  }, [onPathsChanged])
+  const handleScan = useCallback(
+    async (id: number, mode: ScanMode = 'incremental', onScanDone?: () => Promise<void>) => {
+      setScanLoading((prev) => ({ ...prev, [id]: true }));
+      try {
+        // 扫描已改为后端异步执行，立即返回；实际进度由扫描进度 SSE 推送
+        await libApi.scanLibrary(id, mode);
+        const label = mode === 'full' ? '全量扫描已开始' : '增量更新已开始';
+        notifications.show({
+          title: label,
+          message: '正在后台扫描，完成后将自动刷新',
+          color: 'blue',
+          autoClose: 3000,
+        });
+        await onPathsChanged?.();
+        await onScanDone?.();
+      } catch {
+        notifications.show({
+          title: '扫描失败',
+          message: '扫描目录时出错',
+          color: 'red',
+          autoClose: 3000,
+        });
+      } finally {
+        setScanLoading((prev) => ({ ...prev, [id]: false }));
+      }
+    },
+    [onPathsChanged],
+  );
 
-  const handleAddExtension = useCallback(async (path: LibraryPath) => {
-    const extension = (extensionInputs[path.id] || '').trim()
-    if (!extension) return
-    const mediaType = extensionTypes[path.id] || 'video'
-    setExtensionLoading(prev => ({ ...prev, [path.id]: true }))
-    try {
-      await libApi.addMediaExtension(path.id, extension, mediaType)
-      setExtensionInputs(prev => ({ ...prev, [path.id]: '' }))
-      await loadExtensionPolicies([path], false)
-      notifications.show({ title: '后缀已添加', message: `${extension} 已绑定到 "${path.label || path.path}"`, color: 'green', autoClose: 3000 })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '添加后缀失败，请检查格式'
-      notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 })
-    } finally {
-      setExtensionLoading(prev => ({ ...prev, [path.id]: false }))
-    }
-  }, [extensionInputs, extensionTypes, loadExtensionPolicies])
+  const handleAddExtension = useCallback(
+    async (path: LibraryPath) => {
+      const extension = (extensionInputs[path.id] || '').trim();
+      if (!extension) return;
+      const mediaType = extensionTypes[path.id] || 'video';
+      setExtensionLoading((prev) => ({ ...prev, [path.id]: true }));
+      try {
+        await libApi.addMediaExtension(path.id, extension, mediaType);
+        setExtensionInputs((prev) => ({ ...prev, [path.id]: '' }));
+        await loadExtensionPolicies([path], false);
+        notifications.show({
+          title: '后缀已添加',
+          message: `${extension} 已绑定到 "${path.label || path.path}"`,
+          color: 'green',
+          autoClose: 3000,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '添加后缀失败，请检查格式';
+        notifications.show({ title: '添加失败', message, color: 'red', autoClose: 3000 });
+      } finally {
+        setExtensionLoading((prev) => ({ ...prev, [path.id]: false }));
+      }
+    },
+    [extensionInputs, extensionTypes, loadExtensionPolicies],
+  );
 
   // 删除自定义后缀（FR-64）：仅自定义可删，内置由 UI 禁用删除入口。
-  const handleDeleteExtension = useCallback(async (path: LibraryPath, extension: string) => {
-    try {
-      await libApi.deleteMediaExtension(path.id, extension)
-      await loadExtensionPolicies([path], false)
-      notifications.show({ title: '后缀已删除', message: `${extension} 已从 "${path.label || path.path}" 移除`, color: 'green', autoClose: 3000 })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '删除后缀失败'
-      notifications.show({ title: '删除失败', message, color: 'red', autoClose: 3000 })
-    }
-  }, [loadExtensionPolicies])
+  const handleDeleteExtension = useCallback(
+    async (path: LibraryPath, extension: string) => {
+      try {
+        await libApi.deleteMediaExtension(path.id, extension);
+        await loadExtensionPolicies([path], false);
+        notifications.show({
+          title: '后缀已删除',
+          message: `${extension} 已从 "${path.label || path.path}" 移除`,
+          color: 'green',
+          autoClose: 3000,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '删除后缀失败';
+        notifications.show({ title: '删除失败', message, color: 'red', autoClose: 3000 });
+      }
+    },
+    [loadExtensionPolicies],
+  );
 
   return {
     // 状态
@@ -153,5 +204,5 @@ export function useLibraryPaths(
     handleScan,
     handleAddExtension,
     handleDeleteExtension,
-  }
+  };
 }

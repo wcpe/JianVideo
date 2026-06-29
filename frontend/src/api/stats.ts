@@ -1,25 +1,25 @@
-import type { WatchStats } from '@/types'
-import client from './client'
+import type { WatchStats } from '@/types';
+import client from './client';
 
 // 使用构建时环境变量决定是否启用 mock 模式
-const useMock = import.meta.env.VITE_USE_MOCK === 'true'
+const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
 function mockDelay(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ─── 真实 API 实现 ──────────────────────────────────
 
 async function realGetWatchStats(): Promise<WatchStats> {
-  const res = await client.get<WatchStats>('/api/library/stats')
-  return res.data
+  const res = await client.get<WatchStats>('/api/library/stats');
+  return res.data;
 }
 
 // ─── Mock API 实现 ──────────────────────────────────
 // mock 模式给一组示例统计，便于离线 demo 展示各维度。
 
 async function mockGetWatchStats(): Promise<WatchStats> {
-  await mockDelay(120)
+  await mockDelay(120);
   return {
     total: 42,
     watched: 18,
@@ -40,9 +40,11 @@ async function mockGetWatchStats(): Promise<WatchStats> {
       { format: 'mkv', watched: 7 },
     ],
     top_viewed: [],
-  }
+  };
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
-export function getWatchStats() { return useMock ? mockGetWatchStats() : realGetWatchStats() }
+export function getWatchStats() {
+  return useMock ? mockGetWatchStats() : realGetWatchStats();
+}

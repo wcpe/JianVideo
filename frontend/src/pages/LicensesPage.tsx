@@ -1,10 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react';
 import {
-  Stack, Title, Card, Text, Group, Badge, TextInput, Accordion, Anchor, Code, Box,
-} from '@mantine/core'
-import { IconSearch, IconExternalLink } from '@tabler/icons-react'
-import licensesData from '@/data/licenses'
-import type { FrontendLicense, BackendLicense } from '@/types'
+  Stack,
+  Title,
+  Card,
+  Text,
+  Group,
+  Badge,
+  TextInput,
+  Accordion,
+  Anchor,
+  Code,
+  Box,
+} from '@mantine/core';
+import { IconSearch, IconExternalLink } from '@tabler/icons-react';
+import licensesData from '@/data/licenses';
+import type { FrontendLicense, BackendLicense } from '@/types';
 
 // 协议全文统一以等宽块展示（协议是纯文本，非 markdown）
 function LicenseText({ text }: { text: string }) {
@@ -12,7 +22,7 @@ function LicenseText({ text }: { text: string }) {
     <Code block style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflowY: 'auto' }}>
       {text}
     </Code>
-  )
+  );
 }
 
 // 单条前端依赖：标题行（包名 + 版本 + 协议 + 作者），展开见全文
@@ -21,19 +31,35 @@ function FrontendItem({ pkg }: { pkg: FrontendLicense }) {
     <Accordion.Item value={`fe:${pkg.name}@${pkg.version}`}>
       <Accordion.Control>
         <Group gap="xs" wrap="wrap">
-          <Text fw={600} size="sm">{pkg.name}</Text>
-          <Text size="xs" c="dimmed">{pkg.version}</Text>
-          {pkg.license && <Badge size="sm" variant="light">{pkg.license}</Badge>}
-          {pkg.author && <Text size="xs" c="dimmed">· {pkg.author}</Text>}
+          <Text fw={600} size="sm">
+            {pkg.name}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {pkg.version}
+          </Text>
+          {pkg.license && (
+            <Badge size="sm" variant="light">
+              {pkg.license}
+            </Badge>
+          )}
+          {pkg.author && (
+            <Text size="xs" c="dimmed">
+              · {pkg.author}
+            </Text>
+          )}
         </Group>
       </Accordion.Control>
       <Accordion.Panel>
-        {pkg.text
-          ? <LicenseText text={pkg.text} />
-          : <Text size="sm" c="dimmed">未随包提供协议全文。</Text>}
+        {pkg.text ? (
+          <LicenseText text={pkg.text} />
+        ) : (
+          <Text size="sm" c="dimmed">
+            未随包提供协议全文。
+          </Text>
+        )}
       </Accordion.Panel>
     </Accordion.Item>
-  )
+  );
 }
 
 // 单条后端依赖：有全文则可展开，无全文给 pkg.go.dev 外链
@@ -43,9 +69,17 @@ function BackendItem({ pkg }: { pkg: BackendLicense }) {
     return (
       <Group justify="space-between" wrap="nowrap" px="md" py="xs">
         <Group gap="xs" wrap="wrap">
-          <Text fw={600} size="sm">{pkg.name}</Text>
-          <Text size="xs" c="dimmed">{pkg.version}</Text>
-          {pkg.license && <Badge size="sm" variant="light">{pkg.license}</Badge>}
+          <Text fw={600} size="sm">
+            {pkg.name}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {pkg.version}
+          </Text>
+          {pkg.license && (
+            <Badge size="sm" variant="light">
+              {pkg.license}
+            </Badge>
+          )}
         </Group>
         {pkg.url && (
           <Anchor href={pkg.url} target="_blank" rel="noopener noreferrer" size="sm">
@@ -56,22 +90,30 @@ function BackendItem({ pkg }: { pkg: BackendLicense }) {
           </Anchor>
         )}
       </Group>
-    )
+    );
   }
   return (
     <Accordion.Item value={`be:${pkg.name}@${pkg.version}`}>
       <Accordion.Control>
         <Group gap="xs" wrap="wrap">
-          <Text fw={600} size="sm">{pkg.name}</Text>
-          <Text size="xs" c="dimmed">{pkg.version}</Text>
-          {pkg.license && <Badge size="sm" variant="light">{pkg.license}</Badge>}
+          <Text fw={600} size="sm">
+            {pkg.name}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {pkg.version}
+          </Text>
+          {pkg.license && (
+            <Badge size="sm" variant="light">
+              {pkg.license}
+            </Badge>
+          )}
         </Group>
       </Accordion.Control>
       <Accordion.Panel>
         <LicenseText text={pkg.text} />
       </Accordion.Panel>
     </Accordion.Item>
-  )
+  );
 }
 
 /**
@@ -79,19 +121,19 @@ function BackendItem({ pkg }: { pkg: BackendLicense }) {
  * 的协议信息。数据来自构建期生成、随 go:embed 内嵌的 licenses.json，运行时不联网。
  */
 export default function LicensesPage() {
-  const { project, frontend, backend } = licensesData
-  const [keyword, setKeyword] = useState('')
+  const { project, frontend, backend } = licensesData;
+  const [keyword, setKeyword] = useState('');
 
   // 按包名（不区分大小写）过滤前后端依赖
-  const trimmed = keyword.trim().toLowerCase()
+  const trimmed = keyword.trim().toLowerCase();
   const filteredFrontend = useMemo(
     () => (trimmed ? frontend.filter((p) => p.name.toLowerCase().includes(trimmed)) : frontend),
     [frontend, trimmed],
-  )
+  );
   const filteredBackend = useMemo(
     () => (trimmed ? backend.filter((p) => p.name.toLowerCase().includes(trimmed)) : backend),
     [backend, trimmed],
-  )
+  );
 
   return (
     <Stack gap="lg">
@@ -106,7 +148,9 @@ export default function LicensesPage() {
                 <Text fw={700}>{project.name}</Text>
                 {project.license && <Badge variant="light">{project.license}</Badge>}
                 {project.author && (
-                  <Text size="sm" c="dimmed">Copyright (c) {project.author}</Text>
+                  <Text size="sm" c="dimmed">
+                    Copyright (c) {project.author}
+                  </Text>
                 )}
               </Group>
             </Accordion.Control>
@@ -128,37 +172,49 @@ export default function LicensesPage() {
 
       {/* 前端依赖 */}
       <Card withBorder padding="md" radius="md">
-        <Title order={4} mb="sm">前端依赖（{filteredFrontend.length}）</Title>
-        {filteredFrontend.length === 0
-          ? <Text size="sm" c="dimmed">无匹配的前端依赖。</Text>
-          : (
-            <Accordion variant="separated" chevronPosition="left">
-              {filteredFrontend.map((pkg) => (
-                <FrontendItem key={`${pkg.name}@${pkg.version}`} pkg={pkg} />
-              ))}
-            </Accordion>
-          )}
+        <Title order={4} mb="sm">
+          前端依赖（{filteredFrontend.length}）
+        </Title>
+        {filteredFrontend.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            无匹配的前端依赖。
+          </Text>
+        ) : (
+          <Accordion variant="separated" chevronPosition="left">
+            {filteredFrontend.map((pkg) => (
+              <FrontendItem key={`${pkg.name}@${pkg.version}`} pkg={pkg} />
+            ))}
+          </Accordion>
+        )}
       </Card>
 
       {/* 后端依赖 */}
       <Card withBorder padding="md" radius="md">
-        <Title order={4} mb="sm">后端依赖（{filteredBackend.length}）</Title>
-        {filteredBackend.length === 0
-          ? <Text size="sm" c="dimmed">无匹配的后端依赖。</Text>
-          : (
-            <Box>
-              {/* 有全文者进 Accordion，无全文者单行外链；混合渲染保持顺序 */}
-              <Accordion variant="separated" chevronPosition="left">
-                {filteredBackend.filter((p) => p.text).map((pkg) => (
+        <Title order={4} mb="sm">
+          后端依赖（{filteredBackend.length}）
+        </Title>
+        {filteredBackend.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            无匹配的后端依赖。
+          </Text>
+        ) : (
+          <Box>
+            {/* 有全文者进 Accordion，无全文者单行外链；混合渲染保持顺序 */}
+            <Accordion variant="separated" chevronPosition="left">
+              {filteredBackend
+                .filter((p) => p.text)
+                .map((pkg) => (
                   <BackendItem key={`${pkg.name}@${pkg.version}`} pkg={pkg} />
                 ))}
-              </Accordion>
-              {filteredBackend.filter((p) => !p.text).map((pkg) => (
+            </Accordion>
+            {filteredBackend
+              .filter((p) => !p.text)
+              .map((pkg) => (
                 <BackendItem key={`${pkg.name}@${pkg.version}`} pkg={pkg} />
               ))}
-            </Box>
-          )}
+          </Box>
+        )}
       </Card>
     </Stack>
-  )
+  );
 }

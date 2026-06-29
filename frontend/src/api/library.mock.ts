@@ -5,28 +5,32 @@
  * 注意：可变数据（paths、mediaFiles）统一从 @/mocks/data 导入，
  *       避免与 library.ts 中的 mock 数据重复定义。
  */
-import type { LibraryPath, MediaListResponse, MediaFile, ScanResponse } from '@/types'
-import { mockPaths, mockMediaFiles } from '@/mocks/data'
+import type { LibraryPath, MediaListResponse, MediaFile, ScanResponse } from '@/types';
+import { mockPaths, mockMediaFiles } from '@/mocks/data';
 
 // ─── 可变数据（引用共享源，通过 splice/push 修改） ────
 
-let paths: LibraryPath[] = mockPaths
-let mediaFiles: MediaFile[] = mockMediaFiles
-let nextId = 100
+let paths: LibraryPath[] = mockPaths;
+let mediaFiles: MediaFile[] = mockMediaFiles;
+let nextId = 100;
 
 function delay(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ─── Mock API 实现 ──────────────────────────────────
 
 export async function getLibraryPaths(): Promise<LibraryPath[]> {
-  await delay(150)
-  return [...paths]
+  await delay(150);
+  return [...paths];
 }
 
-export async function createLibraryPath(path: string, type = 'local', label = ''): Promise<LibraryPath> {
-  await delay(200)
+export async function createLibraryPath(
+  path: string,
+  type = 'local',
+  label = '',
+): Promise<LibraryPath> {
+  await delay(200);
   const p: LibraryPath = {
     id: nextId++,
     path,
@@ -34,60 +38,62 @@ export async function createLibraryPath(path: string, type = 'local', label = ''
     label: label || path,
     enabled: true,
     created_at: new Date().toISOString(),
-  }
-  paths.push(p)
-  return p
+  };
+  paths.push(p);
+  return p;
 }
 
 export async function deleteLibraryPath(id: number): Promise<void> {
-  await delay(150)
-  paths = paths.filter(p => p.id !== id)
-  mediaFiles = mediaFiles.filter(m => m.library_id !== id)
+  await delay(150);
+  paths = paths.filter((p) => p.id !== id);
+  mediaFiles = mediaFiles.filter((m) => m.library_id !== id);
 }
 
-export async function getMediaFiles(params: {
-  library_id?: number
-  sort?: string
-  page?: number
-  page_size?: number
-  search?: string
-} = {}): Promise<MediaListResponse> {
-  await delay(200)
-  const { page = 1, page_size = 20, search, sort } = params
+export async function getMediaFiles(
+  params: {
+    library_id?: number;
+    sort?: string;
+    page?: number;
+    page_size?: number;
+    search?: string;
+  } = {},
+): Promise<MediaListResponse> {
+  await delay(200);
+  const { page = 1, page_size = 20, search, sort } = params;
 
-  let items = [...mediaFiles]
+  let items = [...mediaFiles];
   if (search) {
-    items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+    items = items.filter((m) => m.file_name.toLowerCase().includes(search.toLowerCase()));
   }
   if (sort === 'time_desc') {
-    items.sort((a, b) => b.added_at.localeCompare(a.added_at))
+    items.sort((a, b) => b.added_at.localeCompare(a.added_at));
   }
 
-  const total = items.length
-  const start = (page - 1) * page_size
-  return { items: items.slice(start, start + page_size), total, page, page_size }
+  const total = items.length;
+  const start = (page - 1) * page_size;
+  return { items: items.slice(start, start + page_size), total, page, page_size };
 }
 
 export async function getMediaFile(id: number): Promise<MediaFile> {
-  await delay(100)
-  const f = mediaFiles.find(m => m.id === id)
-  if (!f) throw new Error('媒体文件不存在')
-  return f
+  await delay(100);
+  const f = mediaFiles.find((m) => m.id === id);
+  if (!f) throw new Error('媒体文件不存在');
+  return f;
 }
 
 export async function deleteMediaFile(id: number): Promise<void> {
-  await delay(150)
-  mediaFiles = mediaFiles.filter(m => m.id !== id)
+  await delay(150);
+  mediaFiles = mediaFiles.filter((m) => m.id !== id);
 }
 
 export async function scanLibrary(id: number): Promise<ScanResponse> {
-  await delay(400)
-  const libraryPath = paths.find(p => p.id === id)?.path || 'D:\\Videos'
-  const count = Math.floor(Math.random() * 3) + 1
-  const fmts = ['mp4', 'mkv', 'avi', 'mov']
+  await delay(400);
+  const libraryPath = paths.find((p) => p.id === id)?.path || 'D:\\Videos';
+  const count = Math.floor(Math.random() * 3) + 1;
+  const fmts = ['mp4', 'mkv', 'avi', 'mov'];
   for (let i = 0; i < count; i++) {
-    const fileId = nextId++
-    const format = fmts[i % fmts.length]
+    const fileId = nextId++;
+    const format = fmts[i % fmts.length];
     mediaFiles.push({
       id: fileId,
       library_id: id,
@@ -104,7 +110,7 @@ export async function scanLibrary(id: number): Promise<ScanResponse> {
       subtitle_tracks: '',
       added_at: new Date().toISOString(),
       modified_at: new Date().toISOString(),
-    })
+    });
   }
-  return { scanned: count }
+  return { scanned: count };
 }

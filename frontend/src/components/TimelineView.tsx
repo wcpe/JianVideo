@@ -1,73 +1,94 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
-import { SimpleGrid, Card, Text, Group, Box, Skeleton, Alert, Stack, Loader, Center, ActionIcon, Checkbox } from '@mantine/core'
-import { IconFolder, IconAlertCircle, IconStar, IconStarFilled, IconSearchOff, IconPlayerPlay, IconDots } from '@tabler/icons-react'
-import EmptyState from '@/components/EmptyState'
-import { useWindowVirtualizer } from '@tanstack/react-virtual'
-import { isImageFile, mediaDisplayName } from '@/utils/media'
-import { groupMediaByDate } from '@/utils/timeline'
-import MediaThumbnail from '@/components/MediaThumbnail'
-import MediaCardOverlay from '@/components/MediaCardOverlay'
-import TimelineScrubber from '@/components/TimelineScrubber'
-import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu'
-import SelectionBatchBar from '@/components/SelectionBatchBar'
-import { useMultiSelect, type ClickModifiers } from '@/hooks/useMultiSelect'
-import type { MediaFile } from '@/types'
-import type { DateGroup, TimelineGranularity } from '@/utils/timeline'
+import { useRef, useEffect, useState, useMemo } from 'react';
+import {
+  SimpleGrid,
+  Card,
+  Text,
+  Group,
+  Box,
+  Skeleton,
+  Alert,
+  Stack,
+  Loader,
+  Center,
+  ActionIcon,
+  Checkbox,
+} from '@mantine/core';
+import {
+  IconFolder,
+  IconAlertCircle,
+  IconStar,
+  IconStarFilled,
+  IconSearchOff,
+  IconPlayerPlay,
+  IconDots,
+} from '@tabler/icons-react';
+import EmptyState from '@/components/EmptyState';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { isImageFile, mediaDisplayName } from '@/utils/media';
+import { groupMediaByDate } from '@/utils/timeline';
+import MediaThumbnail from '@/components/MediaThumbnail';
+import MediaCardOverlay from '@/components/MediaCardOverlay';
+import TimelineScrubber from '@/components/TimelineScrubber';
+import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu';
+import SelectionBatchBar from '@/components/SelectionBatchBar';
+import { useMultiSelect, type ClickModifiers } from '@/hooks/useMultiSelect';
+import type { MediaFile } from '@/types';
+import type { DateGroup, TimelineGranularity } from '@/utils/timeline';
 
 /**
  * 选择上下文（FR-69）：把多选状态与卡片交互回调下传给日期组渲染。
  * flatIndexOf 把 media id 映射到「全部已加载项展平后」的有序下标，供 Shift 区间等手势使用。
  */
 interface SelectionContext {
-  enabled: boolean
-  checkboxMode: boolean
-  isSelected: (id: number) => boolean
-  flatIndexOf: (id: number) => number
-  onCardClick: (index: number, mods: ClickModifiers) => void
-  onCardContextMenu: (id: number, e: React.MouseEvent) => void
+  enabled: boolean;
+  checkboxMode: boolean;
+  isSelected: (id: number) => boolean;
+  flatIndexOf: (id: number) => number;
+  onCardClick: (index: number, mods: ClickModifiers) => void;
+  onCardContextMenu: (id: number, e: React.MouseEvent) => void;
 }
 
 interface TimelineViewProps {
-  mediaFiles: MediaFile[]
-  loading: boolean
-  error: string | null
-  customImageExtensions: Record<number, string[]>
-  onErrorClose: () => void
-  onOpenFile: (file: MediaFile) => void
+  mediaFiles: MediaFile[];
+  loading: boolean;
+  error: string | null;
+  customImageExtensions: Record<number, string[]>;
+  onErrorClose: () => void;
+  onOpenFile: (file: MediaFile) => void;
   // 切换收藏（FR-41）：传入时媒体卡片展示标星按钮
-  onToggleFavorite?: (file: MediaFile) => void
+  onToggleFavorite?: (file: MediaFile) => void;
   // 滚动到底部时触发加载更多
-  onLoadMore?: () => void
+  onLoadMore?: () => void;
   // 是否还有更多数据可加载
-  hasMore?: boolean
+  hasMore?: boolean;
   // 是否正在加载下一页（用于底部提示）
-  loadingMore?: boolean
+  loadingMore?: boolean;
   // 分组粒度（FR-32 缩放）：日 / 月 / 年，默认日
-  granularity?: TimelineGranularity
+  granularity?: TimelineGranularity;
   // 搜索/筛选生效标记（FR-98）：为真时 0 结果显示「无匹配结果」而非「空库」
-  filtered?: boolean
+  filtered?: boolean;
   // 清除筛选回调（FR-98）：无结果态「清除筛选」CTA，传入才渲染
-  onClearFilter?: () => void
+  onClearFilter?: () => void;
   // 多选与批量删除（FR-69），均可选；传入任一即启用选择手势与右键菜单
-  onSelectionChange?: (ids: number[]) => void
-  onBatchDelete?: (ids: number[]) => void
-  onDeleteOne?: (file: MediaFile) => void
+  onSelectionChange?: (ids: number[]) => void;
+  onBatchDelete?: (ids: number[]) => void;
+  onDeleteOne?: (file: MediaFile) => void;
   // 批量操作（FR-91）：以 id 集为对象（无选中退化为右键项），均可选
-  onBatchAddToAlbum?: (ids: number[]) => void
-  onBatchAddTag?: (ids: number[]) => void
-  onBatchDownload?: (ids: number[]) => void
+  onBatchAddToAlbum?: (ids: number[]) => void;
+  onBatchAddTag?: (ids: number[]) => void;
+  onBatchDownload?: (ids: number[]) => void;
 }
 
 /** 单个日期组的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
-const GROUP_ESTIMATE_SIZE = 320
+const GROUP_ESTIMATE_SIZE = 320;
 
 /** 把分组键拆成年份与月-日两段，便于竖向日期轴展示（支持 年/年-月/年-月-日 三种粒度，FR-32） */
 function splitDate(date: string): { year: string; monthDay: string } {
-  if (/^\d{4}$/.test(date)) return { year: date, monthDay: '' } // 年粒度：仅年
-  if (/^\d{4}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) } // 年-月
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) } // 年-月-日
+  if (/^\d{4}$/.test(date)) return { year: date, monthDay: '' }; // 年粒度：仅年
+  if (/^\d{4}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) }; // 年-月
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) }; // 年-月-日
   // 非法/未知日期整段作为月日展示，年份留空
-  return { year: '', monthDay: date }
+  return { year: '', monthDay: date };
 }
 
 /** 渲染单个日期组：左侧竖向日期轴 + 右侧媒体缩略图网格 */
@@ -78,61 +99,91 @@ function DateGroupRow({
   onToggleFavorite,
   selection,
 }: {
-  group: DateGroup
-  customImageExtensions: Record<number, string[]>
-  onOpenFile: (file: MediaFile) => void
-  onToggleFavorite?: (file: MediaFile) => void
-  selection: SelectionContext
+  group: DateGroup;
+  customImageExtensions: Record<number, string[]>;
+  onOpenFile: (file: MediaFile) => void;
+  onToggleFavorite?: (file: MediaFile) => void;
+  selection: SelectionContext;
 }) {
-  const { year, monthDay } = splitDate(group.date)
+  const { year, monthDay } = splitDate(group.date);
   // 主标签：日/月粒度为月日、年粒度为年；次标签：仅日/月粒度在上方显示年
-  const primary = monthDay || year
-  const secondary = monthDay ? year : ''
+  const primary = monthDay || year;
+  const secondary = monthDay ? year : '';
   return (
     <Group align="flex-start" wrap="nowrap" gap="md" pb="lg">
       {/* 左侧竖向日期轴（FR-100 时间锚视觉）：紫圆点 + 竖线 + 年/月日。
           苹果风收紧（FR-120）：分组头更轻——更小圆点、收窄字号、更紧间距。 */}
       <Box style={{ width: 80, flexShrink: 0, position: 'relative' }}>
         {/* 次标签（年）在锚点上方，弱化处理 */}
-        {secondary && <Text size="xs" c="dimmed" pl={20} mb={2}>{secondary}</Text>}
+        {secondary && (
+          <Text size="xs" c="dimmed" pl={20} mb={2}>
+            {secondary}
+          </Text>
+        )}
         <Group gap={8} wrap="nowrap" align="center">
           {/* 锚点圆点：品牌紫实心 + 浅紫光晕环，收小更克制 */}
           <Box
             style={{
-              width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              flexShrink: 0,
               background: 'var(--mantine-color-purple-6)',
               boxShadow: '0 0 0 3px var(--mantine-color-purple-light)',
             }}
           />
           {/* 主标签（月-日 / 年）：时间锚，收窄字号更轻 */}
-          <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>{primary}</Text>
+          <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>
+            {primary}
+          </Text>
         </Group>
         {/* 竖线营造时间线视觉：起点对齐圆点中心 */}
-        <Box style={{ position: 'absolute', left: 4, top: 18, bottom: -20, width: 2, background: 'var(--mantine-color-default-border)' }} />
+        <Box
+          style={{
+            position: 'absolute',
+            left: 4,
+            top: 18,
+            bottom: -20,
+            width: 2,
+            background: 'var(--mantine-color-default-border)',
+          }}
+        />
       </Box>
 
       {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列。
           苹果风收紧（FR-120）：列数更密、间距更小，配合方形密铺更紧致。 */}
       <Box style={{ flex: 1, minWidth: 0 }}>
-        <SimpleGrid type="container" cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }} spacing="xs" verticalSpacing="xs">
+        <SimpleGrid
+          type="container"
+          cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }}
+          spacing="xs"
+          verticalSpacing="xs"
+        >
           {group.files.map((file) => {
-            const isImage = isImageFile(file, customImageExtensions)
-            const selected = selection.enabled && selection.isSelected(file.id)
+            const isImage = isImageFile(file, customImageExtensions);
+            const selected = selection.enabled && selection.isSelected(file.id);
             // 时间轴沿用「普通单击=打开」的画廊式交互；多选仅在带修饰键（Ctrl/Cmd/Shift）或复选框模式下触发。
             // 这样既不回归既有点击打开预览/播放流程，又叠加桌面级多选手势。
             const handleClick = (e: React.MouseEvent) => {
-              const isSelectGesture = e.ctrlKey || e.metaKey || e.shiftKey || selection.checkboxMode
+              const isSelectGesture =
+                e.ctrlKey || e.metaKey || e.shiftKey || selection.checkboxMode;
               if (selection.enabled && isSelectGesture) {
-                selection.onCardClick(selection.flatIndexOf(file.id), e)
+                selection.onCardClick(selection.flatIndexOf(file.id), e);
               } else {
-                onOpenFile(file)
+                onOpenFile(file);
               }
-            }
+            };
             return (
               <Card
                 key={file.id}
-                withBorder p={0} radius="md"
-                style={{ cursor: 'pointer', borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined, overflow: 'hidden' }}
+                withBorder
+                p={0}
+                radius="md"
+                style={{
+                  cursor: 'pointer',
+                  borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined,
+                  overflow: 'hidden',
+                }}
                 onClick={handleClick}
                 onContextMenu={(e) => selection.onCardContextMenu(file.id, e)}
                 className="hover-card media-card"
@@ -145,25 +196,43 @@ function DateGroupRow({
                     fileName={file.file_name}
                     aspectRatio="1"
                     objectFit="cover"
-                    overlay={<MediaCardOverlay file={file} isImage={isImage} selected={selected} checkboxMode={selection.checkboxMode} />}
+                    overlay={
+                      <MediaCardOverlay
+                        file={file}
+                        isImage={isImage}
+                        selected={selected}
+                        checkboxMode={selection.checkboxMode}
+                      />
+                    }
                   />
                   {selection.enabled && selection.checkboxMode && (
                     <Checkbox
-                      size="xs" checked={selected} readOnly tabIndex={-1}
+                      size="xs"
+                      checked={selected}
+                      readOnly
+                      tabIndex={-1}
                       aria-label={`选择 ${mediaDisplayName(file)}`}
                       style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
                     />
                   )}
                   {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 收藏 / 更多 */}
                   <Group
-                    gap={6} wrap="nowrap"
+                    gap={6}
+                    wrap="nowrap"
                     className="media-card-actions"
                     style={{ position: 'absolute', top: 6, right: 6, zIndex: 6 }}
                   >
                     <ActionIcon
-                      variant="filled" color="dark" size="sm" radius="xl"
-                      aria-label="播放" title="播放"
-                      onClick={(e) => { e.stopPropagation(); onOpenFile(file) }}
+                      variant="filled"
+                      color="dark"
+                      size="sm"
+                      radius="xl"
+                      aria-label="播放"
+                      title="播放"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenFile(file);
+                      }}
                     >
                       <IconPlayerPlay size={14} />
                     </ActionIcon>
@@ -171,19 +240,30 @@ function DateGroupRow({
                       <ActionIcon
                         variant="filled"
                         color={file.favorite ? 'yellow' : 'dark'}
-                        size="sm" radius="xl"
+                        size="sm"
+                        radius="xl"
                         aria-label={file.favorite ? '取消收藏' : '收藏'}
                         title={file.favorite ? '取消收藏' : '收藏'}
-                        onClick={(e) => { e.stopPropagation(); onToggleFavorite(file) }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleFavorite(file);
+                        }}
                       >
                         {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
                       </ActionIcon>
                     )}
                     {selection.enabled && (
                       <ActionIcon
-                        variant="filled" color="dark" size="sm" radius="xl"
-                        aria-label="更多操作" title="更多操作"
-                        onClick={(e) => { e.stopPropagation(); selection.onCardContextMenu(file.id, e) }}
+                        variant="filled"
+                        color="dark"
+                        size="sm"
+                        radius="xl"
+                        aria-label="更多操作"
+                        title="更多操作"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selection.onCardContextMenu(file.id, e);
+                        }}
                       >
                         <IconDots size={14} />
                       </ActionIcon>
@@ -191,12 +271,12 @@ function DateGroupRow({
                   </Group>
                 </Box>
               </Card>
-            )
+            );
           })}
         </SimpleGrid>
       </Box>
     </Group>
-  )
+  );
 }
 
 /**
@@ -225,67 +305,73 @@ export default function TimelineView({
   onBatchDownload,
 }: TimelineViewProps) {
   // 列表容器 ref，用于计算窗口虚拟化所需的 scrollMargin（列表相对文档顶部的偏移）
-  const listRef = useRef<HTMLDivElement>(null)
-  const [scrollMargin, setScrollMargin] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
 
   // 分组结果记忆化：既稳定下方 useMemo 的依赖，又避免每次渲染重复分组
   const groups = useMemo(
     () => (error || loading ? [] : groupMediaByDate(mediaFiles, granularity)),
     [error, loading, mediaFiles, granularity],
-  )
+  );
 
   // 父组件关心选择（提供任一选择相关回调）时启用选择手势与右键菜单
   const selectionEnabled = !!(
-    onSelectionChange || onBatchDelete || onDeleteOne ||
-    onBatchAddToAlbum || onBatchAddTag || onBatchDownload
-  )
+    onSelectionChange ||
+    onBatchDelete ||
+    onDeleteOne ||
+    onBatchAddToAlbum ||
+    onBatchAddTag ||
+    onBatchDownload
+  );
   // 全部已加载项按分组渲染顺序展平为有序 id 列表——Ctrl+A / Shift 区间均以此为范围（虚拟列表边界：
   // 已加载多少就能选多少，未滚动触发 loadMore 的项不在范围内）。flatIndexOf 供卡片把 id 反查为下标。
-  const flatIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f.id)), [groups])
+  const flatIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f.id)), [groups]);
   const flatIndex = useMemo(() => {
-    const map = new Map<number, number>()
-    flatIds.forEach((id, i) => map.set(id, i))
-    return map
-  }, [flatIds])
-  const select = useMultiSelect(flatIds)
-  const { selectedIds } = select
-  const [menu, setMenu] = useState<ContextMenuState | null>(null)
+    const map = new Map<number, number>();
+    flatIds.forEach((id, i) => map.set(id, i));
+    return map;
+  }, [flatIds]);
+  const select = useMultiSelect(flatIds);
+  const { selectedIds } = select;
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
 
   // 选中集变化上抛父组件（升序）
   useEffect(() => {
-    if (selectionEnabled) onSelectionChange?.(Array.from(selectedIds).sort((a, b) => a - b))
+    if (selectionEnabled) onSelectionChange?.(Array.from(selectedIds).sort((a, b) => a - b));
     // 仅在选中集变化时上抛
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds])
+  }, [selectedIds]);
 
   // 右键媒体卡片：阻止系统菜单，记录光标位置与右键项 id（不改动选择集）
   function handleCardContextMenu(id: number, e: React.MouseEvent) {
-    if (!selectionEnabled) return
-    e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, targetId: id })
+    if (!selectionEnabled) return;
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, targetId: id });
   }
 
   // 「删除选中」：有选中按选中批量删；无选中删右键项
   function handleMenuDelete(targetId: number) {
-    setMenu(null)
+    setMenu(null);
     if (selectedIds.size > 0) {
-      onBatchDelete?.(Array.from(selectedIds).sort((a, b) => a - b))
+      onBatchDelete?.(Array.from(selectedIds).sort((a, b) => a - b));
     } else {
-      const f = mediaFiles.find((x) => x.id === targetId)
-      if (f) onDeleteOne?.(f)
+      const f = mediaFiles.find((x) => x.id === targetId);
+      if (f) onDeleteOne?.(f);
     }
   }
 
   // 批量操作（FR-91）：有选中按选中集；无选中退化为右键项。统一关菜单后回调。
   function runBatch(targetId: number, fn?: (ids: number[]) => void) {
-    setMenu(null)
-    const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId]
-    fn?.(ids)
+    setMenu(null);
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds).sort((a, b) => a - b) : [targetId];
+    fn?.(ids);
   }
 
   // sticky 批量条（FR-99）：以当前选中集为对象调用 FR-91 批量回调，复用已有多选 state。
-  const selectedArr = () => Array.from(selectedIds).sort((a, b) => a - b)
-  const runBarBatch = (fn?: (ids: number[]) => void) => { if (selectedIds.size > 0) fn?.(selectedArr()) }
+  const selectedArr = () => Array.from(selectedIds).sort((a, b) => a - b);
+  const runBarBatch = (fn?: (ids: number[]) => void) => {
+    if (selectedIds.size > 0) fn?.(selectedArr());
+  };
 
   const selection: SelectionContext = {
     enabled: selectionEnabled,
@@ -294,50 +380,60 @@ export default function TimelineView({
     flatIndexOf: (id) => flatIndex.get(id) ?? -1,
     onCardClick: select.handleItemClick,
     onCardContextMenu: handleCardContextMenu,
-  }
+  };
 
   // 列表挂载/数据变化后测量容器距文档顶部的偏移作为 scrollMargin
   useEffect(() => {
     if (listRef.current) {
-      setScrollMargin(listRef.current.getBoundingClientRect().top + window.scrollY)
+      setScrollMargin(listRef.current.getBoundingClientRect().top + window.scrollY);
     }
-  }, [groups.length])
+  }, [groups.length]);
 
   const virtualizer = useWindowVirtualizer({
     count: groups.length,
     estimateSize: () => GROUP_ESTIMATE_SIZE,
     overscan: 4,
     scrollMargin,
-  })
+  });
 
-  const virtualItems = virtualizer.getVirtualItems()
+  const virtualItems = virtualizer.getVirtualItems();
 
   // 滚动加载更多：底部哨兵进入视口时触发 onLoadMore。
   // 用 IntersectionObserver 而非依赖虚拟化 lastIndex 变化——group 级虚拟化下，已加载日期组
   // 全部渲染后 lastIndex 不再变化，会导致 loadMore 不再触发（无限滚动失效）。
-  const sentinelRef = useRef<HTMLDivElement>(null)
-  const loadMoreRef = useRef<() => void>(() => {})
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<() => void>(() => {});
   useEffect(() => {
-    loadMoreRef.current = () => { if (hasMore && !loadingMore) onLoadMore?.() }
-  }, [hasMore, loadingMore, onLoadMore])
+    loadMoreRef.current = () => {
+      if (hasMore && !loadingMore) onLoadMore?.();
+    };
+  }, [hasMore, loadingMore, onLoadMore]);
   useEffect(() => {
-    const el = sentinelRef.current
+    const el = sentinelRef.current;
     // 无布局/无 IntersectionObserver 的环境（如测试 jsdom）降级为不挂载，避免崩溃
-    if (!el || typeof IntersectionObserver === 'undefined') return
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) loadMoreRef.current()
-    }, { rootMargin: '400px' })
-    observer.observe(el)
-    return () => observer.disconnect()
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMoreRef.current();
+      },
+      { rootMargin: '400px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
     // 列表在 loading/空 状态下不渲染哨兵，故依赖这些状态变化以在列表出现后重新挂载观察
-  }, [loading, error, mediaFiles.length])
+  }, [loading, error, mediaFiles.length]);
 
   if (error) {
     return (
-      <Alert icon={<IconAlertCircle size={16} />} color="red" withCloseButton onClose={onErrorClose}>
+      <Alert
+        icon={<IconAlertCircle size={16} />}
+        color="red"
+        withCloseButton
+        onClose={onErrorClose}
+      >
         {error}
       </Alert>
-    )
+    );
   }
 
   if (loading) {
@@ -347,25 +443,37 @@ export default function TimelineView({
           <Skeleton key={i} height={140} radius="md" />
         ))}
       </Stack>
-    )
+    );
   }
 
   if (mediaFiles.length === 0) {
     // 区分「搜索/筛选无结果」与「空库」（FR-98）：前者给清除筛选引导
     return filtered ? (
       <EmptyState
-        icon={<IconSearchOff size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+        icon={
+          <IconSearchOff
+            size={72}
+            stroke={1.2}
+            style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }}
+          />
+        }
         title="没有匹配的媒体"
         description="当前搜索或筛选条件下没有结果，换个条件或清除筛选试试。"
         action={onClearFilter ? { label: '清除筛选', onClick: onClearFilter } : undefined}
       />
     ) : (
       <EmptyState
-        icon={<IconFolder size={72} stroke={1.2} style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }} />}
+        icon={
+          <IconFolder
+            size={72}
+            stroke={1.2}
+            style={{ color: 'var(--mantine-color-dimmed)', opacity: 0.7 }}
+          />
+        }
         title="暂无媒体文件"
         description="在「存储库管理」添加目录并扫描后，媒体会在此按时间轴展示。"
       />
-    )
+    );
   }
 
   return (
@@ -378,7 +486,7 @@ export default function TimelineView({
           onSeek={(index) => virtualizer.scrollToIndex(index, { align: 'start' })}
         />
         {virtualItems.map((virtualItem) => {
-          const group = groups[virtualItem.index]
+          const group = groups[virtualItem.index];
           return (
             <Box
               key={group.date}
@@ -401,7 +509,7 @@ export default function TimelineView({
                 selection={selection}
               />
             </Box>
-          )
+          );
         })}
       </Box>
 
@@ -435,14 +543,23 @@ export default function TimelineView({
           selectedCount={selectedIds.size}
           checkboxMode={select.checkboxMode}
           onDelete={handleMenuDelete}
-          onSelectAll={() => { select.selectAll(); setMenu(null) }}
-          onInvert={() => { select.invertSelection(); setMenu(null) }}
-          onToggleCheckboxMode={() => { select.setCheckboxMode(!select.checkboxMode); setMenu(null) }}
+          onSelectAll={() => {
+            select.selectAll();
+            setMenu(null);
+          }}
+          onInvert={() => {
+            select.invertSelection();
+            setMenu(null);
+          }}
+          onToggleCheckboxMode={() => {
+            select.setCheckboxMode(!select.checkboxMode);
+            setMenu(null);
+          }}
           onAddToAlbum={onBatchAddToAlbum ? (id) => runBatch(id, onBatchAddToAlbum) : undefined}
           onAddTag={onBatchAddTag ? (id) => runBatch(id, onBatchAddTag) : undefined}
           onDownload={onBatchDownload ? (id) => runBatch(id, onBatchDownload) : undefined}
         />
       )}
     </>
-  )
+  );
 }

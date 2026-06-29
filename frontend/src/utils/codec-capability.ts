@@ -16,22 +16,22 @@ const FMP4_CODEC_MIME: Record<string, string> = {
   h265: 'video/mp4; codecs="hvc1.1.6.L93.B0"',
   av1: 'video/mp4; codecs="av01.0.05M.08"',
   vp9: 'video/mp4; codecs="vp09.00.10.08"',
-}
+};
 
 /** 本 FR 探测的高级编码集合。 */
-const ADVANCED_CODECS = ['h265', 'av1', 'vp9'] as const
+const ADVANCED_CODECS = ['h265', 'av1', 'vp9'] as const;
 
 /** 客户端高级编码能力描述（供 FR-53 协商上报）。 */
 export interface ClientCapabilities {
-  h265: boolean
-  av1: boolean
-  vp9: boolean
+  h265: boolean;
+  av1: boolean;
+  vp9: boolean;
 }
 
 /** 归一化目标编码标识：大小写无关，hevc 视为 h265（与后端 normalizeCodec 一致）。 */
 function normalizeCodec(codec: string): string {
-  const c = codec.trim().toLowerCase()
-  return c === 'hevc' ? 'h265' : c
+  const c = codec.trim().toLowerCase();
+  return c === 'hevc' ? 'h265' : c;
 }
 
 /**
@@ -39,7 +39,7 @@ function normalizeCodec(codec: string): string {
  * 非高级编码（h264 / 空 / 未知）返回空串。
  */
 export function codecMIME(codec: string): string {
-  return FMP4_CODEC_MIME[normalizeCodec(codec)] ?? ''
+  return FMP4_CODEC_MIME[normalizeCodec(codec)] ?? '';
 }
 
 /**
@@ -47,11 +47,11 @@ export function codecMIME(codec: string): string {
  * 无对应 MIME 串（非高级编码）或环境无 `MediaSource.isTypeSupported` 时返回 false。
  */
 export function isCodecSupported(codec: string): boolean {
-  const mime = codecMIME(codec)
-  if (!mime) return false
-  const ms = (globalThis as { MediaSource?: typeof MediaSource }).MediaSource
-  if (!ms?.isTypeSupported) return false
-  return ms.isTypeSupported(mime)
+  const mime = codecMIME(codec);
+  if (!mime) return false;
+  const ms = (globalThis as { MediaSource?: typeof MediaSource }).MediaSource;
+  if (!ms?.isTypeSupported) return false;
+  return ms.isTypeSupported(mime);
 }
 
 /**
@@ -62,5 +62,5 @@ export function probeClientCapabilities(): ClientCapabilities {
   return ADVANCED_CODECS.reduce(
     (caps, codec) => ({ ...caps, [codec]: isCodecSupported(codec) }),
     {} as ClientCapabilities,
-  )
+  );
 }

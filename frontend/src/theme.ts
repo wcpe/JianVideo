@@ -1,14 +1,22 @@
-import { createTheme, Card } from '@mantine/core'
-import type { CSSVariablesResolver, MantineColorsTuple } from '@mantine/core'
+import { createTheme, Card } from '@mantine/core';
+import type { CSSVariablesResolver, MantineColorsTuple } from '@mantine/core';
 
 // 品牌紫色板（FR-93）：锚定品牌主色 #7e14ff 于 shade 6 的 10 阶色阶。
 // 此前全站引用 --mantine-color-purple-* / color="purple"，却从未定义 purple 色板，
 // 靠未定义 CSS 变量 / CSS 命名色兜底（不一致）；这里正式定义并设为 primaryColor，
 // 一改全站默认主色由 Mantine 默认蓝转品牌紫（导航激活态/链接/默认按钮/滑块/开关随之收敛）。
 const brandPurple: MantineColorsTuple = [
-  '#f3ebff', '#e0ccff', '#c9a7fb', '#b182f7', '#9c63f3',
-  '#8a45f0', '#7e14ff', '#6f10e6', '#5c0cbd', '#490996',
-]
+  '#f3ebff',
+  '#e0ccff',
+  '#c9a7fb',
+  '#b182f7',
+  '#9c63f3',
+  '#8a45f0',
+  '#7e14ff',
+  '#6f10e6',
+  '#5c0cbd',
+  '#490996',
+];
 
 // 全局 CSS 变量覆盖（FR-84 + FR-97 对比度修复）：
 // 暗色：Mantine 默认把 `--mantine-color-dimmed` 映射到 dark.2(#828282)，
@@ -27,7 +35,7 @@ export const themeCssVariablesResolver: CSSVariablesResolver = () => ({
   light: {
     '--mantine-color-dimmed': 'var(--mantine-color-gray-7)',
   },
-})
+});
 
 // 应用主题（FR-92 设计系统 token 地基）：集中定义/调优设计 token 并设全局默认，
 // 经 Mantine 级联让全站圆角/层次/标题/焦点环统一，是第九期其余界面 FR 的依赖地基。
@@ -97,4 +105,4 @@ export const appTheme = createTheme({
       neutral: 'gray',
     },
   },
-})
+});

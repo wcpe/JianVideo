@@ -1,6 +1,6 @@
 interface BrandLogoProps {
   /** 图标边长（像素），默认 64 */
-  size?: number
+  size?: number;
 }
 
 /**
@@ -11,8 +11,8 @@ interface BrandLogoProps {
  */
 export default function BrandLogo({ size = 64 }: BrandLogoProps) {
   // 与全站一致，直接引用 Mantine 紫色 CSS 变量
-  const purpleMain = 'var(--mantine-color-purple-4)'
-  const purpleDeep = 'var(--mantine-color-purple-6)'
+  const purpleMain = 'var(--mantine-color-purple-4)';
+  const purpleDeep = 'var(--mantine-color-purple-6)';
 
   return (
     <svg
@@ -57,5 +57,5 @@ export default function BrandLogo({ size = 64 }: BrandLogoProps) {
         strokeLinejoin="round"
       />
     </svg>
-  )
+  );
 }

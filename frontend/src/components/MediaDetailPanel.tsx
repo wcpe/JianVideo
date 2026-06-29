@@ -1,289 +1,398 @@
-import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useClipboard } from '@mantine/hooks'
-import { Modal, Group, Stack, Button, ActionIcon, Text, Box, ScrollArea, Divider, Tooltip, Anchor } from '@mantine/core'
+import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useClipboard } from '@mantine/hooks';
 import {
-  IconChevronLeft, IconChevronRight, IconX, IconMaximize, IconMinimize,
-  IconDownload, IconRotateClockwise, IconRotate2, IconPlayerPlay, IconPlayerPause,
-  IconHeart, IconHeartFilled, IconShare, IconTag, IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand, IconCopy, IconCheck, IconMapPin, IconCamera,
-  IconAperture, IconClock, IconAdjustments, IconPhoto,
-} from '@tabler/icons-react'
+  Modal,
+  Group,
+  Stack,
+  Button,
+  ActionIcon,
+  Text,
+  Box,
+  ScrollArea,
+  Divider,
+  Tooltip,
+  Anchor,
+} from '@mantine/core';
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconX,
+  IconMaximize,
+  IconMinimize,
+  IconDownload,
+  IconRotateClockwise,
+  IconRotate2,
+  IconPlayerPlay,
+  IconPlayerPause,
+  IconHeart,
+  IconHeartFilled,
+  IconShare,
+  IconTag,
+  IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
+  IconCopy,
+  IconCheck,
+  IconMapPin,
+  IconCamera,
+  IconAperture,
+  IconClock,
+  IconAdjustments,
+  IconPhoto,
+} from '@tabler/icons-react';
 // FR-102：懒加载 VideoPlayer，仅在灯箱内实际查看视频时才加载其 mpegts.js 等重内核，
 // 避免图片预览场景白白拉入大体积播放内核。
-const VideoPlayer = lazy(() => import('@/components/VideoPlayer'))
-import ShareDialog from '@/components/ShareDialog'
-import BatchActionsModals from '@/components/BatchActionsModals'
-import { useBatchActions } from '@/hooks/useBatchActions'
-import { isImageFile, mediaDisplayName } from '@/utils/media'
-import { mediaRawUrl, mediaStreamUrl } from '@/utils/media-url'
-import { formatSize, formatDuration, formatAperture, formatShutter, formatIso } from '@/utils/format'
-import type { MediaFile } from '@/types'
+const VideoPlayer = lazy(() => import('@/components/VideoPlayer'));
+import ShareDialog from '@/components/ShareDialog';
+import BatchActionsModals from '@/components/BatchActionsModals';
+import { useBatchActions } from '@/hooks/useBatchActions';
+import { isImageFile, mediaDisplayName } from '@/utils/media';
+import { mediaRawUrl, mediaStreamUrl } from '@/utils/media-url';
+import {
+  formatSize,
+  formatDuration,
+  formatAperture,
+  formatShutter,
+  formatIso,
+} from '@/utils/format';
+import type { MediaFile } from '@/types';
 
 interface MediaDetailPanelProps {
-  files: MediaFile[]
+  files: MediaFile[];
   /** 选中项在 files 中的下标；null 表示面板关闭 */
-  initialIndex: number | null
-  onClose: () => void
-  customImageExtensions: Record<number, string[]>
+  initialIndex: number | null;
+  onClose: () => void;
+  customImageExtensions: Record<number, string[]>;
   /** 切换收藏（FR-106）：父层负责调接口并刷新列表，未传则不显收藏按钮 */
-  onToggleFavorite?: (f: MediaFile) => void
+  onToggleFavorite?: (f: MediaFile) => void;
 }
 
-const ZOOM_MIN = 1
-const ZOOM_MAX = 4
-const ZOOM_STEP = 0.25
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.25;
 // 双击放大目标倍率（FR-105）：1×↔2× 切换
-const ZOOM_DOUBLE_CLICK = 2
+const ZOOM_DOUBLE_CLICK = 2;
 // 幻灯片自动切换间隔（毫秒，FR-105）
-const SLIDESHOW_INTERVAL_MS = 3000
+const SLIDESHOW_INTERVAL_MS = 3000;
 // 相邻预加载半径（FR-105）：预取前后各 1 张原图，切换不闪白
-const PRELOAD_RADIUS = 1
+const PRELOAD_RADIUS = 1;
 
 // 详情区定宽 label 列宽（FR-106）：定义列表两列对齐，键值成对易读
-const DETAIL_LABEL_WIDTH = 64
+const DETAIL_LABEL_WIDTH = 64;
 
 /**
  * 一行「标签 / 值」详情（FR-106）：定宽 label 列 + 紧凑 value 列的定义列表行（dt/dd）。
  * 复用 FR-101 系统页定宽两列范式；可选前置 tabler 图标，值为空时不渲染。
  */
 function DetailRow({
-  label, value, icon,
-}: { label: string; value: string | number | null | undefined; icon?: React.ReactNode }) {
-  if (value === null || value === undefined || value === '') return null
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string | number | null | undefined;
+  icon?: React.ReactNode;
+}) {
+  if (value === null || value === undefined || value === '') return null;
   return (
-    <Box component="div" style={{ display: 'flex', gap: 'var(--mantine-spacing-sm)', alignItems: 'baseline' }}>
+    <Box
+      component="div"
+      style={{ display: 'flex', gap: 'var(--mantine-spacing-sm)', alignItems: 'baseline' }}
+    >
       <Text
         component="dt"
         size="sm"
         c="dimmed"
-        style={{ width: DETAIL_LABEL_WIDTH, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+        style={{
+          width: DETAIL_LABEL_WIDTH,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}
       >
         {icon}
         {label}
       </Text>
-      <Text component="dd" size="sm" style={{ margin: 0, minWidth: 0, wordBreak: 'break-word' }}>{value}</Text>
+      <Text component="dd" size="sm" style={{ margin: 0, minWidth: 0, wordBreak: 'break-word' }}>
+        {value}
+      </Text>
     </Box>
-  )
+  );
 }
 
 /** 复制按钮（FR-106）：复制成功 2 秒内显勾选反馈 */
 function CopyIconButton({ value, label }: { value: string; label: string }) {
-  const clipboard = useClipboard({ timeout: 2000 })
+  const clipboard = useClipboard({ timeout: 2000 });
   return (
     <Tooltip label={clipboard.copied ? '已复制' : label}>
-      <ActionIcon variant="subtle" size="sm" color={clipboard.copied ? 'teal' : 'gray'} aria-label={label} onClick={() => clipboard.copy(value)}>
+      <ActionIcon
+        variant="subtle"
+        size="sm"
+        color={clipboard.copied ? 'teal' : 'gray'}
+        aria-label={label}
+        onClick={() => clipboard.copy(value)}
+      >
         {clipboard.copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
       </ActionIcon>
     </Tooltip>
-  )
+  );
 }
 
 function formatTime(s?: string | null): string {
-  if (!s) return ''
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? '' : d.toLocaleString()
+  if (!s) return '';
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString();
 }
 
 // 媒体时间来源中文标注（FR-38）
 const MEDIA_TIME_SOURCE_LABEL: Record<string, string> = {
-  exif: 'EXIF', filename: '文件名', created: '创建时间', modified: '修改时间',
-}
+  exif: 'EXIF',
+  filename: '文件名',
+  created: '创建时间',
+  modified: '修改时间',
+};
 
 /** 是否含可展示的 EXIF 信息（FR-38） */
 function hasExif(f: MediaFile): boolean {
-  return !!(f.media_time || f.camera || f.lens || f.aperture || f.shutter || (f.iso ?? 0) > 0 || (f.gps_lat ?? 0) !== 0 || (f.gps_lon ?? 0) !== 0)
+  return !!(
+    f.media_time ||
+    f.camera ||
+    f.lens ||
+    f.aperture ||
+    f.shutter ||
+    (f.iso ?? 0) > 0 ||
+    (f.gps_lat ?? 0) !== 0 ||
+    (f.gps_lon ?? 0) !== 0
+  );
 }
 
 /**
  * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频内嵌播放器直接播放，FR-102）、右侧元数据，
  * 支持全屏切换、←/→ 上下一项、Esc 关闭。EXIF 区块由 FR-38 在右侧补充。
  */
-export default function MediaDetailPanel({ files, initialIndex, onClose, customImageExtensions, onToggleFavorite }: MediaDetailPanelProps) {
-  const navigate = useNavigate()
+export default function MediaDetailPanel({
+  files,
+  initialIndex,
+  onClose,
+  customImageExtensions,
+  onToggleFavorite,
+}: MediaDetailPanelProps) {
+  const navigate = useNavigate();
   // 打标签复用 FR-91 批量编排（单 id 列表即可）：零新后端端点
-  const batch = useBatchActions()
+  const batch = useBatchActions();
   // 分享弹窗开合（FR-106）：复用既有 ShareDialog（resourceType='media'）
-  const [shareOpened, setShareOpened] = useState(false)
+  const [shareOpened, setShareOpened] = useState(false);
   // 信息栏折叠（FR-106）：折叠后右侧详情收起、左侧预览吃满，纯图沉浸
-  const [infoCollapsed, setInfoCollapsed] = useState(false)
+  const [infoCollapsed, setInfoCollapsed] = useState(false);
 
-  const opened = initialIndex !== null
-  const [idx, setIdx] = useState<number>(initialIndex ?? 0)
-  const [fullscreen, setFullscreen] = useState(false)
-  const [zoom, setZoom] = useState(1)
+  const opened = initialIndex !== null;
+  const [idx, setIdx] = useState<number>(initialIndex ?? 0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [zoom, setZoom] = useState(1);
   // 平移量（FR-105）：放大后拖拽查看图片别处
-  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   // 旋转角度（FR-105）：0/90/180/270，左右各 90°
-  const [rotation, setRotation] = useState(0)
+  const [rotation, setRotation] = useState(0);
   // 幻灯片自动轮播开关（FR-105）
-  const [slideshow, setSlideshow] = useState(false)
+  const [slideshow, setSlideshow] = useState(false);
 
   // 鼠标 / 触摸拖拽平移的过程态（FR-105）：起点坐标与起始平移量，拖拽中不触发渲染
-  const dragRef = useRef<{ active: boolean; startX: number; startY: number; panX: number; panY: number }>({
-    active: false, startX: 0, startY: 0, panX: 0, panY: 0,
-  })
+  const dragRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    panX: 0,
+    panY: 0,
+  });
   // 双指捏合缩放的过程态（FR-105）：起始两指间距与起始缩放
   const pinchRef = useRef<{ active: boolean; startDist: number; startZoom: number }>({
-    active: false, startDist: 0, startZoom: 1,
-  })
+    active: false,
+    startDist: 0,
+    startZoom: 1,
+  });
 
-  const total = files.length
+  const total = files.length;
 
   // 重新打开（initialIndex 变化）时定位并复位查看状态
   useEffect(() => {
     if (initialIndex !== null) {
-      setIdx(initialIndex)
-      setZoom(1)
-      setPan({ x: 0, y: 0 })
-      setRotation(0)
-      setSlideshow(false)
+      setIdx(initialIndex);
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      setRotation(0);
+      setSlideshow(false);
     }
-  }, [initialIndex])
+  }, [initialIndex]);
 
   // 上/下一项环绕循环（FR-105）：到头时首↔尾循环
   const goPrev = useCallback(() => {
-    setIdx(i => (total > 0 ? (i - 1 + total) % total : i))
-  }, [total])
+    setIdx((i) => (total > 0 ? (i - 1 + total) % total : i));
+  }, [total]);
   const goNext = useCallback(() => {
-    setIdx(i => (total > 0 ? (i + 1) % total : i))
-  }, [total])
+    setIdx((i) => (total > 0 ? (i + 1) % total : i));
+  }, [total]);
 
   // 换项复位缩放 / 平移 / 旋转（FR-105）
   useEffect(() => {
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
-    setRotation(0)
-  }, [idx])
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setRotation(0);
+  }, [idx]);
 
   // 右/左旋转 90°（FR-105）
-  const rotateRight = useCallback(() => setRotation(r => (r + 90) % 360), [])
-  const rotateLeft = useCallback(() => setRotation(r => (r + 270) % 360), [])
+  const rotateRight = useCallback(() => setRotation((r) => (r + 90) % 360), []);
+  const rotateLeft = useCallback(() => setRotation((r) => (r + 270) % 360), []);
 
   // 在站内地图打开（FR-106）：跳照片地图页并带经纬度定位，外部 OSM 链接保留为次要入口
-  const openInSiteMap = useCallback((lat: number, lon: number) => {
-    onClose()
-    navigate(`/map?lat=${lat}&lon=${lon}`)
-  }, [navigate, onClose])
+  const openInSiteMap = useCallback(
+    (lat: number, lon: number) => {
+      onClose();
+      navigate(`/map?lat=${lat}&lon=${lon}`);
+    },
+    [navigate, onClose],
+  );
 
   // 键盘导航与快捷键（FR-105 在既有 ←/→/Esc 上补 +/-、F、Space、R）
   useEffect(() => {
-    if (!opened) return
+    if (!opened) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') goPrev()
-      else if (e.key === 'ArrowRight') goNext()
-      else if (e.key === 'Escape') onClose()
-      else if (e.key === '+' || e.key === '=') setZoom(z => Math.min(ZOOM_MAX, z + ZOOM_STEP))
-      else if (e.key === '-' || e.key === '_') setZoom(z => Math.max(ZOOM_MIN, z - ZOOM_STEP))
-      else if (e.key === 'f' || e.key === 'F') setFullscreen(v => !v)
-      else if (e.key === ' ') { e.preventDefault(); goNext() }
-      else if (e.key === 'r' || e.key === 'R') rotateRight()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [opened, goPrev, goNext, onClose, rotateRight])
+      if (e.key === 'ArrowLeft') goPrev();
+      else if (e.key === 'ArrowRight') goNext();
+      else if (e.key === 'Escape') onClose();
+      else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(ZOOM_MAX, z + ZOOM_STEP));
+      else if (e.key === '-' || e.key === '_') setZoom((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP));
+      else if (e.key === 'f' || e.key === 'F') setFullscreen((v) => !v);
+      else if (e.key === ' ') {
+        e.preventDefault();
+        goNext();
+      } else if (e.key === 'r' || e.key === 'R') rotateRight();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [opened, goPrev, goNext, onClose, rotateRight]);
 
   // 幻灯片自动轮播（FR-105）：开启时按固定间隔自动切下一张
   useEffect(() => {
-    if (!opened || !slideshow) return
-    const timer = window.setInterval(goNext, SLIDESHOW_INTERVAL_MS)
-    return () => window.clearInterval(timer)
-  }, [opened, slideshow, goNext])
+    if (!opened || !slideshow) return;
+    const timer = window.setInterval(goNext, SLIDESHOW_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [opened, slideshow, goNext]);
 
   // 相邻原图预加载（FR-105）：预取当前项前后各 PRELOAD_RADIUS 张，切换不闪白
   useEffect(() => {
-    if (!opened || total === 0) return
+    if (!opened || total === 0) return;
     for (let d = 1; d <= PRELOAD_RADIUS; d++) {
       for (const j of [(idx - d + total) % total, (idx + d) % total]) {
-        const neighbor = files[j]
+        const neighbor = files[j];
         if (neighbor && isImageFile(neighbor, customImageExtensions)) {
           // 用 createElement('img') 触发浏览器原图预取，jsdom 下亦可断言 src 赋值
-          const pre = document.createElement('img')
-          pre.src = mediaRawUrl(neighbor.id)
+          const pre = document.createElement('img');
+          pre.src = mediaRawUrl(neighbor.id);
         }
       }
     }
-  }, [opened, idx, total, files, customImageExtensions])
+  }, [opened, idx, total, files, customImageExtensions]);
 
-  const file = opened && files[idx] ? files[idx] : null
-  if (!file) return null
+  const file = opened && files[idx] ? files[idx] : null;
+  if (!file) return null;
 
-  const isImage = isImageFile(file, customImageExtensions)
+  const isImage = isImageFile(file, customImageExtensions);
 
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    setZoom(z => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))))
-  }
+    e.preventDefault();
+    setZoom((z) =>
+      Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))),
+    );
+  };
 
   // 双击放大 / 复位（FR-105）：1×↔2× 切换，复位时平移归零
   const handleDoubleClick = () => {
     if (zoom > 1) {
-      setZoom(1)
-      setPan({ x: 0, y: 0 })
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
     } else {
-      setZoom(ZOOM_DOUBLE_CLICK)
+      setZoom(ZOOM_DOUBLE_CLICK);
     }
-  }
+  };
 
   // 鼠标按下开始拖拽平移（FR-105）：仅放大态生效，过程绑定到 window 以便拖出元素仍跟手
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (zoom <= 1) return
-    e.preventDefault()
-    dragRef.current = { active: true, startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y }
+    if (zoom <= 1) return;
+    e.preventDefault();
+    dragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
     const onMove = (ev: MouseEvent) => {
-      if (!dragRef.current.active) return
+      if (!dragRef.current.active) return;
       setPan({
         x: dragRef.current.panX + (ev.clientX - dragRef.current.startX),
         y: dragRef.current.panY + (ev.clientY - dragRef.current.startY),
-      })
-    }
+      });
+    };
     const onUp = () => {
-      dragRef.current.active = false
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
+      dragRef.current.active = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // 触摸开始（FR-105）：单指准备平移，双指准备捏合缩放
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX
-      const dy = e.touches[0].clientY - e.touches[1].clientY
-      pinchRef.current = { active: true, startDist: Math.hypot(dx, dy), startZoom: zoom }
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = { active: true, startDist: Math.hypot(dx, dy), startZoom: zoom };
     } else if (e.touches.length === 1 && zoom > 1) {
-      const t = e.touches[0]
-      dragRef.current = { active: true, startX: t.clientX, startY: t.clientY, panX: pan.x, panY: pan.y }
+      const t = e.touches[0];
+      dragRef.current = {
+        active: true,
+        startX: t.clientX,
+        startY: t.clientY,
+        panX: pan.x,
+        panY: pan.y,
+      };
     }
-  }
+  };
 
   // 触摸移动（FR-105）：双指改缩放，单指改平移
   const handleTouchMove = (e: React.TouchEvent) => {
     if (pinchRef.current.active && e.touches.length === 2) {
-      e.preventDefault()
-      const dx = e.touches[0].clientX - e.touches[1].clientX
-      const dy = e.touches[0].clientY - e.touches[1].clientY
-      const ratio = Math.hypot(dx, dy) / (pinchRef.current.startDist || 1)
-      setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pinchRef.current.startZoom * ratio)))
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const ratio = Math.hypot(dx, dy) / (pinchRef.current.startDist || 1);
+      setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pinchRef.current.startZoom * ratio)));
     } else if (dragRef.current.active && e.touches.length === 1) {
-      e.preventDefault()
-      const t = e.touches[0]
+      e.preventDefault();
+      const t = e.touches[0];
       setPan({
         x: dragRef.current.panX + (t.clientX - dragRef.current.startX),
         y: dragRef.current.panY + (t.clientY - dragRef.current.startY),
-      })
+      });
     }
-  }
+  };
 
   // 触摸结束（FR-105）：松手清理过程态，缩回 1× 时平移归零
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length === 0) {
-      dragRef.current.active = false
-      pinchRef.current.active = false
-      if (zoom <= 1) setPan({ x: 0, y: 0 })
+      dragRef.current.active = false;
+      pinchRef.current.active = false;
+      if (zoom <= 1) setPan({ x: 0, y: 0 });
     }
-  }
+  };
 
   return (
     <Modal
@@ -296,9 +405,13 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
       title={
         <Group justify="space-between" w="100%" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <Text fw={600} truncate>{mediaDisplayName(file)}</Text>
+            <Text fw={600} truncate>
+              {mediaDisplayName(file)}
+            </Text>
             {/* 位置计数（FR-105）：当前 / 总数 */}
-            <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>{idx + 1} / {total}</Text>
+            <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
+              {idx + 1} / {total}
+            </Text>
           </Group>
           <Group gap={4} wrap="nowrap">
             <Tooltip label="上一项 (←)">
@@ -325,7 +438,11 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
                   </ActionIcon>
                 </Tooltip>
                 <Tooltip label={slideshow ? '暂停幻灯片' : '开始幻灯片'}>
-                  <ActionIcon variant="subtle" onClick={() => setSlideshow(v => !v)} aria-label="幻灯片切换">
+                  <ActionIcon
+                    variant="subtle"
+                    onClick={() => setSlideshow((v) => !v)}
+                    aria-label="幻灯片切换"
+                  >
                     {slideshow ? <IconPlayerPause size={18} /> : <IconPlayerPlay size={18} />}
                   </ActionIcon>
                 </Tooltip>
@@ -345,7 +462,11 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
               </Tooltip>
             )}
             <Tooltip label="打标签">
-              <ActionIcon variant="subtle" onClick={() => batch.openAddTag([file.id])} aria-label="打标签">
+              <ActionIcon
+                variant="subtle"
+                onClick={() => batch.openAddTag([file.id])}
+                aria-label="打标签"
+              >
                 <IconTag size={18} />
               </ActionIcon>
             </Tooltip>
@@ -356,12 +477,24 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             </Tooltip>
             {/* 信息栏折叠（FR-106）：纯图沉浸 */}
             <Tooltip label={infoCollapsed ? '展开信息栏' : '折叠信息栏'}>
-              <ActionIcon variant="subtle" onClick={() => setInfoCollapsed(v => !v)} aria-label={infoCollapsed ? '展开信息栏' : '折叠信息栏'}>
-                {infoCollapsed ? <IconLayoutSidebarRightExpand size={18} /> : <IconLayoutSidebarRightCollapse size={18} />}
+              <ActionIcon
+                variant="subtle"
+                onClick={() => setInfoCollapsed((v) => !v)}
+                aria-label={infoCollapsed ? '展开信息栏' : '折叠信息栏'}
+              >
+                {infoCollapsed ? (
+                  <IconLayoutSidebarRightExpand size={18} />
+                ) : (
+                  <IconLayoutSidebarRightCollapse size={18} />
+                )}
               </ActionIcon>
             </Tooltip>
             <Tooltip label={fullscreen ? '退出全屏 (F)' : '全屏 (F)'}>
-              <ActionIcon variant="subtle" onClick={() => setFullscreen(f => !f)} aria-label="全屏切换">
+              <ActionIcon
+                variant="subtle"
+                onClick={() => setFullscreen((f) => !f)}
+                aria-label="全屏切换"
+              >
                 {fullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
               </ActionIcon>
             </Tooltip>
@@ -373,16 +506,41 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
       }
       styles={{ title: { width: '100%' } }}
     >
-      <Group align="stretch" gap="md" wrap="nowrap" style={{ minHeight: fullscreen ? '80vh' : '60vh' }}>
+      <Group
+        align="stretch"
+        gap="md"
+        wrap="nowrap"
+        style={{ minHeight: fullscreen ? '80vh' : '60vh' }}
+      >
         {/* 左侧预览 */}
-        <Box style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', borderRadius: 8, overflow: 'hidden' }}>
+        <Box
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#000',
+            borderRadius: 8,
+            overflow: 'hidden',
+          }}
+        >
           {isImage ? (
             <Box
               onWheel={handleWheel}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
-              style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', touchAction: 'none', cursor: zoom > 1 ? (dragRef.current.active ? 'grabbing' : 'grab') : 'zoom-in' }}
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                touchAction: 'none',
+                cursor: zoom > 1 ? (dragRef.current.active ? 'grabbing' : 'grab') : 'zoom-in',
+              }}
             >
               <Box
                 component="img"
@@ -406,7 +564,13 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
             // FR-102：视频内嵌 VideoPlayer 直接播放（静音自动播），去掉「打开播放」中间步骤。
             // 灯箱内用既有 /api/play/:id/stream 流地址（与播放页降级路径一致），不引入协商逻辑。
             <Box w="100%" px="md" style={{ maxWidth: 960 }}>
-              <Suspense fallback={<Text c="dimmed" size="sm">加载播放器…</Text>}>
+              <Suspense
+                fallback={
+                  <Text c="dimmed" size="sm">
+                    加载播放器…
+                  </Text>
+                }
+              >
                 <VideoPlayer url={mediaStreamUrl(file.id)} streamType="mp4" autoPlay />
               </Suspense>
             </Box>
@@ -415,90 +579,116 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
 
         {/* 右侧详情（FR-106 可折叠沉浸）：折叠后不渲染、左侧预览吃满宽度 */}
         {!infoCollapsed && (
-        <ScrollArea style={{ width: 300, flexShrink: 0 }} type="hover">
-          <Stack gap="xs">
-            <Group justify="space-between" wrap="nowrap">
-              <Text fw={600} size="sm">文件信息</Text>
-              {/* 复制文件路径（FR-106） */}
-              {file.file_path && <CopyIconButton value={file.file_path} label="复制路径" />}
-            </Group>
-            {/* 定宽两列定义列表（FR-106） */}
-            <Box component="dl" style={{ margin: 0 }}>
-              <DetailRow label="显示名" value={mediaDisplayName(file)} />
-              <DetailRow label="文件名" value={file.file_name} />
-              <DetailRow label="类型" value={file.format?.toUpperCase()} />
-              <DetailRow label="大小" value={formatSize(file.file_size)} />
-              {file.width > 0 && file.height > 0 && <DetailRow label="分辨率" value={`${file.width} × ${file.height}`} />}
-              {!isImage && <DetailRow label="时长" value={formatDuration(file.duration)} />}
-              {!isImage && <DetailRow label="视频编码" value={file.video_codec} />}
-              {!isImage && <DetailRow label="音频编码" value={file.audio_codec} />}
-            </Box>
-            <Divider my={4} />
-            <Box component="dl" style={{ margin: 0 }}>
-              <DetailRow label="加入时间" value={formatTime(file.added_at)} />
-              <DetailRow label="修改时间" value={formatTime(file.modified_at)} />
-            </Box>
-
-            {/* EXIF 信息（FR-38/FR-106）：定宽两列 + 图标 + 单位格式化，有数据才展示 */}
-            {hasExif(file) && (
-              <>
-                <Divider my={4} label="EXIF" labelPosition="left" />
-                <Box component="dl" role="group" aria-label="EXIF 信息" style={{ margin: 0 }}>
-                  <DetailRow
-                    label="拍摄时间"
-                    value={file.media_time ? `${formatTime(file.media_time)}${file.media_time_source ? `（${MEDIA_TIME_SOURCE_LABEL[file.media_time_source] ?? file.media_time_source}）` : ''}` : ''}
-                  />
-                  <DetailRow label="相机" value={file.camera} icon={<IconCamera size={14} />} />
-                  <DetailRow label="镜头" value={file.lens} icon={<IconPhoto size={14} />} />
-                  <DetailRow label="光圈" value={formatAperture(file.aperture)} icon={<IconAperture size={14} />} />
-                  <DetailRow label="快门" value={formatShutter(file.shutter)} icon={<IconClock size={14} />} />
-                  <DetailRow label="ISO" value={formatIso(file.iso)} icon={<IconAdjustments size={14} />} />
-                </Box>
-                {((file.gps_lat ?? 0) !== 0 || (file.gps_lon ?? 0) !== 0) && (
-                  <Stack gap={4}>
-                    <Group gap={4} wrap="nowrap" align="center">
-                      <IconMapPin size={14} style={{ flexShrink: 0, color: 'var(--mantine-color-dimmed)' }} />
-                      <Text size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>
-                        {`${file.gps_lat?.toFixed(6)}, ${file.gps_lon?.toFixed(6)}`}
-                      </Text>
-                      <CopyIconButton value={`${file.gps_lat}, ${file.gps_lon}`} label="复制坐标" />
-                    </Group>
-                    {/* 站内地图为主、外部 OSM 为次（FR-106） */}
-                    <Button
-                      size="xs"
-                      variant="light"
-                      leftSection={<IconMapPin size={14} />}
-                      onClick={() => openInSiteMap(file.gps_lat ?? 0, file.gps_lon ?? 0)}
-                    >
-                      在站内地图打开
-                    </Button>
-                    <Anchor
-                      href={`https://www.openstreetmap.org/?mlat=${file.gps_lat}&mlon=${file.gps_lon}#map=15/${file.gps_lat}/${file.gps_lon}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      size="xs"
-                      c="dimmed"
-                    >
-                      在外部地图打开
-                    </Anchor>
-                  </Stack>
+          <ScrollArea style={{ width: 300, flexShrink: 0 }} type="hover">
+            <Stack gap="xs">
+              <Group justify="space-between" wrap="nowrap">
+                <Text fw={600} size="sm">
+                  文件信息
+                </Text>
+                {/* 复制文件路径（FR-106） */}
+                {file.file_path && <CopyIconButton value={file.file_path} label="复制路径" />}
+              </Group>
+              {/* 定宽两列定义列表（FR-106） */}
+              <Box component="dl" style={{ margin: 0 }}>
+                <DetailRow label="显示名" value={mediaDisplayName(file)} />
+                <DetailRow label="文件名" value={file.file_name} />
+                <DetailRow label="类型" value={file.format?.toUpperCase()} />
+                <DetailRow label="大小" value={formatSize(file.file_size)} />
+                {file.width > 0 && file.height > 0 && (
+                  <DetailRow label="分辨率" value={`${file.width} × ${file.height}`} />
                 )}
-              </>
-            )}
+                {!isImage && <DetailRow label="时长" value={formatDuration(file.duration)} />}
+                {!isImage && <DetailRow label="视频编码" value={file.video_codec} />}
+                {!isImage && <DetailRow label="音频编码" value={file.audio_codec} />}
+              </Box>
+              <Divider my={4} />
+              <Box component="dl" style={{ margin: 0 }}>
+                <DetailRow label="加入时间" value={formatTime(file.added_at)} />
+                <DetailRow label="修改时间" value={formatTime(file.modified_at)} />
+              </Box>
 
-            <Divider my="sm" />
-            <Button
-              component="a"
-              href={`/api/library/media/${file.id}/download`}
-              download
-              variant="light"
-              leftSection={<IconDownload size={16} />}
-              fullWidth
-            >
-              下载原文件
-            </Button>
-          </Stack>
-        </ScrollArea>
+              {/* EXIF 信息（FR-38/FR-106）：定宽两列 + 图标 + 单位格式化，有数据才展示 */}
+              {hasExif(file) && (
+                <>
+                  <Divider my={4} label="EXIF" labelPosition="left" />
+                  <Box component="dl" role="group" aria-label="EXIF 信息" style={{ margin: 0 }}>
+                    <DetailRow
+                      label="拍摄时间"
+                      value={
+                        file.media_time
+                          ? `${formatTime(file.media_time)}${file.media_time_source ? `（${MEDIA_TIME_SOURCE_LABEL[file.media_time_source] ?? file.media_time_source}）` : ''}`
+                          : ''
+                      }
+                    />
+                    <DetailRow label="相机" value={file.camera} icon={<IconCamera size={14} />} />
+                    <DetailRow label="镜头" value={file.lens} icon={<IconPhoto size={14} />} />
+                    <DetailRow
+                      label="光圈"
+                      value={formatAperture(file.aperture)}
+                      icon={<IconAperture size={14} />}
+                    />
+                    <DetailRow
+                      label="快门"
+                      value={formatShutter(file.shutter)}
+                      icon={<IconClock size={14} />}
+                    />
+                    <DetailRow
+                      label="ISO"
+                      value={formatIso(file.iso)}
+                      icon={<IconAdjustments size={14} />}
+                    />
+                  </Box>
+                  {((file.gps_lat ?? 0) !== 0 || (file.gps_lon ?? 0) !== 0) && (
+                    <Stack gap={4}>
+                      <Group gap={4} wrap="nowrap" align="center">
+                        <IconMapPin
+                          size={14}
+                          style={{ flexShrink: 0, color: 'var(--mantine-color-dimmed)' }}
+                        />
+                        <Text size="sm" style={{ minWidth: 0, wordBreak: 'break-word' }}>
+                          {`${file.gps_lat?.toFixed(6)}, ${file.gps_lon?.toFixed(6)}`}
+                        </Text>
+                        <CopyIconButton
+                          value={`${file.gps_lat}, ${file.gps_lon}`}
+                          label="复制坐标"
+                        />
+                      </Group>
+                      {/* 站内地图为主、外部 OSM 为次（FR-106） */}
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconMapPin size={14} />}
+                        onClick={() => openInSiteMap(file.gps_lat ?? 0, file.gps_lon ?? 0)}
+                      >
+                        在站内地图打开
+                      </Button>
+                      <Anchor
+                        href={`https://www.openstreetmap.org/?mlat=${file.gps_lat}&mlon=${file.gps_lon}#map=15/${file.gps_lat}/${file.gps_lon}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        size="xs"
+                        c="dimmed"
+                      >
+                        在外部地图打开
+                      </Anchor>
+                    </Stack>
+                  )}
+                </>
+              )}
+
+              <Divider my="sm" />
+              <Button
+                component="a"
+                href={`/api/library/media/${file.id}/download`}
+                download
+                variant="light"
+                leftSection={<IconDownload size={16} />}
+                fullWidth
+              >
+                下载原文件
+              </Button>
+            </Stack>
+          </ScrollArea>
         )}
       </Group>
 
@@ -513,5 +703,5 @@ export default function MediaDetailPanel({ files, initialIndex, onClose, customI
       {/* 打标签弹窗（FR-106）：复用 FR-91 批量编排 */}
       <BatchActionsModals state={batch.modalState} />
     </Modal>
-  )
+  );
 }

@@ -1,78 +1,96 @@
-import client from './client'
+import client from './client';
 
 // 使用构建时环境变量决定是否启用 mock 模式
-const useMock = import.meta.env.VITE_USE_MOCK === 'true'
+const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
 // ─── 真实 API ────────────────────────────────────────
 
 async function realLogin(username: string, password: string): Promise<void> {
-  await client.post('/api/auth/login', { username, password })
+  await client.post('/api/auth/login', { username, password });
 }
 
 async function realLogout(): Promise<void> {
-  try { await client.post('/api/auth/logout') } catch { /* 静默 */ }
+  try {
+    await client.post('/api/auth/logout');
+  } catch {
+    /* 静默 */
+  }
 }
 
 async function realGetMe(): Promise<{ username: string }> {
-  const res = await client.get('/api/me')
-  return res.data
+  const res = await client.get('/api/me');
+  return res.data;
 }
 
 async function realGetSetupStatus(): Promise<{ needs_setup: boolean }> {
-  const res = await client.get('/api/auth/setup-status')
-  return res.data
+  const res = await client.get('/api/auth/setup-status');
+  return res.data;
 }
 
 async function realSetup(username: string, password: string): Promise<void> {
-  await client.post('/api/auth/setup', { username, password })
+  await client.post('/api/auth/setup', { username, password });
 }
 
 async function realChangePassword(oldPassword: string, newPassword: string): Promise<void> {
-  await client.post('/api/me/password', { old_password: oldPassword, new_password: newPassword })
+  await client.post('/api/me/password', { old_password: oldPassword, new_password: newPassword });
 }
 
 // ─── Mock API ────────────────────────────────────────
 
 function mockDelay(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function mockLogin(username: string, password: string): Promise<void> {
-  await mockDelay(300)
-  if (username === 'admin' && password === 'admin') return
-  throw new Error('用户名或密码错误')
+  await mockDelay(300);
+  if (username === 'admin' && password === 'admin') return;
+  throw new Error('用户名或密码错误');
 }
 
 async function mockLogout(): Promise<void> {
-  await mockDelay(100)
+  await mockDelay(100);
 }
 
 async function mockGetMe(): Promise<{ username: string }> {
-  await mockDelay(100)
-  return { username: 'admin' }
+  await mockDelay(100);
+  return { username: 'admin' };
 }
 
 async function mockGetSetupStatus(): Promise<{ needs_setup: boolean }> {
-  await mockDelay(100)
+  await mockDelay(100);
   // mock 模式默认视为已初始化（admin 存在），不打扰本地开发
-  return { needs_setup: false }
+  return { needs_setup: false };
 }
 
 async function mockSetup(_username: string, _password: string): Promise<void> {
-  await mockDelay(300)
+  await mockDelay(300);
 }
 
 async function mockChangePassword(oldPassword: string, _newPassword: string): Promise<void> {
-  await mockDelay(300)
+  await mockDelay(300);
   // mock 模式：当前密码为 admin 视为正确，否则报错（便于本地演示校验失败分支）
-  if (oldPassword !== 'admin') throw new Error('当前密码错误')
+  if (oldPassword !== 'admin') throw new Error('当前密码错误');
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
-export function login(username: string, password: string) { return useMock ? mockLogin(username, password) : realLogin(username, password) }
-export function logout() { return useMock ? mockLogout() : realLogout() }
-export function getMe() { return useMock ? mockGetMe() : realGetMe() }
-export function getSetupStatus() { return useMock ? mockGetSetupStatus() : realGetSetupStatus() }
-export function setup(username: string, password: string) { return useMock ? mockSetup(username, password) : realSetup(username, password) }
-export function changePassword(oldPassword: string, newPassword: string) { return useMock ? mockChangePassword(oldPassword, newPassword) : realChangePassword(oldPassword, newPassword) }
+export function login(username: string, password: string) {
+  return useMock ? mockLogin(username, password) : realLogin(username, password);
+}
+export function logout() {
+  return useMock ? mockLogout() : realLogout();
+}
+export function getMe() {
+  return useMock ? mockGetMe() : realGetMe();
+}
+export function getSetupStatus() {
+  return useMock ? mockGetSetupStatus() : realGetSetupStatus();
+}
+export function setup(username: string, password: string) {
+  return useMock ? mockSetup(username, password) : realSetup(username, password);
+}
+export function changePassword(oldPassword: string, newPassword: string) {
+  return useMock
+    ? mockChangePassword(oldPassword, newPassword)
+    : realChangePassword(oldPassword, newPassword);
+}

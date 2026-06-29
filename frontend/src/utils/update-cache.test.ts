@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from './update-cache'
-import type { UpdateCheckResult } from '@/types'
+import { describe, it, expect, beforeEach } from 'vitest';
+import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from './update-cache';
+import type { UpdateCheckResult } from '@/types';
 
 const sample: UpdateCheckResult = {
   current: '0.16.0',
@@ -11,45 +11,45 @@ const sample: UpdateCheckResult = {
   channel: 'stable',
   notes: '## 更新日志\n- 修复若干问题',
   asset_name: 'jianvideo-windows-amd64',
-}
+};
 
 describe('update-cache（更新结果本地缓存）', () => {
   beforeEach(() => {
-    localStorage.clear()
-  })
+    localStorage.clear();
+  });
 
   it('无缓存返回 null', () => {
-    expect(loadCachedUpdate('stable')).toBeNull()
-  })
+    expect(loadCachedUpdate('stable')).toBeNull();
+  });
 
   it('保存后可按频道读回（含发布说明）', () => {
-    saveCachedUpdate('stable', sample)
-    const got = loadCachedUpdate('stable')
-    expect(got).not.toBeNull()
-    expect(got?.latest).toBe('v0.16.1')
-    expect(got?.notes).toContain('更新日志')
-  })
+    saveCachedUpdate('stable', sample);
+    const got = loadCachedUpdate('stable');
+    expect(got).not.toBeNull();
+    expect(got?.latest).toBe('v0.16.1');
+    expect(got?.notes).toContain('更新日志');
+  });
 
   it('按频道隔离：写 stable 不影响 prerelease', () => {
-    saveCachedUpdate('stable', sample)
-    expect(loadCachedUpdate('prerelease')).toBeNull()
-  })
+    saveCachedUpdate('stable', sample);
+    expect(loadCachedUpdate('prerelease')).toBeNull();
+  });
 
   it('损坏的缓存安全返回 null（不抛异常）', () => {
-    localStorage.setItem('jianvideo.update.check.stable', '{不是合法 json')
-    expect(loadCachedUpdate('stable')).toBeNull()
-  })
+    localStorage.setItem('jianvideo.update.check.stable', '{不是合法 json');
+    expect(loadCachedUpdate('stable')).toBeNull();
+  });
 
   it('clearCachedUpdate 清除该频道缓存、不影响其他频道（FR-112）', () => {
-    saveCachedUpdate('stable', sample)
-    saveCachedUpdate('prerelease', { ...sample, channel: 'prerelease' })
-    clearCachedUpdate('stable')
-    expect(loadCachedUpdate('stable')).toBeNull()
+    saveCachedUpdate('stable', sample);
+    saveCachedUpdate('prerelease', { ...sample, channel: 'prerelease' });
+    clearCachedUpdate('stable');
+    expect(loadCachedUpdate('stable')).toBeNull();
     // 仅清目标频道，prerelease 仍在
-    expect(loadCachedUpdate('prerelease')).not.toBeNull()
-  })
+    expect(loadCachedUpdate('prerelease')).not.toBeNull();
+  });
 
   it('clearCachedUpdate 对无缓存频道安全无操作（不抛异常）', () => {
-    expect(() => clearCachedUpdate('stable')).not.toThrow()
-  })
-})
+    expect(() => clearCachedUpdate('stable')).not.toThrow();
+  });
+});

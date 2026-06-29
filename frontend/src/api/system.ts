@@ -1,18 +1,26 @@
-import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress, EnvVar, FFmpegDetectResult, ProxyTestResult } from '@/types'
-import client from './client'
+import type {
+  SystemInfo,
+  CodecTestResult,
+  UpdateCheckResult,
+  UpdateProgress,
+  EnvVar,
+  FFmpegDetectResult,
+  ProxyTestResult,
+} from '@/types';
+import client from './client';
 
 // 使用构建时环境变量决定是否启用 mock 模式
-const useMock = import.meta.env.VITE_USE_MOCK === 'true'
+const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
 function mockDelay(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ─── 真实 API 实现 ──────────────────────────────────
 
 async function realGetSystemInfo(): Promise<SystemInfo> {
-  const res = await client.get<SystemInfo>('/api/system/info')
-  return res.data
+  const res = await client.get<SystemInfo>('/api/system/info');
+  return res.data;
 }
 
 async function realRunCodecTest(force?: boolean): Promise<CodecTestResult> {
@@ -20,8 +28,8 @@ async function realRunCodecTest(force?: boolean): Promise<CodecTestResult> {
     '/api/system/codec-test',
     undefined,
     force ? { params: { force: 'true' } } : undefined,
-  )
-  return res.data
+  );
+  return res.data;
 }
 
 async function realCheckUpdate(channel: string, force = false): Promise<UpdateCheckResult> {
@@ -32,46 +40,55 @@ async function realCheckUpdate(channel: string, force = false): Promise<UpdateCh
     params: { channel, ...(force ? { force: 'true' } : {}) },
     timeout: 60000,
     silent: true,
-  })
-  return res.data
+  });
+  return res.data;
 }
 
 async function realApplyUpdate(channel: string): Promise<void> {
   // 更新会触发下载替换，给较长单请求超时以防慢网络下前端提前超时。
-  await client.post('/api/system/update/apply', { channel }, { timeout: 60000 })
+  await client.post('/api/system/update/apply', { channel }, { timeout: 60000 });
 }
 
 async function realRollbackUpdate(): Promise<void> {
-  await client.post('/api/system/update/rollback')
+  await client.post('/api/system/update/rollback');
 }
 
 async function realGetUpdateProgress(): Promise<UpdateProgress> {
   // 进度轮询：短超时即可，进度端点为进程内单例读取、恒快速返回；
   // silent：后台轮询失败不弹全局 toast，避免反复失败时 toast 堆积致白屏
-  const res = await client.get<UpdateProgress>('/api/system/update/progress', { timeout: 5000, silent: true })
-  return res.data
+  const res = await client.get<UpdateProgress>('/api/system/update/progress', {
+    timeout: 5000,
+    silent: true,
+  });
+  return res.data;
 }
 
 async function realGetEnvVars(): Promise<EnvVar[]> {
-  const res = await client.get<{ env: EnvVar[] }>('/api/system/env')
-  return res.data.env || []
+  const res = await client.get<{ env: EnvVar[] }>('/api/system/env');
+  return res.data.env || [];
 }
 
 async function realDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
-  const res = await client.post<FFmpegDetectResult>('/api/system/ffmpeg/detect', { path: path ?? '' })
-  return res.data
+  const res = await client.post<FFmpegDetectResult>('/api/system/ffmpeg/detect', {
+    path: path ?? '',
+  });
+  return res.data;
 }
 
 async function realTestProxy(proxy?: string): Promise<ProxyTestResult> {
   // 代理探测需发起出站请求、国内常较慢；单请求超时放宽到 15s（覆盖全局），避免前端先于后端超时。
-  const res = await client.post<ProxyTestResult>('/api/system/proxy/test', { proxy: proxy ?? '' }, { timeout: 15000 })
-  return res.data
+  const res = await client.post<ProxyTestResult>(
+    '/api/system/proxy/test',
+    { proxy: proxy ?? '' },
+    { timeout: 15000 },
+  );
+  return res.data;
 }
 
 // ─── Mock API 实现 ──────────────────────────────────
 
 async function mockGetSystemInfo(): Promise<SystemInfo> {
-  await mockDelay(200)
+  await mockDelay(200);
   return {
     app_version: '0.3.0',
     os: 'linux',
@@ -128,18 +145,46 @@ async function mockGetSystemInfo(): Promise<SystemInfo> {
       ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
       tested_at: '2026-06-23T10:00:00Z',
     },
-  }
+  };
 }
 
 async function mockRunCodecTest(_force?: boolean): Promise<CodecTestResult> {
-  await mockDelay(400)
+  await mockDelay(400);
   return {
     ffmpeg_available: true,
     results: [
-      { encoder: 'libx264', family: 'software', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
-      { encoder: 'libx265', family: 'software', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
-      { encoder: 'h264_amf', family: 'amf', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
-      { encoder: 'hevc_amf', family: 'amf', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
+      {
+        encoder: 'libx264',
+        family: 'software',
+        codec: 'h264',
+        compiled: true,
+        tested_ok: true,
+        detail: '',
+      },
+      {
+        encoder: 'libx265',
+        family: 'software',
+        codec: 'h265',
+        compiled: true,
+        tested_ok: true,
+        detail: '',
+      },
+      {
+        encoder: 'h264_amf',
+        family: 'amf',
+        codec: 'h264',
+        compiled: true,
+        tested_ok: true,
+        detail: '',
+      },
+      {
+        encoder: 'hevc_amf',
+        family: 'amf',
+        codec: 'h265',
+        compiled: true,
+        tested_ok: true,
+        detail: '',
+      },
       {
         encoder: 'av1_amf',
         family: 'amf',
@@ -152,12 +197,12 @@ async function mockRunCodecTest(_force?: boolean): Promise<CodecTestResult> {
     from_cache: true,
     ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
     tested_at: '2026-06-23T10:00:00Z',
-  }
+  };
 }
 
 async function mockCheckUpdate(channel: string, _force = false): Promise<UpdateCheckResult> {
-  await mockDelay(200)
-  const prerelease = channel === 'prerelease'
+  await mockDelay(200);
+  const prerelease = channel === 'prerelease';
   return {
     current: '0.6.2',
     latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
@@ -168,103 +213,134 @@ async function mockCheckUpdate(channel: string, _force = false): Promise<UpdateC
     notes: '示例发布说明：修复若干问题。',
     asset_name: 'jianvideo-linux-amd64',
     rollback_available: false,
-  }
+  };
 }
 
 async function mockApplyUpdate(_channel: string): Promise<void> {
-  await mockDelay(300)
+  await mockDelay(300);
 }
 
 async function mockRollbackUpdate(): Promise<void> {
-  await mockDelay(300)
+  await mockDelay(300);
 }
 
 async function mockGetUpdateProgress(): Promise<UpdateProgress> {
-  await mockDelay(80)
-  return { state: 'downloading', downloaded: 6 * 1024 * 1024, total: 12 * 1024 * 1024, percent: 50 }
+  await mockDelay(80);
+  return {
+    state: 'downloading',
+    downloaded: 6 * 1024 * 1024,
+    total: 12 * 1024 * 1024,
+    percent: 50,
+  };
 }
 
 async function mockGetEnvVars(): Promise<EnvVar[]> {
-  await mockDelay(120)
+  await mockDelay(120);
   return [
-    { key: 'JIANVIDEO_FFMPEG_PATH', description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH', sensitive: false, set: true, value: '/opt/jianvideo/ffmpeg' },
-    { key: 'JIANVIDEO_DEBUG', description: '设为 1/true 时启用 gin debug 模式（输出调试日志）', sensitive: false, set: false, value: '' },
-    { key: 'JWT_SECRET', description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）', sensitive: true, set: true, value: '****（已设置）' },
-    { key: 'SMB_MASTER_PASSWORD', description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用', sensitive: true, set: false, value: '（未设置）' },
-  ]
+    {
+      key: 'JIANVIDEO_FFMPEG_PATH',
+      description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH',
+      sensitive: false,
+      set: true,
+      value: '/opt/jianvideo/ffmpeg',
+    },
+    {
+      key: 'JIANVIDEO_DEBUG',
+      description: '设为 1/true 时启用 gin debug 模式（输出调试日志）',
+      sensitive: false,
+      set: false,
+      value: '',
+    },
+    {
+      key: 'JWT_SECRET',
+      description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）',
+      sensitive: true,
+      set: true,
+      value: '****（已设置）',
+    },
+    {
+      key: 'SMB_MASTER_PASSWORD',
+      description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用',
+      sensitive: true,
+      set: false,
+      value: '（未设置）',
+    },
+  ];
 }
 
 async function mockDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
-  await mockDelay(200)
+  await mockDelay(200);
   // 模拟：含 ffmpeg 字样或空（测当前）视为可用
-  const available = !path || path.toLowerCase().includes('ffmpeg')
+  const available = !path || path.toLowerCase().includes('ffmpeg');
   return {
     ffmpeg_available: available,
-    ffmpeg_version: available ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers' : '',
-  }
+    ffmpeg_version: available
+      ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers'
+      : '',
+  };
 }
 
 async function mockTestProxy(proxy?: string): Promise<ProxyTestResult> {
-  await mockDelay(300)
+  await mockDelay(300);
   // 模拟：含 bad 字样视为不可达，其余（含空=直连）视为可达
-  const reachable = !proxy || !proxy.toLowerCase().includes('bad')
+  const reachable = !proxy || !proxy.toLowerCase().includes('bad');
   return {
     reachable,
     detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
     latency_ms: reachable ? 123 : 0,
     target: 'https://api.github.com',
-  }
+  };
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function getSystemInfo(): Promise<SystemInfo> {
-  return useMock ? mockGetSystemInfo() : realGetSystemInfo()
+  return useMock ? mockGetSystemInfo() : realGetSystemInfo();
 }
 
 export function runCodecTest(force?: boolean): Promise<CodecTestResult> {
-  return useMock ? mockRunCodecTest(force) : realRunCodecTest(force)
+  return useMock ? mockRunCodecTest(force) : realRunCodecTest(force);
 }
 
 export function checkUpdate(channel: string, force = false): Promise<UpdateCheckResult> {
-  return useMock ? mockCheckUpdate(channel, force) : realCheckUpdate(channel, force)
+  return useMock ? mockCheckUpdate(channel, force) : realCheckUpdate(channel, force);
 }
 
 export function applyUpdate(channel: string): Promise<void> {
-  return useMock ? mockApplyUpdate(channel) : realApplyUpdate(channel)
+  return useMock ? mockApplyUpdate(channel) : realApplyUpdate(channel);
 }
 
 export function rollbackUpdate(): Promise<void> {
-  return useMock ? mockRollbackUpdate() : realRollbackUpdate()
+  return useMock ? mockRollbackUpdate() : realRollbackUpdate();
 }
 
 // 自更新下载进度（FR-90）：更新进行中前端轮询展示进度条
 export function getUpdateProgress(): Promise<UpdateProgress> {
-  return useMock ? mockGetUpdateProgress() : realGetUpdateProgress()
+  return useMock ? mockGetUpdateProgress() : realGetUpdateProgress();
 }
 
 // 环境变量查看（FR-56）：只读，敏感项已脱敏
 export function getEnvVars(): Promise<EnvVar[]> {
-  return useMock ? mockGetEnvVars() : realGetEnvVars()
+  return useMock ? mockGetEnvVars() : realGetEnvVars();
 }
 
 // FFmpeg 路径检测（FR-56）：path 可空 = 测当前已配置路径
 export function detectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
-  return useMock ? mockDetectFFmpeg(path) : realDetectFFmpeg(path)
+  return useMock ? mockDetectFFmpeg(path) : realDetectFFmpeg(path);
 }
 
 // 代理连通性测试（FR-89）：proxy 可空 = 测直连；用临时 client 探测，不改后端运行期代理
 export function testProxy(proxy?: string): Promise<ProxyTestResult> {
-  return useMock ? mockTestProxy(proxy) : realTestProxy(proxy)
+  return useMock ? mockTestProxy(proxy) : realTestProxy(proxy);
 }
 
 // pingHealth 探测服务是否在线，用于自更新/回滚重启后轮询恢复。
 export async function pingHealth(): Promise<boolean> {
-  if (useMock) return true
+  if (useMock) return true;
   try {
-    const res = await client.get('/health', { timeout: 3000 })
-    return res.status === 200
+    const res = await client.get('/health', { timeout: 3000 });
+    return res.status === 200;
   } catch {
-    return false
+    return false;
   }
 }

@@ -1,25 +1,38 @@
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { MantineProvider } from '@mantine/core'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import TimelineView from './TimelineView'
-import type { MediaFile } from '@/types'
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MantineProvider } from '@mantine/core';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import TimelineView from './TimelineView';
+import type { MediaFile } from '@/types';
 
 // 模拟 IntersectionObserver，捕获回调以手动触发“滚到底部哨兵进入视口”
-let ioCb: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null
+let ioCb: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null;
 class MockIO {
-  constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) { ioCb = cb }
+  constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+    ioCb = cb;
+  }
   observe() {}
   unobserve() {}
   disconnect() {}
 }
 
 const file = (id: number): MediaFile => ({
-  id, library_id: 1, file_path: `/x/f${id}.png`, file_name: `f${id}.png`,
-  file_size: 1, format: 'png', video_codec: '', audio_codec: '', duration: 0,
-  width: 1, height: 1, bitrate: 0, subtitle_tracks: '',
-  added_at: '2025-01-09T00:00:00Z', modified_at: '2025-01-09T00:00:00Z',
-})
+  id,
+  library_id: 1,
+  file_path: `/x/f${id}.png`,
+  file_name: `f${id}.png`,
+  file_size: 1,
+  format: 'png',
+  video_codec: '',
+  audio_codec: '',
+  duration: 0,
+  width: 1,
+  height: 1,
+  bitrate: 0,
+  subtitle_tracks: '',
+  added_at: '2025-01-09T00:00:00Z',
+  modified_at: '2025-01-09T00:00:00Z',
+});
 
 function renderView(props: Partial<React.ComponentProps<typeof TimelineView>> = {}) {
   return render(
@@ -34,69 +47,88 @@ function renderView(props: Partial<React.ComponentProps<typeof TimelineView>> = 
         {...props}
       />
     </MantineProvider>,
-  )
+  );
 }
 
 describe('TimelineView 滚动加载', () => {
   beforeEach(() => {
-    ioCb = null
-    ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO
-  })
+    ioCb = null;
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;
+  });
 
   it('底部哨兵进入视口且 hasMore 时触发 onLoadMore', () => {
-    const onLoadMore = vi.fn()
-    renderView({ onLoadMore, hasMore: true })
-    expect(typeof ioCb).toBe('function') // 哨兵已注册观察
-    ioCb!([{ isIntersecting: true }])
-    expect(onLoadMore).toHaveBeenCalled()
-  })
+    const onLoadMore = vi.fn();
+    renderView({ onLoadMore, hasMore: true });
+    expect(typeof ioCb).toBe('function'); // 哨兵已注册观察
+    ioCb!([{ isIntersecting: true }]);
+    expect(onLoadMore).toHaveBeenCalled();
+  });
 
   it('hasMore 为 false 时不触发 onLoadMore', () => {
-    const onLoadMore = vi.fn()
-    renderView({ onLoadMore, hasMore: false })
-    if (ioCb) ioCb([{ isIntersecting: true }])
-    expect(onLoadMore).not.toHaveBeenCalled()
-  })
-})
+    const onLoadMore = vi.fn();
+    renderView({ onLoadMore, hasMore: false });
+    if (ioCb) ioCb([{ isIntersecting: true }]);
+    expect(onLoadMore).not.toHaveBeenCalled();
+  });
+});
 
 describe('TimelineView 空态区分（FR-98）', () => {
   beforeEach(() => {
-    ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO
-  })
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;
+  });
 
   it('无筛选且 0 结果渲染「空库」空态', () => {
     render(
       <MantineProvider>
-        <TimelineView mediaFiles={[]} loading={false} error={null}
-          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}} />
+        <TimelineView
+          mediaFiles={[]}
+          loading={false}
+          error={null}
+          customImageExtensions={{}}
+          onErrorClose={() => {}}
+          onOpenFile={() => {}}
+        />
       </MantineProvider>,
-    )
-    expect(screen.getByText('暂无媒体文件')).toBeInTheDocument()
-    expect(screen.queryByText('没有匹配的媒体')).toBeNull()
-  })
+    );
+    expect(screen.getByText('暂无媒体文件')).toBeInTheDocument();
+    expect(screen.queryByText('没有匹配的媒体')).toBeNull();
+  });
 
   it('有筛选且 0 结果渲染「无匹配结果」空态 + 清除筛选 CTA', async () => {
-    const onClearFilter = vi.fn()
+    const onClearFilter = vi.fn();
     render(
       <MantineProvider>
-        <TimelineView mediaFiles={[]} loading={false} error={null}
-          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}}
-          filtered onClearFilter={onClearFilter} />
+        <TimelineView
+          mediaFiles={[]}
+          loading={false}
+          error={null}
+          customImageExtensions={{}}
+          onErrorClose={() => {}}
+          onOpenFile={() => {}}
+          filtered
+          onClearFilter={onClearFilter}
+        />
       </MantineProvider>,
-    )
-    expect(screen.getByText('没有匹配的媒体')).toBeInTheDocument()
-    const btn = screen.getByRole('button', { name: '清除筛选' })
-    await userEvent.click(btn)
-    expect(onClearFilter).toHaveBeenCalledTimes(1)
-  })
+    );
+    expect(screen.getByText('没有匹配的媒体')).toBeInTheDocument();
+    const btn = screen.getByRole('button', { name: '清除筛选' });
+    await userEvent.click(btn);
+    expect(onClearFilter).toHaveBeenCalledTimes(1);
+  });
 
   it('首屏加载渲染骨架屏', () => {
     const { container } = render(
       <MantineProvider>
-        <TimelineView mediaFiles={[]} loading error={null}
-          customImageExtensions={{}} onErrorClose={() => {}} onOpenFile={() => {}} />
+        <TimelineView
+          mediaFiles={[]}
+          loading
+          error={null}
+          customImageExtensions={{}}
+          onErrorClose={() => {}}
+          onOpenFile={() => {}}
+        />
       </MantineProvider>,
-    )
-    expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument()
-  })
-})
+    );
+    expect(container.querySelector('.mantine-Skeleton-root')).toBeInTheDocument();
+  });
+});

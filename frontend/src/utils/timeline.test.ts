@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { groupMediaByDate, positionToGroupIndex } from './timeline'
-import type { MediaFile } from '@/types'
+import { describe, it, expect } from 'vitest';
+import { groupMediaByDate, positionToGroupIndex } from './timeline';
+import type { MediaFile } from '@/types';
 
 /** 构造测试用媒体文件，仅关心 id 与 added_at */
 function makeFile(id: number, addedAt: string): MediaFile {
@@ -20,7 +20,7 @@ function makeFile(id: number, addedAt: string): MediaFile {
     subtitle_tracks: '',
     added_at: addedAt,
     modified_at: addedAt,
-  }
+  };
 }
 
 describe('groupMediaByDate', () => {
@@ -29,138 +29,147 @@ describe('groupMediaByDate', () => {
       makeFile(1, '2025-01-09T12:00:00Z'),
       makeFile(2, '2025-01-01T08:00:00Z'),
       makeFile(3, '2025-03-15T20:00:00Z'),
-    ])
-    expect(groups.map((g) => g.date)).toEqual(['2025-03-15', '2025-01-09', '2025-01-01'])
-  })
+    ]);
+    expect(groups.map((g) => g.date)).toEqual(['2025-03-15', '2025-01-09', '2025-01-01']);
+  });
 
   it('同一日期的文件合并到同一组并保持输入顺序', () => {
     const groups = groupMediaByDate([
       makeFile(1, '2025-01-09T01:00:00Z'),
       makeFile(2, '2025-01-09T23:00:00Z'),
       makeFile(3, '2025-01-09T12:00:00Z'),
-    ])
-    expect(groups).toHaveLength(1)
-    expect(groups[0].date).toBe('2025-01-09')
-    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3])
-  })
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].date).toBe('2025-01-09');
+    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3]);
+  });
 
   it('空字符串与非法 added_at 归入“未知日期”组', () => {
     const groups = groupMediaByDate([
       makeFile(1, ''),
       makeFile(2, 'not-a-date'),
       makeFile(3, '2025'),
-    ])
-    expect(groups).toHaveLength(1)
-    expect(groups[0].date).toBe('未知日期')
-    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3])
-  })
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].date).toBe('未知日期');
+    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3]);
+  });
 
   it('“未知日期”组始终排在所有有效日期之后', () => {
     const groups = groupMediaByDate([
       makeFile(1, ''),
       makeFile(2, '2025-01-01T00:00:00Z'),
       makeFile(3, '2024-12-31T00:00:00Z'),
-    ])
-    expect(groups.map((g) => g.date)).toEqual(['2025-01-01', '2024-12-31', '未知日期'])
-  })
+    ]);
+    expect(groups.map((g) => g.date)).toEqual(['2025-01-01', '2024-12-31', '未知日期']);
+  });
 
   it('空输入返回空数组', () => {
-    expect(groupMediaByDate([])).toEqual([])
-  })
+    expect(groupMediaByDate([])).toEqual([]);
+  });
 
   // FR-32：缩放粒度与媒体时间组织
   it('media_time 优先于 added_at 作为时间源', () => {
-    const f = makeFile(1, '2020-01-01T00:00:00Z')
-    f.media_time = '2023-08-15T10:00:00Z'
-    const groups = groupMediaByDate([f])
-    expect(groups[0].date).toBe('2023-08-15')
-  })
+    const f = makeFile(1, '2020-01-01T00:00:00Z');
+    f.media_time = '2023-08-15T10:00:00Z';
+    const groups = groupMediaByDate([f]);
+    expect(groups[0].date).toBe('2023-08-15');
+  });
 
   it('按月粒度分组（YYYY-MM）', () => {
-    const groups = groupMediaByDate([
-      makeFile(1, '2025-01-09T12:00:00Z'),
-      makeFile(2, '2025-01-20T12:00:00Z'),
-      makeFile(3, '2024-12-31T12:00:00Z'),
-    ], 'month')
-    expect(groups.map((g) => g.date)).toEqual(['2025-01', '2024-12'])
-    expect(groups[0].files.map((x) => x.id)).toEqual([1, 2])
-  })
+    const groups = groupMediaByDate(
+      [
+        makeFile(1, '2025-01-09T12:00:00Z'),
+        makeFile(2, '2025-01-20T12:00:00Z'),
+        makeFile(3, '2024-12-31T12:00:00Z'),
+      ],
+      'month',
+    );
+    expect(groups.map((g) => g.date)).toEqual(['2025-01', '2024-12']);
+    expect(groups[0].files.map((x) => x.id)).toEqual([1, 2]);
+  });
 
   it('按年粒度分组（YYYY）', () => {
-    const groups = groupMediaByDate([
-      makeFile(1, '2025-01-09T12:00:00Z'),
-      makeFile(2, '2024-06-01T12:00:00Z'),
-      makeFile(3, '2024-12-31T12:00:00Z'),
-    ], 'year')
-    expect(groups.map((g) => g.date)).toEqual(['2025', '2024'])
-    expect(groups[1].files.map((x) => x.id)).toEqual([2, 3])
-  })
+    const groups = groupMediaByDate(
+      [
+        makeFile(1, '2025-01-09T12:00:00Z'),
+        makeFile(2, '2024-06-01T12:00:00Z'),
+        makeFile(3, '2024-12-31T12:00:00Z'),
+      ],
+      'year',
+    );
+    expect(groups.map((g) => g.date)).toEqual(['2025', '2024']);
+    expect(groups[1].files.map((x) => x.id)).toEqual([2, 3]);
+  });
 
   // FR-68 缩放健壮性：媒体时间降级链 media_time → added_at → modified_at
   it('media_time 与 added_at 均无效时回退 modified_at（不归未知日期）', () => {
-    const f = makeFile(1, 'not-a-date') // added_at 非法
-    f.media_time = '' // 空字符串视为缺失
-    f.modified_at = '2022-05-06T03:00:00Z' // 有效的修改时间
-    const groups = groupMediaByDate([f])
-    expect(groups[0].date).toBe('2022-05-06')
-  })
+    const f = makeFile(1, 'not-a-date'); // added_at 非法
+    f.media_time = ''; // 空字符串视为缺失
+    f.modified_at = '2022-05-06T03:00:00Z'; // 有效的修改时间
+    const groups = groupMediaByDate([f]);
+    expect(groups[0].date).toBe('2022-05-06');
+  });
 
   it('三个时间源全部缺失/非法才归入“未知日期”', () => {
-    const f = makeFile(1, '')
-    f.media_time = null
-    f.modified_at = 'bad'
-    const groups = groupMediaByDate([f])
-    expect(groups[0].date).toBe('未知日期')
-  })
+    const f = makeFile(1, '');
+    f.media_time = null;
+    f.modified_at = 'bad';
+    const groups = groupMediaByDate([f]);
+    expect(groups[0].date).toBe('未知日期');
+  });
 
   // FR-120：“所有”粒度——不按日期分组，全部并入单组、保持输入顺序
   it('“所有”粒度不分组：全部并入单组并保持输入顺序', () => {
-    const groups = groupMediaByDate([
-      makeFile(1, '2025-03-15T20:00:00Z'),
-      makeFile(2, '2025-01-01T08:00:00Z'),
-      makeFile(3, '2024-12-31T00:00:00Z'),
-    ], 'all')
-    expect(groups).toHaveLength(1)
-    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3])
-  })
+    const groups = groupMediaByDate(
+      [
+        makeFile(1, '2025-03-15T20:00:00Z'),
+        makeFile(2, '2025-01-01T08:00:00Z'),
+        makeFile(3, '2024-12-31T00:00:00Z'),
+      ],
+      'all',
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].files.map((f) => f.id)).toEqual([1, 2, 3]);
+  });
 
   it('“所有”粒度空输入返回空数组', () => {
-    expect(groupMediaByDate([], 'all')).toEqual([])
-  })
-})
+    expect(groupMediaByDate([], 'all')).toEqual([]);
+  });
+});
 
 // FR-68 scrubber 位置 → 目标分组映射
 describe('positionToGroupIndex', () => {
   it('顶部比例 0 映射到第一组（最新）', () => {
-    expect(positionToGroupIndex(0, 5)).toBe(0)
-  })
+    expect(positionToGroupIndex(0, 5)).toBe(0);
+  });
 
   it('底部比例 1 映射到最后一组（最旧）', () => {
-    expect(positionToGroupIndex(1, 5)).toBe(4)
-  })
+    expect(positionToGroupIndex(1, 5)).toBe(4);
+  });
 
   it('中间比例落在对应均分段', () => {
     // 5 组均分 [0,1) → 每段 0.2：0.5 落第 3 段（下标 2）
-    expect(positionToGroupIndex(0.5, 5)).toBe(2)
+    expect(positionToGroupIndex(0.5, 5)).toBe(2);
     // 0.25 落第 2 段（下标 1）
-    expect(positionToGroupIndex(0.25, 5)).toBe(1)
+    expect(positionToGroupIndex(0.25, 5)).toBe(1);
     // 0.85 落第 5 段（下标 4）
-    expect(positionToGroupIndex(0.85, 5)).toBe(4)
-  })
+    expect(positionToGroupIndex(0.85, 5)).toBe(4);
+  });
 
   it('越界比例钳制到 [0, count-1]', () => {
-    expect(positionToGroupIndex(-0.3, 5)).toBe(0)
-    expect(positionToGroupIndex(1.7, 5)).toBe(4)
-  })
+    expect(positionToGroupIndex(-0.3, 5)).toBe(0);
+    expect(positionToGroupIndex(1.7, 5)).toBe(4);
+  });
 
   it('单组始终返回 0', () => {
-    expect(positionToGroupIndex(0, 1)).toBe(0)
-    expect(positionToGroupIndex(0.9, 1)).toBe(0)
-    expect(positionToGroupIndex(1, 1)).toBe(0)
-  })
+    expect(positionToGroupIndex(0, 1)).toBe(0);
+    expect(positionToGroupIndex(0.9, 1)).toBe(0);
+    expect(positionToGroupIndex(1, 1)).toBe(0);
+  });
 
   it('空组（count<=0）返回 0', () => {
-    expect(positionToGroupIndex(0.5, 0)).toBe(0)
-    expect(positionToGroupIndex(0.5, -2)).toBe(0)
-  })
-})
+    expect(positionToGroupIndex(0.5, 0)).toBe(0);
+    expect(positionToGroupIndex(0.5, -2)).toBe(0);
+  });
+});

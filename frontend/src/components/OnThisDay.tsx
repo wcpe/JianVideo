@@ -1,21 +1,21 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Badge, Box, Card, Group, Stack, Text, Title } from '@mantine/core'
-import MediaThumbnail from '@/components/MediaThumbnail'
-import * as libApi from '@/api/library'
-import { mediaDisplayName } from '@/utils/media'
-import type { MediaFile } from '@/types'
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Badge, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
+import MediaThumbnail from '@/components/MediaThumbnail';
+import * as libApi from '@/api/library';
+import { mediaDisplayName } from '@/utils/media';
+import type { MediaFile } from '@/types';
 
 /**
  * 计算「X 年前的今天」文案（FR-72）：今年减媒体年份。
  * media_time 为空或无法解析时返回空串（不展示标签）。
  */
 function yearsAgoLabel(mediaTime?: string | null): string {
-  if (!mediaTime) return ''
-  const t = new Date(mediaTime)
-  if (Number.isNaN(t.getTime())) return ''
-  const diff = new Date().getFullYear() - t.getFullYear()
-  return diff > 0 ? `${diff} 年前的今天` : ''
+  if (!mediaTime) return '';
+  const t = new Date(mediaTime);
+  if (Number.isNaN(t.getTime())) return '';
+  const diff = new Date().getFullYear() - t.getFullYear();
+  return diff > 0 ? `${diff} 年前的今天` : '';
 }
 
 /**
@@ -26,18 +26,21 @@ function yearsAgoLabel(mediaTime?: string | null): string {
  * 列表为空时整块不渲染。
  */
 export default function OnThisDay() {
-  const navigate = useNavigate()
-  const [items, setItems] = useState<MediaFile[]>([])
+  const navigate = useNavigate();
+  const [items, setItems] = useState<MediaFile[]>([]);
 
   const load = useCallback(() => {
-    libApi.getOnThisDay()
+    libApi
+      .getOnThisDay()
       .then(setItems)
-      .catch(() => setItems([]))
-  }, [])
+      .catch(() => setItems([]));
+  }, []);
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
 
   return (
     <Stack gap="xs" data-testid="on-this-day">
@@ -46,8 +49,8 @@ export default function OnThisDay() {
       <Box style={{ overflowX: 'auto', paddingBottom: 4 }}>
         <Group gap="sm" wrap="nowrap" align="stretch">
           {items.map((f) => {
-            const name = mediaDisplayName(f)
-            const label = yearsAgoLabel(f.media_time)
+            const name = mediaDisplayName(f);
+            const label = yearsAgoLabel(f.media_time);
             return (
               <Card
                 key={f.id}
@@ -63,14 +66,20 @@ export default function OnThisDay() {
                   <MediaThumbnail mediaID={f.id} fileName={f.file_name} />
                 </Card.Section>
                 <Box mt="xs">
-                  <Text size="sm" fw={500} truncate>{name}</Text>
-                  {label && <Badge size="sm" variant="light" color="purple" mt={6}>{label}</Badge>}
+                  <Text size="sm" fw={500} truncate>
+                    {name}
+                  </Text>
+                  {label && (
+                    <Badge size="sm" variant="light" color="purple" mt={6}>
+                      {label}
+                    </Badge>
+                  )}
                 </Box>
               </Card>
-            )
+            );
           })}
         </Group>
       </Box>
     </Stack>
-  )
+  );
 }

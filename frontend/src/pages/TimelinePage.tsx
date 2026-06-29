@@ -1,102 +1,137 @@
-import { useState, useCallback, useMemo } from 'react'
-import { Stack, Title, TextInput, Group, SegmentedControl, Text, ActionIcon, Tooltip, Button, Drawer, Box } from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
-import { IconSearch, IconRefresh, IconFilter } from '@tabler/icons-react'
-import { useLibraryPaths } from '@/hooks/useLibraryPaths'
-import { useInfiniteMedia } from '@/hooks/useInfiniteMedia'
-import { useScanProgress } from '@/hooks/useScanProgress'
-import TimelineView from '@/components/TimelineView'
-import MediaFilterBar from '@/components/MediaFilterBar'
-import MediaQueryFilters from '@/components/MediaQueryFilters'
-import ContinueWatching from '@/components/ContinueWatching'
-import OnThisDay from '@/components/OnThisDay'
-import RecentlyViewed from '@/components/RecentlyViewed'
-import MediaDetailPanel from '@/components/MediaDetailPanel'
-import ConfirmModal from '@/components/ConfirmModal'
-import BatchActionsModals from '@/components/BatchActionsModals'
-import { useBatchActions } from '@/hooks/useBatchActions'
-import { extractErrorMessage } from '@/utils/error'
-import * as libApi from '@/api/library'
-import type { TimelineGranularity } from '@/utils/timeline'
-import type { MediaFile } from '@/types'
+import { useState, useCallback, useMemo } from 'react';
+import {
+  Stack,
+  Title,
+  TextInput,
+  Group,
+  SegmentedControl,
+  Text,
+  ActionIcon,
+  Tooltip,
+  Button,
+  Drawer,
+  Box,
+} from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
+import { IconSearch, IconRefresh, IconFilter } from '@tabler/icons-react';
+import { useLibraryPaths } from '@/hooks/useLibraryPaths';
+import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
+import { useScanProgress } from '@/hooks/useScanProgress';
+import TimelineView from '@/components/TimelineView';
+import MediaFilterBar from '@/components/MediaFilterBar';
+import MediaQueryFilters from '@/components/MediaQueryFilters';
+import ContinueWatching from '@/components/ContinueWatching';
+import OnThisDay from '@/components/OnThisDay';
+import RecentlyViewed from '@/components/RecentlyViewed';
+import MediaDetailPanel from '@/components/MediaDetailPanel';
+import ConfirmModal from '@/components/ConfirmModal';
+import BatchActionsModals from '@/components/BatchActionsModals';
+import { useBatchActions } from '@/hooks/useBatchActions';
+import { extractErrorMessage } from '@/utils/error';
+import * as libApi from '@/api/library';
+import type { TimelineGranularity } from '@/utils/timeline';
+import type { MediaFile } from '@/types';
 
 /** 时间轴页：按日期分组的时间线浏览，虚拟滚动 + 滚动加载更多 */
 export default function TimelinePage() {
   // 文件详情面板（FR-34）：选中项下标，null 表示关闭
-  const [detailIndex, setDetailIndex] = useState<number | null>(null)
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
   // 收藏/标签筛选（FR-41）
-  const [favorite, setFavorite] = useState(false)
-  const [tagId, setTagId] = useState(0)
+  const [favorite, setFavorite] = useState(false);
+  const [tagId, setTagId] = useState(0);
   // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
-  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('')
-  const [sizeMin, setSizeMin] = useState(0)
-  const [timeFrom, setTimeFrom] = useState('')
-  const [timeTo, setTimeTo] = useState('')
+  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
+  const [sizeMin, setSizeMin] = useState(0);
+  const [timeFrom, setTimeFrom] = useState('');
+  const [timeTo, setTimeTo] = useState('');
   // 时间轴缩放粒度（FR-32）：按媒体时间组织，日/月/年缩放
-  const [granularity, setGranularity] = useState<TimelineGranularity>('day')
+  const [granularity, setGranularity] = useState<TimelineGranularity>('day');
   // 批量删除（FR-69）：待确认删除 id 列表（非空即弹确认框）+ 删除进行中
-  const [pendingDelete, setPendingDelete] = useState<number[]>([])
-  const [deleting, setDeleting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<number[]>([]);
+  const [deleting, setDeleting] = useState(false);
   // 移动端筛选抽屉开合（FR-86）：窄屏将筛选控件收进抽屉，搜索框常驻
-  const [filterDrawerOpened, filterDrawer] = useDisclosure(false)
-  const infinite = useInfiniteMedia({ favorite, tagId, mediaType, sizeMin, timeFrom, timeTo, sort: 'media_time' })
+  const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
+  const infinite = useInfiniteMedia({
+    favorite,
+    tagId,
+    mediaType,
+    sizeMin,
+    timeFrom,
+    timeTo,
+    sort: 'media_time',
+  });
   // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
-  const batch = useBatchActions()
-  const paths = useLibraryPaths(undefined)
-  const exts = paths.customImageExtensions
+  const batch = useBatchActions();
+  const paths = useLibraryPaths(undefined);
+  const exts = paths.customImageExtensions;
   // 扫描完成后重载第一页
-  useScanProgress(() => infinite.reload())
+  useScanProgress(() => infinite.reload());
 
   // 点击媒体（图片与视频统一）打开文件详情面板（FR-34）
   // 同时记录最近查看（FR-120）：打开即标记 last_viewed_at，失败静默不阻塞打开
-  const handleOpen = useCallback((f: MediaFile) => {
-    const i = infinite.items.findIndex(x => x.id === f.id)
-    if (i >= 0) setDetailIndex(i)
-    void libApi.setMediaViewed(f.id).catch(() => {})
-  }, [infinite.items])
+  const handleOpen = useCallback(
+    (f: MediaFile) => {
+      const i = infinite.items.findIndex((x) => x.id === f.id);
+      if (i >= 0) setDetailIndex(i);
+      void libApi.setMediaViewed(f.id).catch(() => {});
+    },
+    [infinite.items],
+  );
 
   // 搜索/筛选是否生效（FR-98）：用于区分「无结果」与「空库」空态
   const filterActive = useMemo(
-    () => !!(infinite.searchInput.trim() || favorite || tagId || mediaType || sizeMin || timeFrom || timeTo),
+    () =>
+      !!(
+        infinite.searchInput.trim() ||
+        favorite ||
+        tagId ||
+        mediaType ||
+        sizeMin ||
+        timeFrom ||
+        timeTo
+      ),
     [infinite.searchInput, favorite, tagId, mediaType, sizeMin, timeFrom, timeTo],
-  )
+  );
 
   // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
   const clearFilters = useCallback(() => {
-    infinite.setSearchInput('')
-    setFavorite(false)
-    setTagId(0)
-    setMediaType('')
-    setSizeMin(0)
-    setTimeFrom('')
-    setTimeTo('')
-  }, [infinite])
+    infinite.setSearchInput('');
+    setFavorite(false);
+    setTagId(0);
+    setMediaType('');
+    setSizeMin(0);
+    setTimeFrom('');
+    setTimeTo('');
+  }, [infinite]);
 
   // 切换收藏（FR-41）：调用接口后刷新列表
-  const handleToggleFavorite = useCallback(async (f: MediaFile) => {
-    try {
-      await libApi.setMediaFavorite(f.id, !f.favorite)
-      infinite.reload()
-    } catch (err) {
-      notifications.show({ color: 'red', message: extractErrorMessage(err, '更新收藏失败') })
-    }
-  }, [infinite])
+  const handleToggleFavorite = useCallback(
+    async (f: MediaFile) => {
+      try {
+        await libApi.setMediaFavorite(f.id, !f.favorite);
+        infinite.reload();
+      } catch (err) {
+        notifications.show({ color: 'red', message: extractErrorMessage(err, '更新收藏失败') });
+      }
+    },
+    [infinite],
+  );
 
   // 执行批量软删（FR-69）：确认后调端点，成功刷新 + 关闭确认框
   const confirmDelete = useCallback(async () => {
-    setDeleting(true)
+    setDeleting(true);
     try {
-      const n = await libApi.batchDeleteMediaFiles(pendingDelete)
-      notifications.show({ color: 'green', message: `已删除 ${n} 项到回收站` })
-      setPendingDelete([])
-      infinite.reload()
+      const n = await libApi.batchDeleteMediaFiles(pendingDelete);
+      notifications.show({ color: 'green', message: `已删除 ${n} 项到回收站` });
+      setPendingDelete([]);
+      infinite.reload();
     } catch (err) {
-      notifications.show({ color: 'red', message: extractErrorMessage(err, '批量删除失败') })
+      notifications.show({ color: 'red', message: extractErrorMessage(err, '批量删除失败') });
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }, [pendingDelete, infinite])
+  }, [pendingDelete, infinite]);
 
   // 筛选控件（FR-86）：桌面内联铺开、移动收进抽屉，二者共用同一套受控状态
   // 控件按「内容筛选 | 视图」分组成带标签容器（FR-100），更清晰；搜索框在本块之外常驻（FR-35/FR-86）。
@@ -104,7 +139,9 @@ export default function TimelinePage() {
     <Stack gap="lg">
       {/* 内容筛选组（FR-100）：收藏/标签（FR-41）+ 类型/大小/拍摄时间（FR-36） */}
       <Box aria-label="内容筛选" role="group">
-        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>内容筛选</Text>
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>
+          内容筛选
+        </Text>
         <Stack gap="sm">
           <MediaFilterBar
             favorite={favorite}
@@ -127,9 +164,13 @@ export default function TimelinePage() {
 
       {/* 视图组（FR-100）：时间轴缩放（FR-32 + FR-120）年/月/日/所有粒度切换 */}
       <Box aria-label="视图" role="group">
-        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>视图</Text>
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>
+          视图
+        </Text>
         <Group gap="xs" align="center">
-          <Text size="xs" c="dimmed">缩放</Text>
+          <Text size="xs" c="dimmed">
+            缩放
+          </Text>
           <SegmentedControl
             aria-label="时间轴缩放"
             size="xs"
@@ -145,7 +186,7 @@ export default function TimelinePage() {
         </Group>
       </Box>
     </Stack>
-  )
+  );
 
   return (
     <Stack gap="md">
@@ -254,5 +295,5 @@ export default function TimelinePage() {
         loading={deleting}
       />
     </Stack>
-  )
+  );
 }

@@ -13,12 +13,29 @@ globalThis.document = dom.window.document;
 
 // 挂载 DOM 类型到 globalThis
 const domTypes = [
-  'HTMLElement', 'HTMLInputElement', 'HTMLDivElement', 'HTMLSpanElement',
-  'HTMLButtonElement', 'HTMLAnchorElement', 'HTMLImageElement',
-  'HTMLFormElement', 'HTMLLabelElement', 'HTMLSelectElement', 'HTMLTextAreaElement',
-  'Element', 'Node', 'DocumentFragment', 'Text', 'Comment',
-  'Event', 'MouseEvent', 'KeyboardEvent', 'FocusEvent', 'InputEvent',
-  'CustomEvent', 'FormData',
+  'HTMLElement',
+  'HTMLInputElement',
+  'HTMLDivElement',
+  'HTMLSpanElement',
+  'HTMLButtonElement',
+  'HTMLAnchorElement',
+  'HTMLImageElement',
+  'HTMLFormElement',
+  'HTMLLabelElement',
+  'HTMLSelectElement',
+  'HTMLTextAreaElement',
+  'Element',
+  'Node',
+  'DocumentFragment',
+  'Text',
+  'Comment',
+  'Event',
+  'MouseEvent',
+  'KeyboardEvent',
+  'FocusEvent',
+  'InputEvent',
+  'CustomEvent',
+  'FormData',
 ];
 
 for (const type of domTypes) {
@@ -50,7 +67,9 @@ Object.defineProperty(globalThis, 'MutationObserver', {
   value: class {
     observe() {}
     disconnect() {}
-    takeRecords() { return []; }
+    takeRecords() {
+      return [];
+    }
   },
   writable: true,
   configurable: true,
@@ -81,7 +100,9 @@ Object.defineProperty(globalThis, 'requestAnimationFrame', {
   writable: true,
 });
 Object.defineProperty(globalThis, 'queueMicrotask', {
-  value: (fn: () => void) => { Promise.resolve().then(fn); },
+  value: (fn: () => void) => {
+    Promise.resolve().then(fn);
+  },
   writable: true,
 });
 

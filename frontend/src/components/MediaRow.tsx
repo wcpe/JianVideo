@@ -1,25 +1,25 @@
-import { Card, Group, Stack, Text, Checkbox, Box } from '@mantine/core'
-import type { ReactNode } from 'react'
-import MediaThumbnail from '@/components/MediaThumbnail'
+import { Card, Group, Stack, Text, Checkbox, Box } from '@mantine/core';
+import type { ReactNode } from 'react';
+import MediaThumbnail from '@/components/MediaThumbnail';
 
 interface MediaRowProps {
   // 缩略图所需媒体标识与文件名；为空（如巡检页源文件已丢失的问题项）时不渲染缩略图。
-  mediaID?: number
-  thumbFileName?: string
+  mediaID?: number;
+  thumbFileName?: string;
   // 行主标题（展示名 / 文件名）与可选副标题（详情 / 路径等）。
-  title: string
+  title: string;
   // 主标题悬停全文提示（长文件名 / 路径），不传则用 title 文本本身。
-  titleTooltip?: string
-  subtitle?: string
-  subtitleTooltip?: string
+  titleTooltip?: string;
+  subtitle?: string;
+  subtitleTooltip?: string;
   // 勾选模式：传 selectable 时渲染左侧复选框，受控于 selected/onToggle。
-  selectable?: boolean
-  selected?: boolean
-  onToggle?: () => void
+  selectable?: boolean;
+  selected?: boolean;
+  onToggle?: () => void;
   // 复选框无障碍标签（如「选择 xxx.mp4」），勾选模式下必传。
-  checkboxLabel?: string
+  checkboxLabel?: string;
   // 右侧操作区（还原按钮等）。
-  actions?: ReactNode
+  actions?: ReactNode;
 }
 
 /**
@@ -28,8 +28,17 @@ interface MediaRowProps {
  * 直接复用现有 MediaThumbnail（不动其 API/实现）；保留 .mantine-Card-root 类与无障碍标签兼容既有定位。
  */
 export default function MediaRow({
-  mediaID, thumbFileName, title, titleTooltip, subtitle, subtitleTooltip,
-  selectable, selected, onToggle, checkboxLabel, actions,
+  mediaID,
+  thumbFileName,
+  title,
+  titleTooltip,
+  subtitle,
+  subtitleTooltip,
+  selectable,
+  selected,
+  onToggle,
+  checkboxLabel,
+  actions,
 }: MediaRowProps) {
   return (
     <Card withBorder padding="xs" radius="md" className="mantine-Card-root">
@@ -50,14 +59,18 @@ export default function MediaRow({
             </Box>
           )}
           <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
-            <Text size="sm" truncate title={titleTooltip ?? title}>{title}</Text>
+            <Text size="sm" truncate title={titleTooltip ?? title}>
+              {title}
+            </Text>
             {subtitle && (
-              <Text size="xs" c="dimmed" truncate title={subtitleTooltip ?? subtitle}>{subtitle}</Text>
+              <Text size="xs" c="dimmed" truncate title={subtitleTooltip ?? subtitle}>
+                {subtitle}
+              </Text>
             )}
           </Stack>
         </Group>
         {actions && <Box style={{ flexShrink: 0 }}>{actions}</Box>}
       </Group>
     </Card>
-  )
+  );
 }

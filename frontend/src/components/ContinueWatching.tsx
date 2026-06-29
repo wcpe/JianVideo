@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Box, Card, Group, Progress, Stack, Text, Title } from '@mantine/core'
-import MediaThumbnail from '@/components/MediaThumbnail'
-import * as libApi from '@/api/library'
-import type { MediaFile } from '@/types'
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Box, Card, Group, Progress, Stack, Text, Title } from '@mantine/core';
+import MediaThumbnail from '@/components/MediaThumbnail';
+import * as libApi from '@/api/library';
+import type { MediaFile } from '@/types';
 
 /**
  * 首页「继续观看」区块（FR-44）。
@@ -12,18 +12,21 @@ import type { MediaFile } from '@/types'
  * 点击进入播放页从上次位置续播。列表为空时整块不渲染。
  */
 export default function ContinueWatching() {
-  const navigate = useNavigate()
-  const [items, setItems] = useState<MediaFile[]>([])
+  const navigate = useNavigate();
+  const [items, setItems] = useState<MediaFile[]>([]);
 
   const load = useCallback(() => {
-    libApi.getContinueWatching()
+    libApi
+      .getContinueWatching()
       .then(setItems)
-      .catch(() => setItems([]))
-  }, [])
+      .catch(() => setItems([]));
+  }, []);
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
 
   return (
     <Stack gap="xs" data-testid="continue-watching">
@@ -32,7 +35,8 @@ export default function ContinueWatching() {
       <Box style={{ overflowX: 'auto', paddingBottom: 4 }}>
         <Group gap="sm" wrap="nowrap" align="stretch">
           {items.map((f) => {
-            const pct = f.duration > 0 ? Math.min(100, ((f.last_position ?? 0) / f.duration) * 100) : 0
+            const pct =
+              f.duration > 0 ? Math.min(100, ((f.last_position ?? 0) / f.duration) * 100) : 0;
             return (
               <Card
                 key={f.id}
@@ -48,14 +52,16 @@ export default function ContinueWatching() {
                   <MediaThumbnail mediaID={f.id} fileName={f.file_name} />
                 </Card.Section>
                 <Box mt="xs">
-                  <Text size="sm" fw={500} truncate>{f.file_name}</Text>
+                  <Text size="sm" fw={500} truncate>
+                    {f.file_name}
+                  </Text>
                   <Progress value={pct} size="xs" mt={6} color="purple" />
                 </Box>
               </Card>
-            )
+            );
           })}
         </Group>
       </Box>
     </Stack>
-  )
+  );
 }

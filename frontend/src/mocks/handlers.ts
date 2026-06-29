@@ -1,111 +1,118 @@
-import { http, HttpResponse, delay } from 'msw'
-import { mockPaths, mockMediaFiles } from './data'
-import type { LibraryPath, MediaFile, MediaExtension, Album, Tag, ScanTask } from '@/types'
+import { http, HttpResponse, delay } from 'msw';
+import { mockPaths, mockMediaFiles } from './data';
+import type { LibraryPath, MediaFile, MediaExtension, Album, Tag, ScanTask } from '@/types';
 
 // 内存中的可变数据（支持增删）
-let paths = [...mockPaths]
-let mediaFiles = [...mockMediaFiles]
-let mediaExtensions: MediaExtension[] = []
-let nextPathId = Math.max(...paths.map(p => p.id)) + 1
-let nextMediaId = Math.max(...mediaFiles.map(m => m.id)) + 1
-let nextExtensionId = 1
+let paths = [...mockPaths];
+let mediaFiles = [...mockMediaFiles];
+let mediaExtensions: MediaExtension[] = [];
+let nextPathId = Math.max(...paths.map((p) => p.id)) + 1;
+let nextMediaId = Math.max(...mediaFiles.map((m) => m.id)) + 1;
+let nextExtensionId = 1;
 // 运行期设置内存存储（支持读写往返）
 const settingsStore: Record<string, string> = {
   scan_interval: '3600',
   recycle_bin_paths: '{"D":"D:/.recycle"}',
   ffmpeg_path: '',
   ffprobe_path: '',
-}
+};
 
 // 相册（FR-40）内存数据
-let albums: Album[] = []
-let albumItems: { album_id: number; media_id: number }[] = []
-let nextAlbumId = 1
+let albums: Album[] = [];
+let albumItems: { album_id: number; media_id: number }[] = [];
+let nextAlbumId = 1;
 
 // 标签（FR-41）
-const tags: Tag[] = []
-let tagMappings: { tag_id: number; media_id: number }[] = []
-let nextTagId = 1
+const tags: Tag[] = [];
+let tagMappings: { tag_id: number; media_id: number }[] = [];
+let nextTagId = 1;
 
 // 软删除/回收站（FR-25）：被软删的媒体 ID 集合
-const deletedMediaIds = new Set<number>()
+const deletedMediaIds = new Set<number>();
 
 // 扫描任务队列（FR-29）内存数据
-const scanTasks: ScanTask[] = []
-let nextScanTaskId = 1
+const scanTasks: ScanTask[] = [];
+let nextScanTaskId = 1;
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
 
   http.post('*/api/auth/login', async ({ request }) => {
-    await delay(300)
-    const body = await request.json() as { username: string; password: string }
+    await delay(300);
+    const body = (await request.json()) as { username: string; password: string };
     if (body.username === 'admin' && body.password === 'admin') {
       return HttpResponse.json(
         { username: 'admin' },
         {
-          headers: { 'Set-Cookie': 'auth_token=mock_jwt; Path=/; HttpOnly; Secure; Max-Age=259200' },
+          headers: {
+            'Set-Cookie': 'auth_token=mock_jwt; Path=/; HttpOnly; Secure; Max-Age=259200',
+          },
         },
-      )
+      );
     }
     return HttpResponse.json(
       { code: 'INVALID_CREDENTIALS', message: '用户名或密码错误' },
       { status: 401 },
-    )
+    );
   }),
 
   http.post('*/api/auth/logout', async () => {
-    await delay(100)
+    await delay(100);
     return new HttpResponse(null, {
       headers: { 'Set-Cookie': 'auth_token=; Path=/; Max-Age=0' },
-    })
+    });
   }),
 
   http.get('*/api/me', async () => {
-    await delay(100)
-    return HttpResponse.json({ username: 'admin' })
+    await delay(100);
+    return HttpResponse.json({ username: 'admin' });
   }),
 
   // 首次初始化（FR-109）：默认已初始化（admin 存在），不打扰常规用例
   http.get('*/api/auth/setup-status', async () => {
-    await delay(50)
-    return HttpResponse.json({ needs_setup: false })
+    await delay(50);
+    return HttpResponse.json({ needs_setup: false });
   }),
 
   http.post('*/api/auth/setup', async ({ request }) => {
-    await delay(200)
-    const body = await request.json() as { username: string; password: string }
+    await delay(200);
+    const body = (await request.json()) as { username: string; password: string };
     return HttpResponse.json(
       { username: body.username },
-      { headers: { 'Set-Cookie': 'auth_token=mock_jwt; Path=/; HttpOnly; Secure; Max-Age=259200' } },
-    )
+      {
+        headers: { 'Set-Cookie': 'auth_token=mock_jwt; Path=/; HttpOnly; Secure; Max-Age=259200' },
+      },
+    );
   }),
 
   // 修改密码（FR-108）：当前密码为 admin 视为正确，否则 401
   http.post('*/api/me/password', async ({ request }) => {
-    await delay(200)
-    const body = await request.json() as { old_password: string; new_password: string }
+    await delay(200);
+    const body = (await request.json()) as { old_password: string; new_password: string };
     if (body.old_password !== 'admin') {
-      return HttpResponse.json({ code: 'WRONG_PASSWORD', message: '当前密码错误' }, { status: 401 })
+      return HttpResponse.json(
+        { code: 'WRONG_PASSWORD', message: '当前密码错误' },
+        { status: 401 },
+      );
     }
-    return new HttpResponse(null, { status: 204 })
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ─── 媒体库目录 ─────────────────────────────────────
 
   http.get('*/api/library/paths', async () => {
-    await delay(200)
+    await delay(200);
     // 为每个库附带已索引媒体数量，与真实接口字段一致
-    const items = paths.map(p => ({
+    const items = paths.map((p) => ({
       ...p,
-      media_count: mediaFiles.filter(m => m.library_id === p.id).length,
-    }))
-    return HttpResponse.json({ items })
+      media_count: mediaFiles.filter((m) => m.library_id === p.id).length,
+    }));
+    return HttpResponse.json({ items });
   }),
 
   http.post('*/api/library/paths', async ({ request }) => {
-    await delay(300)
-    const body = await request.json() as { path: string; type: string; label: string }
+    await delay(300);
+    const body = (await request.json()) as { path: string; type: string; label: string };
     const newPath: LibraryPath = {
       id: nextPathId++,
       path: body.path,
@@ -113,276 +120,301 @@ export const handlers = [
       label: body.label || body.path,
       enabled: true,
       created_at: new Date().toISOString(),
-    }
-    paths.push(newPath)
-    return HttpResponse.json(newPath, { status: 201 })
+    };
+    paths.push(newPath);
+    return HttpResponse.json(newPath, { status: 201 });
   }),
 
   http.delete('*/api/library/paths/:id', async ({ params }) => {
-    await delay(200)
-    const id = Number(params.id)
-    paths = paths.filter(p => p.id !== id)
+    await delay(200);
+    const id = Number(params.id);
+    paths = paths.filter((p) => p.id !== id);
     // 同时删除关联的媒体文件与自定义后缀
-    mediaFiles = mediaFiles.filter(m => m.library_id !== id)
-    mediaExtensions = mediaExtensions.filter(ext => ext.library_id !== id)
-    return new HttpResponse(null, { status: 204 })
+    mediaFiles = mediaFiles.filter((m) => m.library_id !== id);
+    mediaExtensions = mediaExtensions.filter((ext) => ext.library_id !== id);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ─── 媒体文件 ───────────────────────────────────────
 
   http.get('*/api/library/media', async ({ request }) => {
-    await delay(300)
-    const url = new URL(request.url)
-    const page = Number(url.searchParams.get('page') || '1')
-    const pageSize = Number(url.searchParams.get('page_size') || '20')
-    const search = url.searchParams.get('search') || ''
-    const sort = url.searchParams.get('sort') || ''
-    const favorite = url.searchParams.get('favorite')
-    const tagID = Number(url.searchParams.get('tag_id') || '0')
+    await delay(300);
+    const url = new URL(request.url);
+    const page = Number(url.searchParams.get('page') || '1');
+    const pageSize = Number(url.searchParams.get('page_size') || '20');
+    const search = url.searchParams.get('search') || '';
+    const sort = url.searchParams.get('sort') || '';
+    const favorite = url.searchParams.get('favorite');
+    const tagID = Number(url.searchParams.get('tag_id') || '0');
 
     // 常规列表排除已软删项（FR-25）
-    let items = mediaFiles.filter(m => !deletedMediaIds.has(m.id))
+    let items = mediaFiles.filter((m) => !deletedMediaIds.has(m.id));
     if (search) {
-      items = items.filter(m => m.file_name.toLowerCase().includes(search.toLowerCase()))
+      items = items.filter((m) => m.file_name.toLowerCase().includes(search.toLowerCase()));
     }
     if (favorite === 'true' || favorite === '1') {
-      items = items.filter(m => m.favorite)
+      items = items.filter((m) => m.favorite);
     }
     if (tagID > 0) {
-      const ids = new Set(tagMappings.filter(tm => tm.tag_id === tagID).map(tm => tm.media_id))
-      items = items.filter(m => ids.has(m.id))
+      const ids = new Set(tagMappings.filter((tm) => tm.tag_id === tagID).map((tm) => tm.media_id));
+      items = items.filter((m) => ids.has(m.id));
     }
     if (sort === 'time_desc') {
-      items.sort((a, b) => b.added_at.localeCompare(a.added_at))
+      items.sort((a, b) => b.added_at.localeCompare(a.added_at));
     }
 
-    const total = items.length
-    const start = (page - 1) * pageSize
-    const paged = items.slice(start, start + pageSize)
+    const total = items.length;
+    const start = (page - 1) * pageSize;
+    const paged = items.slice(start, start + pageSize);
 
-    return HttpResponse.json({ items: paged, total, page, page_size: pageSize })
+    return HttpResponse.json({ items: paged, total, page, page_size: pageSize });
   }),
 
   // ─── 收藏与标签（FR-41）──────────────────────────────
 
   // 真实文件名改名（FR-30）：仅模拟更新 file_name，不动 display_name
   http.put('*/api/library/media/:id/rename', async ({ request, params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    const body = await request.json() as { new_name: string }
-    const newName = (body.new_name || '').trim()
+    const body = (await request.json()) as { new_name: string };
+    const newName = (body.new_name || '').trim();
     if (!newName || /[/\\]/.test(newName) || newName === '.' || newName === '..') {
-      return HttpResponse.json({ code: 'RENAME_REJECTED', message: '新文件名不合法' }, { status: 400 })
+      return HttpResponse.json(
+        { code: 'RENAME_REJECTED', message: '新文件名不合法' },
+        { status: 400 },
+      );
     }
-    file.file_name = newName
-    return HttpResponse.json(file)
+    file.file_name = newName;
+    return HttpResponse.json(file);
   }),
 
   // 显示名修改（FR-30）：仅更新库内 display_name，不动磁盘真实文件名
   http.put('*/api/library/media/:id/display-name', async ({ request, params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    const body = await request.json() as { display_name: string }
-    file.display_name = (body.display_name || '').trim()
-    return HttpResponse.json(file)
+    const body = (await request.json()) as { display_name: string };
+    file.display_name = (body.display_name || '').trim();
+    return HttpResponse.json(file);
   }),
 
   http.put('*/api/library/media/:id/favorite', async ({ request, params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    const body = await request.json() as { favorite: boolean }
-    file.favorite = body.favorite
-    return HttpResponse.json(file)
+    const body = (await request.json()) as { favorite: boolean };
+    file.favorite = body.favorite;
+    return HttpResponse.json(file);
   }),
 
   http.get('*/api/library/tags', async () => {
-    await delay(100)
-    return HttpResponse.json({ items: [...tags].sort((a, b) => a.name.localeCompare(b.name)) })
+    await delay(100);
+    return HttpResponse.json({ items: [...tags].sort((a, b) => a.name.localeCompare(b.name)) });
   }),
 
   http.post('*/api/library/tags', async ({ request }) => {
-    await delay(100)
-    const body = await request.json() as { name: string }
-    const name = (body.name || '').trim()
+    await delay(100);
+    const body = (await request.json()) as { name: string };
+    const name = (body.name || '').trim();
     if (!name) {
-      return HttpResponse.json({ code: 'INVALID_TAG', message: '标签名不能为空' }, { status: 400 })
+      return HttpResponse.json({ code: 'INVALID_TAG', message: '标签名不能为空' }, { status: 400 });
     }
-    let tag = tags.find(t => t.name === name)
+    let tag = tags.find((t) => t.name === name);
     if (!tag) {
-      tag = { id: nextTagId++, name, created_at: new Date().toISOString() }
-      tags.push(tag)
+      tag = { id: nextTagId++, name, created_at: new Date().toISOString() };
+      tags.push(tag);
     }
-    return HttpResponse.json(tag, { status: 201 })
+    return HttpResponse.json(tag, { status: 201 });
   }),
 
   http.get('*/api/library/media/:id/tags', async ({ params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const ids = new Set(tagMappings.filter(tm => tm.media_id === id).map(tm => tm.tag_id))
-    return HttpResponse.json({ items: tags.filter(t => ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name)) })
+    await delay(100);
+    const id = Number(params.id);
+    const ids = new Set(tagMappings.filter((tm) => tm.media_id === id).map((tm) => tm.tag_id));
+    return HttpResponse.json({
+      items: tags.filter((t) => ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name)),
+    });
   }),
 
   http.post('*/api/library/media/:id/tags', async ({ request, params }) => {
-    await delay(100)
-    const mediaID = Number(params.id)
-    const body = await request.json() as { tag_id?: number; name?: string }
-    let tag: Tag | undefined
+    await delay(100);
+    const mediaID = Number(params.id);
+    const body = (await request.json()) as { tag_id?: number; name?: string };
+    let tag: Tag | undefined;
     if (body.tag_id) {
-      tag = tags.find(t => t.id === body.tag_id)
+      tag = tags.find((t) => t.id === body.tag_id);
     } else if (body.name) {
-      const name = body.name.trim()
-      if (!name) return HttpResponse.json({ code: 'INVALID_TAG', message: '标签名不能为空' }, { status: 400 })
-      tag = tags.find(t => t.name === name)
+      const name = body.name.trim();
+      if (!name)
+        return HttpResponse.json(
+          { code: 'INVALID_TAG', message: '标签名不能为空' },
+          { status: 400 },
+        );
+      tag = tags.find((t) => t.name === name);
       if (!tag) {
-        tag = { id: nextTagId++, name, created_at: new Date().toISOString() }
-        tags.push(tag)
+        tag = { id: nextTagId++, name, created_at: new Date().toISOString() };
+        tags.push(tag);
       }
     }
-    if (!tag) return HttpResponse.json({ code: 'ADD_TAG_FAILED', message: '标签不存在' }, { status: 400 })
-    if (!tagMappings.some(tm => tm.tag_id === tag!.id && tm.media_id === mediaID)) {
-      tagMappings.push({ tag_id: tag.id, media_id: mediaID })
+    if (!tag)
+      return HttpResponse.json({ code: 'ADD_TAG_FAILED', message: '标签不存在' }, { status: 400 });
+    if (!tagMappings.some((tm) => tm.tag_id === tag!.id && tm.media_id === mediaID)) {
+      tagMappings.push({ tag_id: tag.id, media_id: mediaID });
     }
-    return HttpResponse.json(tag, { status: 201 })
+    return HttpResponse.json(tag, { status: 201 });
   }),
 
   http.delete('*/api/library/media/:id/tags/:tagId', async ({ params }) => {
-    await delay(100)
-    const mediaID = Number(params.id)
-    const tagID = Number(params.tagId)
-    tagMappings = tagMappings.filter(tm => !(tm.tag_id === tagID && tm.media_id === mediaID))
-    return new HttpResponse(null, { status: 204 })
+    await delay(100);
+    const mediaID = Number(params.id);
+    const tagID = Number(params.tagId);
+    tagMappings = tagMappings.filter((tm) => !(tm.tag_id === tagID && tm.media_id === mediaID));
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ─── 续播与观看状态（FR-44）─────────────────────────
 
   http.get('*/api/library/continue-watching', async ({ request }) => {
-    await delay(100)
-    const limit = Number(new URL(request.url).searchParams.get('limit') || '12')
+    await delay(100);
+    const limit = Number(new URL(request.url).searchParams.get('limit') || '12');
     const items = mediaFiles
-      .filter(m => (m.last_position ?? 0) > 0 && !m.watched)
+      .filter((m) => (m.last_position ?? 0) > 0 && !m.watched)
       .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
-      .slice(0, limit)
-    return HttpResponse.json({ items })
+      .slice(0, limit);
+    return HttpResponse.json({ items });
   }),
 
   // ─── 最近查看（FR-120）────────────────────────────────
 
   // 记录媒体查看：把 last_viewed_at 置为当前时间（不存在 → 404）
   http.put('*/api/library/media/:id/viewed', async ({ params }) => {
-    await delay(80)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(80);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    file.last_viewed_at = new Date().toISOString()
-    return HttpResponse.json({ ok: true })
+    file.last_viewed_at = new Date().toISOString();
+    return HttpResponse.json({ ok: true });
   }),
 
   // 最近查看列表：last_viewed_at 非空、未软删，按 last_viewed_at 倒序
   http.get('*/api/library/recently-viewed', async ({ request }) => {
-    await delay(100)
-    const limit = Number(new URL(request.url).searchParams.get('limit') || '12')
+    await delay(100);
+    const limit = Number(new URL(request.url).searchParams.get('limit') || '12');
     const items = mediaFiles
-      .filter(m => !deletedMediaIds.has(m.id) && !!m.last_viewed_at)
+      .filter((m) => !deletedMediaIds.has(m.id) && !!m.last_viewed_at)
       .sort((a, b) => (b.last_viewed_at ?? '').localeCompare(a.last_viewed_at ?? ''))
-      .slice(0, limit)
-    return HttpResponse.json({ items })
+      .slice(0, limit);
+    return HttpResponse.json({ items });
   }),
 
   // 编码协商（FR-53）：默认返回 h264/TS 描述符，使既有播放流程沿用 master 探测；
   // 需要 fMP4 路径的用例在测试中用 server.use 覆盖。
   http.post('*/api/play/:id/negotiate', async ({ params }) => {
-    await delay(50)
-    const id = Number(params.id)
-    return HttpResponse.json({ codec: 'h264', path: 'ts', url: `/api/play/hls/${id}/master` })
+    await delay(50);
+    const id = Number(params.id);
+    return HttpResponse.json({ codec: 'h264', path: 'ts', url: `/api/play/hls/${id}/master` });
   }),
 
   http.put('*/api/play/:id/position', async ({ request, params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    const body = await request.json() as { position: number }
-    file.last_position = body.position < 0 ? 0 : body.position
-    file.last_watched_at = new Date().toISOString()
-    return HttpResponse.json(file)
+    const body = (await request.json()) as { position: number };
+    file.last_position = body.position < 0 ? 0 : body.position;
+    file.last_watched_at = new Date().toISOString();
+    return HttpResponse.json(file);
   }),
 
   http.put('*/api/play/:id/watched', async ({ params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    file.watched = true
-    file.last_position = 0
-    file.last_watched_at = new Date().toISOString()
-    return HttpResponse.json(file)
+    file.watched = true;
+    file.last_position = 0;
+    file.last_watched_at = new Date().toISOString();
+    return HttpResponse.json(file);
   }),
 
   http.get('*/api/library/media/:id/raw', async ({ params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    return new HttpResponse('', { headers: { 'Content-Type': `image/${file.format}` } })
+    return new HttpResponse('', { headers: { 'Content-Type': `image/${file.format}` } });
   }),
 
   // 下载原文件（FR-42）：以附件形式回传原始文件
   http.get('*/api/library/media/:id/download', async ({ params }) => {
-    await delay(100)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
     return new HttpResponse('mock-file-bytes', {
-      headers: { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}` },
-    })
+      headers: {
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}`,
+      },
+    });
   }),
 
   http.get('*/api/library/media/:id', async ({ params }) => {
-    await delay(200)
-    const id = Number(params.id)
-    const file = mediaFiles.find(m => m.id === id)
+    await delay(200);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
     if (!file) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 })
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    return HttpResponse.json(file)
+    return HttpResponse.json(file);
   }),
 
   http.get('*/api/library/extensions', async ({ request }) => {
-    await delay(100)
-    const libraryID = Number(new URL(request.url).searchParams.get('library_id') || '0')
-    return HttpResponse.json({ items: mediaExtensions.filter(ext => ext.library_id === libraryID) })
+    await delay(100);
+    const libraryID = Number(new URL(request.url).searchParams.get('library_id') || '0');
+    return HttpResponse.json({
+      items: mediaExtensions.filter((ext) => ext.library_id === libraryID),
+    });
   }),
 
   http.post('*/api/library/extensions', async ({ request }) => {
-    await delay(100)
-    const body = await request.json() as { library_id: number; extension: string; type: 'image' | 'video' }
-    const extension = body.extension.trim().toLowerCase().replace(/^\./, '')
+    await delay(100);
+    const body = (await request.json()) as {
+      library_id: number;
+      extension: string;
+      type: 'image' | 'video';
+    };
+    const extension = body.extension.trim().toLowerCase().replace(/^\./, '');
     if (!extension) {
-      return HttpResponse.json({ code: 'INVALID_EXTENSION', message: '后缀格式不支持' }, { status: 400 })
+      return HttpResponse.json(
+        { code: 'INVALID_EXTENSION', message: '后缀格式不支持' },
+        { status: 400 },
+      );
     }
-    if (!mediaExtensions.some(ext => ext.library_id === body.library_id && ext.extension === extension)) {
+    if (
+      !mediaExtensions.some(
+        (ext) => ext.library_id === body.library_id && ext.extension === extension,
+      )
+    ) {
       mediaExtensions.push({
         id: nextExtensionId++,
         library_id: body.library_id,
@@ -390,175 +422,194 @@ export const handlers = [
         type: body.type,
         is_builtin: 0,
         created_at: new Date().toISOString(),
-      })
+      });
     }
-    return new HttpResponse(null, { status: 201 })
+    return new HttpResponse(null, { status: 201 });
   }),
 
   // 删除自定义后缀（FR-64）：内置不可删、删不存在返回 400
   http.delete('*/api/library/extensions', async ({ request }) => {
-    await delay(100)
-    const url = new URL(request.url)
-    const libraryID = Number(url.searchParams.get('library_id') || '0')
-    const extension = (url.searchParams.get('extension') || '').trim().toLowerCase().replace(/^\./, '')
-    const idx = mediaExtensions.findIndex(ext => ext.library_id === libraryID && ext.extension === extension && ext.is_builtin === 0)
+    await delay(100);
+    const url = new URL(request.url);
+    const libraryID = Number(url.searchParams.get('library_id') || '0');
+    const extension = (url.searchParams.get('extension') || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^\./, '');
+    const idx = mediaExtensions.findIndex(
+      (ext) => ext.library_id === libraryID && ext.extension === extension && ext.is_builtin === 0,
+    );
     if (idx === -1) {
-      return HttpResponse.json({ code: 'DELETE_EXTENSION_FAILED', message: '自定义后缀不存在' }, { status: 400 })
+      return HttpResponse.json(
+        { code: 'DELETE_EXTENSION_FAILED', message: '自定义后缀不存在' },
+        { status: 400 },
+      );
     }
-    mediaExtensions.splice(idx, 1)
-    return new HttpResponse(null, { status: 204 })
+    mediaExtensions.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.delete('*/api/library/media/:id', async ({ params }) => {
-    await delay(200)
-    const id = Number(params.id)
+    await delay(200);
+    const id = Number(params.id);
     // 软删除（FR-25）：仅标记，不从内存数据移除
-    if (mediaFiles.some(m => m.id === id)) deletedMediaIds.add(id)
-    return new HttpResponse(null, { status: 204 })
+    if (mediaFiles.some((m) => m.id === id)) deletedMediaIds.add(id);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // 批量软删（FR-69）：把存在且未软删的 id 批量加入回收站，返回实际软删条数
   http.post('*/api/library/media/batch-delete', async ({ request }) => {
-    await delay(200)
-    const body = (await request.json()) as { ids?: number[] }
-    let deleted = 0
+    await delay(200);
+    const body = (await request.json()) as { ids?: number[] };
+    let deleted = 0;
     for (const id of body.ids ?? []) {
-      if (mediaFiles.some(m => m.id === id) && !deletedMediaIds.has(id)) {
-        deletedMediaIds.add(id)
-        deleted++
+      if (mediaFiles.some((m) => m.id === id) && !deletedMediaIds.has(id)) {
+        deletedMediaIds.add(id);
+        deleted++;
       }
     }
-    return HttpResponse.json({ deleted })
+    return HttpResponse.json({ deleted });
   }),
 
   // ─── 软删除与回收站（FR-25）──────────────────────────
 
   http.get('*/api/library/recycle', async () => {
-    await delay(200)
-    const items = mediaFiles.filter(m => deletedMediaIds.has(m.id))
-    return HttpResponse.json({ items })
+    await delay(200);
+    const items = mediaFiles.filter((m) => deletedMediaIds.has(m.id));
+    return HttpResponse.json({ items });
   }),
 
   http.post('*/api/library/media/:id/restore', async ({ params }) => {
-    await delay(200)
-    const id = Number(params.id)
+    await delay(200);
+    const id = Number(params.id);
     if (!deletedMediaIds.has(id)) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '回收站中不存在该媒体文件' }, { status: 404 })
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: '回收站中不存在该媒体文件' },
+        { status: 404 },
+      );
     }
-    deletedMediaIds.delete(id)
-    return new HttpResponse(null, { status: 204 })
+    deletedMediaIds.delete(id);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // 回收站清理（FR-26）：把全部软删项移出（模拟移到回收站目录 + 删记录）
   http.post('*/api/library/recycle/cleanup', async () => {
-    await delay(200)
-    let moved = 0
+    await delay(200);
+    let moved = 0;
     for (const id of deletedMediaIds) {
-      mediaFiles = mediaFiles.filter(m => m.id !== id)
-      moved++
+      mediaFiles = mediaFiles.filter((m) => m.id !== id);
+      moved++;
     }
-    deletedMediaIds.clear()
-    return HttpResponse.json({ moved, failed: 0 })
+    deletedMediaIds.clear();
+    return HttpResponse.json({ moved, failed: 0 });
   }),
 
   // ─── 目录浏览 ─────────────────────────────────────────
 
   http.get('*/api/library/browse', async ({ request }) => {
-    await delay(200)
-    const url = new URL(request.url)
-    const parentPath = url.searchParams.get('parent_path') || '__root__'
-    const sort = url.searchParams.get('sort') || 'name'
-    const alive = mediaFiles.filter(m => !deletedMediaIds.has(m.id))
+    await delay(200);
+    const url = new URL(request.url);
+    const parentPath = url.searchParams.get('parent_path') || '__root__';
+    const sort = url.searchParams.get('sort') || 'name';
+    const alive = mediaFiles.filter((m) => !deletedMediaIds.has(m.id));
 
     // 真实路径树根（FR-121）：各启用库推导卷根、去重排序作为顶层目录项（不带 library_id）。
     if (parentPath === '__root__') {
       const volRoot = (raw: string): string => {
-        const p = raw.replace(/\\/g, '/')
+        const p = raw.replace(/\\/g, '/');
         if (p.startsWith('//')) {
-          const seg = p.slice(2).split('/').filter(Boolean)
-          return seg.length >= 2 ? `//${seg[0]}/${seg[1]}` : p
+          const seg = p.slice(2).split('/').filter(Boolean);
+          return seg.length >= 2 ? `//${seg[0]}/${seg[1]}` : p;
         }
-        const m = p.match(/^([A-Za-z]:)/)
-        return m ? m[1] : (p.split('/').filter(Boolean)[0] || p)
-      }
-      const roots = Array.from(new Set(paths.filter(p => p.enabled).map(p => volRoot(p.path)))).sort()
+        const m = p.match(/^([A-Za-z]:)/);
+        return m ? m[1] : p.split('/').filter(Boolean)[0] || p;
+      };
+      const roots = Array.from(
+        new Set(paths.filter((p) => p.enabled).map((p) => volRoot(p.path))),
+      ).sort();
       return HttpResponse.json({
         breadcrumbs: [{ name: '全部', path: '__root__' }],
-        directories: roots.map(r => ({ name: r, path: r })),
+        directories: roots.map((r) => ({ name: r, path: r })),
         files: [],
-      })
+      });
     }
 
     // 浏览真实路径 P（FR-121）：跨所有库按前缀合并，不依赖 library_id。
-    const prefix = parentPath.replace(/\\/g, '/') + '/'
-    const dirSet = new Set<string>()
-    const files: MediaFile[] = []
+    const prefix = parentPath.replace(/\\/g, '/') + '/';
+    const dirSet = new Set<string>();
+    const files: MediaFile[] = [];
     for (const f of alive) {
-      const fp = f.file_path.replace(/\\/g, '/')
-      if (!fp.startsWith(prefix)) continue
-      const rel = fp.slice(prefix.length)
-      const slashIdx = rel.indexOf('/')
-      if (slashIdx !== -1) dirSet.add(rel.substring(0, slashIdx))
-      else files.push(f)
+      const fp = f.file_path.replace(/\\/g, '/');
+      if (!fp.startsWith(prefix)) continue;
+      const rel = fp.slice(prefix.length);
+      const slashIdx = rel.indexOf('/');
+      if (slashIdx !== -1) dirSet.add(rel.substring(0, slashIdx));
+      else files.push(f);
     }
 
     // 面包屑：按分隔符拆段累进，Windows 盘符不加前导斜杠（`D:/...`）。
-    const cleanPath = parentPath.replace(/\\/g, '/').replace(/\/+$/g, '')
-    const parts = cleanPath.split('/').filter(Boolean)
-    const breadcrumbs: { name: string; path: string }[] = []
-    let current = ''
+    const cleanPath = parentPath.replace(/\\/g, '/').replace(/\/+$/g, '');
+    const parts = cleanPath.split('/').filter(Boolean);
+    const breadcrumbs: { name: string; path: string }[] = [];
+    let current = '';
     for (const seg of parts) {
-      current = current === '' ? seg : `${current}/${seg}`
-      breadcrumbs.push({ name: seg, path: current })
+      current = current === '' ? seg : `${current}/${seg}`;
+      breadcrumbs.push({ name: seg, path: current });
     }
-    if (breadcrumbs.length === 0) breadcrumbs.push({ name: cleanPath || '/', path: cleanPath || '/' })
+    if (breadcrumbs.length === 0)
+      breadcrumbs.push({ name: cleanPath || '/', path: cleanPath || '/' });
 
     // 服务端排序（FR-121）：目录恒在前、按名；文件按 sort 升序。
     const sorted = [...files].sort((a, b) => {
-      if (sort === 'size') return a.file_size - b.file_size
-      if (sort === 'type') return (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name)
-      if (sort === 'time') return (a.modified_at || '').localeCompare(b.modified_at || '')
-      return a.file_name.localeCompare(b.file_name)
-    })
+      if (sort === 'size') return a.file_size - b.file_size;
+      if (sort === 'type')
+        return (
+          (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name)
+        );
+      if (sort === 'time') return (a.modified_at || '').localeCompare(b.modified_at || '');
+      return a.file_name.localeCompare(b.file_name);
+    });
 
     return HttpResponse.json({
       breadcrumbs,
-      directories: Array.from(dirSet).sort().map(name => ({ name, path: prefix + name })),
+      directories: Array.from(dirSet)
+        .sort()
+        .map((name) => ({ name, path: prefix + name })),
       files: sorted,
-    })
+    });
   }),
 
   // ─── 字幕 ─────────────────────────────────────────────
 
   http.get('*/api/play/:id/subtitles', async () => {
-    await delay(150)
+    await delay(150);
     return HttpResponse.json({
       tracks: [
         { index: 0, file_name: '电影名.srt', format: 'srt', url: '/api/play/1/subtitles/0' },
         { index: 1, file_name: '电影名.ass', format: 'ass', url: '/api/play/1/subtitles/1' },
       ],
-    })
+    });
   }),
 
   http.get('*/api/play/:id/subtitles/:index', async () => {
-    await delay(100)
+    await delay(100);
     return new HttpResponse(
       'WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n这是第一条测试字幕\n\n2\n00:00:04.000 --> 00:00:06.000\n这是第二条测试字幕\n',
       { headers: { 'Content-Type': 'text/vtt' } },
-    )
+    );
   }),
 
   // ─── SMB 凭据 ──────────────────────────────────────────
 
   http.post('*/api/smb/credentials', async () => {
-    await delay(200)
-    return new HttpResponse(null, { status: 204 })
+    await delay(200);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // ─── 系统诊断 ──────────────────────────────────────────
 
   http.get('*/api/system/info', async () => {
-    await delay(150)
+    await delay(150);
     return HttpResponse.json({
       app_version: '0.3.0',
       os: 'linux',
@@ -615,18 +666,46 @@ export const handlers = [
         ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
         tested_at: '2026-06-23T10:00:00Z',
       },
-    })
+    });
   }),
 
   http.post('*/api/system/codec-test', async () => {
-    await delay(200)
+    await delay(200);
     return HttpResponse.json({
       ffmpeg_available: true,
       results: [
-        { encoder: 'libx264', family: 'software', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
-        { encoder: 'libx265', family: 'software', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
-        { encoder: 'h264_amf', family: 'amf', codec: 'h264', compiled: true, tested_ok: true, detail: '' },
-        { encoder: 'hevc_amf', family: 'amf', codec: 'h265', compiled: true, tested_ok: true, detail: '' },
+        {
+          encoder: 'libx264',
+          family: 'software',
+          codec: 'h264',
+          compiled: true,
+          tested_ok: true,
+          detail: '',
+        },
+        {
+          encoder: 'libx265',
+          family: 'software',
+          codec: 'h265',
+          compiled: true,
+          tested_ok: true,
+          detail: '',
+        },
+        {
+          encoder: 'h264_amf',
+          family: 'amf',
+          codec: 'h264',
+          compiled: true,
+          tested_ok: true,
+          detail: '',
+        },
+        {
+          encoder: 'hevc_amf',
+          family: 'amf',
+          codec: 'h265',
+          compiled: true,
+          tested_ok: true,
+          detail: '',
+        },
         {
           encoder: 'av1_amf',
           family: 'amf',
@@ -639,53 +718,79 @@ export const handlers = [
       from_cache: true,
       ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
       tested_at: '2026-06-23T10:00:00Z',
-    })
+    });
   }),
 
   // 环境变量查看（FR-56）：只读，敏感项已脱敏（绝不含明文）
   http.get('*/api/system/env', async () => {
-    await delay(80)
+    await delay(80);
     return HttpResponse.json({
       env: [
-        { key: 'JIANVIDEO_FFMPEG_PATH', description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH', sensitive: false, set: true, value: '/opt/jianvideo/ffmpeg' },
-        { key: 'JIANVIDEO_DEBUG', description: '设为 1/true 时启用 gin debug 模式（输出调试日志）', sensitive: false, set: false, value: '' },
-        { key: 'JWT_SECRET', description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）', sensitive: true, set: true, value: '****（已设置）' },
-        { key: 'SMB_MASTER_PASSWORD', description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用', sensitive: true, set: false, value: '（未设置）' },
+        {
+          key: 'JIANVIDEO_FFMPEG_PATH',
+          description: 'ffmpeg 可执行文件路径，未设置时回退同目录捆绑版或 PATH',
+          sensitive: false,
+          set: true,
+          value: '/opt/jianvideo/ffmpeg',
+        },
+        {
+          key: 'JIANVIDEO_DEBUG',
+          description: '设为 1/true 时启用 gin debug 模式（输出调试日志）',
+          sensitive: false,
+          set: false,
+          value: '',
+        },
+        {
+          key: 'JWT_SECRET',
+          description: 'JWT 签名密钥，未设置时启动随机生成（重启后需重新登录）',
+          sensitive: true,
+          set: true,
+          value: '****（已设置）',
+        },
+        {
+          key: 'SMB_MASTER_PASSWORD',
+          description: 'SMB 凭据加解密主密码，未设置则 SMB 凭据功能不可用',
+          sensitive: true,
+          set: false,
+          value: '（未设置）',
+        },
       ],
-    })
+    });
   }),
 
   // FFmpeg 路径检测（FR-56）：含 ffmpeg 字样或空路径视为可用
   http.post('*/api/system/ffmpeg/detect', async ({ request }) => {
-    await delay(120)
-    const body = await request.json() as { path?: string }
-    const path = body.path || ''
-    const available = !path || path.toLowerCase().includes('ffmpeg')
+    await delay(120);
+    const body = (await request.json()) as { path?: string };
+    const path = body.path || '';
+    const available = !path || path.toLowerCase().includes('ffmpeg');
     return HttpResponse.json({
       ffmpeg_available: available,
-      ffmpeg_version: available ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers' : '',
-    })
+      ffmpeg_version: available
+        ? 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers'
+        : '',
+    });
   }),
 
   // 代理连通性测试（FR-89）：含 bad 字样视为不可达，其余（含空=直连）视为可达
   http.post('*/api/system/proxy/test', async ({ request }) => {
-    await delay(120)
-    const body = await request.json() as { proxy?: string }
-    const proxy = body.proxy || ''
-    const reachable = !proxy || !proxy.toLowerCase().includes('bad')
+    await delay(120);
+    const body = (await request.json()) as { proxy?: string };
+    const proxy = body.proxy || '';
+    const reachable = !proxy || !proxy.toLowerCase().includes('bad');
     return HttpResponse.json({
       reachable,
       detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
       latency_ms: reachable ? 123 : 0,
       target: 'https://api.github.com',
-    })
+    });
   }),
 
   // 自更新（FR-46）
   http.get('*/api/system/update/check', async ({ request }) => {
-    await delay(150)
-    const channel = new URL(request.url).searchParams.get('channel') || 'stable'
-    const prerelease = channel === 'prerelease'
+    await delay(150);
+    const channel = new URL(request.url).searchParams.get('channel') || 'stable';
+    const prerelease = channel === 'prerelease';
     return HttpResponse.json({
       current: '0.3.0',
       latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
@@ -696,56 +801,59 @@ export const handlers = [
       notes: '示例发布说明',
       asset_name: 'jianvideo-linux-amd64',
       rollback_available: false,
-    })
+    });
   }),
   http.post('*/api/system/update/apply', async () => {
-    await delay(100)
-    return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' })
+    await delay(100);
+    return HttpResponse.json({ status: 'updating', message: '更新已应用，服务即将重启' });
   }),
   http.post('*/api/system/update/rollback', async () => {
-    await delay(100)
-    return HttpResponse.json({ status: 'rolling_back', message: '已回滚到上一版本，服务即将重启' })
+    await delay(100);
+    return HttpResponse.json({ status: 'rolling_back', message: '已回滚到上一版本，服务即将重启' });
   }),
   // 自更新下载进度（FR-90）
   http.get('*/api/system/update/progress', async () => {
-    await delay(50)
+    await delay(50);
     return HttpResponse.json({
       state: 'downloading',
       downloaded: 6 * 1024 * 1024,
       total: 12 * 1024 * 1024,
       percent: 50,
-    })
+    });
   }),
 
   // ─── 运行期设置 ────────────────────────────────────────
 
   http.get('*/api/settings', async () => {
-    await delay(100)
-    return HttpResponse.json({ settings: { ...settingsStore } })
+    await delay(100);
+    return HttpResponse.json({ settings: { ...settingsStore } });
   }),
 
   http.put('*/api/settings', async ({ request }) => {
-    await delay(100)
-    const body = await request.json() as { settings: Record<string, string> }
+    await delay(100);
+    const body = (await request.json()) as { settings: Record<string, string> };
     if (!body.settings || Object.keys(body.settings).length === 0) {
-      return HttpResponse.json({ code: 'EMPTY_SETTINGS', message: 'settings 不能为空' }, { status: 400 })
+      return HttpResponse.json(
+        { code: 'EMPTY_SETTINGS', message: 'settings 不能为空' },
+        { status: 400 },
+      );
     }
-    Object.assign(settingsStore, body.settings)
-    return HttpResponse.json({ settings: { ...settingsStore } })
+    Object.assign(settingsStore, body.settings);
+    return HttpResponse.json({ settings: { ...settingsStore } });
   }),
 
   // ─── 扫描 ──────────────────────────────────────────────
 
   http.post('*/api/library/scan/:id', async ({ params }) => {
-    await delay(500)
-    const id = Number(params.id)
-    const libraryPath = paths.find(p => p.id === id)?.path || 'D:\\Videos'
+    await delay(500);
+    const id = Number(params.id);
+    const libraryPath = paths.find((p) => p.id === id)?.path || 'D:\\Videos';
     // 模拟扫描：随机添加 1-3 个新文件
-    const count = Math.floor(Math.random() * 3) + 1
-    const formats = ['mp4', 'mkv', 'avi', 'mov']
+    const count = Math.floor(Math.random() * 3) + 1;
+    const formats = ['mp4', 'mkv', 'avi', 'mov'];
     for (let i = 0; i < count; i++) {
-      const fileId = nextMediaId++
-      const format = formats[i % formats.length]
+      const fileId = nextMediaId++;
+      const format = formats[i % formats.length];
       const newFile: MediaFile = {
         id: fileId,
         library_id: id,
@@ -762,45 +870,55 @@ export const handlers = [
         subtitle_tracks: '',
         added_at: new Date().toISOString(),
         modified_at: new Date().toISOString(),
-      }
-      mediaFiles.push(newFile)
+      };
+      mediaFiles.push(newFile);
     }
     // 扫描任务队列（FR-29）：入队一条已完成任务，供页眉任务展示
-    const now = new Date().toISOString()
+    const now = new Date().toISOString();
     scanTasks.unshift({
-      id: nextScanTaskId++, library_id: id, scan_type: 'full', status: 'completed',
-      scanned_files: count, total_files: count, error: '',
-      created_at: now, started_at: now, completed_at: now,
-    })
-    return HttpResponse.json({ status: 'queued', task_id: nextScanTaskId - 1 })
+      id: nextScanTaskId++,
+      library_id: id,
+      scan_type: 'full',
+      status: 'completed',
+      scanned_files: count,
+      total_files: count,
+      error: '',
+      created_at: now,
+      started_at: now,
+      completed_at: now,
+    });
+    return HttpResponse.json({ status: 'queued', task_id: nextScanTaskId - 1 });
   }),
 
   // 扫描任务列表（FR-29）
   http.get('*/api/library/scan/tasks', async () => {
-    await delay(50)
-    const current = scanTasks.find(t => t.status === 'running') ?? null
-    return HttpResponse.json({ tasks: [...scanTasks], current })
+    await delay(50);
+    const current = scanTasks.find((t) => t.status === 'running') ?? null;
+    return HttpResponse.json({ tasks: [...scanTasks], current });
   }),
 
   // ─── 相册（FR-40）──────────────────────────────────────
 
   http.get('*/api/albums', async () => {
-    await delay(120)
-    const items = albums.map(a => ({
+    await delay(120);
+    const items = albums.map((a) => ({
       ...a,
-      item_count: albumItems.filter(it => it.album_id === a.id).length,
-    }))
-    return HttpResponse.json({ items })
+      item_count: albumItems.filter((it) => it.album_id === a.id).length,
+    }));
+    return HttpResponse.json({ items });
   }),
 
   http.post('*/api/albums', async ({ request }) => {
-    await delay(150)
-    const body = await request.json() as { name: string; description?: string }
-    const name = (body.name || '').trim()
+    await delay(150);
+    const body = (await request.json()) as { name: string; description?: string };
+    const name = (body.name || '').trim();
     if (!name) {
-      return HttpResponse.json({ code: 'INVALID_INPUT', message: '相册名称不能为空' }, { status: 400 })
+      return HttpResponse.json(
+        { code: 'INVALID_INPUT', message: '相册名称不能为空' },
+        { status: 400 },
+      );
     }
-    const now = new Date().toISOString()
+    const now = new Date().toISOString();
     const album: Album = {
       id: nextAlbumId++,
       name,
@@ -808,50 +926,50 @@ export const handlers = [
       cover_media_id: 0,
       created_at: now,
       updated_at: now,
-    }
-    albums.unshift(album)
-    return HttpResponse.json(album, { status: 201 })
+    };
+    albums.unshift(album);
+    return HttpResponse.json(album, { status: 201 });
   }),
 
   http.delete('*/api/albums/:id', async ({ params }) => {
-    await delay(120)
-    const id = Number(params.id)
-    if (!albums.some(a => a.id === id)) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册不存在' }, { status: 404 })
+    await delay(120);
+    const id = Number(params.id);
+    if (!albums.some((a) => a.id === id)) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册不存在' }, { status: 404 });
     }
-    albums = albums.filter(a => a.id !== id)
-    albumItems = albumItems.filter(it => it.album_id !== id)
-    return new HttpResponse(null, { status: 204 })
+    albums = albums.filter((a) => a.id !== id);
+    albumItems = albumItems.filter((it) => it.album_id !== id);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get('*/api/albums/:id/items', async ({ params }) => {
-    await delay(120)
-    const id = Number(params.id)
+    await delay(120);
+    const id = Number(params.id);
     const items = albumItems
-      .filter(it => it.album_id === id)
-      .map(it => mediaFiles.find(m => m.id === it.media_id))
-      .filter((m): m is MediaFile => m !== undefined)
-    return HttpResponse.json({ items })
+      .filter((it) => it.album_id === id)
+      .map((it) => mediaFiles.find((m) => m.id === it.media_id))
+      .filter((m): m is MediaFile => m !== undefined);
+    return HttpResponse.json({ items });
   }),
 
   http.post('*/api/albums/:id/items', async ({ params, request }) => {
-    await delay(120)
-    const id = Number(params.id)
-    const body = await request.json() as { media_id: number }
-    if (!albums.some(a => a.id === id) || !mediaFiles.some(m => m.id === body.media_id)) {
-      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册或媒体不存在' }, { status: 404 })
+    await delay(120);
+    const id = Number(params.id);
+    const body = (await request.json()) as { media_id: number };
+    if (!albums.some((a) => a.id === id) || !mediaFiles.some((m) => m.id === body.media_id)) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '相册或媒体不存在' }, { status: 404 });
     }
-    if (!albumItems.some(it => it.album_id === id && it.media_id === body.media_id)) {
-      albumItems.push({ album_id: id, media_id: body.media_id })
+    if (!albumItems.some((it) => it.album_id === id && it.media_id === body.media_id)) {
+      albumItems.push({ album_id: id, media_id: body.media_id });
     }
-    return new HttpResponse(null, { status: 204 })
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.delete('*/api/albums/:id/items/:mediaId', async ({ params }) => {
-    await delay(120)
-    const id = Number(params.id)
-    const mediaId = Number(params.mediaId)
-    albumItems = albumItems.filter(it => !(it.album_id === id && it.media_id === mediaId))
-    return new HttpResponse(null, { status: 204 })
+    await delay(120);
+    const id = Number(params.id);
+    const mediaId = Number(params.mediaId);
+    albumItems = albumItems.filter((it) => !(it.album_id === id && it.media_id === mediaId));
+    return new HttpResponse(null, { status: 204 });
   }),
-]
+];

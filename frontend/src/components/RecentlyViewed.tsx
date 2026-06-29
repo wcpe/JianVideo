@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Box, Card, Group, Stack, Text, Title } from '@mantine/core'
-import MediaThumbnail from '@/components/MediaThumbnail'
-import * as libApi from '@/api/library'
-import { mediaDisplayName } from '@/utils/media'
-import type { MediaFile } from '@/types'
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Box, Card, Group, Stack, Text, Title } from '@mantine/core';
+import MediaThumbnail from '@/components/MediaThumbnail';
+import * as libApi from '@/api/library';
+import { mediaDisplayName } from '@/utils/media';
+import type { MediaFile } from '@/types';
 
 /**
  * 时间轴页「最近查看」回忆区块（FR-120）。
@@ -16,18 +16,21 @@ import type { MediaFile } from '@/types'
  * 二者可重叠展示、互不替代。
  */
 export default function RecentlyViewed() {
-  const navigate = useNavigate()
-  const [items, setItems] = useState<MediaFile[]>([])
+  const navigate = useNavigate();
+  const [items, setItems] = useState<MediaFile[]>([]);
 
   const load = useCallback(() => {
-    libApi.getRecentlyViewed()
+    libApi
+      .getRecentlyViewed()
       .then(setItems)
-      .catch(() => setItems([]))
-  }, [])
+      .catch(() => setItems([]));
+  }, []);
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
 
   return (
     <Stack gap="xs" data-testid="recently-viewed">
@@ -36,7 +39,7 @@ export default function RecentlyViewed() {
       <Box style={{ overflowX: 'auto', paddingBottom: 4 }}>
         <Group gap="sm" wrap="nowrap" align="stretch">
           {items.map((f) => {
-            const name = mediaDisplayName(f)
+            const name = mediaDisplayName(f);
             return (
               <Card
                 key={f.id}
@@ -52,13 +55,15 @@ export default function RecentlyViewed() {
                   <MediaThumbnail mediaID={f.id} fileName={f.file_name} />
                 </Card.Section>
                 <Box mt="xs">
-                  <Text size="sm" fw={500} truncate>{name}</Text>
+                  <Text size="sm" fw={500} truncate>
+                    {name}
+                  </Text>
                 </Box>
               </Card>
-            )
+            );
           })}
         </Group>
       </Box>
     </Stack>
-  )
+  );
 }

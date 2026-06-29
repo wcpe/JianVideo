@@ -3,7 +3,7 @@
 
 /** 原图地址：图片预览与相邻预加载共用 */
 export function mediaRawUrl(mediaID: number): string {
-  return `/api/library/media/${mediaID}/raw`
+  return `/api/library/media/${mediaID}/raw`;
 }
 
 /**
@@ -12,10 +12,10 @@ export function mediaRawUrl(mediaID: number): string {
  * 与播放页探测失败时的降级路径保持一致。
  */
 export function mediaStreamUrl(mediaID: number): string {
-  return new URL(`/api/play/${mediaID}/stream`, window.location.href).toString()
+  return new URL(`/api/play/${mediaID}/stream`, window.location.href).toString();
 }
 
 /** HLS master 播放列表地址：播放页探测 ABR 可用性时使用 */
 export function mediaHlsMasterUrl(mediaID: number): string {
-  return new URL(`/api/play/hls/${mediaID}/master`, window.location.href).toString()
+  return new URL(`/api/play/hls/${mediaID}/master`, window.location.href).toString();
 }

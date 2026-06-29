@@ -1,17 +1,17 @@
-import { useState } from 'react'
-import { Modal, Button, Select, Group, TextInput, Stack, Text } from '@mantine/core'
-import { useClipboard } from '@mantine/hooks'
-import { IconExternalLink, IconCopy, IconCheck, IconPlayerPlay } from '@tabler/icons-react'
-import { notifications } from '@mantine/notifications'
-import { createShare } from '@/api/share'
-import { buildExternalStreamURL } from '@/utils/external-player'
+import { useState } from 'react';
+import { Modal, Button, Select, Group, TextInput, Stack, Text } from '@mantine/core';
+import { useClipboard } from '@mantine/hooks';
+import { IconExternalLink, IconCopy, IconCheck, IconPlayerPlay } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { createShare } from '@/api/share';
+import { buildExternalStreamURL } from '@/utils/external-player';
 
 interface ExternalPlayerDialogProps {
-  opened: boolean
-  onClose: () => void
-  mediaID: number
+  opened: boolean;
+  onClose: () => void;
+  mediaID: number;
   // 续播位置（秒）：>0 时生成地址附 #t= 续播点（FR-44）
-  lastPosition?: number
+  lastPosition?: number;
 }
 
 // 有效期选项（小时）：0 表示永不过期。与分享对话框（FR-43）一致。
@@ -20,47 +20,66 @@ const EXPIRY_OPTIONS = [
   { value: '24', label: '1 天' },
   { value: '168', label: '7 天' },
   { value: '720', label: '30 天' },
-]
+];
 
 /**
  * 外部播放器深链弹窗（FR-79）：选有效期 → 复用 FR-43 createShare 生成免登 token →
  * 拼出 VLC / IINA 可消费的网络串流地址（原文件直链 + Range），可复制或在浏览器打开。
  * 注意：扫码（二维码）本期不做（无 QR 库），留待 FR-78 引入 QR 依赖时合并。
  */
-export default function ExternalPlayerDialog({ opened, onClose, mediaID, lastPosition }: ExternalPlayerDialogProps) {
-  const [expiry, setExpiry] = useState('0')
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
-  const clipboard = useClipboard({ timeout: 2000 })
+export default function ExternalPlayerDialog({
+  opened,
+  onClose,
+  mediaID,
+  lastPosition,
+}: ExternalPlayerDialogProps) {
+  const [expiry, setExpiry] = useState('0');
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const clipboard = useClipboard({ timeout: 2000 });
 
   async function handleGenerate() {
-    setLoading(true)
+    setLoading(true);
     try {
-      const share = await createShare('media', mediaID, Number(expiry))
-      setUrl(buildExternalStreamURL(window.location.origin, share.token, mediaID, lastPosition))
+      const share = await createShare('media', mediaID, Number(expiry));
+      setUrl(buildExternalStreamURL(window.location.origin, share.token, mediaID, lastPosition));
     } catch (err) {
-      notifications.show({ color: 'red', message: err instanceof Error ? err.message : '生成地址失败' })
+      notifications.show({
+        color: 'red',
+        message: err instanceof Error ? err.message : '生成地址失败',
+      });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   function handleClose() {
-    setUrl('')
-    setExpiry('0')
-    onClose()
+    setUrl('');
+    setExpiry('0');
+    onClose();
   }
 
   return (
     <Modal opened={opened} onClose={handleClose} title="用外部播放器打开" centered>
       <Stack>
         <Text size="sm" c="dimmed">
-          生成一个免登的网络串流地址，可在 VLC / IINA 等外部播放器中「打开网络串流」并粘贴此地址播放。
+          生成一个免登的网络串流地址，可在 VLC / IINA
+          等外部播放器中「打开网络串流」并粘贴此地址播放。
           任何持有该地址者均可只读访问此媒体原文件，请按需选择有效期。
         </Text>
-        <Select label="有效期" data={EXPIRY_OPTIONS} value={expiry} onChange={v => setExpiry(v ?? '0')} allowDeselect={false} />
+        <Select
+          label="有效期"
+          data={EXPIRY_OPTIONS}
+          value={expiry}
+          onChange={(v) => setExpiry(v ?? '0')}
+          allowDeselect={false}
+        />
         {!url ? (
-          <Button onClick={handleGenerate} loading={loading} leftSection={<IconExternalLink size={16} />}>
+          <Button
+            onClick={handleGenerate}
+            loading={loading}
+            leftSection={<IconExternalLink size={16} />}
+          >
             生成地址
           </Button>
         ) : (
@@ -90,5 +109,5 @@ export default function ExternalPlayerDialog({ opened, onClose, mediaID, lastPos
         )}
       </Stack>
     </Modal>
-  )
+  );
 }

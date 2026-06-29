@@ -1,15 +1,15 @@
-import { useForm } from '@mantine/form'
-import { TextInput, Button, Paper, Title, Text, Alert, Center, Box, Group } from '@mantine/core'
-import { IconLock, IconUser, IconAlertCircle } from '@tabler/icons-react'
-import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '@/stores/auth'
-import { notifications } from '@mantine/notifications'
-import BrandLogo from '@/components/BrandLogo'
+import { useForm } from '@mantine/form';
+import { TextInput, Button, Paper, Title, Text, Alert, Center, Box, Group } from '@mantine/core';
+import { IconLock, IconUser, IconAlertCircle } from '@tabler/icons-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/stores/auth';
+import { notifications } from '@mantine/notifications';
+import BrandLogo from '@/components/BrandLogo';
 
 /** 首次初始化引导页（FR-109）：系统无用户时配置管理员账号密码并自动登录。 */
 export default function SetupPage() {
-  const { setup, loading, error, clearError } = useAuthStore()
-  const navigate = useNavigate()
+  const { setup, loading, error, clearError } = useAuthStore();
+  const navigate = useNavigate();
 
   const form = useForm({
     initialValues: { username: '', password: '', confirm: '' },
@@ -18,22 +18,22 @@ export default function SetupPage() {
       password: (v) => (v.length >= 6 ? null : '密码至少 6 位'),
       confirm: (v, values) => (v === values.password ? null : '两次输入的密码不一致'),
     },
-  })
+  });
 
   const handleSubmit = async (values: { username: string; password: string }) => {
     try {
-      await setup(values.username.trim(), values.password)
+      await setup(values.username.trim(), values.password);
       notifications.show({
         title: '初始化完成',
         message: `欢迎使用 JianVideo，${values.username}`,
         color: 'green',
         autoClose: 2000,
-      })
-      navigate('/')
+      });
+      navigate('/');
     } catch {
       // 错误已在 store 中设置
     }
-  }
+  };
 
   return (
     <Center h="100vh" w="100%">
@@ -94,5 +94,5 @@ export default function SetupPage() {
         </Paper>
       </Box>
     </Center>
-  )
+  );
 }

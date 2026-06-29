@@ -1,15 +1,15 @@
-import { Group, Box, Anchor, Text, TextInput, ScrollArea } from '@mantine/core'
-import { IconSearch, IconChevronRight, IconDeviceDesktop } from '@tabler/icons-react'
-import type { BreadcrumbItem } from '@/types'
+import { Group, Box, Anchor, Text, TextInput, ScrollArea } from '@mantine/core';
+import { IconSearch, IconChevronRight, IconDeviceDesktop } from '@tabler/icons-react';
+import type { BreadcrumbItem } from '@/types';
 
 interface DirectoryAddressBarProps {
   /** 地址段（消费后端 breadcrumbs），点击跳该层 */
-  breadcrumbs: BreadcrumbItem[]
+  breadcrumbs: BreadcrumbItem[];
   /** 点击地址段跳转 */
-  onNavigate: (path: string) => void
+  onNavigate: (path: string) => void;
   /** 当前目录搜索框值（FR-36） */
-  searchValue: string
-  onSearchChange: (v: string) => void
+  searchValue: string;
+  onSearchChange: (v: string) => void;
 }
 
 /**
@@ -17,7 +17,10 @@ interface DirectoryAddressBarProps {
  * 路径段窄屏可横滚（FR-86 响应式惯例）；点击任一段跳到该层。
  */
 export default function DirectoryAddressBar({
-  breadcrumbs, onNavigate, searchValue, onSearchChange,
+  breadcrumbs,
+  onNavigate,
+  searchValue,
+  onSearchChange,
 }: DirectoryAddressBarProps) {
   return (
     <Group gap="xs" wrap="nowrap" align="center">
@@ -34,14 +37,22 @@ export default function DirectoryAddressBar({
       >
         <ScrollArea type="never" scrollbarSize={6} aria-label="地址栏">
           <Group gap={2} wrap="nowrap" align="center" style={{ minWidth: 'max-content' }}>
-            <IconDeviceDesktop size={14} style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0 }} />
+            <IconDeviceDesktop
+              size={14}
+              style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0 }}
+            />
             {breadcrumbs.map((seg, index) => {
-              const isLast = index === breadcrumbs.length - 1
+              const isLast = index === breadcrumbs.length - 1;
               return (
                 <Group key={seg.path} gap={2} wrap="nowrap" align="center">
-                  <IconChevronRight size={12} style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0 }} />
+                  <IconChevronRight
+                    size={12}
+                    style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0 }}
+                  />
                   {isLast ? (
-                    <Text size="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>{seg.name}</Text>
+                    <Text size="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
+                      {seg.name}
+                    </Text>
                   ) : (
                     <Anchor
                       component="button"
@@ -55,7 +66,7 @@ export default function DirectoryAddressBar({
                     </Anchor>
                   )}
                 </Group>
-              )
+              );
             })}
           </Group>
         </ScrollArea>
@@ -72,5 +83,5 @@ export default function DirectoryAddressBar({
         style={{ flexShrink: 0, width: 'min(360px, 42vw)' }}
       />
     </Group>
-  )
+  );
 }

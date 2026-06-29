@@ -1,32 +1,32 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
-import { MantineProvider } from '@mantine/core'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { MantineProvider } from '@mantine/core';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import LoginPage from './LoginPage'
+import LoginPage from './LoginPage';
 
 // mock react-router-dom 的 useNavigate
-const mockNavigate = vi.fn()
+const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
+  const actual = await importOriginal<typeof import('react-router-dom')>();
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-  }
-})
+  };
+});
 
 // mock @mantine/notifications
-const mockNotificationShow = vi.fn()
+const mockNotificationShow = vi.fn();
 vi.mock('@mantine/notifications', () => ({
   notifications: {
     show: (...args: unknown[]) => mockNotificationShow(...args),
   },
-}))
+}));
 
 // mock auth store — 使用可控的 mock 函数
-const mockLogin = vi.fn()
-const mockClearError = vi.fn()
+const mockLogin = vi.fn();
+const mockClearError = vi.fn();
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     login: mockLogin,
@@ -34,7 +34,7 @@ vi.mock('@/stores/auth', () => ({
     error: null,
     clearError: mockClearError,
   }),
-}))
+}));
 
 // 辅助：渲染包裹在 MantineProvider + MemoryRouter 中的页面
 function renderLoginPage() {
@@ -44,67 +44,67 @@ function renderLoginPage() {
         <LoginPage />
       </MemoryRouter>
     </MantineProvider>,
-  )
+  );
 }
 
 describe('LoginPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    window.localStorage.clear()
-  })
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
 
   it('渲染用户名和密码输入框', () => {
-    renderLoginPage()
+    renderLoginPage();
 
-    expect(screen.getByRole('textbox', { name: /用户名/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/密码/i)).toBeInTheDocument()
-  })
+    expect(screen.getByRole('textbox', { name: /用户名/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/密码/i)).toBeInTheDocument();
+  });
 
   it('渲染登录按钮', () => {
-    renderLoginPage()
+    renderLoginPage();
 
-    const button = screen.getByRole('button', { name: '登录' })
-    expect(button).toBeInTheDocument()
-  })
+    const button = screen.getByRole('button', { name: '登录' });
+    expect(button).toBeInTheDocument();
+  });
 
   it('输入用户名和密码', async () => {
-    const user = userEvent.setup()
-    renderLoginPage()
+    const user = userEvent.setup();
+    renderLoginPage();
 
-    const usernameInput = screen.getByRole('textbox', { name: /用户名/i })
-    const passwordInput = screen.getByLabelText(/密码/i)
+    const usernameInput = screen.getByRole('textbox', { name: /用户名/i });
+    const passwordInput = screen.getByLabelText(/密码/i);
 
-    await user.type(usernameInput, 'admin')
-    await user.type(passwordInput, 'admin')
+    await user.type(usernameInput, 'admin');
+    await user.type(passwordInput, 'admin');
 
-    expect(usernameInput).toHaveValue('admin')
-    expect(passwordInput).toHaveValue('admin')
-  })
+    expect(usernameInput).toHaveValue('admin');
+    expect(passwordInput).toHaveValue('admin');
+  });
 
   it('提交表单调用登录 API', async () => {
-    const user = userEvent.setup()
-    mockLogin.mockResolvedValue(undefined)
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue(undefined);
 
-    renderLoginPage()
+    renderLoginPage();
 
-    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin')
-    await user.type(screen.getByLabelText(/密码/i), 'admin')
-    await user.click(screen.getByRole('button', { name: '登录' }))
+    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin');
+    await user.type(screen.getByLabelText(/密码/i), 'admin');
+    await user.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith('admin', 'admin')
-    })
-  })
+      expect(mockLogin).toHaveBeenCalledWith('admin', 'admin');
+    });
+  });
 
   it('登录成功显示通知', async () => {
-    const user = userEvent.setup()
-    mockLogin.mockResolvedValue(undefined)
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue(undefined);
 
-    renderLoginPage()
+    renderLoginPage();
 
-    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin')
-    await user.type(screen.getByLabelText(/密码/i), 'admin')
-    await user.click(screen.getByRole('button', { name: '登录' }))
+    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin');
+    await user.type(screen.getByLabelText(/密码/i), 'admin');
+    await user.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => {
       expect(mockNotificationShow).toHaveBeenCalledWith(
@@ -113,78 +113,78 @@ describe('LoginPage', () => {
           message: '欢迎回来，admin',
           color: 'green',
         }),
-      )
-    })
+      );
+    });
 
-    expect(mockNavigate).toHaveBeenCalledWith('/')
-  })
+    expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
 
   it('登录失败显示错误提示', async () => {
-    const user = userEvent.setup()
-    mockLogin.mockRejectedValue(new Error('用户名或密码错误'))
+    const user = userEvent.setup();
+    mockLogin.mockRejectedValue(new Error('用户名或密码错误'));
 
-    renderLoginPage()
+    renderLoginPage();
 
-    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'wrong')
-    await user.type(screen.getByLabelText(/密码/i), 'wrong')
-    await user.click(screen.getByRole('button', { name: '登录' }))
+    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'wrong');
+    await user.type(screen.getByLabelText(/密码/i), 'wrong');
+    await user.click(screen.getByRole('button', { name: '登录' }));
 
     // 登录失败后按钮应恢复可用状态（不显示错误提示在页面上，因为 mock store 不更新 error）
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith('wrong', 'wrong')
-    })
-  })
+      expect(mockLogin).toHaveBeenCalledWith('wrong', 'wrong');
+    });
+  });
 
   it('空表单提交时按钮被禁用', async () => {
-    const user = userEvent.setup()
-    renderLoginPage()
+    const user = userEvent.setup();
+    renderLoginPage();
 
     // 表单无效时按钮应 disabled
-    const button = screen.getByRole('button', { name: '登录' })
-    expect(button).toBeDisabled()
+    const button = screen.getByRole('button', { name: '登录' });
+    expect(button).toBeDisabled();
 
     // 点击用户名输入框后离开，触发 blur 验证
-    const usernameInput = screen.getByRole('textbox', { name: /用户名/i })
-    await user.click(usernameInput)
-    await user.tab()
+    const usernameInput = screen.getByRole('textbox', { name: /用户名/i });
+    await user.click(usernameInput);
+    await user.tab();
 
     await waitFor(() => {
       // Mantine 表单 blur 校验错误文本（精确匹配避免与辅助提示「填写用户名和密码后即可登录」冲突）
-      const errorText = screen.queryByText('请输入用户名') || screen.queryByText('请输入密码')
-      expect(errorText || button).toBeInTheDocument()
-    })
-  })
+      const errorText = screen.queryByText('请输入用户名') || screen.queryByText('请输入密码');
+      expect(errorText || button).toBeInTheDocument();
+    });
+  });
 
   // FR-82：禁用态明确化——空表单时按钮禁用且有可辨辅助提示
   it('空表单时按钮禁用且展示可辨辅助提示', () => {
-    renderLoginPage()
+    renderLoginPage();
 
-    const button = screen.getByRole('button', { name: '登录' })
-    expect(button).toBeDisabled()
+    const button = screen.getByRole('button', { name: '登录' });
+    expect(button).toBeDisabled();
 
     // 应存在辅助提示告知用户需先填写，而非按钮故障
-    expect(screen.getByText(/填写用户名和密码后即可登录/)).toBeInTheDocument()
-  })
+    expect(screen.getByText(/填写用户名和密码后即可登录/)).toBeInTheDocument();
+  });
 
   // FR-82：品牌图形——登录卡片上方渲染原创 SVG logo
   it('渲染品牌 logo 图形', () => {
-    renderLoginPage()
+    renderLoginPage();
 
-    expect(screen.getByRole('img', { name: 'JianVideo 标志' })).toBeInTheDocument()
-  })
+    expect(screen.getByRole('img', { name: 'JianVideo 标志' })).toBeInTheDocument();
+  });
 
   // FR-82：填妥用户名密码后按钮可用、辅助提示消失（既有登录流程不回归）
   it('填妥用户名密码后按钮恢复可用且辅助提示消失', async () => {
-    const user = userEvent.setup()
-    renderLoginPage()
+    const user = userEvent.setup();
+    renderLoginPage();
 
-    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin')
-    await user.type(screen.getByLabelText(/密码/i), 'admin')
+    await user.type(screen.getByRole('textbox', { name: /用户名/i }), 'admin');
+    await user.type(screen.getByLabelText(/密码/i), 'admin');
 
-    const button = screen.getByRole('button', { name: '登录' })
+    const button = screen.getByRole('button', { name: '登录' });
     await waitFor(() => {
-      expect(button).toBeEnabled()
-    })
-    expect(screen.queryByText(/填写用户名和密码后即可登录/)).not.toBeInTheDocument()
-  })
-})
+      expect(button).toBeEnabled();
+    });
+    expect(screen.queryByText(/填写用户名和密码后即可登录/)).not.toBeInTheDocument();
+  });
+});

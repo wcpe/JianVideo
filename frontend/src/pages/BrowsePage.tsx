@@ -1,29 +1,47 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Stack, Title, Group, SegmentedControl, NativeSelect, Text, Loader, Button,
-  Drawer, Box, ActionIcon, Tooltip, Divider, Paper,
-} from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
+  Stack,
+  Title,
+  Group,
+  SegmentedControl,
+  NativeSelect,
+  Text,
+  Loader,
+  Button,
+  Drawer,
+  Box,
+  ActionIcon,
+  Tooltip,
+  Divider,
+  Paper,
+} from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import {
-  IconArrowUp, IconRefresh, IconFilter, IconFolders,
-  IconDownload, IconPhotoPlus, IconTag, IconTrash,
-} from '@tabler/icons-react'
-import { useLibraryPaths } from '@/hooks/useLibraryPaths'
-import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDirectoryBrowse'
-import DirectoryBrowser, { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser'
-import DirectoryTree from '@/components/DirectoryTree'
-import DirectoryAddressBar from '@/components/DirectoryAddressBar'
-import MediaQueryFilters from '@/components/MediaQueryFilters'
-import MediaDetailPanel from '@/components/MediaDetailPanel'
-import ConfirmModal from '@/components/ConfirmModal'
-import BatchActionsModals from '@/components/BatchActionsModals'
-import { useBatchActions } from '@/hooks/useBatchActions'
-import { extractErrorMessage } from '@/utils/error'
-import { formatSize } from '@/utils/format'
-import * as libApi from '@/api/library'
-import type { MediaFile } from '@/types'
+  IconArrowUp,
+  IconRefresh,
+  IconFilter,
+  IconFolders,
+  IconDownload,
+  IconPhotoPlus,
+  IconTag,
+  IconTrash,
+} from '@tabler/icons-react';
+import { useLibraryPaths } from '@/hooks/useLibraryPaths';
+import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDirectoryBrowse';
+import DirectoryBrowser, { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser';
+import DirectoryTree from '@/components/DirectoryTree';
+import DirectoryAddressBar from '@/components/DirectoryAddressBar';
+import MediaQueryFilters from '@/components/MediaQueryFilters';
+import MediaDetailPanel from '@/components/MediaDetailPanel';
+import ConfirmModal from '@/components/ConfirmModal';
+import BatchActionsModals from '@/components/BatchActionsModals';
+import { useBatchActions } from '@/hooks/useBatchActions';
+import { extractErrorMessage } from '@/utils/error';
+import { formatSize } from '@/utils/format';
+import * as libApi from '@/api/library';
+import type { MediaFile } from '@/types';
 
 /**
  * 目录浏览页（FR-121 资源管理器布局）：左导航树 + 可点地址栏 + 工具栏 + 视图模式（详情/列表/大中小）
@@ -31,166 +49,192 @@ import type { MediaFile } from '@/types'
  * 无筛选：浏览真实路径树；有筛选/搜索：按当前目录路径（前缀，递归）查媒体接口展示匹配结果。只读浏览。
  */
 export default function BrowsePage() {
-  const [searchParams] = useSearchParams()
-  const paths = useLibraryPaths(undefined)
-  const browse = useDirectoryBrowse()
-  const exts = paths.customImageExtensions
+  const [searchParams] = useSearchParams();
+  const paths = useLibraryPaths(undefined);
+  const browse = useDirectoryBrowse();
+  const exts = paths.customImageExtensions;
 
   // 展示方式（FR-121）：详情 / 列表 / 大中小图标
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('details')
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('details');
   // 筛选/搜索（FR-36）：表达式搜索 + 结构化筛选
-  const [searchInput, setSearchInput] = useState('')
-  const [search, setSearch] = useState('')
-  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('')
-  const [sizeMin, setSizeMin] = useState(0)
-  const [timeFrom, setTimeFrom] = useState('')
-  const [timeTo, setTimeTo] = useState('')
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
+  const [sizeMin, setSizeMin] = useState(0);
+  const [timeFrom, setTimeFrom] = useState('');
+  const [timeTo, setTimeTo] = useState('');
   // 详情面板选中下标（FR-34）
-  const [detailIndex, setDetailIndex] = useState<number | null>(null)
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
   // 筛选结果（FR-36）
-  const [filteredFiles, setFilteredFiles] = useState<MediaFile[]>([])
-  const [filtering, setFiltering] = useState(false)
+  const [filteredFiles, setFilteredFiles] = useState<MediaFile[]>([]);
+  const [filtering, setFiltering] = useState(false);
   // 当前选中 id（FR-69）：由 DirectoryBrowser 上抛，供工具栏批量动作与状态栏统计
-  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   // 批量删除（FR-69）：待确认删除的 id 列表（非空即弹确认框）+ 删除进行中
-  const [pendingDelete, setPendingDelete] = useState<number[]>([])
-  const [deleting, setDeleting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<number[]>([]);
+  const [deleting, setDeleting] = useState(false);
   // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
-  const batch = useBatchActions()
+  const batch = useBatchActions();
   // 移动端筛选抽屉开合（FR-86）：窄屏将结构化筛选收进抽屉，搜索框常驻
-  const [filterDrawerOpened, filterDrawer] = useDisclosure(false)
+  const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
   // 移动端目录树抽屉开合（FR-86/FR-121）：窄屏将左树收进抽屉
-  const [treeDrawerOpened, treeDrawer] = useDisclosure(false)
+  const [treeDrawerOpened, treeDrawer] = useDisclosure(false);
 
   // 搜索防抖 400ms
   useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), 400)
-    return () => clearTimeout(t)
-  }, [searchInput])
+    const t = setTimeout(() => setSearch(searchInput), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-  const filterActive = !!(search.trim() || mediaType || sizeMin || timeFrom || timeTo)
-  const atRoot = browse.currentPath === BROWSE_ROOT
+  const filterActive = !!(search.trim() || mediaType || sizeMin || timeFrom || timeTo);
+  const atRoot = browse.currentPath === BROWSE_ROOT;
 
   // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
   const clearFilters = useCallback(() => {
-    setSearchInput('')
-    setSearch('')
-    setMediaType('')
-    setSizeMin(0)
-    setTimeFrom('')
-    setTimeTo('')
-  }, [])
+    setSearchInput('');
+    setSearch('');
+    setMediaType('');
+    setSizeMin(0);
+    setTimeFrom('');
+    setTimeTo('');
+  }, []);
 
   // 带定位查询参数（path）时直接进该目录浏览；否则以真实路径树根初始化（FR-121）。
   // library_id 已弃用（后端按真实路径跨库聚合），仅用 path。
   useEffect(() => {
-    const path = searchParams.get('path')
+    const path = searchParams.get('path');
     if (path) {
-      browse.initPath(path)
+      browse.initPath(path);
     } else {
-      browse.initRoot()
+      browse.initRoot();
     }
     // 仅依查询参数初始化一次（hook 内部以 initialized 守卫防重复）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }, [searchParams]);
 
   // 切换路径即退出筛选态（避免跨目录残留筛选结果）
   useEffect(() => {
-    clearFilters()
-    setSelectedIds([])
+    clearFilters();
+    setSelectedIds([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browse.currentPath])
+  }, [browse.currentPath]);
 
   // 筛选生效时按当前目录路径（前缀，递归）查媒体接口（消费 FR-35），否则清空。
   // 真实路径树下不再依赖 library_id，按 path 前缀跨库筛选。
   useEffect(() => {
     if (!filterActive || atRoot) {
-      setFilteredFiles([])
-      return
+      setFilteredFiles([]);
+      return;
     }
-    let active = true
-    setFiltering(true)
-    libApi.getMediaFiles({
-      path: browse.currentPath,
-      search: search.trim() || undefined,
-      type: mediaType || undefined,
-      size_min: sizeMin || undefined,
-      time_from: timeFrom || undefined,
-      time_to: timeTo || undefined,
-      page_size: 100,
-    })
-      .then((res) => { if (active) setFilteredFiles(res.items) })
-      .catch(() => { if (active) setFilteredFiles([]) })
-      .finally(() => { if (active) setFiltering(false) })
-    return () => { active = false }
-  }, [filterActive, search, mediaType, sizeMin, timeFrom, timeTo, atRoot, browse.currentPath])
+    let active = true;
+    setFiltering(true);
+    libApi
+      .getMediaFiles({
+        path: browse.currentPath,
+        search: search.trim() || undefined,
+        type: mediaType || undefined,
+        size_min: sizeMin || undefined,
+        time_from: timeFrom || undefined,
+        time_to: timeTo || undefined,
+        page_size: 100,
+      })
+      .then((res) => {
+        if (active) setFilteredFiles(res.items);
+      })
+      .catch(() => {
+        if (active) setFilteredFiles([]);
+      })
+      .finally(() => {
+        if (active) setFiltering(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [filterActive, search, mediaType, sizeMin, timeFrom, timeTo, atRoot, browse.currentPath]);
 
   // 详情面板与浏览器用同一套排序，保证双击下标一致。
   // DirectoryBrowser 内部对 files 再跑一遍 sortFiles，此处以同一函数排序使详情面板下标与列表完全对齐
   // （浏览模式后端已按 sort 排序，再排一次幂等；筛选模式媒体接口排序口径不同，统一按本地 sort 收敛）。
-  const activeFiles = filterActive ? filteredFiles : browse.files
-  const sortedFiles = useMemo(() => sortFiles(activeFiles, browse.sort), [activeFiles, browse.sort])
+  const activeFiles = filterActive ? filteredFiles : browse.files;
+  const sortedFiles = useMemo(
+    () => sortFiles(activeFiles, browse.sort),
+    [activeFiles, browse.sort],
+  );
 
   // 状态栏统计：项目数（子目录 + 文件）、选中数与选中体量。
-  const itemCount = (filterActive ? 0 : browse.directories.length) + activeFiles.length
+  const itemCount = (filterActive ? 0 : browse.directories.length) + activeFiles.length;
   const selectedStat = useMemo(() => {
-    if (selectedIds.length === 0) return null
-    const idSet = new Set(selectedIds)
-    const size = activeFiles.filter((f) => idSet.has(f.id)).reduce((sum, f) => sum + f.file_size, 0)
-    return { count: selectedIds.length, size }
-  }, [selectedIds, activeFiles])
+    if (selectedIds.length === 0) return null;
+    const idSet = new Set(selectedIds);
+    const size = activeFiles
+      .filter((f) => idSet.has(f.id))
+      .reduce((sum, f) => sum + f.file_size, 0);
+    return { count: selectedIds.length, size };
+  }, [selectedIds, activeFiles]);
 
   // 删除后刷新当前视图：筛选模式重跑筛选、浏览模式重载目录。
   const refreshAfterDelete = useCallback(() => {
     if (filterActive && !atRoot) {
-      libApi.getMediaFiles({
-        path: browse.currentPath,
-        search: search.trim() || undefined, type: mediaType || undefined,
-        size_min: sizeMin || undefined, time_from: timeFrom || undefined, time_to: timeTo || undefined,
-        page_size: 100,
-      }).then((res) => setFilteredFiles(res.items)).catch(() => {})
+      libApi
+        .getMediaFiles({
+          path: browse.currentPath,
+          search: search.trim() || undefined,
+          type: mediaType || undefined,
+          size_min: sizeMin || undefined,
+          time_from: timeFrom || undefined,
+          time_to: timeTo || undefined,
+          page_size: 100,
+        })
+        .then((res) => setFilteredFiles(res.items))
+        .catch(() => {});
     } else {
-      browse.reload()
+      browse.reload();
     }
-  }, [filterActive, atRoot, browse, search, mediaType, sizeMin, timeFrom, timeTo])
+  }, [filterActive, atRoot, browse, search, mediaType, sizeMin, timeFrom, timeTo]);
 
   // 执行批量软删（FR-69）：确认后调端点，成功刷新 + 清空选择
   const confirmDelete = useCallback(async () => {
-    setDeleting(true)
+    setDeleting(true);
     try {
-      const n = await libApi.batchDeleteMediaFiles(pendingDelete)
-      notifications.show({ color: 'green', message: `已删除 ${n} 项到回收站` })
-      setPendingDelete([])
-      setSelectedIds([])
-      refreshAfterDelete()
+      const n = await libApi.batchDeleteMediaFiles(pendingDelete);
+      notifications.show({ color: 'green', message: `已删除 ${n} 项到回收站` });
+      setPendingDelete([]);
+      setSelectedIds([]);
+      refreshAfterDelete();
     } catch (err) {
-      notifications.show({ color: 'red', message: extractErrorMessage(err, '批量删除失败') })
+      notifications.show({ color: 'red', message: extractErrorMessage(err, '批量删除失败') });
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }, [pendingDelete, refreshAfterDelete])
+  }, [pendingDelete, refreshAfterDelete]);
 
   // 上一级（FR-121）：回到面包屑倒数第二段；仅一段或根时回根。
   const goUp = useCallback(() => {
-    const bc = browse.breadcrumbs
-    if (atRoot) return
-    if (bc.length >= 2) browse.navigateTo(bc[bc.length - 2].path)
-    else browse.navigateTo(BROWSE_ROOT)
-  }, [browse, atRoot])
+    const bc = browse.breadcrumbs;
+    if (atRoot) return;
+    if (bc.length >= 2) browse.navigateTo(bc[bc.length - 2].path);
+    else browse.navigateTo(BROWSE_ROOT);
+  }, [browse, atRoot]);
 
   // 工具栏批量动作（FR-91/FR-69）：以当前选中集为对象；无选中时禁用。
-  const hasSelection = selectedIds.length > 0
+  const hasSelection = selectedIds.length > 0;
 
   // 共用的 DirectoryBrowser 渲染（浏览 / 筛选两态复用）。
   const browserNode = filterActive ? (
     // 筛选模式：展示当前目录（递归）下的匹配媒体，不展示子目录
     <DirectoryBrowser
-      directories={[]} files={filteredFiles}
-      loading={filtering} error={null} customImageExtensions={exts}
-      onEnterDir={() => {}} onErrorClose={() => {}}
+      directories={[]}
+      files={filteredFiles}
+      loading={filtering}
+      error={null}
+      customImageExtensions={exts}
+      onEnterDir={() => {}}
+      onErrorClose={() => {}}
       onOpenFile={(_, index) => setDetailIndex(index)}
-      displayMode={displayMode} sort={browse.sort}
-      filtered onClearFilter={clearFilters}
+      displayMode={displayMode}
+      sort={browse.sort}
+      filtered
+      onClearFilter={clearFilters}
       hideSelectionBar
       onSelectionChange={setSelectedIds}
       onBatchDelete={(ids) => setPendingDelete(ids)}
@@ -202,11 +246,16 @@ export default function BrowsePage() {
   ) : (
     // 浏览模式：真实路径树（后端已按 sort 排序）
     <DirectoryBrowser
-      directories={browse.directories} files={browse.files}
-      loading={browse.loading} error={browse.error} customImageExtensions={exts}
-      onEnterDir={browse.handleEnterDir} onErrorClose={() => browse.setError(null)}
+      directories={browse.directories}
+      files={browse.files}
+      loading={browse.loading}
+      error={browse.error}
+      customImageExtensions={exts}
+      onEnterDir={browse.handleEnterDir}
+      onErrorClose={() => browse.setError(null)}
       onOpenFile={(_, index) => setDetailIndex(index)}
-      displayMode={displayMode} sort={browse.sort}
+      displayMode={displayMode}
+      sort={browse.sort}
       hideSelectionBar
       onSelectionChange={setSelectedIds}
       onBatchDelete={(ids) => setPendingDelete(ids)}
@@ -215,7 +264,7 @@ export default function BrowsePage() {
       onBatchAddTag={batch.openAddTag}
       onBatchDownload={batch.download}
     />
-  )
+  );
 
   return (
     <Stack gap="sm">
@@ -224,7 +273,13 @@ export default function BrowsePage() {
       {/* 工具栏（FR-121）：导航（上一级/刷新/移动端目录树）+ 批量动作（FR-91/FR-69）+ 视图模式 + 排序 */}
       <Group gap="xs" align="center" wrap="wrap">
         <Tooltip label="上一级">
-          <ActionIcon variant="default" size="lg" aria-label="上一级" disabled={atRoot} onClick={goUp}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="上一级"
+            disabled={atRoot}
+            onClick={goUp}
+          >
             <IconArrowUp size={18} />
           </ActionIcon>
         </Tooltip>
@@ -235,7 +290,13 @@ export default function BrowsePage() {
         </Tooltip>
         {/* 移动端目录树入口（FR-86）：打开左树抽屉，桌面隐藏 */}
         <Tooltip label="目录树">
-          <ActionIcon variant="default" size="lg" aria-label="目录树" hiddenFrom="md" onClick={treeDrawer.open}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="目录树"
+            hiddenFrom="md"
+            onClick={treeDrawer.open}
+          >
             <IconFolders size={18} />
           </ActionIcon>
         </Tooltip>
@@ -244,22 +305,47 @@ export default function BrowsePage() {
 
         {/* 批量动作（FR-91/FR-69）：以当前选中集为对象，无选中禁用 */}
         <Tooltip label="打包下载选中">
-          <ActionIcon variant="default" size="lg" aria-label="下载" disabled={!hasSelection} onClick={() => batch.download(selectedIds)}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="下载"
+            disabled={!hasSelection}
+            onClick={() => batch.download(selectedIds)}
+          >
             <IconDownload size={18} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label="加入相册">
-          <ActionIcon variant="default" size="lg" aria-label="加入相册" disabled={!hasSelection} onClick={() => batch.openAddToAlbum(selectedIds)}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="加入相册"
+            disabled={!hasSelection}
+            onClick={() => batch.openAddToAlbum(selectedIds)}
+          >
             <IconPhotoPlus size={18} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label="打标签">
-          <ActionIcon variant="default" size="lg" aria-label="打标签" disabled={!hasSelection} onClick={() => batch.openAddTag(selectedIds)}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="打标签"
+            disabled={!hasSelection}
+            onClick={() => batch.openAddTag(selectedIds)}
+          >
             <IconTag size={18} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label="删除选中">
-          <ActionIcon variant="default" size="lg" color="red" aria-label="删除" disabled={!hasSelection} onClick={() => setPendingDelete(selectedIds)}>
+          <ActionIcon
+            variant="default"
+            size="lg"
+            color="red"
+            aria-label="删除"
+            disabled={!hasSelection}
+            onClick={() => setPendingDelete(selectedIds)}
+          >
             <IconTrash size={18} />
           </ActionIcon>
         </Tooltip>
@@ -267,7 +353,9 @@ export default function BrowsePage() {
         {/* 右侧：视图模式 + 排序（接后端 sort） */}
         <Group gap="md" align="center" ml="auto">
           <SegmentedControl
-            aria-label="视图模式" size="xs" value={displayMode}
+            aria-label="视图模式"
+            size="xs"
+            value={displayMode}
             onChange={(v) => setDisplayMode(v as DisplayMode)}
             data={[
               { value: 'details', label: '详情' },
@@ -278,9 +366,13 @@ export default function BrowsePage() {
             ]}
           />
           <Group gap={4} align="center" wrap="nowrap">
-            <Text size="xs" c="dimmed">排序</Text>
+            <Text size="xs" c="dimmed">
+              排序
+            </Text>
             <NativeSelect
-              aria-label="排序方式" size="xs" value={browse.sort}
+              aria-label="排序方式"
+              size="xs"
+              value={browse.sort}
               onChange={(e) => browse.setSort(e.currentTarget.value as BrowseSort)}
               data={[
                 { value: 'name', label: '名称' },
@@ -305,7 +397,8 @@ export default function BrowsePage() {
         </Box>
         {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
         <Button
-          variant="default" size="sm"
+          variant="default"
+          size="sm"
           leftSection={<IconFilter size={16} />}
           onClick={filterDrawer.open}
           hiddenFrom="sm"
@@ -319,14 +412,23 @@ export default function BrowsePage() {
       <Box visibleFrom="sm">
         <Group gap="md" align="center" wrap="wrap">
           <MediaQueryFilters
-            mediaType={mediaType} onMediaTypeChange={setMediaType}
-            sizeMin={sizeMin} onSizeMinChange={setSizeMin}
-            timeFrom={timeFrom} onTimeFromChange={setTimeFrom}
-            timeTo={timeTo} onTimeToChange={setTimeTo}
+            mediaType={mediaType}
+            onMediaTypeChange={setMediaType}
+            sizeMin={sizeMin}
+            onSizeMinChange={setSizeMin}
+            timeFrom={timeFrom}
+            onTimeFromChange={setTimeFrom}
+            timeTo={timeTo}
+            onTimeToChange={setTimeTo}
           />
-          {filterActive && (
-            filtering ? <Loader size="xs" /> : <Text size="xs" c="dimmed">筛选结果 {filteredFiles.length} 条</Text>
-          )}
+          {filterActive &&
+            (filtering ? (
+              <Loader size="xs" />
+            ) : (
+              <Text size="xs" c="dimmed">
+                筛选结果 {filteredFiles.length} 条
+              </Text>
+            ))}
         </Group>
       </Box>
 
@@ -341,10 +443,14 @@ export default function BrowsePage() {
         closeButtonProps={{ 'aria-label': '关闭筛选' }}
       >
         <MediaQueryFilters
-          mediaType={mediaType} onMediaTypeChange={setMediaType}
-          sizeMin={sizeMin} onSizeMinChange={setSizeMin}
-          timeFrom={timeFrom} onTimeFromChange={setTimeFrom}
-          timeTo={timeTo} onTimeToChange={setTimeTo}
+          mediaType={mediaType}
+          onMediaTypeChange={setMediaType}
+          sizeMin={sizeMin}
+          onSizeMinChange={setSizeMin}
+          timeFrom={timeFrom}
+          onTimeFromChange={setTimeFrom}
+          timeTo={timeTo}
+          onTimeToChange={setTimeTo}
         />
       </Drawer>
 
@@ -352,7 +458,9 @@ export default function BrowsePage() {
       <Group align="flex-start" gap="md" wrap="nowrap">
         {/* 左导航树（FR-121）：桌面常驻，窄屏收进抽屉 */}
         <Paper
-          withBorder radius="sm" p="xs"
+          withBorder
+          radius="sm"
+          p="xs"
           visibleFrom="md"
           style={{ width: 260, flexShrink: 0, maxHeight: '70vh', overflowY: 'auto' }}
         >
@@ -360,9 +468,7 @@ export default function BrowsePage() {
         </Paper>
 
         {/* 主文件区 */}
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          {browserNode}
-        </Box>
+        <Box style={{ flex: 1, minWidth: 0 }}>{browserNode}</Box>
       </Group>
 
       {/* 移动端目录树抽屉（FR-86/FR-121）：承载与桌面同一棵树，点节点后关闭抽屉 */}
@@ -377,16 +483,27 @@ export default function BrowsePage() {
       >
         <DirectoryTree
           currentPath={browse.currentPath}
-          onNavigate={(p) => { browse.navigateTo(p); treeDrawer.close() }}
+          onNavigate={(p) => {
+            browse.navigateTo(p);
+            treeDrawer.close();
+          }}
         />
       </Drawer>
 
       {/* 状态栏（FR-121）：项目数 + 选中数与体量 */}
-      <Group gap="md" align="center" justify="space-between"
-        style={{ borderTop: '1px solid var(--mantine-color-default-border)', paddingTop: 6 }}>
-        <Text size="xs" c="dimmed">{itemCount} 个项目</Text>
+      <Group
+        gap="md"
+        align="center"
+        justify="space-between"
+        style={{ borderTop: '1px solid var(--mantine-color-default-border)', paddingTop: 6 }}
+      >
+        <Text size="xs" c="dimmed">
+          {itemCount} 个项目
+        </Text>
         {selectedStat && (
-          <Text size="xs" c="dimmed">已选 {selectedStat.count} 项 · {formatSize(selectedStat.size)}</Text>
+          <Text size="xs" c="dimmed">
+            已选 {selectedStat.count} 项 · {formatSize(selectedStat.size)}
+          </Text>
         )}
       </Group>
 
@@ -410,5 +527,5 @@ export default function BrowsePage() {
         loading={deleting}
       />
     </Stack>
-  )
+  );
 }

@@ -1,6 +1,6 @@
-import client from './client'
-import type { ClientCapabilities } from '@/utils/codec-capability'
-import type { PlaybackDescriptor } from '@/types'
+import client from './client';
+import type { ClientCapabilities } from '@/utils/codec-capability';
+import type { PlaybackDescriptor } from '@/types';
 
 /**
  * 端到端编码协商（FR-53）。
@@ -11,11 +11,11 @@ import type { PlaybackDescriptor } from '@/types'
 
 /** 后端协商响应（snake_case）；前端转为 PlaybackDescriptor。 */
 interface NegotiateResponse {
-  codec: string
-  path: 'ts' | 'fmp4' | 'mp4'
-  url: string
-  mime?: string
-  fallback_url?: string
+  codec: string;
+  path: 'ts' | 'fmp4' | 'mp4';
+  url: string;
+  mime?: string;
+  fallback_url?: string;
 }
 
 /**
@@ -28,13 +28,13 @@ export async function negotiate(
 ): Promise<PlaybackDescriptor> {
   const res = await client.post<NegotiateResponse>(`/api/play/${mediaID}/negotiate`, {
     client_caps: caps,
-  })
-  const data = res.data
-  const toAbsolute = (path: string) => new URL(path, window.location.href).toString()
+  });
+  const data = res.data;
+  const toAbsolute = (path: string) => new URL(path, window.location.href).toString();
   return {
     codec: data.codec,
     path: data.path,
     url: toAbsolute(data.url),
     fallbackUrl: data.fallback_url ? toAbsolute(data.fallback_url) : undefined,
-  }
+  };
 }
