@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { strToDate, dateToStr } from './MediaQueryFilters';
+import { strToDate, dateToStr } from './MediaQueryFilters.helpers';
 
 // FR-94：原生日期控件换 Mantine DatePickerInput 后，YYYY-MM-DD ↔ 本地 Date 的转换契约，
 // 保证请求侧仍传 YYYY-MM-DD 字符串、且不因 UTC 解析/格式化差一天。

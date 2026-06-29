@@ -3,11 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MantineProvider } from '@mantine/core';
 
-import AnchorNav, {
-  pickActiveByScroll,
-  measureStickyOffset,
-  type SectionOffset,
-} from './AnchorNav';
+import AnchorNav from './AnchorNav';
+import { pickActiveByScroll, measureStickyOffset, type SectionOffset } from './AnchorNav.helpers';
 
 // 在 MantineProvider 下渲染锚点导航（组件用到 Mantine 样式）
 function renderNav(props: Parameters<typeof AnchorNav>[0]) {

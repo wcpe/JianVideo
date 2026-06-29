@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { http, HttpResponse, delay } from 'msw';
-import SystemPage, { type SystemSection } from './SystemPage';
+import SystemPage from './SystemPage';
+import { type SystemSection } from './SystemPage.helpers';
 import { server } from '@/mocks/beforeAll';
 
 // 复制功能依赖 navigator.clipboard，jsdom 默认缺失，这里注入可断言的 mock

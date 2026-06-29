@@ -2,12 +2,13 @@ import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MantineProvider } from '@mantine/core';
-import VideoPlayer, {
+import VideoPlayer from './VideoPlayer';
+import {
   loadVolumePref,
   saveVolumePref,
   clampVolume,
   VOLUME_PREF_KEY,
-} from './VideoPlayer';
+} from './VideoPlayer.helpers';
 
 // 走 streamType='mp4' 原生 video 分支，避免依赖 mpegts.js / hls.js 真实内核
 vi.mock('mpegts.js', () => ({ default: { createPlayer: () => ({}) } }));

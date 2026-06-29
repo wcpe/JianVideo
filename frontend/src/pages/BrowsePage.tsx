@@ -30,7 +30,8 @@ import {
 } from '@tabler/icons-react';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDirectoryBrowse';
-import DirectoryBrowser, { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser';
+import DirectoryBrowser from '@/components/DirectoryBrowser';
+import { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser.helpers';
 import DirectoryTree from '@/components/DirectoryTree';
 import DirectoryAddressBar from '@/components/DirectoryAddressBar';
 import MediaQueryFilters from '@/components/MediaQueryFilters';

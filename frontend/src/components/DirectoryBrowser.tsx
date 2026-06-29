@@ -27,12 +27,8 @@ import MediaCardOverlay from '@/components/MediaCardOverlay';
 import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu';
 import SelectionBatchBar from '@/components/SelectionBatchBar';
 import { useMultiSelect } from '@/hooks/useMultiSelect';
+import { type DisplayMode, type DirSort, sortFiles } from '@/components/DirectoryBrowser.helpers';
 import type { MediaFile, BreadcrumbItem, DirInfo } from '@/types';
-
-/** 展示方式（FR-33/FR-121）：详情表格 / 列表 / 大-中-小图标 */
-export type DisplayMode = 'details' | 'list' | 'large' | 'medium' | 'small';
-/** 排序方式（FR-33） */
-export type DirSort = 'name' | 'size' | 'type' | 'time';
 
 /** 把后端 modified_at 渲染为本地日期时间；无值返回 '—'。 */
 function formatModified(s?: string): string {
@@ -80,24 +76,6 @@ const GRID_COLS: Record<Exclude<DisplayMode, 'list' | 'details'>, Record<string,
   medium: { '160px': 3, '480px': 4, '720px': 6, '1080px': 8, '1400px': 10 },
   small: { '160px': 4, '420px': 6, '720px': 8, '1080px': 10, '1400px': 12 },
 };
-
-/** 按排序方式对文件排序（纯函数，不改输入）。 */
-export function sortFiles(files: MediaFile[], sort: DirSort): MediaFile[] {
-  const arr = [...files];
-  switch (sort) {
-    case 'size':
-      return arr.sort((a, b) => a.file_size - b.file_size);
-    case 'type':
-      return arr.sort(
-        (a, b) =>
-          (a.format || '').localeCompare(b.format || '') || a.file_name.localeCompare(b.file_name),
-      );
-    case 'time':
-      return arr.sort((a, b) => (a.modified_at || '').localeCompare(b.modified_at || ''));
-    default:
-      return arr.sort((a, b) => mediaDisplayName(a).localeCompare(mediaDisplayName(b)));
-  }
-}
 
 /**
  * 目录浏览 UI（FR-33 资源管理器视图 + FR-69 多选/右键批量）：面包屑 + 多展示档位 + 排序。

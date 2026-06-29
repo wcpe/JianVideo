@@ -35,23 +35,11 @@ import { extractErrorMessage } from '@/utils/error';
 import { formatBytes, formatUptime } from '@/utils/format';
 import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from '@/utils/update-cache';
 import AnchorNav from '@/components/AnchorNav';
+import { type SystemSection, SECTION_TITLES } from '@/pages/SystemPage.helpers';
 import type { SystemInfo, CodecTestResult, UpdateCheckResult, UpdateProgress } from '@/types';
 
 // 检查更新失败的友好兜底文案：超时/网络异常等无后端消息时用它，避免回显裸 axios 串（如 "timeout of 15000ms exceeded"）。
 const UPDATE_CHECK_FALLBACK = '检查更新失败：网络异常或 GitHub 暂时不可用，请稍后重试';
-
-// 系统区块取值（FR-113 一级 tab）：运行环境 / 硬件加速 / 编解码 / 应用更新；
-// 由 ConsolePage 的一级 tab 驱动选中哪个区块，本组件仅渲染该区块（不再有内层 tab）。
-export type SystemSection = 'env' | 'hwaccel' | 'codec' | 'update';
-
-// 区块 → 一级 tab 名称映射（FR-113 后续修复）：内容区 order-2 标题按当前 section 显示对应 tab 名，
-// 与 ConsolePage 的 Tabs.Tab 文案保持一致（避免「应用更新」tab 却显示「系统诊断」）。集中一处定义，不散落硬编码。
-export const SECTION_TITLES: Record<SystemSection, string> = {
-  env: '运行环境',
-  hwaccel: '硬件加速',
-  codec: '编解码',
-  update: '应用更新',
-};
 
 // 运行环境区块内左侧锚点（FR-113）：运行环境 / FFmpeg 两区块
 const ENV_ANCHORS = [

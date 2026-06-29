@@ -34,6 +34,12 @@ export default defineConfig([
       // 迁移到 react-query 等数据层方案超出当前范围，集中关闭此规则；
       // 依赖项正确性仍由 react-hooks/exhaustive-deps 把关。
       'react-hooks/set-state-in-effect': 'off',
+      // react-hooks v7 新增的实验性规则，会误报本项目合法的 latest-ref 模式
+      // （渲染期把最新 prop 写入 ref，供回调 / effect 读取最新值，正是 React 文档认可的用法），
+      // 以及在 style 等渲染期读取 ref.current 做即时视觉判定（如拖拽态、减少动效）。
+      // 强行迁移到 effect 会改变 ref 写入 / 读取时序，在高风险播放器（追播 / seek）组件有回归风险；
+      // 与上方 set-state-in-effect 同理集中关闭此规则。
+      'react-hooks/refs': 'off',
     },
   },
   {

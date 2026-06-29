@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { describe, it, expect, vi } from 'vitest';
 
-import DirectoryBrowser, { sortFiles, type DisplayMode, type DirSort } from './DirectoryBrowser';
+import DirectoryBrowser from './DirectoryBrowser';
+import { sortFiles, type DisplayMode, type DirSort } from './DirectoryBrowser.helpers';
 import type { MediaFile, DirInfo } from '@/types';
 
 function file(over: Partial<MediaFile>): MediaFile {

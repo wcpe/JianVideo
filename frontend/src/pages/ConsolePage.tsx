@@ -8,7 +8,8 @@ import {
   IconCloudDownload,
   IconAdjustments,
 } from '@tabler/icons-react';
-import SystemPage, { type SystemSection, SECTION_TITLES } from './SystemPage';
+import SystemPage from './SystemPage';
+import { type SystemSection, SECTION_TITLES } from './SystemPage.helpers';
 import SettingsPage from './SettingsPage';
 
 // 一级 tab 取值（FR-113）：运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置。

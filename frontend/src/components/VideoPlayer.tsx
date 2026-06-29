@@ -16,6 +16,7 @@ import mpegts from 'mpegts.js';
 import type Hls from 'hls.js';
 import type { SubtitleEntry, PlaybackDescriptor } from '@/types';
 import { isCodecSupported } from '@/utils/codec-capability';
+import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
 
 interface VideoPlayerProps {
   /** 流 URL（支持 master.m3u8 触发 ABR 模式）。传入 descriptor 时由其覆盖。 */
@@ -79,50 +80,6 @@ const SUBTITLE_SCALES = {
   large: 'var(--mantine-font-size-lg)',
 } as const;
 type SubtitleScale = keyof typeof SUBTITLE_SCALES;
-
-// 音量 / 静音偏好持久化键（localStorage，FR-104）
-export const VOLUME_PREF_KEY = 'jianvideo.player.volume';
-
-/** 音量 / 静音偏好（FR-104）。 */
-export interface VolumePref {
-  /** 音量 [0,1] */
-  volume: number;
-  /** 是否静音 */
-  muted: boolean;
-}
-
-/**
- * 读取持久化的音量 / 静音偏好（纯函数，FR-104）。
- * 无存储 / 内容损坏 / 字段非法时返回 null（不抛），volume 夹取到 [0,1]。
- */
-export function loadVolumePref(): VolumePref | null {
-  try {
-    const raw = localStorage.getItem(VOLUME_PREF_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { volume?: unknown; muted?: unknown };
-    if (typeof parsed.volume !== 'number' || isNaN(parsed.volume)) return null;
-    const volume = Math.min(1, Math.max(0, parsed.volume));
-    return { volume, muted: Boolean(parsed.muted) };
-  } catch {
-    return null;
-  }
-}
-
-/** 把音量夹取到 [0,1]（纯函数，FR-104）。非有限数归 0，防止越界值赋给 video.volume 触发 IndexSizeError。 */
-export function clampVolume(val: number): number {
-  if (!Number.isFinite(val)) return 0;
-  return Math.min(1, Math.max(0, val));
-}
-
-/** 写入音量 / 静音偏好（纯函数，FR-104）。失败静默忽略（如隐私模式禁写）。 */
-export function saveVolumePref(pref: VolumePref): void {
-  try {
-    const volume = Math.min(1, Math.max(0, pref.volume));
-    localStorage.setItem(VOLUME_PREF_KEY, JSON.stringify({ volume, muted: Boolean(pref.muted) }));
-  } catch {
-    /* 静默：localStorage 不可用时不影响播放 */
-  }
-}
 
 /** 解析后的有效播放输入（FR-52）。 */
 interface ResolvedPlayback {
@@ -371,12 +328,15 @@ export default function VideoPlayer({
       return;
     }
     if (resolved.streamType === 'mp4' && videoRef.current) {
+      // 把 video 元素复制到局部变量，供 cleanup 使用：cleanup 执行时 videoRef.current 可能已变更，
+      // 用 effect 期捕获的元素引用才能可靠移除 src（消除 react-hooks/exhaustive-deps 告警）。
+      const videoEl = videoRef.current;
       destroyMpegtsPlayer();
       void destroyHlsPlayer();
-      videoRef.current.src = resolved.url;
+      videoEl.src = resolved.url;
       if (autoPlay) attemptAutoPlay();
       return () => {
-        if (videoRef.current) videoRef.current.removeAttribute('src');
+        videoEl.removeAttribute('src');
       };
     }
     if (isABR) void initHlsPlayer(resolved.url);
