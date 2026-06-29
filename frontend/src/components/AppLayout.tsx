@@ -241,9 +241,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         aria-label={label}
         style={{ textDecoration: 'none' }}
       >
+        {/* 紧凑密度（FR-131）：gap 8→6、内边距交由 .nav-link 的 padding:4px 8px 控制（去掉 p="xs"），
+            字号 sm→xs，整体收紧每项行高 */}
         <Group
-          gap={8}
-          p="xs"
+          gap={6}
           justify={collapsed ? 'center' : undefined}
           className="nav-link"
           style={{
@@ -255,7 +256,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         >
           <Icon size={16} />
           {!collapsed && (
-            <Text size="sm" c={active ? 'inherit' : undefined} fw={active ? 600 : undefined}>
+            <Text size="xs" c={active ? 'inherit' : undefined} fw={active ? 600 : undefined}>
               {label}
             </Text>
           )}
@@ -276,7 +277,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 展开态每组前置 dimmed 小标题；收缩态（64px）不显标题文字，改用 Divider 分隔（首组前不加）以免破版。
   const renderNavGroups = (onNavigate?: () => void, collapsed = false) =>
     navGroups.map((group, groupIndex) => (
-      <Stack key={group.title} gap="xs">
+      // 组内项间距收紧（FR-131）：gap xs→4，提高导航密度
+      <Stack key={group.title} gap={4}>
         {collapsed ? (
           groupIndex > 0 && <Divider my={2} />
         ) : (

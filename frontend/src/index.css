@@ -81,14 +81,31 @@ body {
 }
 
 /* 左侧导航项 hover 反馈（FR-115）：非激活项 hover 出可见浅底 + 平滑过渡；
-   激活项（其外层 <a data-active>）保持品牌紫浅底，不被 hover 浅底覆盖。复用设计 token，不写死颜色。 */
+   激活项（其外层 <a data-active>）保持品牌紫浅底，不被 hover 浅底覆盖。复用设计 token，不写死颜色。
+   紧凑密度（FR-131）：用更小的内边距收紧每项行高（覆盖 Mantine p="xs" 的默认 padding），
+   让导航在功能增多后更省空间；进入时附 jianvideo-nav-item-in 轻量淡入动画。 */
 .nav-link {
+  padding: 4px 8px;
   transition:
     background-color 140ms ease,
     color 140ms ease;
+  animation: jianvideo-nav-item-in 180ms ease;
 }
 a:not([data-active]) .nav-link:hover {
   background-color: var(--mantine-color-default-hover);
+}
+
+/* 导航项进入动画（FR-131）：切换展开/收缩或分组渲染时各项轻量淡入（透明 + 极小上移），
+   prefers-reduced-motion 下由下方兜底关闭。 */
+@keyframes jianvideo-nav-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 控制台一级 tab 头部吸顶（FR-113 修复）：随内容滚动时一级 tab 常驻顶部，避免锚点定位后 tab 被滚走。
@@ -176,6 +193,10 @@ a:not([data-active]) .nav-link:hover {
   .mantine-NavLink-root,
   .nav-link {
     transition: none;
+  }
+  /* 导航项进入动画在减少动态下关闭（FR-131） */
+  .nav-link {
+    animation: none;
   }
   .nav-resize-handle::after {
     transition: none;
