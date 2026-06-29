@@ -27,6 +27,7 @@
     "@tabler/icons-react": "^3.34.0",
     "@tanstack/react-virtual": "^3.14.3",
     "axios": "^1.18.0",
+    "framer-motion": "^12.42.0",
     "hls.js": "^1.6.0",
     "leaflet": "^1.9.4",
     "mpegts.js": "^1.8.0",
