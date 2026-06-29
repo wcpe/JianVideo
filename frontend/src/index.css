@@ -11,6 +11,14 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 全局统一固定高度布局（FR-133）：始终为纵向滚动条预留固定宽度。
+   页面滚动容器为 html/window（AnchorNav 等以 window.scrollY 为基准），
+   内容多的页（出滚动条）与内容少的页（无滚动条）原会因滚动条占位差异产生横向位移，
+   切页（概览↔时间轴↔目录）时表现为横向跳动；scrollbar-gutter:stable 始终预留槽位，使横向稳定。 */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -232,6 +240,8 @@ a:not([data-active]) .nav-link:hover {
    不可纵向滚动；卸载时移除该类、其它页布局不受影响。用 100dvh 避开移动端地址栏高度抖动。 */
 body.play-immersive {
   overflow: hidden;
+  /* 沉浸态已禁滚动（无滚动条），复位 FR-133 的滚动条预留，避免右侧留出无用空槽 */
+  scrollbar-gutter: auto;
 }
 
 body.play-immersive .mantine-AppShell-main {
