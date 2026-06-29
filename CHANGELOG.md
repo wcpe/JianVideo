@@ -6,6 +6,17 @@
 
 ## 未发布
 
+## 0.20.2（2026-06-29）
+
+### 修复
+- **CI 质量门工作流在 Linux runner 的多项失败（FR-128，[ADR-0047](docs/adr/0047-ci-quality-gates.md)）**：`ci.yml` 自落地起在 GitHub Actions（Ubuntu / Node 20）从未跑绿，本版逐项修复至 go-quality / web-quality / e2e 三 job 全绿：
+  - **依赖安装**：`npm ci` 因 package-lock 在 Windows 生成、缺 Linux 平台可选依赖（`@emnapi/*` 等 napi WASM 垫片）在 Linux runner 严格校验失败，统一改 `npm install` 按目标平台解析（与 build.yml 既定决策一致）。
+  - **Go 静态检查**：`golangci-lint-action` 升 v6→v7 适配 golangci-lint v2；并去掉 `args` 中重复的 `run` 子命令（v7 已自动注入，致 `run run ./...` 把多余 `run` 当路径报错退出码 7）。
+  - **Go 测试**：go-quality job 安装 ffmpeg（transcoder 版本键控缓存测试依赖 `FFmpegVersion`，缺 ffmpeg 时版本为空、缓存判定按设计失效）；库 `BrowseDirectory` 的 Windows 路径用例改用规范化正斜杠存储（`filepath.ToSlash` 在 Linux 不转换反斜杠，致 `D:\` 路径前缀查询在 Linux 落空），跨平台可在 Linux 运行。
+  - **前端覆盖率门**：vitest（environment=node）测试 setup 显式挂载 `navigator`（react-dom 求值期读取，该全局 Node 21+ 才有，CI 的 Node 20 缺失致 70 个组件 / 页面测试套件加载即抛 `navigator is not defined`）。
+  - **E2E**：Playwright webServer 启动前创建 `.tmp` 隔离库目录（`.tmp` 被 gitignore、CI 全新检出不存在，SQLite 不自建父目录致 go 服务启动报 `unable to open database file`）。
+  - 均为测试基建 / CI 配置修复，无业务代码变更、无新依赖、无新 ADR。
+
 ## 0.20.1（2026-06-29）
 
 ### 工程 / 质量
