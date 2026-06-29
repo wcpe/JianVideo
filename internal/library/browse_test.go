@@ -153,8 +153,11 @@ func TestBrowseDirectory_BreadcrumbPaths(t *testing.T) {
 func TestBrowseDirectory_WindowsBreadcrumbAndDirPaths(t *testing.T) {
 	svc, _ := newTestService(t)
 
-	_, _ = svc.CreateMediaFile(1, `D:\媒体\电影\动作\封面.jpg`, 1024)
-	_, _ = svc.CreateMediaFile(1, `D:\媒体\电影\预告.mp4`, 2048)
+	// 存储用规范化正斜杠路径（即 Windows 上 filepath.ToSlash 的产物），
+	// 查询仍传反斜杠路径以验证 BrowseDirectory 的分隔符归一化；
+	// 如此本用例不依赖 OS 原生分隔符，可在 Linux CI 与 Windows 上一致运行。
+	_, _ = svc.CreateMediaFile(1, "D:/媒体/电影/动作/封面.jpg", 1024)
+	_, _ = svc.CreateMediaFile(1, "D:/媒体/电影/预告.mp4", 2048)
 
 	resp, err := svc.BrowseDirectory(`D:\媒体\电影`, BrowseSortName)
 	if err != nil {
@@ -187,7 +190,9 @@ func TestBrowseDirectory_WindowsBreadcrumbAndDirPaths(t *testing.T) {
 func TestBrowseDirectory_WindowsCaseInsensitivePrefix(t *testing.T) {
 	svc, _ := newTestService(t)
 
-	_, _ = svc.CreateMediaFile(1, `d:\媒体\电影\预告.mp4`, 2048)
+	// 存储用小写盘符的规范化正斜杠路径，查询用大写盘符反斜杠路径，
+	// 验证盘符大小写不敏感前缀匹配；不依赖 OS 原生分隔符，跨平台一致运行。
+	_, _ = svc.CreateMediaFile(1, "d:/媒体/电影/预告.mp4", 2048)
 
 	resp, err := svc.BrowseDirectory(`D:\媒体\电影`, BrowseSortName)
 	if err != nil {
