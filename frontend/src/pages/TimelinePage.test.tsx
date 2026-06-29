@@ -499,3 +499,40 @@ describe('TimelinePage', () => {
     await waitFor(() => expect(viewedId).toBe(88));
   });
 });
+
+describe('TimelinePage 承接页眉全局搜索（FR-132）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderAt(path: string) {
+    return render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <TimelinePage />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+  }
+
+  it('URL 带 ?search= 时初始即以该关键词请求媒体并回填搜索框', async () => {
+    let requestedSearch: string | null = null;
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        requestedSearch = new URL(request.url).searchParams.get('search');
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 });
+      }),
+    );
+
+    renderAt('/timeline?search=' + encodeURIComponent('海边'));
+
+    // 首屏请求即携带 search=海边（来自 URL，承接页眉全局搜索 FR-132）
+    await waitFor(() => {
+      expect(requestedSearch).toBe('海边');
+    });
+    // 搜索框回填该关键词
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('海边')).toBeInTheDocument();
+    });
+  });
+});

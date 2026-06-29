@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Stack,
   Title,
@@ -53,6 +54,9 @@ export default function TimelinePage() {
   const [deleting, setDeleting] = useState(false);
   // 移动端筛选抽屉开合（FR-86）：窄屏将筛选控件收进抽屉，搜索框常驻
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
+  // 承接页眉全局搜索（FR-132）：从 URL ?search= 取初值，作为搜索框初始关键词、首屏即按该词请求
+  const [searchParams] = useSearchParams();
+  const initialSearch = searchParams.get('search') ?? '';
   const infinite = useInfiniteMedia({
     favorite,
     tagId,
@@ -61,6 +65,7 @@ export default function TimelinePage() {
     timeFrom,
     timeTo,
     sort: 'media_time',
+    initialSearch,
   });
   // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
   const batch = useBatchActions();

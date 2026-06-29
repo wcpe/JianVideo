@@ -834,3 +834,46 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1);
   });
 });
+
+describe('AppLayout 页眉居中全局搜索框（FR-132）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' });
+  });
+
+  it('页眉渲染全局搜索输入框（含无障碍标签）', () => {
+    renderLayout();
+    expect(screen.getByRole('textbox', { name: '全局搜索' })).toBeInTheDocument();
+  });
+
+  it('输入关键词回车跳转 /timeline 并带 search 查询参数', async () => {
+    const user = userEvent.setup();
+    renderLayout();
+
+    const input = screen.getByRole('textbox', { name: '全局搜索' });
+    await user.type(input, '海边{Enter}');
+
+    // 搜全部媒体由时间轴页承接（FR-35/FR-132），跳转携带 search 参数
+    expect(mockNavigate).toHaveBeenCalledWith('/timeline?search=' + encodeURIComponent('海边'));
+  });
+
+  it('空白关键词回车不跳转（避免空搜索）', async () => {
+    const user = userEvent.setup();
+    renderLayout();
+
+    const input = screen.getByRole('textbox', { name: '全局搜索' });
+    await user.type(input, '   {Enter}');
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('按「/」快捷键聚焦搜索框', () => {
+    renderLayout();
+
+    const input = screen.getByRole('textbox', { name: '全局搜索' });
+    // 在非输入元素上触发「/」热键应聚焦全局搜索框
+    fireEvent.keyDown(document.body, { key: '/' });
+    expect(document.activeElement).toBe(input);
+  });
+});

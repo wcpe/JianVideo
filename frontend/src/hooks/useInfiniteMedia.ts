@@ -13,6 +13,9 @@ interface UseInfiniteMediaOptions {
   sizeMin?: number;
   timeFrom?: string;
   timeTo?: string;
+  // 初始搜索关键词（FR-132）：用于承接页眉全局搜索经 URL ?search= 传入，
+  // 作为搜索框初值并使首屏即以该词请求；仅作初值，后续由用户输入接管。
+  initialSearch?: string;
 }
 
 /**
@@ -30,12 +33,14 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
     sizeMin = 0,
     timeFrom = '',
     timeTo = '',
+    initialSearch = '',
   } = options;
 
   const [items, setItems] = useState<MediaFile[]>([]);
   const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
+  // 搜索初值取自 initialSearch（FR-132 承接页眉全局搜索）：首屏即按该词请求，搜索框回填该词
+  const [search, setSearch] = useState(initialSearch);
+  const [searchInput, setSearchInput] = useState(initialSearch);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

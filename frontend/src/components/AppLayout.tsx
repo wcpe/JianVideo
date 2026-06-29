@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppShell,
@@ -12,6 +12,7 @@ import {
   Divider,
   Menu,
   Avatar,
+  TextInput,
   UnstyledButton,
   useMantineColorScheme,
   useComputedColorScheme,
@@ -89,6 +90,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // 不整页 reload、不重载导航/页眉、不触动登录态。
   const [refreshNonce, setRefreshNonce] = useState(0);
   const handleRefresh = useCallback(() => setRefreshNonce((n) => n + 1), []);
+
+  // 页眉居中全局搜索（FR-132）：受控输入 + 引用以支持「/」快捷键聚焦。
+  // 回车把关键词交给时间轴页（搜全部媒体的真源 FR-35），跳转携带 search 查询参数；
+  // 空白关键词不跳转（避免空搜索）。
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const submitSearch = useCallback(() => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    navigate(`/timeline?search=${encodeURIComponent(q)}`);
+  }, [searchQuery, navigate]);
 
   // 拖拽调整导航宽度（FR-115 扩展）：按下手柄后监听全局 mousemove，按指针 X 设置宽度（useNavWidth 内部夹紧）；
   // 松开则解绑监听并结束拖拽态。拖拽期间关闭过渡动画，避免卡顿。仅展开态可拖。
@@ -188,8 +200,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     },
   ];
 
-  // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；useHotkeys 默认对匹配事件 preventDefault
-  useHotkeys([['mod+K', openPalette]]);
+  // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；
+  // 全局搜索（FR-132）注册「/」聚焦页眉搜索框。
+  // useHotkeys 默认忽略来自 input/textarea/select 的事件，故在其它输入框内打「/」不会误触。
+  useHotkeys([
+    ['mod+K', openPalette],
+    ['/', () => searchInputRef.current?.focus()],
+  ]);
 
   // 命令清单（FR-74）：跳转类复用 navItems + 开源协议/扫描媒体库/搜索；直接执行类切主题/收展导航/退出登录。
   // 在此构造以拿到 navigate / toggleColorScheme / toggleNavCollapsed / logout 闭包，注入 CommandPalette 做纯展示。
@@ -370,6 +387,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {versionLabel}
               </Text>
             )}
+          </Group>
+
+          {/* 页眉居中全局搜索（FR-132）：占据中部弹性区并水平居中，
+              输入框宽度有上限以保持居中观感；回车搜全部媒体（跳时间轴，FR-35），「/」快捷键聚焦。
+              窄屏（移动端）隐藏，避免与汉堡/品牌挤占；移动端搜索仍走时间轴页内搜索框（FR-86）。 */}
+          <Group justify="center" style={{ flex: 1 }} visibleFrom="sm">
+            <TextInput
+              ref={searchInputRef}
+              aria-label="全局搜索"
+              placeholder="搜索媒体（名称 / 路径 / 显示名）"
+              leftSection={<IconSearch size={16} />}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitSearch();
+              }}
+              style={{ width: '100%', maxWidth: 420 }}
+            />
           </Group>
 
           <Group gap="sm">
