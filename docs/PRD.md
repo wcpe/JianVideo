@@ -159,13 +159,13 @@
 | FR-119 | 系统监控页：新增 `/monitor` 页展示 CPU/内存/磁盘/转码并发当前值 + 时序折线（range 1h/24h/7d）；新增定时采样器 + SQLite 样本表 + 保留期裁剪 + `GET /api/system/metrics`（采样只落 SQLite、不引时序库，采样器独立服务层、`db` 仅样本读写，见 ADR-0044） | P12 | 已交付@v0.20.0 |
 | FR-120 | 时间轴页苹果风重设计：右侧时间标尺悬停即弹出该时段缩略图预览（升级 FR-68 拖动浮层）、年/月/日/所有缩放、方形密铺日期分组网格；顶部「那年今日」+「最近查看」（新增媒体打开 `viewed_at` 记录 + `recently-viewed` 端点）（扩 FR-14/FR-32/FR-68/FR-72） | P12 | 已交付@v0.20.0 |
 | FR-121 | 目录浏览重做为资源管理器：左导航树 + 可点地址栏 + 工具栏 + 名称/修改日期/类型/大小详情列 + 状态栏 + 视图模式；聚合改为按真实磁盘路径前缀跨库重建单一目录树（盘符/共享为根，传 `D:\` 库即整盘可浏览），排序后端参数化；移除全局页级面包屑 `PageBreadcrumbs`；只读浏览，不做真动磁盘文件操作（取代 ADR-0037，见 ADR-0046） | P12 | 已交付@v0.20.0 |
-| FR-122 | Go 静态检查门禁：新增 `.golangci.yml`（全套 linter：govet/staticcheck/errcheck/ineffassign/revive/bodyclose/sqlclosecheck 等），Makefile 加 `lint` 目标（gofmt 检查 + goimports 检查 + golangci-lint run，help 列出，只管 Go）并固定工具版本，修复全部存量告警至全绿（落地 static-analysis.md 既定工具链） | P13 | 计划 |
-| FR-123 | 前端 Prettier 落地与 ESLint 告警清零：引入 prettier + eslint-config-prettier 及配置、format/format:check/lint:fix 脚本，eslint 配置接入 eslint-config-prettier 关闭冲突格式规则，全量 `prettier --write` 格式化（format-only 独立提交、行为不变）并修复全部 eslint 告警（落地 static-analysis.md 既定工具链，扩 eslint 现有配置） | P13 | 计划 |
-| FR-124 | 前端 Mock API 端点补全：审计 `frontend/src/api` 实际调用的全部后端端点，补齐 MSW handlers 至 100% 覆盖、消除未处理请求，并校准 mock 数据形状贴近真实响应（扩现有 MSW 测试基建） | P13 | 计划 |
-| FR-125 | 前端关键浅测补强：审计 render-only 浅测，对关键页面/组件补行为与交互断言（点击/表单/API 往返/状态转换），提升测试有效性（扩 FR-H 测试基线） | P13 | 计划 |
-| FR-126 | 前端测试覆盖率阈值门禁：引入 @vitest/coverage-v8，vitest 覆盖率配置加 thresholds（lines/statements/functions 70%、branches 按实测约 60%），先实测当前值定档，覆盖率不达标即失败（扩 FR-125） | P13 | 计划 |
-| FR-127 | 前端 E2E 接入 CI 并扩关键场景：现有 Playwright E2E 接入 CI 回归门，并补关键流程 spec（播放/转码、目录浏览、设置等），复用已配 retries/SW 禁用/独立 DB（扩现有 e2e 基线） | P13 | 计划 |
-| FR-128 | CI 质量门工作流：新增 `.github/workflows/ci.yml`（PR 与 push main 触发）统一执行 Go（make lint + go test）与前端（lint + format:check + 覆盖率门禁）质量门、E2E 独立 job 失败挡合并，build.yml 仍专管发版（首次在 CI 设质量门，见 ADR-0047） | P13 | 计划 |
+| FR-122 | Go 静态检查门禁：新增 `.golangci.yml`（全套 linter：govet/staticcheck/errcheck/ineffassign/revive/bodyclose/sqlclosecheck 等），Makefile 加 `lint` 目标（gofmt 检查 + goimports 检查 + golangci-lint run，help 列出，只管 Go）并固定工具版本，修复全部存量告警至全绿（落地 static-analysis.md 既定工具链） | P13 | 开发中 |
+| FR-123 | 前端 Prettier 落地与 ESLint 告警清零：引入 prettier + eslint-config-prettier 及配置、format/format:check/lint:fix 脚本，eslint 配置接入 eslint-config-prettier 关闭冲突格式规则，全量 `prettier --write` 格式化（format-only 独立提交、行为不变）并修复全部 eslint 告警（落地 static-analysis.md 既定工具链，扩 eslint 现有配置） | P13 | 开发中 |
+| FR-124 | 前端 Mock API 端点补全：审计 `frontend/src/api` 实际调用的全部后端端点，补齐 MSW handlers 至 100% 覆盖、消除未处理请求，并校准 mock 数据形状贴近真实响应（扩现有 MSW 测试基建） | P13 | 开发中 |
+| FR-125 | 前端关键浅测补强：审计 render-only 浅测，对关键页面/组件补行为与交互断言（点击/表单/API 往返/状态转换），提升测试有效性（扩 FR-H 测试基线） | P13 | 开发中 |
+| FR-126 | 前端测试覆盖率阈值门禁：引入 @vitest/coverage-v8，vitest 覆盖率配置加 thresholds（lines/statements 75、functions 60、branches 75，按实测务实定档），先实测当前值定档，覆盖率不达标即失败（扩 FR-125） | P13 | 开发中 |
+| FR-127 | 前端 E2E 接入 CI 并扩关键场景：现有 Playwright E2E 接入 CI 回归门，并补关键流程 spec（播放/转码、目录浏览、设置等），复用已配 retries/SW 禁用/独立 DB（扩现有 e2e 基线） | P13 | 开发中 |
+| FR-128 | CI 质量门工作流：新增 `.github/workflows/ci.yml`（PR 与 push main 触发）统一执行 Go（make lint + go test）与前端（lint + format:check + 覆盖率门禁）质量门、E2E 独立 job 失败挡合并，build.yml 仍专管发版（首次在 CI 设质量门，见 ADR-0047） | P13 | 开发中 |
 
 > 以下为前端优化专项（2026-03-04 启动）：
 | FR-F | 前端代码结构拆分：LibraryPage 拆分为多个子组件 + hooks，VideoPlayer 重构，样式统一 Mantine，删除模板代码 | P1 | 已交付@v0.1.0 |
@@ -222,7 +222,7 @@
 - **AC-27**（FR-123）：`npm run format:check` 全绿、`npm run lint` 0 error/warning；全量格式化为独立提交、与 eslint 告警修复提交分开；`npm run build`（tsc -b + vite build）与 `npm test` 均通过（格式化未破坏行为）。
 - **AC-28**（FR-124）：可列出 `frontend/src/api` 全部后端端点清单且 MSW handlers 100% 覆盖；测试在 `onUnhandledRequest:'error'` 下运行无未处理请求；`npm test` 全绿。
 - **AC-29**（FR-125）：选定的关键浅测均含实质行为/交互断言（非仅渲染存在性）；`npm test` 全绿；覆盖率较补强前不下降。
-- **AC-30**（FR-126，需先实测定档）：`npm run test:coverage` 产出覆盖率且不低于配置阈值（lines/statements/functions 70%、branches 约 60% 按实测校准）；阈值写入 vitest 覆盖率配置；构造低于阈值用例可使其失败（门禁生效）。
+- **AC-30**（FR-126，需先实测定档）：`npm run test:coverage` 产出覆盖率且不低于配置阈值（实测务实定档 lines/statements 75、functions 60、branches 75）；阈值写入 vitest 覆盖率配置；构造低于阈值用例可使其失败（门禁生效）。
 - **AC-31**（FR-127）：新增关键流程 spec 本地 `npm run e2e` 通过；CI 中 E2E job（headless Chromium）通过、失败时阻断合并；覆盖播放/转码、目录浏览、设置等关键流程。
 - **AC-32**（FR-128，需 CI 实跑确认）：`ci.yml` 在 PR 与 push main 触发，依次跑 Go、前端、E2E 门；任一门失败即整体 fail 并阻断合并（构造失败用例验证）；本地 `make lint` 与 `npm run lint/format:check/test:coverage/e2e` 与 CI 行为一致；`build.yml` 发版职责不变（见 ADR-0047）。
 
