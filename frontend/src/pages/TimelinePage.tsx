@@ -2,7 +2,6 @@ import { useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Stack,
-  Title,
   TextInput,
   Group,
   SegmentedControl,
@@ -27,6 +26,7 @@ import ContinueWatching from '@/components/ContinueWatching';
 import OnThisDay from '@/components/OnThisDay';
 import RecentlyViewed from '@/components/RecentlyViewed';
 import MediaDetailPanel from '@/components/MediaDetailPanel';
+import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
 import BatchActionsModals from '@/components/BatchActionsModals';
 import { useBatchActions } from '@/hooks/useBatchActions';
@@ -196,21 +196,23 @@ export default function TimelinePage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="center">
-        <Title order={2}>时间轴</Title>
-        {/* 手动刷新（FR-67）：重载首页数据 */}
-        <Tooltip label="刷新">
-          <ActionIcon
-            variant="default"
-            size="lg"
-            aria-label="刷新"
-            loading={infinite.loading}
-            onClick={() => infinite.reload()}
-          >
-            <IconRefresh size={18} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
+      <PageHeader
+        title="时间轴"
+        actions={
+          // 手动刷新（FR-67）：重载首页数据
+          <Tooltip label="刷新">
+            <ActionIcon
+              variant="default"
+              size="lg"
+              aria-label="刷新"
+              loading={infinite.loading}
+              onClick={() => infinite.reload()}
+            >
+              <IconRefresh size={18} />
+            </ActionIcon>
+          </Tooltip>
+        }
+      />
 
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
       <ContinueWatching />

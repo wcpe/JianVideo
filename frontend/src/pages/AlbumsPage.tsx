@@ -26,6 +26,7 @@ import {
   IconAlertTriangle,
 } from '@tabler/icons-react';
 import ShareDialog from '@/components/ShareDialog';
+import PageHeader from '@/components/PageHeader';
 import * as albumApi from '@/api/albums';
 import * as libApi from '@/api/library';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -154,16 +155,18 @@ export default function AlbumsPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={2}>相册</Title>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          color="purple"
-          onClick={() => setCreate({ ...initCreate, opened: true })}
-        >
-          新建相册
-        </Button>
-      </Group>
+      <PageHeader
+        title="相册"
+        actions={
+          <Button
+            leftSection={<IconPlus size={16} />}
+            color="purple"
+            onClick={() => setCreate({ ...initCreate, opened: true })}
+          >
+            新建相册
+          </Button>
+        }
+      />
 
       {loading && albums.length === 0 ? (
         // 首屏加载骨架屏（FR-98）：以卡片占位替代空白闪现

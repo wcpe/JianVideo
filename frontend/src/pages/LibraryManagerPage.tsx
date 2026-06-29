@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Stack, Title, Box, Text, Progress } from '@mantine/core';
+import { Stack, Box, Text, Progress } from '@mantine/core';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useScanProgress } from '@/hooks/useScanProgress';
 import LibraryPathManager from '@/components/LibraryPathManager';
+import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
 import * as libApi from '@/api/library';
 import type { LibraryPath } from '@/types';
@@ -42,7 +43,7 @@ export default function LibraryManagerPage() {
 
   return (
     <Stack gap="md">
-      <Title order={2}>存储库管理</Title>
+      <PageHeader title="存储库管理" />
       <LibraryPathManager
         paths={paths.paths}
         loading={paths.loading}

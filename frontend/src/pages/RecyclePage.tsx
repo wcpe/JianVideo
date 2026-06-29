@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Stack, Title, Group, Text, Button, Loader, Center } from '@mantine/core';
+import { Stack, Text, Button, Loader, Center } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import type { AxiosError } from 'axios';
 import * as libApi from '@/api/library';
+import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
 import MediaRow from '@/components/MediaRow';
 import EmptyState from '@/components/EmptyState';
@@ -94,19 +95,21 @@ export default function RecyclePage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Title order={2}>回收站</Title>
-        {items.length > 0 && (
-          <Button
-            color="red"
-            variant="light"
-            leftSection={<IconTrash size={16} />}
-            onClick={() => setCleanupOpen(true)}
-          >
-            清理回收站
-          </Button>
-        )}
-      </Group>
+      <PageHeader
+        title="回收站"
+        actions={
+          items.length > 0 && (
+            <Button
+              color="red"
+              variant="light"
+              leftSection={<IconTrash size={16} />}
+              onClick={() => setCleanupOpen(true)}
+            >
+              清理回收站
+            </Button>
+          )
+        }
+      />
       <Text size="sm" c="dimmed">
         这里的媒体已从媒体库移除但源文件仍在磁盘，可随时还原；清理会把源文件移动到所在盘符的回收站目录（按删除日期分类）并移除记录。
       </Text>

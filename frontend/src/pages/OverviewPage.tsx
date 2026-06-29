@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Stack, Title, Text, Group, Card, Progress, SimpleGrid, Badge, Box } from '@mantine/core';
+import { Stack, Text, Group, Card, Progress, SimpleGrid, Badge, Box } from '@mantine/core';
 import {
   IconPhoto,
   IconVideo,
@@ -16,6 +16,7 @@ import { getHealthStatus } from '@/api/health';
 import { listTranscodeTasks } from '@/api/transcode';
 import { getScanTasks } from '@/api/library';
 import { listAlbums } from '@/api/albums';
+import PageHeader from '@/components/PageHeader';
 import { formatBytes, formatUptime } from '@/utils/format';
 import ContinueWatching from '@/components/ContinueWatching';
 import type { LibrarySummary, WatchStats, SystemInfo, ScanTask } from '@/types';
@@ -243,7 +244,7 @@ export default function OverviewPage() {
 
   return (
     <Stack gap="lg">
-      <Title order={2}>概览</Title>
+      <PageHeader title="概览" />
 
       {/* 1. KPI 大数卡（FR-117）：媒体总数 / 视频总时长 / 占用空间 / 媒体库数 / 相册数 */}
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="md">

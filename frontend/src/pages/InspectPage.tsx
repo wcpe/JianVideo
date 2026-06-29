@@ -1,21 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Stack,
-  Title,
-  Group,
-  Card,
-  Text,
-  Button,
-  Loader,
-  Center,
-  Progress,
-  Badge,
-} from '@mantine/core';
+import { Stack, Group, Card, Text, Button, Loader, Center, Progress, Badge } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconStethoscope, IconTrash } from '@tabler/icons-react';
 import * as healthApi from '@/api/health';
 import { batchDeleteMediaFiles } from '@/api/library';
 import ConfirmModal from '@/components/ConfirmModal';
+import PageHeader from '@/components/PageHeader';
 import MediaRow from '@/components/MediaRow';
 import EmptyState from '@/components/EmptyState';
 import type { HealthIssue, HealthIssueType, HealthScanStatus } from '@/types';
@@ -166,29 +156,31 @@ export default function InspectPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Title order={2}>问题媒体</Title>
-        <Group gap="sm">
-          {selected.size > 0 && (
+      <PageHeader
+        title="问题媒体"
+        actions={
+          <Group gap="sm">
+            {selected.size > 0 && (
+              <Button
+                color="red"
+                variant="light"
+                leftSection={<IconTrash size={16} />}
+                onClick={() => setConfirmOpen(true)}
+              >
+                删除选中（{selected.size}）
+              </Button>
+            )}
             <Button
-              color="red"
-              variant="light"
-              leftSection={<IconTrash size={16} />}
-              onClick={() => setConfirmOpen(true)}
+              color="purple"
+              leftSection={<IconStethoscope size={16} />}
+              loading={scanning}
+              onClick={handleScan}
             >
-              删除选中（{selected.size}）
+              {scanning ? '巡检中…' : '开始巡检'}
             </Button>
-          )}
-          <Button
-            color="purple"
-            leftSection={<IconStethoscope size={16} />}
-            loading={scanning}
-            onClick={handleScan}
-          >
-            {scanning ? '巡检中…' : '开始巡检'}
-          </Button>
-        </Group>
-      </Group>
+          </Group>
+        }
+      />
       <Text size="sm" c="dimmed">
         巡检会后台扫描所有媒体，找出源文件丢失、0
         字节、视频损坏、缩略图无法生成的问题媒体。巡检只读、不会自动删除；可在下方选中后删除进回收站。

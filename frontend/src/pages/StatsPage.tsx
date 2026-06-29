@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
   Stack,
-  Title,
   Text,
   Group,
   Card,
@@ -23,6 +22,7 @@ import { mediaDisplayName } from '@/utils/media';
 import { formatBytes } from '@/utils/format';
 import MediaThumbnail from '@/components/MediaThumbnail';
 import EmptyState from '@/components/EmptyState';
+import PageHeader from '@/components/PageHeader';
 import MetricCard from '@/components/MetricCard';
 import TrendChart from '@/components/TrendChart';
 import type { WatchStats, LibrarySummary, MediaTrends, MediaTrendPoint } from '@/types';
@@ -163,7 +163,7 @@ export default function StatsPage() {
   if (stats.total === 0) {
     return (
       <Stack gap="lg">
-        <Title order={2}>统计</Title>
+        <PageHeader title="统计" />
         <EmptyState
           icon={
             <IconChartBar
@@ -192,7 +192,7 @@ export default function StatsPage() {
 
   return (
     <Stack gap="lg">
-      <Title order={2}>统计</Title>
+      <PageHeader title="统计" />
       <Tabs value={activeTab} onChange={handleTabChange} keepMounted={false}>
         <Tabs.List mb="md">
           <Tabs.Tab value={TAB_WATCH} leftSection={<IconEye size={16} />}>

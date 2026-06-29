@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Stack, Title, Box, Group, Switch, Skeleton } from '@mantine/core';
+import { Stack, Box, Switch, Skeleton } from '@mantine/core';
 import { IconMapPin, IconAlertTriangle } from '@tabler/icons-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -12,6 +12,7 @@ import * as libApi from '@/api/library';
 import { mediaDisplayName } from '@/utils/media';
 import { buildDayTracks } from '@/utils/gpsTrack';
 import EmptyState from '@/components/EmptyState';
+import PageHeader from '@/components/PageHeader';
 import type { MediaFile } from '@/types';
 
 // 修复打包后 leaflet 默认 marker 图标路径丢失（经 Vite 资源 URL 重新指向）
@@ -89,16 +90,20 @@ export default function MapPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="center">
-        <Title order={2}>照片地图</Title>
-        {!loading && !error && media.length > 0 && (
-          <Switch
-            label="轨迹模式"
-            checked={showTracks}
-            onChange={(e) => setShowTracks(e.currentTarget.checked)}
-          />
-        )}
-      </Group>
+      <PageHeader
+        title="照片地图"
+        actions={
+          !loading &&
+          !error &&
+          media.length > 0 && (
+            <Switch
+              label="轨迹模式"
+              checked={showTracks}
+              onChange={(e) => setShowTracks(e.currentTarget.checked)}
+            />
+          )
+        }
+      />
       {loading ? (
         // 首屏加载骨架屏（FR-98）：替代地图区空白闪现
         <Skeleton height="70vh" radius="md" />

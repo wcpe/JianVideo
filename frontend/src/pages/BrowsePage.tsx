@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Stack,
-  Title,
   Group,
   SegmentedControl,
   NativeSelect,
@@ -36,6 +35,7 @@ import DirectoryTree from '@/components/DirectoryTree';
 import DirectoryAddressBar from '@/components/DirectoryAddressBar';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
 import MediaDetailPanel from '@/components/MediaDetailPanel';
+import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
 import BatchActionsModals from '@/components/BatchActionsModals';
 import { useBatchActions } from '@/hooks/useBatchActions';
@@ -269,7 +269,7 @@ export default function BrowsePage() {
 
   return (
     <Stack gap="sm">
-      <Title order={2}>目录浏览</Title>
+      <PageHeader title="目录浏览" />
 
       {/* 工具栏（FR-121）：导航（上一级/刷新/移动端目录树）+ 批量动作（FR-91/FR-69）+ 视图模式 + 排序 */}
       <Group gap="xs" align="center" wrap="wrap">

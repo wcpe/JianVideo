@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Stack, Title, Group, Text, Button, Loader, Center, Paper, Badge } from '@mantine/core';
+import { Stack, Group, Text, Button, Loader, Center, Paper, Badge } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconTrash, IconScan, IconCopyOff } from '@tabler/icons-react';
 import * as libApi from '@/api/library';
+import PageHeader from '@/components/PageHeader';
 import MediaRow from '@/components/MediaRow';
 import EmptyState from '@/components/EmptyState';
 import type { DuplicateGroup } from '@/types';
@@ -107,29 +108,31 @@ export default function DuplicatesPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Title order={2}>重复项</Title>
-        <Group gap="sm">
-          <Button
-            variant="light"
-            color="purple"
-            leftSection={<IconScan size={16} />}
-            loading={scanning}
-            onClick={handleScan}
-          >
-            扫描重复项
-          </Button>
-          <Button
-            color="red"
-            leftSection={<IconTrash size={16} />}
-            loading={deleting}
-            disabled={selected.size === 0}
-            onClick={handleDelete}
-          >
-            删除选中项{selected.size > 0 ? `（${selected.size}）` : ''}
-          </Button>
-        </Group>
-      </Group>
+      <PageHeader
+        title="重复项"
+        actions={
+          <Group gap="sm">
+            <Button
+              variant="light"
+              color="purple"
+              leftSection={<IconScan size={16} />}
+              loading={scanning}
+              onClick={handleScan}
+            >
+              扫描重复项
+            </Button>
+            <Button
+              color="red"
+              leftSection={<IconTrash size={16} />}
+              loading={deleting}
+              disabled={selected.size === 0}
+              onClick={handleDelete}
+            >
+              删除选中项{selected.size > 0 ? `（${selected.size}）` : ''}
+            </Button>
+          </Group>
+        }
+      />
       <Text size="sm" c="dimmed">
         基于缩略图感知哈希（dHash）检出的近似重复媒体，按组列出。勾选每组中要删除的多余项后点「删除选中项」软删进回收站（可还原）。
         若新入库媒体尚未参与，请先点「扫描重复项」补算哈希。

@@ -1,16 +1,7 @@
 import { useState, useEffect } from 'react';
-import {
-  Stack,
-  Title,
-  Text,
-  Card,
-  SegmentedControl,
-  SimpleGrid,
-  Loader,
-  Center,
-  Group,
-} from '@mantine/core';
+import { Stack, Text, Card, SegmentedControl, SimpleGrid, Loader, Center } from '@mantine/core';
 import MetricCard from '@/components/MetricCard';
+import PageHeader from '@/components/PageHeader';
 import TrendChart from '@/components/TrendChart';
 import { getSystemMetrics } from '@/api/metrics';
 import { formatBytes } from '@/utils/format';
@@ -80,15 +71,17 @@ export default function MonitorPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
-        <Title order={2}>系统监控</Title>
-        <SegmentedControl
-          value={range}
-          onChange={setRange}
-          data={RANGE_OPTIONS}
-          aria-label="选择时间范围"
-        />
-      </Group>
+      <PageHeader
+        title="系统监控"
+        actions={
+          <SegmentedControl
+            value={range}
+            onChange={setRange}
+            data={RANGE_OPTIONS}
+            aria-label="选择时间范围"
+          />
+        }
+      />
       <Text size="sm" c="dimmed">
         CPU / 内存 / 磁盘 / 转码并发的当前值与随时间的变动（每 15 秒自动刷新）。
       </Text>

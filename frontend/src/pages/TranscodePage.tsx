@@ -21,6 +21,7 @@ import { notifications } from '@mantine/notifications';
 import { IconMovie, IconTrash, IconPlus, IconPencil } from '@tabler/icons-react';
 import ConfirmModal from '@/components/ConfirmModal';
 import EmptyState from '@/components/EmptyState';
+import PageHeader from '@/components/PageHeader';
 import * as transcodeApi from '@/api/transcode';
 import type { PresetInput } from '@/api/transcode';
 import type { TranscodePreset, TranscodeTask, TranscodeCodec } from '@/types';
@@ -165,12 +166,14 @@ export default function TranscodePage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Title order={2}>转码预设</Title>
-        <Button leftSection={<IconPlus size={16} />} color="purple" onClick={openCreate}>
-          新建预设
-        </Button>
-      </Group>
+      <PageHeader
+        title="转码预设"
+        actions={
+          <Button leftSection={<IconPlus size={16} />} color="purple" onClick={openCreate}>
+            新建预设
+          </Button>
+        }
+      />
 
       {loading && presets.length === 0 ? (
         <Center py="xl">
