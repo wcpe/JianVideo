@@ -75,7 +75,7 @@ export default function DirectoryAddressBar({
       {/* 当前目录搜索框（FR-36）：按当前目录递归筛选 */}
       <TextInput
         aria-label="在当前目录下搜索"
-        placeholder="在当前目录下搜索：文件名，或 ext:jpg type:image size:>10mb"
+        placeholder="在当前目录下搜索：文件名/显示名/相机/镜头，或 ext: type: size: camera: lens:"
         leftSection={<IconSearch size={14} />}
         value={searchValue}
         onChange={(e) => onSearchChange(e.currentTarget.value)}

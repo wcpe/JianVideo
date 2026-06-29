@@ -21,6 +21,7 @@ import { useScanProgress } from '@/hooks/useScanProgress';
 import TimelineView from '@/components/TimelineView';
 import MediaFilterBar from '@/components/MediaFilterBar';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
+import SearchSyntaxHelp from '@/components/SearchSyntaxHelp';
 import ContinueWatching from '@/components/ContinueWatching';
 import OnThisDay from '@/components/OnThisDay';
 import RecentlyViewed from '@/components/RecentlyViewed';
@@ -218,13 +219,15 @@ export default function TimelinePage() {
       {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词）：移动端亦常驻不收进抽屉（FR-86） */}
       <Group gap="xs" align="center" wrap="nowrap">
         <TextInput
-          placeholder="搜索：文件名，或 ext:jpg type:image size:>10mb"
+          placeholder="搜索：文件名/显示名/相机/镜头，或 ext: type: size: camera: lens:"
           leftSection={<IconSearch size={14} />}
           value={infinite.searchInput}
           onChange={(e) => infinite.setSearchInput(e.target.value)}
           size="sm"
           style={{ flex: 1 }}
         />
+        {/* 搜索语法帮助（FR-136）：说明可搜字段与表达式 token */}
+        <SearchSyntaxHelp />
         {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
         <Button
           variant="default"
