@@ -15,6 +15,13 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.test.{ts,tsx}', 'src/**/*.spec.{ts,tsx}', 'src/main.tsx'],
+      // 覆盖率门禁阈值（FR-126，见 ADR-0047）：按实测务实定档（实测 stmts/lines≈78、branches≈81、funcs≈63）
+      thresholds: {
+        lines: 75,
+        statements: 75,
+        functions: 60,
+        branches: 75,
+      },
     },
   },
   resolve: {
