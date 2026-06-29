@@ -26,6 +26,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: 安装 ffmpeg（transcoder 版本键控能力缓存测试依赖）
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:
