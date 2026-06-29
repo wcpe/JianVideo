@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 测试覆盖率报告（vitest --coverage 生成）
+coverage
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
