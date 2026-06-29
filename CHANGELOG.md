@@ -6,6 +6,17 @@
 
 ## 未发布
 
+## 0.20.1（2026-06-29）
+
+### 工程 / 质量
+- **Go 静态检查门禁（FR-122，[ADR-0047](docs/adr/0047-ci-quality-gates.md)）**：新增 `.golangci.yml`（golangci-lint v2，启用 govet/staticcheck/errcheck/ineffassign/revive/bodyclose/sqlclosecheck + gofmt/goimports formatters）与 `make lint` 目标（一次跑齐格式 + 静态检查、只管 Go），并清零全部存量告警（errcheck/revive/staticcheck/unused/bodyclose/ineffassign 共 106 处）。落地 static-analysis.md 既定 Go 工具链。
+- **前端 Prettier 落地与 ESLint 告警清零（FR-123）**：引入 prettier + eslint-config-prettier，新增 `format`/`format:check`/`lint:fix` 脚本，eslint 配置接入 eslint-config-prettier 关闭冲突格式规则；全量 `prettier --write` 格式化前端代码（纯格式、行为不变）并修复全部 eslint 告警（含将组件内非组件导出拆到 `*.helpers`）。
+- **前端 Mock API 端点补全（FR-124）**：审计 `frontend/src/api` 全部后端端点，补齐 MSW handlers 至 100% 覆盖（补 21 个端点 + HLS master 探测回退），测试 `onUnhandledRequest` 由 `warn` 改 `error`，强制零未处理请求。
+- **前端关键浅测补强（FR-125）**：审计 44 个无交互测试，确认绝大多数已是行为/逻辑测试，补 MetricCard「末两点持平」条件渲染断言（精准、无镀金）。
+- **前端测试覆盖率阈值门禁（FR-126，[ADR-0047](docs/adr/0047-ci-quality-gates.md)）**：引入 `@vitest/coverage-v8`，vitest 配 `thresholds`（lines/statements 75、functions 60、branches 75，按实测务实定档），覆盖率不达标即失败；`coverage` 报告产物加入忽略。
+- **前端 E2E 扩关键场景（FR-127）**：复用 Playwright，新增目录浏览 / 设置 / 播放页加载关键流程 spec 与 `ensureSetup`/`login` 公共前置（适配 FR-109 初始化引导），并修正既有 E2E 因 FR-109/FR-117/FR-95 漂移的失效断言。
+- **CI 质量门工作流（FR-128，[ADR-0047](docs/adr/0047-ci-quality-gates.md)）**：新增 `.github/workflows/ci.yml`（PR + push main 触发），统一执行 Go（golangci-lint + go test）、前端（lint + format:check + 覆盖率门禁）、E2E 三道质量门，任一失败挡合并；`build.yml`/`release.yml`/`prerelease.yml` 发版职责不变。
+
 ## 0.20.0（2026-06-28）
 
 ### 新增
