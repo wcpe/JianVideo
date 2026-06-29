@@ -50,4 +50,13 @@ describe('MetricCard', () => {
     expect(screen.queryByTestId('metric-sparkline')).toBeNull();
     expect(screen.queryByLabelText('较前一点上升')).toBeNull();
   });
+
+  it('序列末端持平（末两点相等）时渲染迷你图但不显涨跌箭头', () => {
+    renderWithProvider(<MetricCard label="已看" value="4" sparkline={[1, 3, 3]} />);
+    // 序列长度达标 → 渲染迷你图
+    expect(screen.getByTestId('metric-sparkline')).toBeInTheDocument();
+    // 末两点相等（delta=0）→ 上升/下降箭头均不渲染
+    expect(screen.queryByLabelText('较前一点上升')).toBeNull();
+    expect(screen.queryByLabelText('较前一点下降')).toBeNull();
+  });
 });
