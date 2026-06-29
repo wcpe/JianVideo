@@ -135,7 +135,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // 导航项定义（桌面 Navbar 与移动 Drawer 共用，避免重复）
   const navItems = [
-    { path: '/library-manager', label: '管理', icon: IconSettings },
+    // 库管理（FR-130）：标签由「管理」改为「库管理」，避免与「管理」组标题同名歧义
+    { path: '/library-manager', label: '库管理', icon: IconSettings },
     // 首页概览数据看板（FR-117）：根路由 '/' 为概览
     { path: '/', label: '概览', icon: IconLayoutDashboard },
     // 时间轴迁至 /timeline（FR-117）：浏览媒体入口，仍用时钟图标
@@ -158,21 +159,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/system', label: '系统', icon: IconDeviceDesktopAnalytics },
   ];
 
-  // 左侧导航分组（FR-83）：把扁平 navItems 按「浏览 / 管理 / 系统」三组重排用于渲染。
-  // navItems 仍是命令面板（FR-74）的扁平真源；此处仅按 path 引用其中同一对象做视觉分组，不复制项、不改路径/语义。
+  // 左侧导航分组（FR-130 重构，扩 FR-83）：把扁平 navItems 按「浏览 / 洞察 / 管理」三组重排用于渲染。
+  // 相对旧三组（浏览/管理/系统）的调整：统计移出浏览、监控移出系统，二者并入新增的「洞察」组；
+  // 原「系统」组并入「管理」组。navItems 仍是命令面板（FR-74）的扁平真源；
+  // 此处仅按 path 引用其中同一对象做视觉分组，不复制项、不改路径/语义。
   const navItemByPath = (path: string) => navItems.find((item) => item.path === path)!;
   const navGroups = [
     {
       title: '浏览',
-      items: ['/', '/timeline', '/browse', '/albums', '/map', '/stats'].map(navItemByPath),
+      items: ['/', '/timeline', '/browse', '/albums', '/map'].map(navItemByPath),
     },
     {
-      title: '管理',
-      items: ['/library-manager', '/recycle', '/inspect', '/duplicates', '/transcode'].map(
-        navItemByPath,
-      ),
+      // 洞察组（FR-130）：统计（自浏览移入）+ 监控（自系统移入）
+      title: '洞察',
+      items: ['/stats', '/monitor'].map(navItemByPath),
     },
-    { title: '系统', items: ['/monitor', '/system'].map(navItemByPath) },
+    {
+      // 管理组（FR-130）：原管理项 + 系统（自独立「系统」组并入，置末项）
+      title: '管理',
+      items: [
+        '/library-manager',
+        '/recycle',
+        '/inspect',
+        '/duplicates',
+        '/transcode',
+        '/system',
+      ].map(navItemByPath),
+    },
   ];
 
   // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；useHotkeys 默认对匹配事件 preventDefault

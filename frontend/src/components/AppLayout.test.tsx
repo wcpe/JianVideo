@@ -203,7 +203,7 @@ describe('AppLayout 导航底部版本与开源协议入口（FR-61）', () => {
   });
 });
 
-describe('AppLayout 左侧导航分组（FR-83）', () => {
+describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -213,21 +213,20 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
   // 桌面 Navbar 用 data-collapsed 标识，便于把断言限定在桌面侧边栏（排除移动抽屉重复项）
   const getNavbar = () => document.querySelector('[data-collapsed]') as HTMLElement;
 
-  it('展开态：桌面 navbar 含「浏览 / 管理 / 系统」三组小标题', () => {
+  it('展开态：桌面 navbar 含「浏览 / 洞察 / 管理」三组小标题（FR-130）', () => {
     renderLayout();
 
     const navbar = within(getNavbar());
-    // 「管理」「系统」既是组标题又是同名导航项，故用 getAllByText 断言至少存在一处
+    // 「管理」既是组标题又是同名概念，故用 getAllByText 断言至少存在一处
     expect(navbar.getByText('浏览')).toBeInTheDocument();
+    expect(navbar.getByText('洞察')).toBeInTheDocument();
     expect(navbar.getAllByText('管理').length).toBeGreaterThan(0);
-    expect(navbar.getAllByText('系统').length).toBeGreaterThan(0);
   });
 
-  it('展开态：13 个导航项全部仍在桌面 navbar 中渲染', () => {
+  it('展开态：13 个导航项全部仍在桌面 navbar 中渲染（库管理重命名为「库管理」避免与组标题歧义）', () => {
     renderLayout();
 
     const navbar = within(getNavbar());
-    // 概览（FR-117）置于浏览组首项；时间轴随之保留；监控（FR-119）置于系统组、系统诊断之前
     const labels = [
       '概览',
       '时间轴',
@@ -235,50 +234,51 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
       '相册',
       '地图',
       '统计',
-      '管理',
+      '监控',
+      '库管理',
       '回收站',
       '巡检',
       '重复项',
       '转码',
-      '监控',
       '系统',
     ];
     labels.forEach((label) => {
-      // 「系统」既是组标题又是导航项，故只断言至少存在
       expect(navbar.getAllByText(label).length).toBeGreaterThan(0);
     });
   });
 
-  it('展开态：三组各项归入正确分组（按 navbar 内文档顺序校验组界）', () => {
+  it('展开态：三组各项归入正确分组（FR-130，按 navbar 内文档顺序校验组界）', () => {
     renderLayout();
 
     const navbar = getNavbar();
     const text = navbar.textContent ?? '';
     const idxBrowse = text.indexOf('浏览');
+    const idxInsight = text.indexOf('洞察');
+    // 组标题「管理」为首个出现的「管理」；其后才是导航项「库管理」
     const idxManage = text.indexOf('管理');
-    const idxSystem = text.lastIndexOf('系统');
 
-    // 三个组标题按「浏览 < 管理 < 系统」顺序出现
+    // 三个组标题按「浏览 < 洞察 < 管理」顺序出现
     expect(idxBrowse).toBeGreaterThanOrEqual(0);
-    expect(idxManage).toBeGreaterThan(idxBrowse);
-    expect(idxSystem).toBeGreaterThan(idxManage);
+    expect(idxInsight).toBeGreaterThan(idxBrowse);
+    expect(idxManage).toBeGreaterThan(idxInsight);
 
-    // 浏览组成员落在「浏览」与「管理」标题之间（概览为首项，FR-117）
-    ['概览', '时间轴', '目录', '相册', '地图', '统计'].forEach((label) => {
+    // 浏览组成员落在「浏览」与「洞察」标题之间（统计已移出浏览组）
+    ['概览', '时间轴', '目录', '相册', '地图'].forEach((label) => {
       const i = text.indexOf(label);
       expect(i).toBeGreaterThan(idxBrowse);
+      expect(i).toBeLessThan(idxInsight);
+    });
+    // 洞察组成员（统计 / 监控）落在「洞察」与「管理」标题之间
+    ['统计', '监控'].forEach((label) => {
+      const i = text.indexOf(label);
+      expect(i).toBeGreaterThan(idxInsight);
       expect(i).toBeLessThan(idxManage);
     });
-    // 管理组成员落在「管理」标题之后、「系统」组标题之前
-    ['回收站', '巡检', '重复项', '转码'].forEach((label) => {
+    // 管理组成员（含系统并入）落在「管理」组标题之后
+    ['库管理', '回收站', '巡检', '重复项', '转码', '系统'].forEach((label) => {
       const i = text.indexOf(label);
       expect(i).toBeGreaterThan(idxManage);
-      expect(i).toBeLessThan(idxSystem);
     });
-    // 监控（FR-119）属系统组、位于「系统」诊断项之前：落在「管理」标题之后、「系统」标题/项之前
-    const idxMonitor = text.indexOf('监控');
-    expect(idxMonitor).toBeGreaterThan(idxManage);
-    expect(idxMonitor).toBeLessThan(idxSystem);
   });
 
   it('收缩态：组标题文字隐藏、以分隔线区分组、图标态链接仍可达且不破版', async () => {
@@ -289,11 +289,11 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
 
     const navbar = getNavbar();
     expect(navbar).toHaveAttribute('data-collapsed', 'true');
-    // 收缩态不平铺组标题文字（64px 放不下），但仍以分隔线区分组（至少 2 条：浏览|管理、管理|系统）
+    // 收缩态不平铺组标题文字（64px 放不下），但仍以分隔线区分组（至少 2 条：浏览|洞察、洞察|管理）
     expect(within(navbar).queryByText('浏览')).toBeNull();
-    expect(within(navbar).queryByText('管理')).toBeNull();
+    expect(within(navbar).queryByText('洞察')).toBeNull();
     expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
-    // 13 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）；概览 '/' 与时间轴 '/timeline'（FR-117）；监控 '/monitor'（FR-119）
+    // 13 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
     const paths = [
       '/',
       '/timeline',
@@ -301,12 +301,12 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
       '/albums',
       '/map',
       '/stats',
+      '/monitor',
       '/library-manager',
       '/recycle',
       '/inspect',
       '/duplicates',
       '/transcode',
-      '/monitor',
       '/system',
     ];
     paths.forEach((p) => {
@@ -320,7 +320,6 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     renderLayout();
 
     const navbar = within(getNavbar());
-    // 收起态下仍能按无障碍名定位到各导航链接（修复前图标态链接无名，此处会失败）；含概览（FR-117）、监控（FR-119）
     const names = [
       '概览',
       '时间轴',
@@ -328,12 +327,12 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
       '相册',
       '地图',
       '统计',
-      '管理',
+      '监控',
+      '库管理',
       '回收站',
       '巡检',
       '重复项',
       '转码',
-      '监控',
       '系统',
     ];
     names.forEach((name) => {
@@ -351,8 +350,8 @@ describe('AppLayout 左侧导航分组（FR-83）', () => {
     await waitFor(() => {
       expect(screen.getAllByText('浏览').length).toBeGreaterThan(0);
     });
+    expect(screen.getAllByText('洞察').length).toBeGreaterThan(0);
     expect(screen.getAllByText('管理').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('系统').length).toBeGreaterThan(0);
   });
 });
 
