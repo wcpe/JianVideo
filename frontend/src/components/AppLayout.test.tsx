@@ -877,3 +877,32 @@ describe('AppLayout 页眉居中全局搜索框（FR-132）', () => {
     expect(document.activeElement).toBe(input);
   });
 });
+
+describe('AppLayout 动态文档标题（FR-129）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useAuthStore.setState({ initialized: true, isAuthenticated: true, username: 'admin' });
+    document.title = '';
+  });
+
+  it('概览路由（/）标题为「概览 - JianVideo」', async () => {
+    renderLayoutAt('/');
+    await waitFor(() => expect(document.title).toBe('概览 - JianVideo'));
+  });
+
+  it('时间轴路由（/timeline）标题为「时间轴 - JianVideo」', async () => {
+    renderLayoutAt('/timeline');
+    await waitFor(() => expect(document.title).toBe('时间轴 - JianVideo'));
+  });
+
+  it('播放路由（/play/:id）标题为「播放 - JianVideo」', async () => {
+    renderLayoutAt('/play/42');
+    await waitFor(() => expect(document.title).toBe('播放 - JianVideo'));
+  });
+
+  it('未知路由回退「JianVideo」', async () => {
+    renderLayoutAt('/__unknown__');
+    await waitFor(() => expect(document.title).toBe('JianVideo'));
+  });
+});

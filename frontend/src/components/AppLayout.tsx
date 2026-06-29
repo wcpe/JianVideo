@@ -47,6 +47,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { useNavCollapsed } from '@/hooks/useNavCollapsed';
 import { useNavWidth, NAV_WIDTH_MIN, NAV_WIDTH_MAX } from '@/hooks/useNavWidth';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { CinemaContext } from '@/hooks/cinema-context';
 import { getSystemInfo } from '@/api/system';
 import ScanTaskIndicator from './ScanTaskIndicator';
@@ -199,6 +200,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       ].map(navItemByPath),
     },
   ];
+
+  // 动态文档标题（FR-129）：按当前路由解析页名，设浏览器标签页标题为「<页面名> - JianVideo」。
+  // 页名真源复用 navItems（导航即页名的单一来源）；非导航页（播放/开源协议）补少量映射；
+  // 无匹配（未知路由）传空 → hook 回退「JianVideo」。
+  const pageName = useMemo(() => {
+    const navHit = navItems.find((item) => isNavActive(item.path));
+    if (navHit) return navHit.label;
+    if (pathname.startsWith('/play/')) return '播放';
+    if (pathname === '/licenses') return '开源协议';
+    return '';
+    // navItems 为常量定义、isNavActive 为纯函数，仅依赖 pathname 变化重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+  useDocumentTitle(pageName);
 
   // 命令面板（FR-74）注册全局快捷键 Ctrl/Cmd+K；
   // 全局搜索（FR-132）注册「/」聚焦页眉搜索框。
