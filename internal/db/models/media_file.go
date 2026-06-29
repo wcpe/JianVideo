@@ -37,6 +37,10 @@ type MediaFile struct {
 	GPSLat          float64    `gorm:"default:0" json:"gps_lat"`
 	GPSLon          float64    `gorm:"default:0" json:"gps_lon"`
 
+	// 逆地理编码地名（FR-147，见 ADR-0050）：由 GPS 经纬度离线解析的粗粒度「省·市」可读地名，
+	// 空表示无 GPS 或未解析。供后续聚合 / 筛选展示（前端展示见 FR-146），不影响磁盘文件。
+	Location string `json:"location"`
+
 	// 收藏（FR-41）
 	Favorite bool `gorm:"default:false" json:"favorite"`
 
