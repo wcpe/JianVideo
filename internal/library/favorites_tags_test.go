@@ -221,6 +221,54 @@ func TestListMediaFilesFiltered_ByTag(t *testing.T) {
 	}
 }
 
+func TestUpdateMediaNotes(t *testing.T) {
+	svc, _ := newTagTestService(t)
+	id := createTestMedia(t, svc, 1, "a.mp4")
+
+	// 设置备注（去首尾空白）
+	mf, err := svc.UpdateMediaNotes(id, "  生日聚会现场  ")
+	if err != nil {
+		t.Fatalf("设置备注失败: %v", err)
+	}
+	if mf.Notes != "生日聚会现场" {
+		t.Fatalf("期望备注去空白后落库, 实际 %q", mf.Notes)
+	}
+
+	// 清除备注（空串）
+	mf, err = svc.UpdateMediaNotes(id, "")
+	if err != nil {
+		t.Fatalf("清除备注失败: %v", err)
+	}
+	if mf.Notes != "" {
+		t.Fatalf("期望备注被清除, 实际 %q", mf.Notes)
+	}
+}
+
+func TestUpdateMediaNotes_NotFound(t *testing.T) {
+	svc, _ := newTagTestService(t)
+	if _, err := svc.UpdateMediaNotes(999, "x"); err == nil {
+		t.Fatal("期望对不存在媒体报错")
+	}
+}
+
+func TestListMediaFilesFiltered_SearchHitsNotes(t *testing.T) {
+	svc, _ := newTagTestService(t)
+	a := createTestMedia(t, svc, 1, "a.mp4")
+	createTestMedia(t, svc, 1, "b.mp4")
+	if _, err := svc.UpdateMediaNotes(a, "极光旅行"); err != nil {
+		t.Fatalf("设置备注失败: %v", err)
+	}
+
+	// 裸词搜索应命中备注内容
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"极光"}}, 1, 100)
+	if err != nil {
+		t.Fatalf("搜索失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != a {
+		t.Fatalf("备注搜索期望仅命中 %d, 实际 total=%d items=%+v", a, total, items)
+	}
+}
+
 func TestListMediaFilesFiltered_NoFilterEqualsAll(t *testing.T) {
 	svc, _ := newTagTestService(t)
 	createTestMedia(t, svc, 1, "a.mp4")

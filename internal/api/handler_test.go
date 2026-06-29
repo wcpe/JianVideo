@@ -894,6 +894,41 @@ func TestUpdateDisplayName_API(t *testing.T) {
 	}
 }
 
+func TestUpdateMediaNotes_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	dir := t.TempDir()
+	diskPath := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(diskPath, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写入测试文件失败: %v", err)
+	}
+	mf, _ := svc.CreateMediaFile(1, diskPath, 4)
+
+	// 设置备注 → 200，notes 变更
+	req := httptest.NewRequest("PUT", "/api/library/media/"+strconv.FormatInt(mf.ID, 10)+"/notes",
+		bytes.NewBufferString(`{"notes":"现场实拍"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["notes"] != "现场实拍" {
+		t.Fatalf("响应 notes 期望 现场实拍, 实际 %v", resp["notes"])
+	}
+
+	// 不存在的记录 → 404
+	req = httptest.NewRequest("PUT", "/api/library/media/9999/notes",
+		bytes.NewBufferString(`{"notes":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("不存在记录期望 404, 实际 %d", w.Code)
+	}
+}
+
 // 复现 Bug B：扫描完成后扫描状态恒为 completed，SSE 端点不应在 completed 后
 // 立即关闭连接（否则浏览器 EventSource 会每 ~3s 重连成风暴）。连接应保持打开，
 // 仅在客户端断开时关闭。

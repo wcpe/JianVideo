@@ -31,6 +31,8 @@ export interface MediaFile {
   display_name?: string;
   /** 收藏标记（FR-41），旧数据可能缺省 */
   favorite?: boolean;
+  /** 库内备注（FR-137）：用户自由文本备注，纳入基础搜索；空表示无备注，旧数据可能缺省 */
+  notes?: string;
   /** 上次播放位置（秒，FR-44），旧数据可能缺省 */
   last_position?: number;
   /** 是否已看完（FR-44），旧数据可能缺省 */

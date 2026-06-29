@@ -35,9 +35,9 @@ type MediaFilter struct {
 	LensTerms   []string // lens: token，仅约束 lens 列
 }
 
-// searchableColumns 是裸词关键词的可搜列集合（FR-136）。
+// searchableColumns 是裸词关键词的可搜列集合（FR-136/FR-137）。
 // 统一在此声明，避免多处硬编码列名导致搜索口径漂移。
-var searchableColumns = []string{"file_name", "display_name", "camera", "lens"}
+var searchableColumns = []string{"file_name", "display_name", "camera", "lens", "notes"}
 
 // escapeLike 转义 LIKE 通配符，防止用户输入 % 或 _ 干扰查询。
 func escapeLike(s string) string {

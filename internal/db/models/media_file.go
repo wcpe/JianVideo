@@ -44,6 +44,9 @@ type MediaFile struct {
 	// 收藏（FR-41）
 	Favorite bool `gorm:"default:false" json:"favorite"`
 
+	// 备注（FR-137）：用户对媒体的自由文本备注，仅库内存储，纳入基础搜索；空表示无备注
+	Notes string `json:"notes"`
+
 	// 感知哈希去重（FR-70）：基于缩略图计算的 64 位 dHash，0 表示尚未计算。
 	// 汉明距离 ≤ 阈值的媒体视为近似重复，供「重复项」页聚类清理。
 	// 显式列名 dhash，与去重服务的手写 SQL 条件保持一致。

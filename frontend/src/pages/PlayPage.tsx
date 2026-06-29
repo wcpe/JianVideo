@@ -11,6 +11,8 @@ import {
   Title,
   Menu,
   Drawer,
+  Textarea,
+  Stack,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -82,6 +84,10 @@ export default function PlayPage() {
   // 媒体信息抽屉开关（FR-103）：信息移出文档流、收进右侧抽屉，经「更多」菜单「详情」打开
   const [infoOpened, setInfoOpened] = useState(false);
   const [nameEditSaving, setNameEditSaving] = useState(false);
+
+  // 库内备注编辑（FR-137）：抽屉内编辑草稿与保存中标记，纳入基础搜索
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -224,6 +230,31 @@ export default function PlayPage() {
     }
   };
 
+  // 保存库内备注（FR-137）：去首尾空白后持久化，空串表示清除备注
+  const confirmNotesEdit = async () => {
+    if (!media) return;
+    setNotesSaving(true);
+    try {
+      const updated = await libApi.updateMediaNotes(media.id, notesDraft);
+      setMedia(updated);
+      notifications.show({
+        title: '保存成功',
+        message: '已更新备注',
+        color: 'green',
+        autoClose: 2500,
+      });
+    } catch (err) {
+      notifications.show({
+        title: '保存失败',
+        message: err instanceof Error ? err.message : '请稍后重试',
+        color: 'red',
+        autoClose: 3000,
+      });
+    } finally {
+      setNotesSaving(false);
+    }
+  };
+
   if (loading) {
     return <Skeleton height={400} radius="md" />;
   }
@@ -297,7 +328,11 @@ export default function PlayPage() {
               {/* 媒体信息详情（FR-103）：信息移出文档流后由此入口打开右侧抽屉查看 */}
               <Menu.Item
                 leftSection={<IconInfoCircle size={14} />}
-                onClick={() => setInfoOpened(true)}
+                onClick={() => {
+                  // 打开抽屉时同步备注草稿，确保编辑前展示最新已存值（FR-137）
+                  setNotesDraft(media.notes || '');
+                  setInfoOpened(true);
+                }}
               >
                 详情
               </Menu.Item>
@@ -441,6 +476,31 @@ export default function PlayPage() {
             <Text size="sm">{media.width > 0 ? `${media.width}x${media.height}` : '-'}</Text>
           </div>
         </Group>
+
+        {/* 库内备注编辑（FR-137）：自由文本备注，保存后持久化并纳入基础搜索；留空即清除 */}
+        <Stack gap="xs" mt="md">
+          <Text size="xs" c="dimmed">
+            备注
+          </Text>
+          <Textarea
+            placeholder="为这个媒体添加备注，可被搜索命中（留空则清除备注）"
+            autosize
+            minRows={2}
+            maxRows={6}
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.currentTarget.value)}
+          />
+          <Group justify="flex-end">
+            <Button
+              size="xs"
+              loading={notesSaving}
+              disabled={notesDraft.trim() === (media.notes || '').trim()}
+              onClick={confirmNotesEdit}
+            >
+              保存备注
+            </Button>
+          </Group>
+        </Stack>
       </Drawer>
 
       {/* 改显示名（仅库内，不动磁盘）：二次确认弹窗 */}

@@ -495,6 +495,33 @@ func (h *Handler) UpdateDisplayName(c *gin.Context) {
 	c.JSON(http.StatusOK, mf)
 }
 
+// UpdateMediaNotes PUT /api/library/media/:id/notes
+// 请求体：{"notes": "..."}，更新库内备注，空串表示清除备注（FR-137）。
+func (h *Handler) UpdateMediaNotes(c *gin.Context) {
+	id, ok := parseMediaID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Notes string `json:"notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
+		return
+	}
+
+	mf, err := h.library.UpdateMediaNotes(id, req.Notes)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "NOTES_FAILED", "message": "更新备注失败"})
+		return
+	}
+	c.JSON(http.StatusOK, mf)
+}
+
 // BrowseDirectory GET /api/library/browse
 // 按真实磁盘路径跨库浏览（FR-121）：parent_path 必填；sort 可选（name/size/type/time，缺省 name）；
 // library_id 已弃用，仍接受但忽略（导航按真实路径跨库聚合，向后兼容）。

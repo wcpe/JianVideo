@@ -40,6 +40,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/media/:id/download", h.DownloadMediaFile)
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
 		lib.PUT("/media/:id/display-name", h.UpdateDisplayName)
+		lib.PUT("/media/:id/notes", h.UpdateMediaNotes)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
 
 		// 批量软删（FR-69）：单事务对多个 media_id 复用软删，进回收站

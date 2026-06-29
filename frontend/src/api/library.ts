@@ -229,6 +229,15 @@ async function realUpdateDisplayName(id: number, displayName: string): Promise<M
   }
 }
 
+async function realUpdateMediaNotes(id: number, notes: string): Promise<MediaFile> {
+  try {
+    const res = await client.put<MediaFile>(`/api/library/media/${id}/notes`, { notes });
+    return res.data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '保存备注失败'), { cause: err });
+  }
+}
+
 // ─── 软删除与回收站（FR-25）──────────────────────────
 
 async function realGetRecycleMediaFiles(): Promise<MediaFile[]> {
@@ -577,6 +586,14 @@ async function mockUpdateDisplayName(id: number, displayName: string): Promise<M
   return f;
 }
 
+async function mockUpdateMediaNotes(id: number, notes: string): Promise<MediaFile> {
+  await mockDelay(120);
+  const f = mockMediaFiles.find((m) => m.id === id);
+  if (!f) throw new Error('媒体文件不存在');
+  f.notes = notes.trim();
+  return f;
+}
+
 async function mockScanLibrary(id: number, _mode: ScanMode = 'incremental'): Promise<ScanResponse> {
   await mockDelay(400);
   // mock 模式仅模拟新增入库，不区分对账（全量对账行为由后端集成测试覆盖）
@@ -775,6 +792,10 @@ export function getDuplicateGroups() {
 export function renameMediaFile(id: number, newName: string) {
   return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName);
 }
+export function updateMediaNotes(id: number, notes: string) {
+  return useMock ? mockUpdateMediaNotes(id, notes) : realUpdateMediaNotes(id, notes);
+}
+
 export function updateDisplayName(id: number, displayName: string) {
   return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName);
 }
