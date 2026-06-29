@@ -1,0 +1,19 @@
+# 统一文本文件行尾为 LF，消除 Windows 上 core.autocrlf=true 带来的工作树 CRLF
+# 导致的 golangci-lint(gofmt) 与 prettier(endOfLine:lf) 本地误报。
+# 提交态 blob 始终保持 LF，使本地 `make lint` / `npm run format:check` 与 CI（Linux）一致。
+
+# 默认：自动识别文本文件，入库与检出均规范化为 LF 行尾
+* text=auto eol=lf
+
+# 二进制文件：禁止任何行尾转换，避免被破坏
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.zip  binary
+*.tar.gz binary
+*.exe  binary
