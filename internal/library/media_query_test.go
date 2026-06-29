@@ -30,6 +30,11 @@ func TestParseSearchExpression(t *testing.T) {
 		{"无效大小忽略", "size:abc 海", MediaFilter{Terms: []string{"海"}}},
 		{"无效类型忽略", "type:bogus 海", MediaFilter{Terms: []string{"海"}}},
 		{"未知 key 退化为裸词", "foo:bar", MediaFilter{Terms: []string{"foo:bar"}}},
+		{"相机 token", "camera:Canon", MediaFilter{CameraTerms: []string{"Canon"}}},
+		{"镜头 token", "lens:50mm", MediaFilter{LensTerms: []string{"50mm"}}},
+		{"相机镜头组合裸词", "camera:Sony lens:GM 风景", MediaFilter{
+			CameraTerms: []string{"Sony"}, LensTerms: []string{"GM"}, Terms: []string{"风景"},
+		}},
 		{"空表达式", "   ", MediaFilter{}},
 	}
 	for _, c := range cases {
@@ -50,7 +55,99 @@ func TestParseSearchExpression(t *testing.T) {
 			if !reflect.DeepEqual(got.Terms, c.want.Terms) {
 				t.Errorf("Terms: 期望 %v, 实际 %v", c.want.Terms, got.Terms)
 			}
+			if !reflect.DeepEqual(got.CameraTerms, c.want.CameraTerms) {
+				t.Errorf("CameraTerms: 期望 %v, 实际 %v", c.want.CameraTerms, got.CameraTerms)
+			}
+			if !reflect.DeepEqual(got.LensTerms, c.want.LensTerms) {
+				t.Errorf("LensTerms: 期望 %v, 实际 %v", c.want.LensTerms, got.LensTerms)
+			}
 		})
+	}
+}
+
+// TestListMediaFilesFiltered_SearchSpansDisplayNameAndEXIF 验证裸词关键词搜索覆盖
+// 文件名 / 显示名 / 相机 / 镜头（FR-136 可搜字段扩展）。
+func TestListMediaFilesFiltered_SearchSpansDisplayNameAndEXIF(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	a, _ := svc.CreateMediaFile(1, "D:/pics/IMG_001.jpg", 1000) // 显示名命中
+	b, _ := svc.CreateMediaFile(1, "D:/pics/IMG_002.jpg", 1000) // 相机命中
+	c, _ := svc.CreateMediaFile(1, "D:/pics/海边.jpg", 1000)     // 文件名命中
+	d, _ := svc.CreateMediaFile(1, "D:/pics/IMG_003.jpg", 1000) // 镜头命中
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", a.ID).
+		Update("display_name", "毕业典礼").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", b.ID).
+		Update("camera", "Canon EOS R5").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", d.ID).
+		Update("lens", "RF 50mm F1.2").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	ids := func(items []models.MediaFile) map[int64]bool {
+		m := make(map[int64]bool, len(items))
+		for _, it := range items {
+			m[it.ID] = true
+		}
+		return m
+	}
+
+	// 显示名命中
+	items, _, err := svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"毕业"}}, 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(items); len(got) != 1 || !got[a.ID] {
+		t.Errorf("显示名搜索期望仅命中 %d, 实际 %v", a.ID, items)
+	}
+	// 相机命中
+	items, _, _ = svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"Canon"}}, 1, 100)
+	if got := ids(items); len(got) != 1 || !got[b.ID] {
+		t.Errorf("相机搜索期望仅命中 %d, 实际 %v", b.ID, items)
+	}
+	// 文件名命中
+	items, _, _ = svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"海边"}}, 1, 100)
+	if got := ids(items); len(got) != 1 || !got[c.ID] {
+		t.Errorf("文件名搜索期望仅命中 %d, 实际 %v", c.ID, items)
+	}
+	// 镜头命中
+	items, _, _ = svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"50mm"}}, 1, 100)
+	if got := ids(items); len(got) != 1 || !got[d.ID] {
+		t.Errorf("镜头搜索期望仅命中 %d, 实际 %v", d.ID, items)
+	}
+	// 旧 Search 字段同样跨列
+	items, _, _ = svc.ListMediaFilesFiltered(MediaFilter{Search: "毕业"}, 1, 100)
+	if got := ids(items); len(got) != 1 || !got[a.ID] {
+		t.Errorf("Search 字段显示名搜索期望仅命中 %d, 实际 %v", a.ID, items)
+	}
+}
+
+// TestListMediaFilesFiltered_CameraLensTerms 验证 camera:/lens: 专项 token 仅约束对应 EXIF 列。
+func TestListMediaFilesFiltered_CameraLensTerms(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	a, _ := svc.CreateMediaFile(1, "D:/pics/a.jpg", 1000)
+	b, _ := svc.CreateMediaFile(1, "D:/pics/b.jpg", 1000)
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", a.ID).
+		Updates(map[string]any{"camera": "Sony A7M4", "lens": "FE 35mm"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", b.ID).
+		Updates(map[string]any{"camera": "Nikon Z6", "lens": "Z 24-70"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{CameraTerms: []string{"Sony"}}, 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != a.ID {
+		t.Errorf("camera:Sony 期望仅 %d, 实际 total=%d items=%v", a.ID, total, items)
+	}
+	items, total, _ = svc.ListMediaFilesFiltered(MediaFilter{LensTerms: []string{"24-70"}}, 1, 100)
+	if total != 1 || len(items) != 1 || items[0].ID != b.ID {
+		t.Errorf("lens:24-70 期望仅 %d, 实际 total=%d items=%v", b.ID, total, items)
 	}
 }
 

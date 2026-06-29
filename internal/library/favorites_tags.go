@@ -27,8 +27,34 @@ type MediaFilter struct {
 	TimeFrom   *time.Time // 媒体时间下界（含）
 	TimeTo     *time.Time // 媒体时间上界（含）
 	PathPrefix string     // 目录前缀过滤（file_path LIKE prefix%）
-	Terms      []string   // 表达式解析出的文件名关键词（多词 AND）
+	Terms      []string   // 裸词关键词（多词 AND），FR-136 起跨文件名/显示名/相机/镜头/备注列匹配
 	HasGPS     bool       // 仅返回带 GPS 坐标的媒体（FR-39 照片地图）
+
+	// FR-136 EXIF 专项关键词（多词 AND，全参数化）
+	CameraTerms []string // camera: token，仅约束 camera 列
+	LensTerms   []string // lens: token，仅约束 lens 列
+}
+
+// searchableColumns 是裸词关键词的可搜列集合（FR-136）。
+// 统一在此声明，避免多处硬编码列名导致搜索口径漂移。
+var searchableColumns = []string{"file_name", "display_name", "camera", "lens"}
+
+// escapeLike 转义 LIKE 通配符，防止用户输入 % 或 _ 干扰查询。
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "%", "\\%")
+	return strings.ReplaceAll(s, "_", "\\_")
+}
+
+// applyMultiColumnLike 对若干列做「任一列 LIKE %term%」的 OR 组合，整体作为一个 AND 条件追加。
+func applyMultiColumnLike(query *gorm.DB, columns []string, term string) *gorm.DB {
+	pattern := "%" + escapeLike(term) + "%"
+	clauses := make([]string, 0, len(columns))
+	args := make([]any, 0, len(columns))
+	for _, col := range columns {
+		clauses = append(clauses, col+" LIKE ?")
+		args = append(args, pattern)
+	}
+	return query.Where(strings.Join(clauses, " OR "), args...)
 }
 
 // ListMediaFilesFiltered 按筛选条件分页查询媒体文件列表（FR-41）。
@@ -47,10 +73,8 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		query = query.Where("library_id = ?", filter.LibraryID)
 	}
 	if filter.Search != "" {
-		// 转义 LIKE 通配符，防止用户输入 % 或 _ 干扰查询
-		escaped := strings.ReplaceAll(filter.Search, "%", "\\%")
-		escaped = strings.ReplaceAll(escaped, "_", "\\_")
-		query = query.Where("file_name LIKE ?", "%"+escaped+"%")
+		// FR-136：跨文件名/显示名/相机/镜头/备注列匹配
+		query = applyMultiColumnLike(query, searchableColumns, filter.Search)
 	}
 	if filter.Favorite != nil {
 		query = query.Where("favorite = ?", *filter.Favorite)
@@ -85,22 +109,31 @@ func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int)
 		query = query.Where("COALESCE(media_time, added_at) <= ?", *filter.TimeTo)
 	}
 	if filter.PathPrefix != "" {
-		escaped := strings.ReplaceAll(filter.PathPrefix, "%", "\\%")
-		escaped = strings.ReplaceAll(escaped, "_", "\\_")
-		query = query.Where("file_path LIKE ?", escaped+"%")
+		query = query.Where("file_path LIKE ?", escapeLike(filter.PathPrefix)+"%")
 	}
 	if filter.HasGPS {
 		// 仅带 GPS 坐标的媒体（FR-39 照片地图）
 		query = query.Where("gps_lat != 0 OR gps_lon != 0")
 	}
-	// 表达式 bare 关键词：多词 AND，各自文件名 LIKE
+	// 表达式 bare 关键词：多词 AND，每词跨文件名/显示名/相机/镜头/备注列（FR-136/FR-137）
 	for _, term := range filter.Terms {
 		if term == "" {
 			continue
 		}
-		escaped := strings.ReplaceAll(term, "%", "\\%")
-		escaped = strings.ReplaceAll(escaped, "_", "\\_")
-		query = query.Where("file_name LIKE ?", "%"+escaped+"%")
+		query = applyMultiColumnLike(query, searchableColumns, term)
+	}
+	// camera:/lens: 专项关键词：仅约束对应 EXIF 列（FR-136）
+	for _, term := range filter.CameraTerms {
+		if term == "" {
+			continue
+		}
+		query = query.Where("camera LIKE ?", "%"+escapeLike(term)+"%")
+	}
+	for _, term := range filter.LensTerms {
+		if term == "" {
+			continue
+		}
+		query = query.Where("lens LIKE ?", "%"+escapeLike(term)+"%")
 	}
 
 	var total int64

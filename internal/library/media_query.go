@@ -43,7 +43,9 @@ var sizeUnits = map[string]int64{
 //   - type:image / type:video     → MediaType
 //   - size:>10mb / size:<1gb /
 //     size:>=500kb / size:<=2mb   → SizeMin/SizeMax（单位 b/kb/mb/gb/tb，缺省 b）
-//   - 其余裸词                    → Terms（文件名包含，多词 AND）
+//   - camera:Canon                → CameraTerms（仅约束 EXIF 相机列，FR-136）
+//   - lens:50mm                   → LensTerms（仅约束 EXIF 镜头列，FR-136）
+//   - 其余裸词                    → Terms（跨文件名/显示名/相机/镜头/备注，多词 AND）
 func ParseSearchExpression(expr string) MediaFilter {
 	var f MediaFilter
 	for _, tok := range strings.Fields(expr) {
@@ -65,6 +67,14 @@ func ParseSearchExpression(expr string) MediaFilter {
 			}
 		case strings.HasPrefix(lower, "size:"):
 			applySizeToken(&f, tok[len("size:"):])
+		case strings.HasPrefix(lower, "camera:"):
+			if v := strings.TrimSpace(tok[len("camera:"):]); v != "" {
+				f.CameraTerms = append(f.CameraTerms, v)
+			}
+		case strings.HasPrefix(lower, "lens:"):
+			if v := strings.TrimSpace(tok[len("lens:"):]); v != "" {
+				f.LensTerms = append(f.LensTerms, v)
+			}
 		default:
 			f.Terms = append(f.Terms, tok)
 		}
