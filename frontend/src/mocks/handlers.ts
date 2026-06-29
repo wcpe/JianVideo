@@ -351,6 +351,14 @@ export const handlers = [
     return HttpResponse.json({ codec: 'h264', path: 'ts', url: `/api/play/hls/${id}/master` });
   }),
 
+  // HLS 播放列表（FR-124 补全）：协商后播放器探测该 master URL。
+  // 测试环境（jsdom 无 MSE）无法真正播放 HLS，显式让 master 探测失败，
+  // 触发播放器回退到 /api/play/:id/stream（既有用例验证此回退路径），同时消除未处理请求。
+  http.get('*/api/play/hls/:id/master', async () => {
+    await delay(50);
+    return HttpResponse.error();
+  }),
+
   http.put('*/api/play/:id/position', async ({ request, params }) => {
     await delay(100);
     const id = Number(params.id);
