@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ensureSetup } from './helpers';
 
 // FR-43 真浏览器端到端：无痕（无认证）打开分享链接 → 视频在线播放 / 图片查看 / 相册网格 / 原文件下载。
 // 数据准备经认证 API；查看走全新浏览器上下文（无 cookie = 无痕），验证不跳登录、确实可播放/下载。
@@ -84,8 +85,9 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
     mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-share-e2e-'));
     generateFixtures(mediaDir);
 
-    // 2) 认证 API：登录 → 建库 → 扫描 → 取媒体 ID → 建分享（媒体 / 相册）
+    // 2) 认证 API：初始化建号（FR-109）→ 登录 → 建库 → 扫描 → 取媒体 ID → 建分享（媒体 / 相册）
     const api = await pwRequest.newContext({ baseURL: BASE_URL });
+    await ensureSetup(api);
     const login = await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });
     expect(login.ok()).toBeTruthy();
 

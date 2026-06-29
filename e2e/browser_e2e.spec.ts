@@ -1,32 +1,21 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { BASE_URL, TEST_USER, TEST_PASS, ensureSetup, login } from './helpers';
 
 // 浏览器端到端：覆盖当前前端的登录、路由守卫、主导航与登出。
-// 选择器与路由期望对照 LoginPage / App.tsx 路由 / AppLayout / TimelinePage 编写。
-
-const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8080';
-const TEST_USER = 'admin';
-const TEST_PASS = 'admin';
+// 选择器与路由期望对照 LoginPage / App.tsx 路由 / AppLayout / OverviewPage 编写。
 
 // 禁用 Service Worker：应用为 PWA（autoUpdate），SW 首次安装接管页面会触发整页重载，
 // 会在用例中途清空已填表单导致偶发失败；UI 流程测试不需要离线缓存，统一关闭以保证确定性。
 test.use({ serviceWorkers: 'block' });
 
-// 辅助函数：在登录页输入凭据并提交，成功后停留在首页（时间轴）。
-async function login(page: Page, username = TEST_USER, password = TEST_PASS) {
-  await page.goto('/login');
-  await page.getByLabel('用户名').fill(username);
-  await page.getByLabel('密码').fill(password);
-  await page.getByRole('button', { name: '登录' }).click();
-  // 登录成功后跳转首页，时间轴标题出现即视为进入受保护区
-  await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible({ timeout: 10000 });
-}
-
 test.describe('JianVideo 浏览器端到端测试', () => {
 
   test.beforeEach(async ({ page }) => {
+    // FR-109：先确保已完成初始化（建好 admin 账户），否则 /login 会被守卫重定向到 /setup
+    await ensureSetup(page.request);
     // 进入应用并清空本地存储，确保每个用例从未登录态起步
     await page.goto(BASE_URL);
     await page.evaluate(() => localStorage.clear());
@@ -43,7 +32,8 @@ test.describe('JianVideo 浏览器端到端测试', () => {
   test('成功登录并跳转到首页', async ({ page }) => {
     await login(page);
     await expect(page).toHaveURL(`${BASE_URL}/`);
-    await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
+    // 首页根路由（FR-117）为概览看板，时间轴已迁至 /timeline
+    await expect(page.getByRole('heading', { name: '概览' })).toBeVisible();
   });
 
   test('错误密码登录失败', async ({ page }) => {
@@ -70,8 +60,11 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test('首页时间轴渲染', async ({ page }) => {
+  test('时间轴页渲染', async ({ page }) => {
     await login(page);
+    // 时间轴迁至 /timeline（FR-117）：经导航进入后断言标题与搜索框
+    await page.getByRole('link', { name: '时间轴' }).click();
+    await expect(page).toHaveURL(/\/timeline/);
     await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
     await expect(page.getByPlaceholder(/搜索：文件名/)).toBeVisible();
   });
@@ -108,15 +101,15 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     }
   });
 
-  test('导航回时间轴页', async ({ page }) => {
+  test('导航在目录与概览间切换', async ({ page }) => {
     await login(page);
-    // 先离开首页，再点击导航回到时间轴，验证路由切换生效
+    // 先离开首页进入目录，再点击导航回到概览首页，验证路由切换生效
     await page.getByRole('link', { name: '目录' }).click();
     await expect(page).toHaveURL(/\/browse/);
 
-    await page.getByRole('link', { name: '时间轴' }).click();
+    await page.getByRole('link', { name: '概览' }).click();
     await expect(page).toHaveURL(`${BASE_URL}/`);
-    await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '概览' })).toBeVisible();
   });
 
   test('导航到目录浏览页', async ({ page }) => {
@@ -128,6 +121,9 @@ test.describe('JianVideo 浏览器端到端测试', () => {
 
   test('搜索功能', async ({ page }) => {
     await login(page);
+    // 搜索框在时间轴页（FR-117 后迁至 /timeline）
+    await page.getByRole('link', { name: '时间轴' }).click();
+    await expect(page).toHaveURL(/\/timeline/);
     const searchInput = page.getByPlaceholder(/搜索：文件名/);
     await expect(searchInput).toBeVisible();
     await searchInput.fill('test');
@@ -136,8 +132,9 @@ test.describe('JianVideo 浏览器端到端测试', () => {
 
   test('登出功能', async ({ page }) => {
     await login(page);
-    // 顶栏登出按钮以 aria-label 暴露
-    await page.getByRole('button', { name: '退出登录' }).click();
+    // 登出收进头像下拉菜单（FR-95）：先点用户菜单，再点「退出登录」项
+    await page.getByRole('button', { name: `用户菜单：${TEST_USER}` }).click();
+    await page.getByRole('menuitem', { name: '退出登录' }).click();
     await expect(page).toHaveURL(/\/login/);
   });
 
