@@ -37,7 +37,7 @@ jobs:
           npm --prefix frontend install
           npm --prefix frontend run build
       - name: Go 静态检查门禁（golangci-lint）
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
           args: run ./...
