@@ -87,7 +87,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 	t.Cleanup(func() {
 		server.Close()
 		if sqlDB, err := gormDB.DB(); err == nil {
-			sqlDB.Close()
+			_ = sqlDB.Close() // 测试清理，忽略关闭错误
 		}
 	})
 
@@ -129,7 +129,7 @@ func doRequest(t *testing.T, method, path string, body interface{}, headers map[
 // parseJSON 解析 JSON 响应体。
 func parseJSON(t *testing.T, resp *http.Response, target interface{}) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("解析 JSON 失败: %v, body: %s", err, string(body))
@@ -143,6 +143,7 @@ func TestE2E_HealthCheck(t *testing.T) {
 	defer server.Close()
 
 	resp := doRequest(t, "GET", server.URL+"/health", nil, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("期望 200, 实际 %d", resp.StatusCode)
 	}
@@ -162,6 +163,7 @@ func TestE2E_Login_Success(t *testing.T) {
 
 	body := `{"username":"admin","password":"admin"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("期望 200, 实际 %d, body: %s", resp.StatusCode, string(b))
@@ -186,6 +188,7 @@ func TestE2E_Login_WrongPassword(t *testing.T) {
 
 	body := `{"username":"admin","password":"wrong"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("期望 401, 实际 %d", resp.StatusCode)
 	}
@@ -197,6 +200,7 @@ func TestE2E_Login_InvalidInput(t *testing.T) {
 
 	body := `{"username":""}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("期望 400, 实际 %d", resp.StatusCode)
 	}
@@ -211,16 +215,20 @@ func TestE2E_Library_CreatePath(t *testing.T) {
 	// 先登录获取 Cookie
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 创建媒体库目录（Windows 路径需要转义 JSON 中的反斜杠）
 	// 后端会校验路径必须真实存在且为目录，故先创建
 	dirPath := filepath.Join(tmpDir, "movies")
-	os.MkdirAll(dirPath, 0o755)
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	body := fmt.Sprintf(`{"path":"%s","type":"local","label":"测试目录"}`, strings.ReplaceAll(dirPath, `\`, `\\`))
 	headers := map[string]string{"Cookie": cookie}
 
 	resp := doRequest(t, "POST", server.URL+"/api/library/paths", body, headers)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("期望 201, 实际 %d, body: %s", resp.StatusCode, string(b))
@@ -243,18 +251,23 @@ func TestE2E_Library_ListPaths(t *testing.T) {
 	// 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 先创建一个目录（后端校验路径需真实存在）
 	dirPath := filepath.Join(tmpDir, "movies")
-	os.MkdirAll(dirPath, 0o755)
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影"}`, strings.ReplaceAll(dirPath, `\`, `\\`))
-	doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
+	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	_ = createResp.Body.Close() // 测试清理，忽略关闭错误
 
 	// 查询列表
 	resp := doRequest(t, "GET", server.URL+"/api/library/paths", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("期望 200, 实际 %d", resp.StatusCode)
 	}
@@ -277,16 +290,20 @@ func TestE2E_Media_List(t *testing.T) {
 	// 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 创建目录
 	dir := filepath.Join(tmpDir, "movies")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	// Windows 路径需要转义 JSON 中的反斜杠
 	escapedDir := strings.ReplaceAll(dir, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影"}`, escapedDir)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if createResp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(createResp.Body)
 		t.Fatalf("创建目录失败: %d, body: %s", createResp.StatusCode, string(b))
@@ -296,11 +313,14 @@ func TestE2E_Media_List(t *testing.T) {
 
 	// 创建一个测试视频文件
 	videoPath := filepath.Join(dir, "test.mp4")
-	os.WriteFile(videoPath, []byte("fake video data"), 0o644)
+	if err := os.WriteFile(videoPath, []byte("fake video data"), 0o644); err != nil {
+		t.Fatalf("写入测试视频失败: %v", err)
+	}
 
 	// 触发扫描
 	scanResp := doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = scanResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if scanResp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(scanResp.Body)
 		t.Fatalf("扫描失败: %d, body: %s", scanResp.StatusCode, string(b))
@@ -323,6 +343,7 @@ func waitForMediaItems(t *testing.T, serverURL, cookie string, minCount int) []m
 			Items []models.MediaFile `json:"items"`
 		}
 		parseJSON(t, resp, &result)
+		_ = resp.Body.Close() // 测试清理，忽略关闭错误
 		if len(result.Items) >= minCount {
 			return result.Items
 		}
@@ -342,15 +363,19 @@ func TestE2E_Play_GetPlayInfo(t *testing.T) {
 	// 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 创建目录并添加媒体文件
 	dir := filepath.Join(tmpDir, "movies")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	escapedDir := strings.ReplaceAll(dir, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影"}`, escapedDir)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if createResp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(createResp.Body)
 		t.Fatalf("创建目录失败: %d, body: %s", createResp.StatusCode, string(b))
@@ -360,11 +385,14 @@ func TestE2E_Play_GetPlayInfo(t *testing.T) {
 
 	// 创建 H.264+AAC MP4 文件
 	videoPath := filepath.Join(dir, "movie.mp4")
-	os.WriteFile(videoPath, []byte("fake h264 aac mp4 data"), 0o644)
+	if err := os.WriteFile(videoPath, []byte("fake h264 aac mp4 data"), 0o644); err != nil {
+		t.Fatalf("写入测试视频失败: %v", err)
+	}
 
 	// 扫描
-	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
+	scanResp := doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
+	_ = scanResp.Body.Close() // 测试清理，忽略关闭错误
 
 	// 等待异步扫描入库
 	items := waitForMediaItems(t, server.URL, cookie, 1)
@@ -373,6 +401,7 @@ func TestE2E_Play_GetPlayInfo(t *testing.T) {
 	// 获取播放信息
 	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/%d", server.URL, mediaID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("期望 200 或 404, 实际 %d, body: %s", resp.StatusCode, string(b))
@@ -388,11 +417,13 @@ func TestE2E_HLS_Routes(t *testing.T) {
 	// 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 请求不存在的 HLS m3u8 → 404
 	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/play/hls/9999/index.m3u8", server.URL), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("期望 404, 实际 %d", resp.StatusCode)
 	}
@@ -406,6 +437,7 @@ func TestE2E_Protected_NoAuth(t *testing.T) {
 
 	// 未认证访问受保护路由
 	resp := doRequest(t, "GET", server.URL+"/api/me", nil, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("期望 401, 实际 %d", resp.StatusCode)
 	}
@@ -418,11 +450,13 @@ func TestE2E_Protected_WithAuth(t *testing.T) {
 	// 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 认证访问
 	resp := doRequest(t, "GET", server.URL+"/api/me", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("期望 200, 实际 %d, body: %s", resp.StatusCode, string(b))
@@ -442,6 +476,7 @@ func TestE2E_Static_Index(t *testing.T) {
 	defer server.Close()
 
 	resp := doRequest(t, "GET", server.URL+"/", nil, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	// 如果没有嵌入前端，返回 404 也是可接受的
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("期望 200 或 404, 实际 %d", resp.StatusCode)
@@ -464,6 +499,7 @@ func TestE2E_FullWorkflow(t *testing.T) {
 	// 1. 登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if loginResp.StatusCode != http.StatusOK {
 		t.Fatalf("登录失败: %d", loginResp.StatusCode)
 	}
@@ -471,12 +507,15 @@ func TestE2E_FullWorkflow(t *testing.T) {
 
 	// 2. 创建媒体库目录
 	dir := filepath.Join(tmpDir, "media", "movies")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 
 	escapedDir := strings.ReplaceAll(dir, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"完整流程测试"}`, escapedDir)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths",
 		createBody, map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if createResp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(createResp.Body)
 		t.Fatalf("创建目录失败: %d, body: %s", createResp.StatusCode, string(b))
@@ -488,12 +527,15 @@ func TestE2E_FullWorkflow(t *testing.T) {
 	// 3. 创建测试视频文件
 	videoFiles := []string{"video1.mp4", "video2.mkv", "video3.avi"}
 	for _, name := range videoFiles {
-		os.WriteFile(filepath.Join(dir, name), []byte("test data for "+name), 0o644)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test data for "+name), 0o644); err != nil {
+			t.Fatalf("写入测试视频失败: %v", err)
+		}
 	}
 
 	// 4. 触发扫描
 	scanResp := doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = scanResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if scanResp.StatusCode != http.StatusOK {
 		t.Fatalf("扫描失败: %d", scanResp.StatusCode)
 	}
@@ -511,6 +553,7 @@ func TestE2E_FullWorkflow(t *testing.T) {
 			t.Fatalf("查询失败: %d", listResp.StatusCode)
 		}
 		parseJSON(t, listResp, &listResult)
+		_ = listResp.Body.Close() // 测试清理，忽略关闭错误
 		if listResult.Total == int64(len(videoFiles)) {
 			break
 		}
@@ -524,12 +567,14 @@ func TestE2E_FullWorkflow(t *testing.T) {
 	// 6. 登出
 	logoutResp := doRequest(t, "POST", server.URL+"/api/auth/logout", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = logoutResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if logoutResp.StatusCode != http.StatusNoContent {
 		t.Errorf("期望 204, 实际 %d", logoutResp.StatusCode)
 	}
 
 	// 7. 登出后无法访问受保护路由（不传 Cookie）
 	meResp := doRequest(t, "GET", server.URL+"/api/me", nil, nil)
+	defer func() { _ = meResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if meResp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("登出后期望 401, 实际 %d", meResp.StatusCode)
 	}

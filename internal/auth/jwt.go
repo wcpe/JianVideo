@@ -1,3 +1,4 @@
+// Package auth 提供单用户认证与 JWT 令牌签发、校验能力。
 package auth
 
 import (

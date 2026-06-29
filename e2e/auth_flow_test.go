@@ -18,6 +18,7 @@ func TestE2E_LoginSuccess(t *testing.T) {
 
 	body := `{"username":"admin","password":"admin"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, resp.StatusCode, "登录应返回 200")
 
 	var result map[string]string
@@ -34,6 +35,7 @@ func TestE2E_LoginWrongPassword(t *testing.T) {
 
 	body := `{"username":"admin","password":"wrong"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "错误密码应返回 401")
 
 	var result map[string]string
@@ -49,6 +51,7 @@ func TestE2E_Logout(t *testing.T) {
 	// 先登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, loginResp.StatusCode)
 	cookie := loginResp.Header.Get("Set-Cookie")
 	require.NotEmpty(t, cookie, "登录响应应包含 Set-Cookie")
@@ -56,6 +59,7 @@ func TestE2E_Logout(t *testing.T) {
 	// 登出
 	resp := doRequest(t, "POST", server.URL+"/api/auth/logout", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode, "登出应返回 204")
 }
 
@@ -67,12 +71,14 @@ func TestE2E_Me(t *testing.T) {
 	// 先登录
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
+	defer func() { _ = loginResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, loginResp.StatusCode)
 	cookie := loginResp.Header.Get("Set-Cookie")
 
 	// 获取当前用户信息
 	resp := doRequest(t, "GET", server.URL+"/api/me", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, resp.StatusCode, "/api/me 应返回 200")
 
 	var result map[string]string
@@ -88,6 +94,7 @@ func TestE2E_UnauthorizedAccess(t *testing.T) {
 
 	// 不传 Cookie 访问受保护路由
 	resp := doRequest(t, "GET", server.URL+"/api/me", nil, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "未认证访问应返回 401")
 
 	var result map[string]string
@@ -97,6 +104,7 @@ func TestE2E_UnauthorizedAccess(t *testing.T) {
 	// 使用无效 token
 	resp2 := doRequest(t, "GET", server.URL+"/api/me", nil,
 		map[string]string{"Authorization": "Bearer invalid-token"})
+	defer func() { _ = resp2.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusUnauthorized, resp2.StatusCode, "无效 token 应返回 401")
 }
 
@@ -107,6 +115,7 @@ func TestE2E_LoginInvalidInput(t *testing.T) {
 
 	body := `{"username":""}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "空用户名应返回 400")
 
 	var result map[string]string
@@ -121,6 +130,7 @@ func TestE2E_LoginNonExistentUser(t *testing.T) {
 
 	body := `{"username":"nonexistent","password":"password123"}`
 	resp := doRequest(t, "POST", server.URL+"/api/auth/login", body, nil)
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "不存在的用户应返回 401")
 }
 
@@ -148,7 +158,7 @@ func TestE2E_ProtectedAPIRequireAuth(t *testing.T) {
 		resp := doRequest(t, ep.method, server.URL+ep.path, nil, nil)
 		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 			"%s %s 无凭据应返回 401", ep.method, ep.path)
-		resp.Body.Close()
+		_ = resp.Body.Close() // 测试清理，忽略关闭错误
 	}
 
 	// 带有效 Cookie 时应放行（不再是 401）
@@ -156,7 +166,7 @@ func TestE2E_ProtectedAPIRequireAuth(t *testing.T) {
 	resp := doRequest(t, "GET", server.URL+"/api/library/media", nil,
 		map[string]string{"Cookie": cookie})
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "带有效 Cookie 访问库列表应返回 200")
-	resp.Body.Close()
+	_ = resp.Body.Close() // 测试清理，忽略关闭错误
 }
 
 // TestE2E_PublicPathsNoAuth 验证豁免路径在未登录时仍可访问（登录壳 / 健康检查）。
@@ -167,13 +177,13 @@ func TestE2E_PublicPathsNoAuth(t *testing.T) {
 	// 健康检查无需鉴权
 	healthResp := doRequest(t, "GET", server.URL+"/health", nil, nil)
 	assert.Equal(t, http.StatusOK, healthResp.StatusCode, "/health 无需鉴权")
-	healthResp.Body.Close()
+	_ = healthResp.Body.Close() // 测试清理，忽略关闭错误
 
 	// 登录端点无需鉴权（错误凭据返回 401 是业务结果，而非中间件拦截）
 	loginResp := doRequest(t, "POST", server.URL+"/api/auth/login",
 		`{"username":"admin","password":"admin"}`, nil)
 	assert.Equal(t, http.StatusOK, loginResp.StatusCode, "/api/auth/login 无需鉴权即可登录")
-	loginResp.Body.Close()
+	_ = loginResp.Body.Close() // 测试清理，忽略关闭错误
 }
 
 // loginAndGetCookie 是辅助函数：登录并返回 Cookie 字符串。
@@ -189,6 +199,7 @@ func loginAndGetCookie(t *testing.T, serverURL string) string {
 	if cookie == "" {
 		t.Fatal("登录响应缺少 Set-Cookie")
 	}
+	_ = loginResp.Body.Close() // 测试清理，忽略关闭错误
 	return cookie
 }
 

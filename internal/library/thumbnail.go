@@ -121,7 +121,9 @@ func realRunThumbnail(job thumbnailJob) {
 func InitThumbnailDir(baseDir string) {
 	thumbnailDirMu.Do(func() {
 		thumbnailDir = filepath.Join(baseDir, "thumbnails")
-		os.MkdirAll(thumbnailDir, 0755)
+		if err := os.MkdirAll(thumbnailDir, 0755); err != nil {
+			log.Printf("[WARN] 创建缩略图目录失败: %s, err=%v", thumbnailDir, err)
+		}
 	})
 }
 

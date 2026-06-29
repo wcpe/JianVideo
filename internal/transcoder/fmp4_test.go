@@ -17,17 +17,6 @@ func argValue(args []string, flag string) (string, bool) {
 	return "", false
 }
 
-// argValues 返回 args 中所有 flag 后紧跟的值（同一 flag 可重复）。
-func argValues(args []string, flag string) []string {
-	var out []string
-	for i, a := range args {
-		if a == flag && i+1 < len(args) {
-			out = append(out, args[i+1])
-		}
-	}
-	return out
-}
-
 func TestIsAdvancedCodec(t *testing.T) {
 	// h264（及空、未知）走原 TS 路径；h265/av1/vp9 走 fMP4 路径
 	assert.False(t, IsAdvancedCodec("h264"))

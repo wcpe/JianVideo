@@ -80,7 +80,8 @@ func (h *StreamHandler) StreamMedia(c *gin.Context) {
 		defer wg.Done()
 		tc := h.pipelineFactory()
 		runErr = tc.Run(ctx, mf.FilePath, pipeWriter)
-		pipeWriter.Close()
+		// pipe writer 关闭错误按惯例忽略：错误已由 runErr 捕获，关闭仅用于通知读端结束
+		_ = pipeWriter.Close()
 	}()
 
 	// 将 pipe 数据流式写入响应（使用 CopyBuffer 批量传输，提升吞吐量）

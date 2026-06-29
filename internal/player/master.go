@@ -32,11 +32,11 @@ func GenerateMasterM3U8(qualities []QualityInfo) string {
 	sb.WriteString("#EXT-X-VERSION:3\n")
 
 	for _, q := range qualities {
-		sb.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&sb,
 			"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n",
 			q.Bandwidth, q.Width, q.Height,
-		))
-		sb.WriteString(fmt.Sprintf("%s.m3u8\n", q.Name))
+		)
+		fmt.Fprintf(&sb, "%s.m3u8\n", q.Name)
 	}
 
 	return sb.String()

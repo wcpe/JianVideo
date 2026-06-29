@@ -1,3 +1,4 @@
+// Package library 提供媒体库目录管理、扫描入库、统计聚合等核心能力。
 package library
 
 import (
@@ -117,7 +118,7 @@ func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.Librar
 		return nil, fmt.Errorf("目录类型不支持")
 	}
 
-	storedPath := path
+	var storedPath string
 	if dirType == "local" {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -156,9 +157,9 @@ func (s *Service) ListLibraryPaths() ([]models.LibraryPath, error) {
 	return items, nil
 }
 
-// LibraryPathView 媒体库目录视图：在目录记录基础上附带已索引媒体数量。
+// PathView 媒体库目录视图：在目录记录基础上附带已索引媒体数量。
 // 供 FR-23 存储库卡片展示，不改动 LibraryPath 数据模型。
-type LibraryPathView struct {
+type PathView struct {
 	models.LibraryPath
 	// MediaCount 该库已索引（未软删）的媒体文件数量
 	MediaCount int64 `json:"media_count"`
@@ -167,7 +168,7 @@ type LibraryPathView struct {
 // ListLibraryPathViews 查询所有媒体库目录并附带各库的已索引媒体数量。
 // 媒体数量按 library_id 分组一次查询统计，排除已软删（deleted_at 非空）记录，
 // 与回收站（FR-25）口径一致，避免按库 N+1 计数。
-func (s *Service) ListLibraryPathViews() ([]LibraryPathView, error) {
+func (s *Service) ListLibraryPathViews() ([]PathView, error) {
 	paths, err := s.ListLibraryPaths()
 	if err != nil {
 		return nil, err
@@ -191,9 +192,9 @@ func (s *Service) ListLibraryPathViews() ([]LibraryPathView, error) {
 		countByLibrary[r.LibraryID] = r.Count
 	}
 
-	views := make([]LibraryPathView, len(paths))
+	views := make([]PathView, len(paths))
 	for i, p := range paths {
-		views[i] = LibraryPathView{LibraryPath: p, MediaCount: countByLibrary[p.ID]}
+		views[i] = PathView{LibraryPath: p, MediaCount: countByLibrary[p.ID]}
 	}
 	return views, nil
 }
@@ -491,7 +492,7 @@ func (s *Service) BrowseDirectory(parentPath, sortKey string) (*models.BrowseRes
 	parentPath = strings.ReplaceAll(parentPath, `\`, `/`)
 	// 规范化路径，防止路径遍历
 	if strings.Contains(parentPath, "..") {
-		return nil, fmt.Errorf("非法路径: parentPath 不能包含 ..")
+		return nil, fmt.Errorf("非法路径：parentPath 不能包含上级目录引用")
 	}
 
 	// 规范化路径：去尾斜杠，加 / 用于前缀匹配
@@ -695,7 +696,7 @@ func isWindowsDrivePart(part string) bool {
 func normalizeSMBLibraryPath(path string) string {
 	p := strings.TrimSpace(path)
 	p = strings.TrimPrefix(p, "smb://")
-	p = strings.TrimLeft(p, `\\`)
+	p = strings.TrimLeft(p, `\`)
 	p = strings.ReplaceAll(p, `\`, "/")
 	return strings.Trim(p, "/")
 }
@@ -872,7 +873,7 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("连接 SMB 失败: %w", err)
 	}
-	defer client.Disconnect()
+	defer func() { _ = client.Disconnect() }()
 
 	smbFS := smb.NewFS(shareFS)
 

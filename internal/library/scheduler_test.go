@@ -98,7 +98,7 @@ func TestScanScheduler_StartIdempotent(t *testing.T) {
 // TestTaskQueue_EnqueueScheduled 全库入队：跳过禁用库与已有活动任务的库，返回入队数量。
 func TestTaskQueue_EnqueueScheduled(t *testing.T) {
 	gdb := newTaskQueueDB(t)
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) { return 0, nil }
+	exec := func(_ int64, _, _, _ string) (int, error) { return 0, nil }
 	q := NewTaskQueue(gdb, exec)
 	// 不启动 worker，纯观察入队结果
 

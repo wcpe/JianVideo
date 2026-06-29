@@ -1,3 +1,4 @@
+// Package playback 管理媒体播放会话与边下边播、Seek 等播放控制能力。
 package playback
 
 import (
@@ -116,7 +117,8 @@ func (s *Service) StreamFile(w http.ResponseWriter, r *http.Request, mediaID int
 		return
 	}
 	if closer, ok := f.(io.Closer); ok {
-		defer closer.Close()
+		// 资源清理，关闭错误可忽略
+		defer func() { _ = closer.Close() }()
 	}
 
 	// 更新或创建播放会话

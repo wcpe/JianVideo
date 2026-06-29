@@ -1,3 +1,4 @@
+// Package db 提供 SQLite 数据库的打开与表结构初始化等纯数据读写能力。
 package db
 
 import (
@@ -13,12 +14,14 @@ func Open(dataSourceName string) (*sql.DB, error) {
 	}
 
 	if _, err := d.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		d.Close()
+		// 错误清理路径，关闭出错无从恢复，忽略
+		_ = d.Close()
 		return nil, fmt.Errorf("启用 WAL 模式失败: %w", err)
 	}
 
 	if err := d.Ping(); err != nil {
-		d.Close()
+		// 错误清理路径，关闭出错无从恢复，忽略
+		_ = d.Close()
 		return nil, fmt.Errorf("数据库连接失败: %w", err)
 	}
 

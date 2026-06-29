@@ -13,7 +13,7 @@ func TestOpen_MemoryDB(t *testing.T) {
 	d, err := Open("file::memory:?cache=shared")
 	require.NoError(t, err)
 	require.NotNil(t, d)
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	err = d.Ping()
 	assert.NoError(t, err)
@@ -31,14 +31,14 @@ func TestOpen_InvalidDSN(t *testing.T) {
 func TestInitSchema(t *testing.T) {
 	d, err := Open("file::memory:?cache=shared")
 	require.NoError(t, err)
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	err = InitSchema(d)
 	require.NoError(t, err)
 
 	rows, err := d.Query("SELECT name FROM sqlite_master WHERE type='table'")
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	tables := make(map[string]bool)
 	for rows.Next() {
@@ -56,7 +56,7 @@ func TestInitSchema(t *testing.T) {
 func TestInitSchema_Idempotent(t *testing.T) {
 	d, err := Open("file::memory:?cache=shared")
 	require.NoError(t, err)
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	err = InitSchema(d)
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestOpen_WALMode(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "wal_test.db")
 	d, err := Open(dbPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { _ = d.Close() })
 
 	var journalMode string
 	err = d.QueryRow("PRAGMA journal_mode").Scan(&journalMode)

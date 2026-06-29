@@ -13,7 +13,7 @@ type recordingWriter struct {
 	lines []string
 }
 
-func (w *recordingWriter) Printf(format string, args ...interface{}) {
+func (w *recordingWriter) Printf(format string, _ ...interface{}) {
 	w.lines = append(w.lines, format)
 }
 

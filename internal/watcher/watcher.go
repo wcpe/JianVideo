@@ -1,3 +1,4 @@
+// Package watcher 基于 fsnotify 监听本地媒体目录的文件变更并上报媒体库。
 package watcher
 
 import (
@@ -76,7 +77,8 @@ func (w *Watcher) Start() error {
 
 // Stop 停止监听。
 func (w *Watcher) Stop() {
-	w.watcher.Close()
+	// 停止流程关闭底层监听器，关闭错误可忽略
+	_ = w.watcher.Close()
 	close(w.done)
 }
 

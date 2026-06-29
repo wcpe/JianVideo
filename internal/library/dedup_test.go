@@ -29,7 +29,7 @@ func writeThumbnailJPEG(t *testing.T, filePath string, img image.Image) {
 	if err != nil {
 		t.Fatalf("创建缩略图文件失败: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 90}); err != nil {
 		t.Fatalf("编码缩略图失败: %v", err)
 	}

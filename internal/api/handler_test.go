@@ -292,7 +292,7 @@ func readZipNames(t *testing.T, body []byte) map[string]string {
 			t.Fatalf("打开 zip 条目失败: %v", err)
 		}
 		data, _ := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		out[f.Name] = string(data)
 	}
 	return out
@@ -930,7 +930,7 @@ func TestScanProgressSSE_StaysOpenAfterCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("连接 SSE 失败: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	buf := make([]byte, 4096)
 	gotProgress := false

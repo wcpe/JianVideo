@@ -53,7 +53,7 @@ func TestPipeline_RunCancelled(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	tc := &mockTranscoder{
-		runFunc: func(ctx context.Context, inputPath string, dst io.Writer) error {
+		runFunc: func(ctx context.Context, _ string, _ io.Writer) error {
 			// 模拟长时间运行
 			select {
 			case <-ctx.Done():
@@ -78,7 +78,7 @@ func TestPipeline_RunSuccess(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	tc := &mockTranscoder{
-		runFunc: func(ctx context.Context, inputPath string, dst io.Writer) error {
+		runFunc: func(_ context.Context, _ string, dst io.Writer) error {
 			_, err := dst.Write([]byte("fake ts data"))
 			return err
 		},

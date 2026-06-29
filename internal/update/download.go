@@ -41,13 +41,15 @@ func downloadToTemp(ctx context.Context, client *http.Client, url, dir, name str
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	// 资源清理，关闭错误可忽略
+	defer func() { _ = resp.Body.Close() }()
 	dst := filepath.Join(dir, name)
 	f, err := os.Create(dst)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	// 临时文件完整性后续由 sha256 校验保证，关闭错误可忽略
+	defer func() { _ = f.Close() }()
 	// Content-Length 未知时 resp.ContentLength 为 -1，归一化为 0（不确定态）
 	total := resp.ContentLength
 	if total < 0 {
@@ -66,7 +68,8 @@ func downloadText(ctx context.Context, client *http.Client, url string) (string,
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	// 资源清理，关闭错误可忽略
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsBytes))
 	if err != nil {
 		return "", err
@@ -85,7 +88,8 @@ func httpGet(ctx context.Context, client *http.Client, url string) (*http.Respon
 		return nil, fmt.Errorf("下载失败: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("下载返回非 200: %d", resp.StatusCode)
 	}
 	return resp, nil

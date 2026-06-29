@@ -876,7 +876,8 @@ func (h *Handler) BatchDownloadMediaFiles(c *gin.Context) {
 // 跳过：smb:// 路径、打开失败的文件。任一文件中途出错记日志并继续，不中断整批。
 func (h *Handler) streamZip(c *gin.Context, files []models.MediaFile) int {
 	zw := zip.NewWriter(c.Writer)
-	defer zw.Close()
+	// 响应已边写边发，收尾关闭出错无从恢复，忽略
+	defer func() { _ = zw.Close() }()
 	flusher, _ := c.Writer.(http.Flusher)
 
 	skipped := 0
@@ -887,7 +888,8 @@ func (h *Handler) streamZip(c *gin.Context, files []models.MediaFile) int {
 		default:
 		}
 		if addZipEntry(zw, &files[i]) {
-			zw.Flush()
+			// 中途 flush 仅为边写边推，出错由后续写入暴露，忽略
+			_ = zw.Flush()
 			if flusher != nil {
 				flusher.Flush() // 边写边推，避免在内存中累积整包
 			}
@@ -908,7 +910,8 @@ func addZipEntry(zw *zip.Writer, mf *models.MediaFile) bool {
 		log.Printf("[WARN] 批量打包下载跳过不可访问文件 id=%d: %v", mf.ID, err)
 		return false
 	}
-	defer f.Close()
+	// 只读打开的源文件，关闭出错无副作用，忽略
+	defer func() { _ = f.Close() }()
 
 	w, err := zw.Create(mf.FileName)
 	if err != nil {

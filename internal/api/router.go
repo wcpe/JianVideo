@@ -194,31 +194,6 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	}
 }
 
-// serveHLSSegment 统一处理 HLS 切片请求（兼容 /:id/segment/:segment 与 /:id/:name.ts 两种路径）。
-func serveHLSSegment(c *gin.Context, hlsMgr *player.HLSManager) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-		return
-	}
-	// 优先取 segment 参数；若为空则从 name 参数取（去掉 .ts 后缀）
-	segment := c.Param("segment")
-	if segment == "" {
-		segment = strings.TrimSuffix(c.Param("name"), ".ts")
-	}
-	if segment == "" || strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SEGMENT", "message": "无效的切片名称"})
-		return
-	}
-	quality := player.ExtractQualityFromSegment(segment)
-	data, err := hlsMgr.GetSegment(id, quality, segment)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
-		return
-	}
-	c.Data(http.StatusOK, "video/mp2t", data)
-}
-
 // RegisterPlaybackRoutes 仅注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // 拆分出来便于在已经走过 RegisterRoutes 的引擎上单独补挂，避免重复注册。
 func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
@@ -295,9 +270,7 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) 
 	r.GET("/api/play/hls/*path", func(c *gin.Context) {
 		relPath := c.Param("path")
 		// 去掉前导 /
-		if strings.HasPrefix(relPath, "/") {
-			relPath = relPath[1:]
-		}
+		relPath = strings.TrimPrefix(relPath, "/")
 
 		// 提取 mediaID（第一段）
 		parts := strings.SplitN(relPath, "/", 2)

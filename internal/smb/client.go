@@ -1,3 +1,4 @@
+// Package smb 提供 SMB/CIFS 网络共享的连接管理与文件系统访问能力。
 package smb
 
 import (
@@ -34,13 +35,13 @@ func normalizeDialAddr(host string) string {
 
 // Client 封装 SMB 会话，提供连接池和重连能力。
 type Client struct {
-	creds      Credentials
-	dialer     *smb2.Dialer
-	mu         sync.Mutex
+	creds       Credentials
+	dialer      *smb2.Dialer
+	mu          sync.Mutex
 	connectOnce sync.Once
-	session    *smb2.Session
-	share      *smb2.Share
-	lastUsed   time.Time
+	session     *smb2.Session
+	share       *smb2.Share
+	lastUsed    time.Time
 }
 
 // NewClient 创建 SMB 客户端。

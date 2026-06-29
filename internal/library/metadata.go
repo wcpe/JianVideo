@@ -200,7 +200,7 @@ func ExtractImageEXIF(path string) *ImageEXIF {
 		log.Printf("[DEBUG] 打开图片读取 EXIF 失败: %s, err=%v", path, err)
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	ex, err := imagemeta.Decode(f)
 	if err != nil {
@@ -223,22 +223,22 @@ func ExtractImageEXIF(path string) *ImageEXIF {
 }
 
 // joinCameraName 拼接相机厂商与型号，去重前缀（型号常已含厂商名）。
-func joinCameraName(make, model string) string {
-	make = strings.TrimSpace(make)
+func joinCameraName(mk, model string) string {
+	mk = strings.TrimSpace(mk)
 	model = strings.TrimSpace(model)
 	switch {
-	case make == "" && model == "":
+	case mk == "" && model == "":
 		return ""
-	case make == "":
+	case mk == "":
 		return model
 	case model == "":
-		return make
+		return mk
 	}
 	// 型号已含厂商前缀时不重复拼接，例如 "Canon" + "Canon EOS R5"
-	if strings.HasPrefix(strings.ToLower(model), strings.ToLower(make)) {
+	if strings.HasPrefix(strings.ToLower(model), strings.ToLower(mk)) {
 		return model
 	}
-	return make + " " + model
+	return mk + " " + model
 }
 
 // apertureString 把光圈数值格式化为 "f/2.8"，零或负值返回空串。

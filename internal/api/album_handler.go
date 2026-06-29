@@ -1,3 +1,4 @@
+// Package api 提供 Web 层的 HTTP 路由与请求处理器，向下经 media-library 协调业务。
 package api
 
 import (

@@ -37,7 +37,8 @@ func fetchReleases(ctx context.Context, client *http.Client, baseURL, owner, rep
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub releases 失败: %w", err)
 	}
-	defer resp.Body.Close()
+	// 资源清理，关闭错误可忽略
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("GitHub releases 返回 %d: %s", resp.StatusCode, string(body))

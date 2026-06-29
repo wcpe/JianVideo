@@ -60,11 +60,11 @@ func IsFFmpegAvailable() bool {
 
 // QualityDefinition 定义一个码率档位。
 type QualityDefinition struct {
-	Name       string
-	Width      int
-	Height     int
-	VideoRate  string
-	AudioRate  string
+	Name      string
+	Width     int
+	Height    int
+	VideoRate string
+	AudioRate string
 }
 
 // qualityLadders 预定义的码率阶梯。
@@ -75,7 +75,7 @@ var qualityLadders = []QualityDefinition{
 }
 
 // QualitiesForResolution 根据源分辨率返回应输出的码率档位列表。
-func QualitiesForResolution(width, height int) []string {
+func QualitiesForResolution(_, height int) []string {
 	var names []string
 	for _, q := range qualityLadders {
 		// 只输出不高于源分辨率的档位

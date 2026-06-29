@@ -1,3 +1,4 @@
+// Package main 是 JianVideo 服务端程序入口，负责初始化各模块并启动 HTTP 服务。
 package main
 
 import (

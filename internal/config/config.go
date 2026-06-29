@@ -1,3 +1,4 @@
+// Package config 提供配置结构体与基于环境变量的加载逻辑。
 package config
 
 import (

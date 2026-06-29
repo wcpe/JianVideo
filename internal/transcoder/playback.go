@@ -7,10 +7,10 @@ import (
 
 // PlayInfo 播放信息响应结构。
 type PlayInfo struct {
-	URL             string `json:"url"`
-	Format          string `json:"format"` // "direct" 或 "hls"
+	URL               string `json:"url"`
+	Format            string `json:"format"` // "direct" 或 "hls"
 	TranscodeRequired bool   `json:"transcode_required"`
-	HWAccel         string `json:"hw_accel"` // 使用的硬件加速类型，直出时为 ""
+	HWAccel           string `json:"hw_accel"` // 使用的硬件加速类型，直出时为 ""
 }
 
 // DecidePlayback 根据媒体文件的编码信息决定播放策略。
@@ -24,19 +24,19 @@ func DecidePlayback(filePath, container, videoCodec, audioCodec string) PlayInfo
 	}
 	if IsBrowserCompatible(info) {
 		return PlayInfo{
-			URL:             filePath,
-			Format:          "direct",
+			URL:               filePath,
+			Format:            "direct",
 			TranscodeRequired: false,
-			HWAccel:         "",
+			HWAccel:           "",
 		}
 	}
 
 	// 不兼容格式 → 转码模式，返回 HLS 占位 URL
 	base := filepath.Base(filePath)
 	return PlayInfo{
-		URL:             fmt.Sprintf("/api/play/hls/%s/index.m3u8", base),
-		Format:          "hls",
+		URL:               fmt.Sprintf("/api/play/hls/%s/index.m3u8", base),
+		Format:            "hls",
 		TranscodeRequired: true,
-		HWAccel:         "software",
+		HWAccel:           "software",
 	}
 }

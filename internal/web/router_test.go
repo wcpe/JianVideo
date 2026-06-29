@@ -79,7 +79,7 @@ func setupFreshRouter(t *testing.T) *gin.Engine {
 	// 关闭 DB，避免 Windows 下临时文件被占用致 TempDir 清理失败
 	t.Cleanup(func() {
 		if sqlDB, err := gormDB.DB(); err == nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 		}
 	})
 	return NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), nil, nil)
@@ -105,7 +105,7 @@ func setupSeededRouter(t *testing.T) *gin.Engine {
 	cfg := &config.Config{ServerPort: 8080, JWTSecret: "test-secret", JWTExpiresIn: 72 * time.Hour, DBPath: dbPath}
 	t.Cleanup(func() {
 		if sqlDB, err := gormDB.DB(); err == nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 		}
 	})
 	r := NewRouter(cfg, gormDB, player.NewHLSManager(t.TempDir()), nil, nil)
@@ -197,7 +197,9 @@ func TestLogin_Success(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应体失败: %v", err)
+	}
 	if resp["username"] != "admin" {
 		t.Errorf("期望 username=admin, 得到 %q", resp["username"])
 	}
@@ -285,7 +287,9 @@ func TestProtectedRoute_Authorized(t *testing.T) {
 	}
 
 	var resp map[string]string
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应体失败: %v", err)
+	}
 	if resp["username"] != "admin" {
 		t.Errorf("期望 username=admin, 得到 %q", resp["username"])
 	}
@@ -302,7 +306,9 @@ func TestSetupStatus_NeedsSetupWhenNoUser(t *testing.T) {
 		t.Fatalf("期望 200, 得到 %d", w.Code)
 	}
 	var resp map[string]bool
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应体失败: %v", err)
+	}
 	if !resp["needs_setup"] {
 		t.Error("无用户时 needs_setup 应为 true")
 	}
@@ -339,7 +345,9 @@ func TestSetup_CreatesUserAndAutoLogin(t *testing.T) {
 	sReq, _ := http.NewRequest("GET", "/api/auth/setup-status", nil)
 	r.ServeHTTP(sW, sReq)
 	var resp map[string]bool
-	json.Unmarshal(sW.Body.Bytes(), &resp)
+	if err := json.Unmarshal(sW.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应体失败: %v", err)
+	}
 	if resp["needs_setup"] {
 		t.Error("初始化后 needs_setup 应为 false")
 	}

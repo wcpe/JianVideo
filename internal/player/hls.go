@@ -1,3 +1,4 @@
+// Package player 提供 HLS 播放列表生成与 TS 切片写入能力（追播模式）。
 package player
 
 import (
@@ -17,7 +18,7 @@ type HLSSegmentWriter struct {
 	mediaID  int64
 	quality  string
 	seq      int
-	f       *os.File
+	f        *os.File
 	closed   bool
 }
 
@@ -37,7 +38,8 @@ func NewHLSSegmentWriter(baseDir string, mediaID int64, quality string) (*HLSSeg
 	}
 
 	if _, err := f.WriteString(m3u8Header); err != nil {
-		f.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = f.Close()
 		return nil, fmt.Errorf("写入 m3u8 头部失败: %w", err)
 	}
 

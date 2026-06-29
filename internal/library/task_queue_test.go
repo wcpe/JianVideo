@@ -52,7 +52,7 @@ func TestTaskQueue_EnqueueExecuteFlow(t *testing.T) {
 	gdb := newTaskQueueDB(t)
 
 	var gotMode atomic.Value
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, mode string) (int, error) {
 		gotMode.Store(mode)
 		return 7, nil
 	}
@@ -96,7 +96,7 @@ func TestTaskQueue_EnqueueExecuteFlow(t *testing.T) {
 func TestTaskQueue_ErrorFlow(t *testing.T) {
 	gdb := newTaskQueueDB(t)
 
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, _ string) (int, error) {
 		return 0, errTest
 	}
 	q := NewTaskQueue(gdb, exec)
@@ -130,7 +130,7 @@ func TestTaskQueue_SerialExecution(t *testing.T) {
 	var current int32
 	var peak int32
 	var mu sync.Mutex
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, _ string) (int, error) {
 		c := atomic.AddInt32(&current, 1)
 		mu.Lock()
 		if c > peak {
@@ -146,13 +146,10 @@ func TestTaskQueue_SerialExecution(t *testing.T) {
 	defer q.Stop()
 
 	const n = 5
-	ids := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
-		id, err := q.Enqueue(int64(i+1), "/p", "local", models.ScanTypeFull)
-		if err != nil {
+		if _, err := q.Enqueue(int64(i+1), "/p", "local", models.ScanTypeFull); err != nil {
 			t.Fatalf("入队失败: %v", err)
 		}
-		ids = append(ids, id)
 	}
 
 	waitFor(t, 5*time.Second, func() bool {
@@ -192,7 +189,7 @@ func TestTaskQueue_RecoverRunning(t *testing.T) {
 	}
 
 	var executed int32
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, _ string) (int, error) {
 		atomic.AddInt32(&executed, 1)
 		return 3, nil
 	}
@@ -220,7 +217,7 @@ func TestTaskQueue_RecoverRunning(t *testing.T) {
 // TestTaskQueue_ListTasks 列出任务（最近在前）。
 func TestTaskQueue_ListTasks(t *testing.T) {
 	gdb := newTaskQueueDB(t)
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) { return 0, nil }
+	exec := func(_ int64, _, _, _ string) (int, error) { return 0, nil }
 	q := NewTaskQueue(gdb, exec)
 	// 不启动 worker，直接观察入队后的 pending 列表
 	_, _ = q.Enqueue(1, "/a", "local", models.ScanTypeFull)

@@ -25,7 +25,7 @@ func TestScanEnrich_BoundedConcurrency(t *testing.T) {
 	var current int32
 	var peak int32
 	var mu sync.Mutex
-	enrichMediaMetadataFn = func(mf *models.MediaFile) {
+	enrichMediaMetadataFn = func(_ *models.MediaFile) {
 		c := atomic.AddInt32(&current, 1)
 		mu.Lock()
 		if c > peak {
@@ -53,14 +53,14 @@ func TestScanEnrich_BoundedConcurrency(t *testing.T) {
 		t.Fatalf("应入库 %d 个文件, 实际 %d", fileCount, count)
 	}
 
-	cap := scanEnrichConcurrency()
+	capLimit := scanEnrichConcurrency()
 	mu.Lock()
 	gotPeak := peak
 	mu.Unlock()
 	if gotPeak <= 1 {
 		t.Fatalf("扫描期富化应并发执行（峰值 > 1），实际峰值 %d（疑似串行）", gotPeak)
 	}
-	if int(gotPeak) > cap {
-		t.Fatalf("扫描期富化并发峰值 %d 超过上限 cap=%d", gotPeak, cap)
+	if int(gotPeak) > capLimit {
+		t.Fatalf("扫描期富化并发峰值 %d 超过上限 cap=%d", gotPeak, capLimit)
 	}
 }

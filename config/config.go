@@ -1,3 +1,4 @@
+// Package config 提供服务端运行配置的加载与环境变量解析（含默认值与凭据生成）。
 package config
 
 import (

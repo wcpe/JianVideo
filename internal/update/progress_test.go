@@ -16,7 +16,7 @@ func TestDownloadToTemp_ReportsProgressByBytes(t *testing.T) {
 	for i := range body {
 		body[i] = byte(i % 251)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// 显式设置 Content-Length，使 resp.ContentLength 为已知总字节
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		_, _ = w.Write(body)
@@ -63,7 +63,7 @@ func TestDownloadToTemp_ReportsProgressByBytes(t *testing.T) {
 // 回调 total 报 0（不确定态），已下载字节仍正常累进。
 func TestDownloadToTemp_UnknownTotalReportsZero(t *testing.T) {
 	body := []byte("hello-jianvideo-update-progress")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// 用 Flusher + chunked，使 Content-Length 未知（resp.ContentLength = -1）
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
@@ -96,7 +96,7 @@ func TestDownloadToTemp_UnknownTotalReportsZero(t *testing.T) {
 // 这里直接驱动下载链路 + 状态写入，覆盖 Service.Progress() 读取并发安全副本。
 func TestProgressState_DownloadingThenVerifying(t *testing.T) {
 	body := make([]byte, 8*1024)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 		_, _ = w.Write(body)
 	}))

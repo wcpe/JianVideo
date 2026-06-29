@@ -95,7 +95,7 @@ func TestPregenQueue_EnqueueExecuteFlow(t *testing.T) {
 func TestPregenQueue_ErrorFlow(t *testing.T) {
 	db := newPregenTestDB(t)
 
-	exec := func(mediaID int64, codec string) error {
+	exec := func(_ int64, _ string) error {
 		return errors.New("预转码失败（测试桩）")
 	}
 	q := NewPregenQueue(db, exec)
@@ -125,7 +125,7 @@ func TestPregenQueue_SerialExecution(t *testing.T) {
 
 	var current, peak int32
 	var mu sync.Mutex
-	exec := func(mediaID int64, codec string) error {
+	exec := func(_ int64, _ string) error {
 		c := atomic.AddInt32(&current, 1)
 		mu.Lock()
 		if c > peak {
@@ -178,7 +178,7 @@ func TestPregenQueue_RecoverRunning(t *testing.T) {
 	}
 
 	var executed int32
-	exec := func(mediaID int64, codec string) error {
+	exec := func(_ int64, _ string) error {
 		atomic.AddInt32(&executed, 1)
 		return nil
 	}
@@ -205,7 +205,7 @@ func TestPregenQueue_RecoverRunning(t *testing.T) {
 // TestPregenQueue_ListTasksFilter 列任务支持按状态过滤、按入队倒序。
 func TestPregenQueue_ListTasksFilter(t *testing.T) {
 	db := newPregenTestDB(t)
-	exec := func(mediaID int64, codec string) error { return nil }
+	exec := func(_ int64, _ string) error { return nil }
 	q := NewPregenQueue(db, exec)
 	// 不启动 worker，观察 pending 列表
 	_, _ = q.Enqueue(1, 1, "h264", 0, 0)

@@ -21,11 +21,11 @@ func mockService(t *testing.T, releases func(base string) []Release, binContent,
 	t.Helper()
 	var base string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/wcpe/JianVideo/releases", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/wcpe/JianVideo/releases", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(releases(base))
 	})
-	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(binContent)) })
-	mux.HandleFunc("/sums", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(sumsContent)) })
+	mux.HandleFunc("/dl/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(binContent)) })
+	mux.HandleFunc("/sums", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(sumsContent)) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	base = srv.URL

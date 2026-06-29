@@ -105,7 +105,8 @@ func TestGetProgress_WithSession(t *testing.T) {
 	// 通过 GetOrCreateSession 创建带 Duration 的会话
 	s.GetOrCreateSession(1, 120.0, 5000)
 	// 通过 HandleSeek 设置 CurrentPosition
-	s.HandleSeek(1, 45.0)
+	_, err := s.HandleSeek(1, 45.0)
+	require.NoError(t, err)
 
 	progress, err := s.GetProgress(1)
 	require.NoError(t, err)

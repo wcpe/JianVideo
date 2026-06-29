@@ -16,15 +16,3 @@ func setProcessGroup(cmd *exec.Cmd) {
 		Setpgid: true,
 	}
 }
-
-// killProcessGroup 杀掉进程组。
-func killProcessGroup(cmd *exec.Cmd) error {
-	if cmd.Process == nil {
-		return nil
-	}
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err != nil {
-		return cmd.Process.Kill()
-	}
-	return syscall.Kill(-pgid, syscall.SIGKILL)
-}

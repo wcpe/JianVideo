@@ -21,6 +21,6 @@ type MediaHealthIssue struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
 	MediaID   int64     `gorm:"index;not null" json:"media_id"`
 	IssueType string    `gorm:"index;not null" json:"issue_type"` // broken / zero_byte / missing / no_thumbnail
-	Detail    string    `json:"detail"`                            // 问题细节（如 ffprobe 错误尾部）
-	CheckedAt time.Time `json:"checked_at"`                        // 本轮巡检判定时刻
+	Detail    string    `json:"detail"`                           // 问题细节（如 ffprobe 错误尾部）
+	CheckedAt time.Time `json:"checked_at"`                       // 本轮巡检判定时刻
 }

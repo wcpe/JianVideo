@@ -138,7 +138,7 @@ func TestGetSubtitleContent_ReturnsVTT(t *testing.T) {
 	body := w.Body.String()
 	// 应以 WEBVTT 开头
 	if !strStartsWith(body, "WEBVTT") {
-		t.Errorf("应以 WEBVTT 开头, body: %s", body[:min(len(body), 50)])
+		t.Errorf("应以 WEBVTT 开头, body: %s", body[:minInt(len(body), 50)])
 	}
 	// 应包含字幕文本（srt 或 ass 转换后的文本）
 	if !strContains(body, "测试字幕") && !strContains(body, "ASS测试") {
@@ -231,7 +231,7 @@ func strStartsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

@@ -17,7 +17,7 @@ func TestGenerateThumbnail_LogsFFmpegStderr(t *testing.T) {
 
 	// 注入失败桩：返回带 stderr 关键内容的错误（模拟 realRunFFmpegThumbnail 的输出契约）
 	orig := runFFmpegThumbnail
-	runFFmpegThumbnail = func(ctx context.Context, args []string) error {
+	runFFmpegThumbnail = func(_ context.Context, _ []string) error {
 		return errWithStderr(stderrMarker)
 	}
 	t.Cleanup(func() { runFFmpegThumbnail = orig })

@@ -18,6 +18,6 @@ type DirInfo struct {
 // BrowseResponse 目录浏览响应。
 type BrowseResponse struct {
 	Breadcrumbs []BreadcrumbItem `json:"breadcrumbs"`
-	Directories []DirInfo         `json:"directories"`
+	Directories []DirInfo        `json:"directories"`
 	Files       []MediaFile      `json:"files"`
 }

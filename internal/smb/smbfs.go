@@ -78,7 +78,7 @@ type smbDirEntry struct {
 
 // Type 返回文件模式类型位。
 func (e *smbDirEntry) Type() fs.FileMode {
-	return e.FileInfo.Mode() & fs.ModeType
+	return e.Mode() & fs.ModeType
 }
 
 // Info 返回 FileInfo。

@@ -15,11 +15,11 @@ import (
 // 返回 (start, end, error)。start 或 end 为 -1 时表示未指定。
 func ParseRangeHeader(header string) (start, end int64, err error) {
 	if header == "" {
-		return 0, 0, fmt.Errorf("Range 头为空")
+		return 0, 0, fmt.Errorf("请求缺少 Range 头")
 	}
 
 	if !strings.HasPrefix(header, "bytes=") {
-		return 0, 0, fmt.Errorf("Range 头格式错误，缺少 'bytes=' 前缀: %s", header)
+		return 0, 0, fmt.Errorf("range 头格式错误，缺少 'bytes=' 前缀: %s", header)
 	}
 
 	spec := strings.TrimPrefix(header, "bytes=")
@@ -36,7 +36,7 @@ func ParseRangeHeader(header string) (start, end int64, err error) {
 	// 标准范围：bytes=start-end 或 bytes=start-
 	parts := strings.SplitN(spec, "-", 2)
 	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("Range 头格式错误，缺少连字符: %s", spec)
+		return 0, 0, fmt.Errorf("range 头格式错误，缺少连字符: %s", spec)
 	}
 
 	startVal, err := strconv.ParseInt(parts[0], 10, 64)

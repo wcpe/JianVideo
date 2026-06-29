@@ -47,7 +47,8 @@ func TestGetEnv(t *testing.T) {
 			if tt.setEnv {
 				t.Setenv(tt.key, tt.envValue)
 			} else {
-				os.Unsetenv(tt.key)
+				// 清除测试 key 以验证缺省路径，key 不存在时 Unsetenv 也返回 nil，忽略错误
+				_ = os.Unsetenv(tt.key)
 			}
 			got := getEnv(tt.key, tt.def)
 			assert.Equal(t, tt.want, got)
@@ -102,7 +103,8 @@ func TestGetEnvInt(t *testing.T) {
 			if tt.setEnv {
 				t.Setenv(tt.key, tt.envValue)
 			} else {
-				os.Unsetenv(tt.key)
+				// 清除测试 key 以验证缺省路径，key 不存在时 Unsetenv 也返回 nil，忽略错误
+				_ = os.Unsetenv(tt.key)
 			}
 			got := getEnvInt(tt.key, tt.def)
 			assert.Equal(t, tt.want, got)
@@ -119,7 +121,9 @@ func TestLoad_Defaults(t *testing.T) {
 		"JIANVIDEO_DB_PATH",
 	}
 	for _, key := range envKeys {
-		os.Unsetenv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("清除环境变量 %s 失败: %v", key, err)
+		}
 	}
 
 	cfg := Load()
@@ -153,7 +157,9 @@ func TestLoad_PartialEnv(t *testing.T) {
 		"JIANVIDEO_DB_PATH",
 	}
 	for _, key := range envKeys {
-		os.Unsetenv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("清除环境变量 %s 失败: %v", key, err)
+		}
 	}
 
 	// 只设置部分环境变量

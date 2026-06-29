@@ -166,7 +166,7 @@ func TestGetLibrarySummary_ByLibraryGrouping(t *testing.T) {
 		t.Fatalf("期望 by_library 2 项, 实际 %d", len(summary.ByLibrary))
 	}
 
-	rows := map[int64]LibrarySummaryRow{}
+	rows := map[int64]SummaryRow{}
 	for _, r := range summary.ByLibrary {
 		rows[r.LibraryID] = r
 	}

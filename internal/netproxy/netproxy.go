@@ -123,7 +123,8 @@ func TestProxy(ctx context.Context, rawURL, target string) (bool, string, time.D
 		// 可能在消息里带上代理地址，故统一用 redactErr 兜底脱敏。
 		return false, redactErr(err, proxyURL), latency
 	}
-	defer resp.Body.Close()
+	// 仅探测连通性，不读取响应体；关闭错误对探测结果无影响，忽略。
+	defer func() { _ = resp.Body.Close() }()
 	// 拿到任意 HTTP 响应即说明代理链路连通到了目标。
 	return true, fmt.Sprintf("HTTP %d", resp.StatusCode), latency
 }

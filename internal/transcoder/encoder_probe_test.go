@@ -74,8 +74,8 @@ func TestCandidateEncoders_FullFamilies(t *testing.T) {
 	wantEncoders := []string{
 		"libsvtav1", "libvpx-vp9", // 软件 AV1/VP9
 		"av1_qsv", "vp9_qsv", // QSV AV1/VP9
-		"av1_nvenc",         // NVENC AV1
-		"av1_amf",           // AMD AMF AV1
+		"av1_nvenc",              // NVENC AV1
+		"av1_amf",                // AMD AMF AV1
 		"av1_vaapi", "vp9_vaapi", // VAAPI AV1/VP9
 		"h264_vulkan", "hevc_vulkan", "av1_vulkan", // Vulkan 全家族
 	}

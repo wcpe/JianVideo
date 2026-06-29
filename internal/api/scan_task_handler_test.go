@@ -43,7 +43,7 @@ func setupScanQueueRouter(t *testing.T, exec library.ScanExecFunc) (*gin.Engine,
 
 // TestScanLibrary_Enqueues 触发扫描时入队任务并返回 task_id，而非直接执行。
 func TestScanLibrary_Enqueues(t *testing.T) {
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) { return 5, nil }
+	exec := func(_ int64, _, _, _ string) (int, error) { return 5, nil }
 	r, gdb, _ := setupScanQueueRouter(t, exec)
 
 	svc := library.NewService(gdb)
@@ -89,7 +89,7 @@ func TestScanLibrary_Enqueues(t *testing.T) {
 func TestListScanTasks(t *testing.T) {
 	// exec 阻塞，确保任务处于 running 时能观察到 current
 	release := make(chan struct{})
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, _ string) (int, error) {
 		<-release
 		return 3, nil
 	}

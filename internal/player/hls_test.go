@@ -15,7 +15,7 @@ func TestHLSSegmentWriter_CreatesDirectoryAndM3U8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHLSSegmentWriter 失败: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	// 子目录应已创建
 	mediaDir := filepath.Join(tDir, "42")
@@ -56,7 +56,7 @@ func TestHLSSegmentWriter_WriteSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHLSSegmentWriter 失败: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	mediaDir := filepath.Join(tDir, "1")
 

@@ -29,6 +29,7 @@ const cacheTTL = 10 * time.Minute
 // Channel 更新频道。
 type Channel string
 
+// 更新频道取值：决定自更新是否纳入预发布版本。
 const (
 	ChannelStable     Channel = "stable"     // 仅正式 Release
 	ChannelPrerelease Channel = "prerelease" // 含滚动 dev 预发布
@@ -294,25 +295,29 @@ func (s *Service) Apply(ctx context.Context, current, channel string) error {
 	tmpBin, err := downloadToTemp(ctx, s.dlClient(), bin.URL, dir, bin.Name, s.setProgressDownloading)
 	if err != nil {
 		s.setProgressFailed()
-		os.RemoveAll(dir)
+		// 清理临时目录，删除错误可忽略（残余由系统回收）
+		_ = os.RemoveAll(dir)
 		return err
 	}
 	s.setProgressVerifying()
 	sumsText, err := downloadText(ctx, s.dlClient(), sums.URL)
 	if err != nil {
 		s.setProgressFailed()
-		os.RemoveAll(dir)
+		// 清理临时目录，删除错误可忽略（残余由系统回收）
+		_ = os.RemoveAll(dir)
 		return err
 	}
 	ok, err := verifyChecksum(tmpBin, bin.Name, sumsText)
 	if err != nil {
 		s.setProgressFailed()
-		os.RemoveAll(dir)
+		// 清理临时目录，删除错误可忽略（残余由系统回收）
+		_ = os.RemoveAll(dir)
 		return err
 	}
 	if !ok {
 		s.setProgressFailed()
-		os.RemoveAll(dir)
+		// 清理临时目录，删除错误可忽略（残余由系统回收）
+		_ = os.RemoveAll(dir)
 		return fmt.Errorf("校验和不匹配，拒绝替换")
 	}
 	// 替换成功将触发进程重启；临时二进制已移走，残余临时目录由系统回收。

@@ -54,7 +54,6 @@ func (s *CapabilityService) CodecResults(ctx context.Context, force bool) (resul
 	if err = s.saveCache(version, results, testedAt); err != nil {
 		// 持久化失败不影响本次结果返回，仅记日志
 		log.Printf("[WARN] 编码器实测结果持久化失败: version=%q, err=%v", version, err)
-		err = nil
 	}
 	return results, false, version, testedAt, nil
 }

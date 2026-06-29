@@ -82,7 +82,7 @@ func newShareTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 		server.Close()
 		pbSvc.Stop()
 		if sqlDB, err := gormDB.DB(); err == nil {
-			sqlDB.Close()
+			_ = sqlDB.Close() // 测试清理，忽略关闭错误
 		}
 	})
 
@@ -93,7 +93,7 @@ func newShareTestServer(t *testing.T) (*httptest.Server, *gorm.DB, string) {
 func shareLogin(t *testing.T, serverURL string) string {
 	t.Helper()
 	resp := doRequest(t, "POST", serverURL+"/api/auth/login", `{"username":"admin","password":"admin"}`, nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("登录失败: %d", resp.StatusCode)
 	}
@@ -115,6 +115,7 @@ func createLibraryWithMedia(t *testing.T, serverURL, cookie, dir, label string, 
 	createResp := doRequest(t, "POST", serverURL+"/api/library/paths",
 		fmt.Sprintf(`{"path":"%s","type":"local","label":"%s"}`, escaped, label),
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if createResp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(createResp.Body)
 		t.Fatalf("建库失败: %d, body: %s", createResp.StatusCode, string(b))
@@ -128,7 +129,7 @@ func createLibraryWithMedia(t *testing.T, serverURL, cookie, dir, label string, 
 		b, _ := io.ReadAll(scanResp.Body)
 		t.Fatalf("触发扫描失败: %d, body: %s", scanResp.StatusCode, string(b))
 	}
-	scanResp.Body.Close()
+	_ = scanResp.Body.Close() // 测试清理，忽略关闭错误
 
 	items := waitForLibraryMedia(t, serverURL, cookie, lp.ID, len(files))
 	idByName := make(map[string]int64, len(files))
@@ -158,6 +159,7 @@ func waitForLibraryMedia(t *testing.T, serverURL, cookie string, libraryID int64
 			Items []models.MediaFile `json:"items"`
 		}
 		parseJSON(t, resp, &result)
+		_ = resp.Body.Close() // 测试清理，忽略关闭错误
 		if len(result.Items) >= want {
 			return result.Items
 		}
@@ -175,7 +177,7 @@ func createShare(t *testing.T, serverURL, cookie, resourceType string, resourceI
 	resp := doRequest(t, "POST", serverURL+"/api/shares", body, map[string]string{"Cookie": cookie})
 	if resp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("创建分享失败: %d, body: %s", resp.StatusCode, string(b))
 	}
 	var sh models.Share
@@ -190,7 +192,7 @@ func createShare(t *testing.T, serverURL, cookie, resourceType string, resourceI
 func shareMediaStatus(t *testing.T, serverURL, token string, mediaID int64, suffix string, headers map[string]string) int {
 	t.Helper()
 	resp := doRequest(t, "GET", fmt.Sprintf("%s/api/share/%s/media/%d/%s", serverURL, token, mediaID, suffix), nil, headers)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	return resp.StatusCode
 }
 
@@ -218,10 +220,11 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 	if ct := pageResp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("/s/:token 应返回 html, 实际 %q", ct)
 	}
-	pageResp.Body.Close()
+	_ = pageResp.Body.Close() // 测试清理，忽略关闭错误
 
 	// 2) 分享元信息（免登）
 	infoResp := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil)
+	defer func() { _ = infoResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if infoResp.StatusCode != http.StatusOK {
 		t.Fatalf("分享元信息免登应 200, 实际 %d", infoResp.StatusCode)
 	}
@@ -243,7 +246,7 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		t.Fatalf("下载应为附件, 实际 %q", cd)
 	}
 	dlBody, _ := io.ReadAll(dlResp.Body)
-	dlResp.Body.Close()
+	_ = dlResp.Body.Close() // 测试清理，忽略关闭错误
 	if string(dlBody) != string(videoBytes) {
 		t.Fatalf("下载字节不一致: %q", string(dlBody))
 	}
@@ -256,7 +259,7 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		t.Fatalf("带 Range 的流应 206, 实际 %d", rangeResp.StatusCode)
 	}
 	part, _ := io.ReadAll(rangeResp.Body)
-	rangeResp.Body.Close()
+	_ = rangeResp.Body.Close() // 测试清理，忽略关闭错误
 	if string(part) != string(videoBytes[:5]) {
 		t.Fatalf("Range 片段不符: 期望 %q, 实际 %q", string(videoBytes[:5]), string(part))
 	}
@@ -280,24 +283,24 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 
 	// 7) 豁免边界：管理端点 /api/shares 不被豁免，无 Cookie → 401（GET 与 DELETE 都验）
 	if mgmt := doRequest(t, "GET", server.URL+"/api/shares", nil, nil); mgmt.StatusCode != http.StatusUnauthorized {
-		mgmt.Body.Close()
+		_ = mgmt.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("GET /api/shares 免登应 401, 实际 %d", mgmt.StatusCode)
 	} else {
-		mgmt.Body.Close()
+		_ = mgmt.Body.Close() // 测试清理，忽略关闭错误
 	}
 	if del := doRequest(t, "DELETE", server.URL+"/api/shares/"+token, nil, nil); del.StatusCode != http.StatusUnauthorized {
-		del.Body.Close()
+		_ = del.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("DELETE /api/shares/:token 免登应 401, 实际 %d", del.StatusCode)
 	} else {
-		del.Body.Close()
+		_ = del.Body.Close() // 测试清理，忽略关闭错误
 	}
 
 	// 8) 伪造/不存在 token → 404（API 层独立断言，与前端文案解耦）
 	if forged := doRequest(t, "GET", server.URL+"/api/share/deadbeefdeadbeefdeadbeef", nil, nil); forged.StatusCode != http.StatusNotFound {
-		forged.Body.Close()
+		_ = forged.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("伪造 token 应 404, 实际 %d", forged.StatusCode)
 	} else {
-		forged.Body.Close()
+		_ = forged.Body.Close() // 测试清理，忽略关闭错误
 	}
 
 	// 9) 过期 token → 404：另建一个分享，把 ExpiresAt 改到过去，免登访问应失效
@@ -307,29 +310,29 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 		t.Fatalf("置过期失败: %v", err)
 	}
 	if exp := doRequest(t, "GET", server.URL+"/api/share/"+expToken, nil, nil); exp.StatusCode != http.StatusNotFound {
-		exp.Body.Close()
+		_ = exp.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("过期 token 应 404, 实际 %d", exp.StatusCode)
 	} else {
-		exp.Body.Close()
+		_ = exp.Body.Close() // 测试清理，忽略关闭错误
 	}
 
 	// 10) 撤销前后对照（让 204 有证明力，而非空操作也返回 204）：撤销前 200 → 撤销 204 → 撤销后 404
 	if pre := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil); pre.StatusCode != http.StatusOK {
-		pre.Body.Close()
+		_ = pre.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("撤销前 token 应仍有效 200, 实际 %d", pre.StatusCode)
 	} else {
-		pre.Body.Close()
+		_ = pre.Body.Close() // 测试清理，忽略关闭错误
 	}
 	delResp := doRequest(t, "DELETE", server.URL+"/api/shares/"+token, nil, map[string]string{"Cookie": cookie})
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("撤销应 204, 实际 %d", delResp.StatusCode)
 	}
-	delResp.Body.Close()
+	_ = delResp.Body.Close() // 测试清理，忽略关闭错误
 	if goneResp := doRequest(t, "GET", server.URL+"/api/share/"+token, nil, nil); goneResp.StatusCode != http.StatusNotFound {
-		goneResp.Body.Close()
+		_ = goneResp.Body.Close() // 测试清理，忽略关闭错误
 		t.Fatalf("撤销后免登访问应 404, 实际 %d", goneResp.StatusCode)
 	} else {
-		goneResp.Body.Close()
+		_ = goneResp.Body.Close() // 测试清理，忽略关闭错误
 	}
 }
 
@@ -347,6 +350,7 @@ func TestE2E_Share_AlbumScopePublic(t *testing.T) {
 	// 建相册并只把 in.jpg 加入
 	albResp := doRequest(t, "POST", server.URL+"/api/albums", `{"name":"分享相册","description":""}`,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = albResp.Body.Close() }() // 测试清理，忽略关闭错误
 	if albResp.StatusCode != http.StatusCreated && albResp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(albResp.Body)
 		t.Fatalf("建相册失败: %d, body: %s", albResp.StatusCode, string(b))
@@ -359,7 +363,7 @@ func TestE2E_Share_AlbumScopePublic(t *testing.T) {
 		b, _ := io.ReadAll(addResp.Body)
 		t.Fatalf("加入相册失败: %d, body: %s", addResp.StatusCode, string(b))
 	}
-	addResp.Body.Close()
+	_ = addResp.Body.Close() // 测试清理，忽略关闭错误
 
 	token := createShare(t, server.URL, cookie, models.ShareResourceAlbum, album.ID, 0)
 
@@ -369,7 +373,7 @@ func TestE2E_Share_AlbumScopePublic(t *testing.T) {
 		t.Fatalf("相册成员免登下载应 200, 实际 %d", inResp.StatusCode)
 	}
 	inBody, _ := io.ReadAll(inResp.Body)
-	inResp.Body.Close()
+	_ = inResp.Body.Close() // 测试清理，忽略关闭错误
 	if string(inBody) != string(inBytes) {
 		t.Fatalf("相册成员下载字节不一致: %q", string(inBody))
 	}

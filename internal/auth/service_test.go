@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 func TestCreateDefaultUser(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 
@@ -59,7 +59,9 @@ func TestCreateDefaultUser(t *testing.T) {
 	}
 
 	var count int
-	d.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err := d.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		t.Fatalf("查询用户数失败: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("应只有 1 个用户, 得到 %d", count)
 	}
@@ -67,7 +69,7 @@ func TestCreateDefaultUser(t *testing.T) {
 
 func TestNeedsSetup(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 
@@ -95,7 +97,7 @@ func TestNeedsSetup(t *testing.T) {
 
 func TestSetup_CreatesFirstUser(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	user, err := svc.Setup("alice", "secret123")
@@ -118,7 +120,7 @@ func TestSetup_CreatesFirstUser(t *testing.T) {
 
 func TestSetup_RejectsWhenUserExists(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if _, err := svc.Setup("alice", "secret123"); err != nil {
@@ -129,7 +131,9 @@ func TestSetup_RejectsWhenUserExists(t *testing.T) {
 		t.Fatal("已初始化后再次 Setup 应被拒绝")
 	}
 	var count int
-	d.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err := d.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		t.Fatalf("查询用户数失败: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("应只有 1 个用户, 得到 %d", count)
 	}
@@ -137,7 +141,7 @@ func TestSetup_RejectsWhenUserExists(t *testing.T) {
 
 func TestSetup_RejectsEmpty(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if _, err := svc.Setup("", "secret123"); err == nil {
@@ -150,7 +154,7 @@ func TestSetup_RejectsEmpty(t *testing.T) {
 
 func TestChangePassword_Success(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -171,7 +175,7 @@ func TestChangePassword_Success(t *testing.T) {
 
 func TestChangePassword_WrongCurrent(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -190,7 +194,7 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 
 func TestChangePassword_EmptyNew(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -203,7 +207,7 @@ func TestChangePassword_EmptyNew(t *testing.T) {
 
 func TestLogin_Success(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -221,7 +225,7 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_WrongPassword(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {
@@ -236,7 +240,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 
 func TestLogin_UserNotFound(t *testing.T) {
 	d := setupTestDB(t)
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	svc := NewService(d, "test-secret")
 	if err := svc.CreateDefaultUser(); err != nil {

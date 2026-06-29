@@ -118,22 +118,26 @@ func copyAndRemove(src, dst string) error {
 	}
 	out, err := os.Create(dst)
 	if err != nil {
-		in.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = in.Close()
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		in.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = out.Close()
+		_ = in.Close()
 		return err
 	}
 	// 先刷盘再关闭，保证新二进制完整落地到磁盘（重启后仍是新版）。
 	if err := out.Sync(); err != nil {
-		out.Close()
-		in.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = out.Close()
+		_ = in.Close()
 		return err
 	}
 	if err := out.Close(); err != nil {
-		in.Close()
+		// 错误清理分支，关闭错误可忽略
+		_ = in.Close()
 		return err
 	}
 	// 关键：删除源前先关闭 src 句柄，否则 Windows 下删除失败导致整体落地失败。

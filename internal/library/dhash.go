@@ -88,7 +88,7 @@ func dHashFromThumbnail(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	img, err := jpeg.Decode(f)
 	if err != nil {
 		return 0, fmt.Errorf("解码缩略图失败: %w", err)
@@ -105,8 +105,7 @@ func clusterByHamming(items []dhashItem, threshold int) [][]int64 {
 	for i := range parent {
 		parent[i] = i
 	}
-	var find func(int) int
-	find = func(i int) int {
+	find := func(i int) int {
 		for parent[i] != i {
 			parent[i] = parent[parent[i]] // 路径压缩
 			i = parent[i]

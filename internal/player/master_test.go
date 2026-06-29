@@ -59,5 +59,3 @@ func TestGenerateMasterM3U8_SingleQuality(t *testing.T) {
 		t.Fatal("应包含 480p.m3u8 引用")
 	}
 }
-
-

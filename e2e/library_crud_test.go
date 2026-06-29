@@ -29,6 +29,7 @@ func TestE2E_CreateLibraryPath(t *testing.T) {
 
 	resp := doRequest(t, "POST", server.URL+"/api/library/paths", body,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "创建路径应返回 201")
 
 	var result models.LibraryPath
@@ -52,11 +53,13 @@ func TestE2E_ListLibraryPaths(t *testing.T) {
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"电影库"}`, escapedPath)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	// 查询列表
 	resp := doRequest(t, "GET", server.URL+"/api/library/paths", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = resp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, resp.StatusCode, "查询列表应返回 200")
 
 	var result struct {
@@ -90,6 +93,7 @@ func TestE2E_DeleteLibraryPath(t *testing.T) {
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"待删除"}`, escapedPath)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	var created models.LibraryPath
@@ -99,11 +103,13 @@ func TestE2E_DeleteLibraryPath(t *testing.T) {
 	delResp := doRequest(t, "DELETE",
 		fmt.Sprintf("%s/api/library/paths/%d", server.URL, created.ID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = delResp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusNoContent, delResp.StatusCode, "删除应返回 204")
 
 	// 再次查询，确认已删除
 	listResp := doRequest(t, "GET", server.URL+"/api/library/paths", nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = listResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, listResp.StatusCode)
 
 	var result struct {
@@ -125,11 +131,14 @@ func TestE2E_CreateMediaFile(t *testing.T) {
 
 	// 创建目录
 	dir := filepath.Join(tmpDir, "media_test")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	escapedDir := strings.ReplaceAll(dir, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"媒体测试"}`, escapedDir)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	var lp models.LibraryPath
@@ -137,12 +146,15 @@ func TestE2E_CreateMediaFile(t *testing.T) {
 
 	// 创建测试视频文件
 	videoPath := filepath.Join(dir, "sample.mp4")
-	os.WriteFile(videoPath, []byte("fake video data for testing"), 0o644)
+	if err := os.WriteFile(videoPath, []byte("fake video data for testing"), 0o644); err != nil {
+		t.Fatalf("写入测试视频失败: %v", err)
+	}
 
 	// 触发扫描
 	scanResp := doRequest(t, "POST",
 		fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = scanResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusOK, scanResp.StatusCode, "扫描应返回 200")
 
 	// 等待异步扫描入库（扫描为后台 goroutine，避免竞态）
@@ -168,20 +180,26 @@ func TestE2E_DeleteMediaFile(t *testing.T) {
 
 	// 创建目录并扫描
 	dir := filepath.Join(tmpDir, "del_media")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
 	escapedDir := strings.ReplaceAll(dir, `\`, `\\`)
 	createBody := fmt.Sprintf(`{"path":"%s","type":"local","label":"删除测试"}`, escapedDir)
 	createResp := doRequest(t, "POST", server.URL+"/api/library/paths", createBody,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = createResp.Body.Close() }() // 测试清理，忽略关闭错误
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 
 	var lp models.LibraryPath
 	doJSONRequest(t, createResp, &lp)
 
 	// 创建并扫描
-	os.WriteFile(filepath.Join(dir, "to_delete.mp4"), []byte("data"), 0o644)
-	doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
+	if err := os.WriteFile(filepath.Join(dir, "to_delete.mp4"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("写入测试视频失败: %v", err)
+	}
+	scanResp := doRequest(t, "POST", fmt.Sprintf("%s/api/library/scan/%d", server.URL, lp.ID), nil,
 		map[string]string{"Cookie": cookie})
+	_ = scanResp.Body.Close() // 测试清理，忽略关闭错误
 
 	// 等待异步扫描入库
 	items := waitForMediaItems(t, server.URL, cookie, 1)
@@ -191,5 +209,6 @@ func TestE2E_DeleteMediaFile(t *testing.T) {
 	delResp := doRequest(t, "DELETE",
 		fmt.Sprintf("%s/api/library/media/%d", server.URL, mediaID), nil,
 		map[string]string{"Cookie": cookie})
+	defer func() { _ = delResp.Body.Close() }() // 测试清理，忽略关闭错误
 	assert.Equal(t, http.StatusNoContent, delResp.StatusCode, "删除媒体文件应返回 204")
 }

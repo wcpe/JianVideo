@@ -23,7 +23,7 @@ func TestGenerateThumbnail_ConcurrencyCapped(t *testing.T) {
 
 	// 注入阻塞桩：记录峰值并发，阻塞驻留以暴露超限；全部任务最终经 release 放行后退出。
 	orig := runThumbnail
-	runThumbnail = func(job thumbnailJob) {
+	runThumbnail = func(_ thumbnailJob) {
 		n := atomic.AddInt32(&current, 1)
 		for {
 			p := atomic.LoadInt32(&peak)

@@ -58,9 +58,9 @@ func TestSetMediaViewed_PicksUpInRecentlyViewed(t *testing.T) {
 
 func TestRecentlyViewed_OrderAndExcludeUnviewed(t *testing.T) {
 	svc := newWatchTestService(t)
-	idA := seedWatchMedia(t, svc, "a.jpg")  // 先看
-	idB := seedWatchMedia(t, svc, "b.jpg")  // 后看，应排在前
-	seedWatchMedia(t, svc, "c.jpg")         // 从未查看，不应出现
+	idA := seedWatchMedia(t, svc, "a.jpg") // 先看
+	idB := seedWatchMedia(t, svc, "b.jpg") // 后看，应排在前
+	seedWatchMedia(t, svc, "c.jpg")        // 从未查看，不应出现
 
 	if err := svc.SetMediaViewed(idA); err != nil {
 		t.Fatalf("记录 A 失败: %v", err)

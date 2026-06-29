@@ -84,7 +84,7 @@ func TestStreamMedia_Success(t *testing.T) {
 
 	mockFactory := func() Transcoder {
 		return &mockTranscoder{
-			runFunc: func(ctx context.Context, inputPath string, dst io.Writer) error {
+			runFunc: func(_ context.Context, _ string, dst io.Writer) error {
 				_, err := dst.Write([]byte("test ts stream data"))
 				return err
 			},
@@ -121,7 +121,7 @@ func TestStreamMedia_CacheControl(t *testing.T) {
 
 	mockFactory := func() Transcoder {
 		return &mockTranscoder{
-			runFunc: func(ctx context.Context, inputPath string, dst io.Writer) error {
+			runFunc: func(_ context.Context, _ string, _ io.Writer) error {
 				return nil
 			},
 		}

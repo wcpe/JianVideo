@@ -16,14 +16,14 @@ const (
 
 // WatchStats 观看统计聚合结果（FR-75），各维度均仅统计未软删媒体。
 type WatchStats struct {
-	Total           int                 `json:"total"`            // 媒体总数
-	Watched         int                 `json:"watched"`          // 已看完数
-	Unwatched       int                 `json:"unwatched"`        // 未看完数
-	RecentTimeline  []TimelineBucket    `json:"recent_timeline"`  // 最近观看时间线（按天）
-	PositionHeatmap []int               `json:"position_heatmap"` // 续播位置分布（10 档，下标 0=0-10%…9=90-100%）
-	ByLibrary       []LibraryWatchCount `json:"by_library"`       // 各存储库已看分布
-	ByFormat        []FormatWatchCount  `json:"by_format"`        // 各格式已看分布
-	TopViewed       []models.MediaFile  `json:"top_viewed"`       // 观看次数 Top N
+	Total           int                `json:"total"`            // 媒体总数
+	Watched         int                `json:"watched"`          // 已看完数
+	Unwatched       int                `json:"unwatched"`        // 未看完数
+	RecentTimeline  []TimelineBucket   `json:"recent_timeline"`  // 最近观看时间线（按天）
+	PositionHeatmap []int              `json:"position_heatmap"` // 续播位置分布（10 档，下标 0=0-10%…9=90-100%）
+	ByLibrary       []WatchCount       `json:"by_library"`       // 各存储库已看分布
+	ByFormat        []FormatWatchCount `json:"by_format"`        // 各格式已看分布
+	TopViewed       []models.MediaFile `json:"top_viewed"`       // 观看次数 Top N
 }
 
 // TimelineBucket 时间线的一天：日期（本地，YYYY-MM-DD）与当天观看媒体数。
@@ -32,8 +32,8 @@ type TimelineBucket struct {
 	Count int    `json:"count"`
 }
 
-// LibraryWatchCount 某存储库的已看媒体数。
-type LibraryWatchCount struct {
+// WatchCount 某存储库的已看媒体数。
+type WatchCount struct {
 	LibraryID int64  `json:"library_id"`
 	Label     string `json:"label"`
 	Watched   int    `json:"watched"`
@@ -51,7 +51,7 @@ func (s *Service) GetWatchStats() (*WatchStats, error) {
 	stats := &WatchStats{
 		PositionHeatmap: make([]int, positionHeatmapBuckets),
 		RecentTimeline:  []TimelineBucket{},
-		ByLibrary:       []LibraryWatchCount{},
+		ByLibrary:       []WatchCount{},
 		ByFormat:        []FormatWatchCount{},
 		TopViewed:       []models.MediaFile{},
 	}
@@ -91,7 +91,7 @@ func (s *Service) GetWatchStats() (*WatchStats, error) {
 		stats.RecentTimeline = []TimelineBucket{}
 	}
 	if stats.ByLibrary == nil {
-		stats.ByLibrary = []LibraryWatchCount{}
+		stats.ByLibrary = []WatchCount{}
 	}
 	if stats.ByFormat == nil {
 		stats.ByFormat = []FormatWatchCount{}
@@ -153,7 +153,7 @@ func ratioToBucket(ratio float64) int {
 
 // fillByLibrary 按 library_id 统计已看媒体数，并带上库 label。
 func (s *Service) fillByLibrary(stats *WatchStats) error {
-	var rows []LibraryWatchCount
+	var rows []WatchCount
 	if err := s.db.Model(&models.MediaFile{}).
 		Select("media_files.library_id AS library_id, library_paths.label AS label, COUNT(*) AS watched").
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").

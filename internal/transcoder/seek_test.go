@@ -82,11 +82,11 @@ func TestParseRangeHeader(t *testing.T) {
 
 func TestBytesToTimePosition(t *testing.T) {
 	tests := []struct {
-		name         string
-		startByte    int64
-		totalSize    int64
-		durationSec  float64
-		wantTimeSec  float64
+		name        string
+		startByte   int64
+		totalSize   int64
+		durationSec float64
+		wantTimeSec float64
 	}{
 		{
 			name:        "起始位置",

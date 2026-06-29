@@ -16,12 +16,14 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("创建测试数据库失败: %v", err)
 	}
-	db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&models.LibraryPath{},
 		&models.MediaFile{},
 		&models.MediaExtension{},
 		&models.User{},
 		&models.PlaybackSession{},
-	)
+	); err != nil {
+		t.Fatalf("迁移测试数据库失败: %v", err)
+	}
 	return db
 }

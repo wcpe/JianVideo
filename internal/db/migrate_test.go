@@ -21,7 +21,7 @@ func TestAutoMigrate_FoundationModels(t *testing.T) {
 	// Windows 下需先关闭连接，TempDir 才能删除 db 文件
 	t.Cleanup(func() {
 		if s, e := g.DB(); e == nil {
-			s.Close()
+			_ = s.Close()
 		}
 	})
 	if err := g.AutoMigrate(
@@ -72,7 +72,7 @@ func TestAutoMigrate_CodecProbeCache(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if s, e := g.DB(); e == nil {
-			s.Close()
+			_ = s.Close()
 		}
 	})
 	if err := g.AutoMigrate(&models.CodecProbeCache{}); err != nil {

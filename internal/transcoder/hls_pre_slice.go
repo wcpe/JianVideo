@@ -228,13 +228,13 @@ func buildMasterM3U8(qualityNames []string, ladders []QualityDefinition) string 
 	sb.WriteString("#EXT-X-VERSION:3\n")
 	for _, p := range pairs {
 		bw := rateToBps(p.def.VideoRate)
-		sb.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&sb,
 			"#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n",
 			bw, p.def.Width, p.def.Height,
-		))
+		)
 		// 与 master 同目录：hls.js 拼到 master URL 得到 /api/play/hls/:id/{quality}.m3u8，
 		// 静态文件服务直接返回 hlsDir/{mediaID}/{quality}.m3u8
-		sb.WriteString(fmt.Sprintf("%s.m3u8\n", p.name))
+		fmt.Fprintf(&sb, "%s.m3u8\n", p.name)
 	}
 	return sb.String()
 }

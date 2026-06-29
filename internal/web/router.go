@@ -1,3 +1,4 @@
+// Package web 装配 HTTP 路由，整合认证、媒体库、播放与前端静态资源服务。
 package web
 
 import (

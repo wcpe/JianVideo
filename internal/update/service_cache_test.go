@@ -18,7 +18,7 @@ func countingService(t *testing.T, tag string) (*Service, func() int64, *atomic.
 	var fail atomic.Bool
 	var base string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/wcpe/JianVideo/releases", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/repos/wcpe/JianVideo/releases", func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		if fail.Load() {
 			http.Error(w, "boom", http.StatusInternalServerError)

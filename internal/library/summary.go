@@ -4,20 +4,20 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
-// LibrarySummary 媒体库总量聚合结果（FR-117）。
+// Summary 媒体库总量聚合结果（FR-117）。
 // 所有计数/求和均仅统计未软删媒体（deleted_at IS NULL）。
-type LibrarySummary struct {
-	Total         int                 `json:"total"`          // 未软删媒体总数
-	VideoCount    int                 `json:"video_count"`    // 视频数（format 不在内置图片后缀集合内）
-	ImageCount    int                 `json:"image_count"`    // 图片数（format 在内置图片后缀集合内）
-	TotalSize     int64               `json:"total_size"`     // 占用空间合计（字节，SUM(file_size)）
-	TotalDuration float64             `json:"total_duration"` // 时长合计（秒，SUM(duration)，图片为 0 不影响）
-	LibraryCount  int                 `json:"library_count"`  // 启用的媒体库数（library_paths.enabled=1）
-	ByLibrary     []LibrarySummaryRow `json:"by_library"`     // 各库聚合（按 library_id 分组）
+type Summary struct {
+	Total         int          `json:"total"`          // 未软删媒体总数
+	VideoCount    int          `json:"video_count"`    // 视频数（format 不在内置图片后缀集合内）
+	ImageCount    int          `json:"image_count"`    // 图片数（format 在内置图片后缀集合内）
+	TotalSize     int64        `json:"total_size"`     // 占用空间合计（字节，SUM(file_size)）
+	TotalDuration float64      `json:"total_duration"` // 时长合计（秒，SUM(duration)，图片为 0 不影响）
+	LibraryCount  int          `json:"library_count"`  // 启用的媒体库数（library_paths.enabled=1）
+	ByLibrary     []SummaryRow `json:"by_library"`     // 各库聚合（按 library_id 分组）
 }
 
-// LibrarySummaryRow 单个媒体库的聚合行（FR-117）。
-type LibrarySummaryRow struct {
+// SummaryRow 单个媒体库的聚合行（FR-117）。
+type SummaryRow struct {
 	LibraryID     int64   `json:"library_id"`
 	Label         string  `json:"label"`          // 库名（取自 library_paths，LEFT JOIN）
 	MediaCount    int     `json:"media_count"`    // 该库未软删媒体数
@@ -30,9 +30,9 @@ type LibrarySummaryRow struct {
 // GetLibrarySummary 聚合媒体库总量（FR-117）：纯查询、全程带 deleted_at IS NULL、无副作用。
 // 视频/图片拆分复用全站一致谓词（builtInImageExtensionList）：图片=LOWER(format) IN 集合，视频=NOT IN。
 // by_library 用单次 GROUP BY library_id（LEFT JOIN library_paths 取 label）一次取齐，避免逐库查询（N+1）。
-func (s *Service) GetLibrarySummary() (*LibrarySummary, error) {
-	summary := &LibrarySummary{
-		ByLibrary: []LibrarySummaryRow{},
+func (s *Service) GetLibrarySummary() (*Summary, error) {
+	summary := &Summary{
+		ByLibrary: []SummaryRow{},
 	}
 
 	if err := s.fillSummaryTotals(summary); err != nil {
@@ -49,7 +49,7 @@ func (s *Service) GetLibrarySummary() (*LibrarySummary, error) {
 
 // fillSummaryTotals 单次扫描 media_files 取总数、视频/图片拆分、SUM(file_size)、SUM(duration)。
 // 视频/图片用 SUM(CASE WHEN ...) 在同一聚合内完成，避免多趟查询。
-func (s *Service) fillSummaryTotals(summary *LibrarySummary) error {
+func (s *Service) fillSummaryTotals(summary *Summary) error {
 	imageExts := builtInImageExtensionList()
 	type totalsRow struct {
 		Total         int
@@ -80,7 +80,7 @@ func (s *Service) fillSummaryTotals(summary *LibrarySummary) error {
 }
 
 // fillSummaryLibraryCount 统计启用的媒体库数（enabled=1），与 /paths 口径一致。
-func (s *Service) fillSummaryLibraryCount(summary *LibrarySummary) error {
+func (s *Service) fillSummaryLibraryCount(summary *Summary) error {
 	var count int64
 	if err := s.db.Model(&models.LibraryPath{}).Where("enabled = ?", 1).Count(&count).Error; err != nil {
 		return err
@@ -91,9 +91,9 @@ func (s *Service) fillSummaryLibraryCount(summary *LibrarySummary) error {
 
 // fillSummaryByLibrary 单次 GROUP BY library_id 取各库聚合，LEFT JOIN library_paths 取 label。
 // 视频/图片拆分同样用 SUM(CASE WHEN ...) 在同一聚合内完成，避免逐库查询（N+1）。
-func (s *Service) fillSummaryByLibrary(summary *LibrarySummary) error {
+func (s *Service) fillSummaryByLibrary(summary *Summary) error {
 	imageExts := builtInImageExtensionList()
-	var rows []LibrarySummaryRow
+	var rows []SummaryRow
 	if err := s.db.Model(&models.MediaFile{}).
 		Select(
 			"media_files.library_id AS library_id, "+

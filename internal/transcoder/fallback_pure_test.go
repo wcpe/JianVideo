@@ -71,11 +71,11 @@ func TestBuildCapabilities_AMFFamilyAvailable(t *testing.T) {
 	require.NotNil(t, info)
 
 	require.Len(t, info.Available, 1)
-	cap := info.Available[0]
-	assert.Equal(t, "amf", cap.Family)
-	assert.Equal(t, "AMD AMF", cap.Name)
-	assert.Equal(t, "d3d11va", cap.DeviceType)
-	assert.True(t, cap.Available, "h264/h265 成功，家族应可用")
+	capInfo := info.Available[0]
+	assert.Equal(t, "amf", capInfo.Family)
+	assert.Equal(t, "AMD AMF", capInfo.Name)
+	assert.Equal(t, "d3d11va", capInfo.DeviceType)
+	assert.True(t, capInfo.Available, "h264/h265 成功，家族应可用")
 
 	// av1 试编码失败，不入顶层并集
 	assert.Equal(t, []string{"h264", "h265"}, info.Codecs)

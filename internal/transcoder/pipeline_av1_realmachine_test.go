@@ -59,7 +59,7 @@ func TestRealMachine_AV1Pipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建输出文件失败: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

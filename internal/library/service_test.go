@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,16 +12,6 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
-
-// sanitizeDBName 将测试名转为合法的文件名。
-func sanitizeDBName(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, "\\", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	name = strings.ReplaceAll(name, "*", "_")
-	name = strings.ReplaceAll(name, "?", "_")
-	return name
-}
 
 // newTestService 创建带内存数据库的测试服务。
 func newTestService(t *testing.T) (*Service, *gorm.DB) {

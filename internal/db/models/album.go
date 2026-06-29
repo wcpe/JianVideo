@@ -1,3 +1,4 @@
+// Package models 定义数据库实体结构体，仅承载数据字段，不含业务逻辑。
 package models
 
 import "time"

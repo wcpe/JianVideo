@@ -11,9 +11,9 @@ const (
 	progressFailed      = "failed"      // 下载或校验失败
 )
 
-// progressState 自更新下载进度快照（FR-90），直接序列化给前端轮询。
+// ProgressState 自更新下载进度快照（FR-90），直接序列化给前端轮询。
 // Total=0 表示总字节未知（响应无 Content-Length），此时 Percent 为 0、前端退化为展示已下载字节。
-type progressState struct {
+type ProgressState struct {
 	State      string `json:"state"`      // 见 progress* 常量：idle/downloading/verifying/done/failed
 	Downloaded int64  `json:"downloaded"` // 已下载字节数
 	Total      int64  `json:"total"`      // 总字节数（0 表示未知）
@@ -37,12 +37,12 @@ func progressPercent(downloaded, total int64) int {
 // 与 FR-46 的 TTL 缓存单例同构，不落库（自更新本就用户显式触发、单次互斥，无需持久化）。
 type progressTracker struct {
 	mu sync.Mutex
-	st progressState
+	st ProgressState
 }
 
 // snapshot 返回进度副本（并发安全，外部改动不污染内部状态）。
 // 零值（从未更新）归一化为 idle；Percent 由已下载 / 总字节即时算出，使进度端点恒返回有意义的状态。
-func (t *progressTracker) snapshot() progressState {
+func (t *progressTracker) snapshot() ProgressState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s := t.st
@@ -75,11 +75,11 @@ func (t *progressTracker) setState(state string) {
 func (t *progressTracker) reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.st = progressState{State: progressDownloading}
+	t.st = ProgressState{State: progressDownloading}
 }
 
 // Progress 返回当前自更新进度快照（FR-90），供进度查询端点。
-func (s *Service) Progress() progressState {
+func (s *Service) Progress() ProgressState {
 	return s.progress.snapshot()
 }
 
