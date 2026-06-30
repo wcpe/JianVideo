@@ -95,6 +95,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
 
+		// Web 上传入库（FR-149，见 ADR-0051）：multipart 接收图片/视频，落盘到库内目标位置后触发增量扫描
+		lib.POST("/upload", h.UploadMedia)
+
 		lib.POST("/scan/:id", h.ScanLibrary)
 		lib.GET("/scan/progress", h.ScanProgressSSE)
 		// 扫描任务队列（FR-29）：列任务与当前进行中任务

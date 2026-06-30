@@ -13,6 +13,8 @@ import type {
   Tag,
   RecycleCleanupResult,
   DuplicateGroup,
+  UploadNamingRule,
+  UploadResponse,
 } from '@/types';
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -264,6 +266,38 @@ async function realScanLibrary(id: number, mode: ScanMode = 'incremental'): Prom
     params: { mode },
   });
   return res.data;
+}
+
+// ─── Web 上传入库（FR-149，见 ADR-0051）────────────────
+
+/** 上传选项：临时指定落盘目录与命名规则（均可缺省，缺省走后端设置默认） */
+export interface UploadMediaOptions {
+  targetDir?: string;
+  namingRule?: UploadNamingRule;
+  // 上传进度回调（0~100），用于 UI 进度条
+  onProgress?: (percent: number) => void;
+}
+
+async function realUploadMedia(file: File, opts: UploadMediaOptions = {}): Promise<UploadResponse> {
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    if (opts.targetDir) form.append('target_dir', opts.targetDir);
+    if (opts.namingRule) form.append('naming_rule', opts.namingRule);
+
+    const res = await client.post<UploadResponse>('/api/library/upload', form, {
+      // 上传大文件不设短超时（覆盖 client 默认 15s），由浏览器/服务端自然控制
+      timeout: 0,
+      onUploadProgress: (e) => {
+        if (opts.onProgress && e.total) {
+          opts.onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      },
+    });
+    return res.data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '上传失败'), { cause: err });
+  }
 }
 
 // ─── 扫描任务队列（FR-29）──────────────────────────────
@@ -812,6 +846,18 @@ export function cleanupRecycle() {
 }
 export function scanLibrary(id: number, mode: ScanMode = 'incremental') {
   return useMock ? mockScanLibrary(id, mode) : realScanLibrary(id, mode);
+}
+// Web 上传入库（FR-149）：mock 模式下直接回成功，便于本地无后端联调
+export function uploadMedia(file: File, opts?: UploadMediaOptions): Promise<UploadResponse> {
+  if (useMock) {
+    return Promise.resolve({
+      status: 'uploaded',
+      library_id: 1,
+      file_path: `mock/${file.name}`,
+      scan_task: 0,
+    });
+  }
+  return realUploadMedia(file, opts);
 }
 // 扫描任务队列（FR-29）
 export function getScanTasks() {

@@ -34,6 +34,10 @@ const (
 	KeyNetworkProxy = "network_proxy"
 	// KeyDebugLog 运行时调试日志开关（FR-110），值 "1"=开启详细日志、其余=安静；保存即生效，启动读取决定初始级别。
 	KeyDebugLog = "debug_log"
+	// KeyUploadTargetDir Web 上传默认落盘目录（FR-149，见 ADR-0051），须为已注册本地库目录或其子目录；空=上传时必须显式指定。
+	KeyUploadTargetDir = "upload_target_dir"
+	// KeyUploadNamingRule Web 上传命名规则（FR-149）：original=保留原样、date=按日期 YYYY/MM 整齐归档；空/非法回退 original。
+	KeyUploadNamingRule = "upload_naming_rule"
 )
 
 // Service 运行期设置业务逻辑。

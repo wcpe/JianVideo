@@ -15,6 +15,7 @@ import {
   ActionIcon,
   Switch,
   Box,
+  Select,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconTrash, IconPlus } from '@tabler/icons-react';
@@ -28,7 +29,10 @@ import {
   SETTING_KEY_MAGICK_PATH,
   SETTING_KEY_NETWORK_PROXY,
   SETTING_KEY_DEBUG_LOG,
+  SETTING_KEY_UPLOAD_TARGET_DIR,
+  SETTING_KEY_UPLOAD_NAMING_RULE,
 } from '@/api/settings';
+import { getLibraryPaths } from '@/api/library';
 import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system';
 import { changePassword } from '@/api/auth';
 import AnchorNav from '@/components/AnchorNav';
@@ -39,12 +43,13 @@ import {
   serializeRecycleBinRows,
   type RecycleBinRow,
 } from '@/utils/recycle-bin';
-import type { EnvVar } from '@/types';
+import type { EnvVar, LibraryPath } from '@/types';
 
 // 设置页左侧锚点（FR-113）：各分区标题挂同名 id，点击滚动定位、滚动高亮
 const SETTINGS_ANCHORS = [
   { id: 'set-account', label: '账户安全' },
   { id: 'set-scan', label: '扫描' },
+  { id: 'set-upload', label: '上传' },
   { id: 'set-network', label: '网络' },
   { id: 'set-tools', label: '工具路径' },
   { id: 'set-recycle', label: '回收站' },
@@ -63,6 +68,11 @@ export default function SettingsPage() {
   const [networkProxy, setNetworkProxy] = useState('');
   // 调试日志开关（FR-110）：开启输出 GORM 详细 SQL/慢查询日志，关闭恢复安静；保存即生效
   const [debugLog, setDebugLog] = useState(false);
+  // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
+  const [uploadTargetDir, setUploadTargetDir] = useState('');
+  const [uploadNamingRule, setUploadNamingRule] = useState('');
+  // 本地库目录列表，供「默认上传位置」下拉选择
+  const [localLibraryPaths, setLocalLibraryPaths] = useState<LibraryPath[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -107,12 +117,29 @@ export default function SettingsPage() {
         setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '');
         setNetworkProxy(data[SETTING_KEY_NETWORK_PROXY] ?? '');
         setDebugLog((data[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
+        setUploadTargetDir(data[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
+        setUploadNamingRule(data[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       })
       .catch((err) => {
         if (active) setLoadError(extractErrorMessage(err, '加载设置失败'));
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 挂载时加载本地库目录（FR-149）：供「默认上传位置」下拉，失败静默（仍可手填后端校验）
+  useEffect(() => {
+    let active = true;
+    getLibraryPaths()
+      .then((paths) => {
+        if (active) setLocalLibraryPaths(paths.filter((p) => p.type === 'local' && p.enabled));
+      })
+      .catch(() => {
+        /* 拉取库目录失败不阻塞设置页 */
       });
     return () => {
       active = false;
@@ -175,6 +202,8 @@ export default function SettingsPage() {
         [SETTING_KEY_MAGICK_PATH]: magickPath,
         [SETTING_KEY_NETWORK_PROXY]: networkProxy,
         [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
+        [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
+        [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
       });
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '');
@@ -184,6 +213,8 @@ export default function SettingsPage() {
       setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '');
       setNetworkProxy(updated[SETTING_KEY_NETWORK_PROXY] ?? '');
       setDebugLog((updated[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
+      setUploadTargetDir(updated[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
+      setUploadNamingRule(updated[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       notifications.show({
         title: '保存成功',
         message: '设置已保存',
@@ -200,7 +231,17 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [scanInterval, recycleBinRows, ffmpegPath, ffprobePath, magickPath, networkProxy, debugLog]);
+  }, [
+    scanInterval,
+    recycleBinRows,
+    ffmpegPath,
+    ffprobePath,
+    magickPath,
+    networkProxy,
+    debugLog,
+    uploadTargetDir,
+    uploadNamingRule,
+  ]);
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
   const handleDetect = useCallback(async () => {
@@ -354,6 +395,42 @@ export default function SettingsPage() {
                 value={scanInterval}
                 onChange={(e) => setScanInterval(e.currentTarget.value)}
               />
+            </Card>
+
+            {/* 上传分区（FR-149）：Web 上传默认落盘位置与命名规则；目标须为已注册本地库目录或其子目录 */}
+            <Title id="set-upload" order={3}>
+              上传
+            </Title>
+            <Card withBorder padding="md" radius="md">
+              <Stack gap="sm">
+                <Select
+                  label="默认上传位置"
+                  description="Web 上传缺省落盘目录，须为已注册的本地媒体库目录；上传时仍可临时选择其他位置"
+                  placeholder={
+                    localLibraryPaths.length > 0 ? '选择一个本地库目录' : '暂无本地库目录'
+                  }
+                  data={localLibraryPaths.map((p) => ({
+                    value: p.path,
+                    label: p.label ? `${p.label}（${p.path}）` : p.path,
+                  }))}
+                  value={uploadTargetDir || null}
+                  onChange={(v) => setUploadTargetDir(v ?? '')}
+                  clearable
+                  searchable
+                />
+                <Select
+                  label="命名规则"
+                  description="保留原样：直接落目标目录；按日期整齐归档：分 年/月 子目录存放"
+                  data={[
+                    { value: 'original', label: '保留原样' },
+                    { value: 'date', label: '按日期整齐归档（年/月）' },
+                  ]}
+                  value={uploadNamingRule || null}
+                  onChange={(v) => setUploadNamingRule(v ?? '')}
+                  placeholder="保留原样（默认）"
+                  clearable
+                />
+              </Stack>
             </Card>
 
             {/* 网络分区（FR-80/FR-89）：后端出站网络代理，空=直连；随「保存设置」一并保存、保存即生效；可在保存前先「测试」连通性 */}

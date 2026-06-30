@@ -131,6 +131,17 @@ export interface ScanResponse {
   task_id?: number; // 入队任务 ID（FR-29，队列启用时返回）
 }
 
+/** Web 上传命名规则（FR-149）：保留原样 / 按日期整齐归档 */
+export type UploadNamingRule = 'original' | 'date';
+
+/** Web 上传入库响应（FR-149，见 ADR-0051） */
+export interface UploadResponse {
+  status: string; // "uploaded"
+  library_id: number; // 落盘归属的库 ID
+  file_path: string; // 最终落盘路径
+  scan_task: number; // 触发的扫描任务 ID（队列启用时非 0）
+}
+
 /** 扫描进度状态 */
 export interface ScanStatus {
   status: string; // "idle", "scanning", "completed", "error"

@@ -43,6 +43,7 @@ import {
   IconMovie,
   IconLayoutDashboard,
   IconActivity,
+  IconUpload,
 } from '@tabler/icons-react';
 import { useAuthStore } from '@/stores/auth';
 import { useNavCollapsed } from '@/hooks/useNavCollapsed';
@@ -54,6 +55,7 @@ import ScanTaskIndicator from './ScanTaskIndicator';
 import UpdateIndicator from './UpdateIndicator';
 import CommandPalette, { type Command } from './CommandPalette';
 import RouteTransition from './RouteTransition';
+import UploadModal from './UploadModal';
 
 // 桌面导航收缩态的 navbar 宽度（像素）：仅留图标。
 // 展开态宽度改由 useNavWidth 提供（可拖拽调整、持久化），不再固定。
@@ -68,6 +70,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false);
   // 命令面板（FR-74）：全局 Ctrl/Cmd+K 打开、header 入口按钮亦可触发
   const [paletteOpened, { open: openPalette, close: closePalette }] = useDisclosure(false);
+  // Web 上传入库（FR-149）：页眉上传按钮打开上传弹窗
+  const [uploadOpened, { open: openUpload, close: closeUpload }] = useDisclosure(false);
   // 桌面导航收缩态（FR-54）：持久化到 localStorage，刷新后保持；仅影响桌面 Navbar，移动端抽屉不受影响
   const [navCollapsed, toggleNavCollapsed] = useNavCollapsed();
   // 桌面导航展开态宽度（FR-115 扩展）：可拖拽调整、夹紧 160–360、持久化；仅展开态生效，收缩态固定图标宽度、移动端不受影响
@@ -423,6 +427,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Group>
 
           <Group gap="sm">
+            {/* Web 上传入库入口（FR-149）：打开上传弹窗，选/拖文件落盘到库内并触发扫描 */}
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              onClick={openUpload}
+              title="上传媒体"
+              aria-label="上传媒体"
+            >
+              <IconUpload size={18} />
+            </ActionIcon>
             {/* 刷新当前页面内容（FR-114）：仅重载当前路由内容数据，
                 不整页 reload、不重载导航/页眉、不重置登录态 */}
             <ActionIcon
@@ -574,6 +588,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* 全局命令面板（FR-74）：Ctrl/Cmd+K 或 header 入口打开 */}
       <CommandPalette opened={paletteOpened} onClose={closePalette} commands={commands} />
+
+      {/* Web 上传入库弹窗（FR-149）：页眉上传按钮打开 */}
+      <UploadModal opened={uploadOpened} onClose={closeUpload} />
     </AppShell>
   );
 }

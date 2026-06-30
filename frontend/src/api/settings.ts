@@ -22,6 +22,10 @@ export const SETTING_KEY_DEBUG_LOG = 'debug_log';
 export const SETTING_KEY_OPEN_TABS = 'open_tabs';
 // 目录浏览上次浏览位置（FR-151），字符串路径，用于恢复时定位激活标签
 export const SETTING_KEY_LAST_OPENED_PATH = 'last_opened_path';
+// Web 上传默认落盘目录（FR-149），须为已注册本地库目录或其子目录；与后端 settings 常量一致
+export const SETTING_KEY_UPLOAD_TARGET_DIR = 'upload_target_dir';
+// Web 上传命名规则（FR-149）：original=保留原样、date=按日期 YYYY/MM 整齐归档；与后端 settings 常量一致
+export const SETTING_KEY_UPLOAD_NAMING_RULE = 'upload_naming_rule';
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
