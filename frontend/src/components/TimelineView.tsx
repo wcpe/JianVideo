@@ -185,7 +185,27 @@ function DateGroupRow({
                       style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
                     />
                   )}
-                  {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 收藏 / 更多 */}
+                  {/* 左下角常驻收藏（FR-140）：常显可点的收藏按钮，复用 favorite API。
+                      与左上选择框（top/left）、右下时长角标（bottom/right）、右上 hover 操作（top/right）四角避让不冲突。
+                      底部信息渐变层 pointerEvents:none，不拦截本按钮点击。 */}
+                  {onToggleFavorite && (
+                    <ActionIcon
+                      variant="filled"
+                      color={file.favorite ? 'yellow' : 'dark'}
+                      size="sm"
+                      radius="xl"
+                      aria-label={file.favorite ? '取消收藏' : '收藏'}
+                      title={file.favorite ? '取消收藏' : '收藏'}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleFavorite(file);
+                      }}
+                      style={{ position: 'absolute', left: 6, bottom: 6, zIndex: 6 }}
+                    >
+                      {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+                    </ActionIcon>
+                  )}
+                  {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 更多 */}
                   <Group
                     gap={6}
                     wrap="nowrap"
@@ -206,22 +226,6 @@ function DateGroupRow({
                     >
                       <IconPlayerPlay size={14} />
                     </ActionIcon>
-                    {onToggleFavorite && (
-                      <ActionIcon
-                        variant="filled"
-                        color={file.favorite ? 'yellow' : 'dark'}
-                        size="sm"
-                        radius="xl"
-                        aria-label={file.favorite ? '取消收藏' : '收藏'}
-                        title={file.favorite ? '取消收藏' : '收藏'}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleFavorite(file);
-                        }}
-                      >
-                        {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
-                      </ActionIcon>
-                    )}
                     {selection.enabled && (
                       <ActionIcon
                         variant="filled"
