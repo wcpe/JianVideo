@@ -107,10 +107,9 @@ describe('TimelinePage', () => {
     await screen.findByText('海报.png');
     await screen.findByText('星际穿越.mkv');
 
-    // 两个不同日期分别渲染日期轴文本：年份 2025 与月日 01-09 / 01-01
-    expect(screen.getAllByText('2025').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('01-09')).toBeInTheDocument();
-    expect(screen.getByText('01-01')).toBeInTheDocument();
+    // 两个不同日期各渲染整串日期分组头（FR-138）：YYYY-MM-DD 完整键
+    expect(screen.getByText('2025-01-09')).toBeInTheDocument();
+    expect(screen.getByText('2025-01-01')).toBeInTheDocument();
 
     // 图片卡片渲染缩略图指向缩略图 URL（多尺寸：带 size 参数，FR-81）
     const pngThumb = screen.getByRole('img', { name: '海报.png' });
@@ -200,20 +199,25 @@ describe('TimelinePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    // 默认日粒度：两个不同日的日期轴主标签 07-20 / 07-01
-    await screen.findByText('07-20');
-    expect(screen.getByText('07-01')).toBeInTheDocument();
+    // 默认日粒度：两个不同日的整串日期分组头 2023-07-20 / 2023-07-01（FR-138）
+    await screen.findByText('2023-07-20');
+    expect(screen.getByText('2023-07-01')).toBeInTheDocument();
 
-    // 切到月粒度：合并为单组，主标签为月份 07，且不再出现日级标签
+    // 切到月粒度：合并为单组，分组头为月份键 2023-07，且不再出现日级整串标签
     await user.click(screen.getByRole('radio', { name: '月' }));
-    await screen.findByText('07');
-    expect(screen.queryByText('07-20')).not.toBeInTheDocument();
-    expect(screen.queryByText('07-01')).not.toBeInTheDocument();
+    await screen.findByText('2023-07');
+    expect(screen.queryByText('2023-07-20')).not.toBeInTheDocument();
+    expect(screen.queryByText('2023-07-01')).not.toBeInTheDocument();
 
-    // 切到年粒度：主标签为年份 2023，且不再出现月级标签 07
+    // 切到年粒度：分组头为年份键 2023，且不再出现月级键 2023-07
+    // 年份串同时出现在右侧 scrubber 年份刻度层，故按分组头容器作用域取 2023，避免命中刻度
     await user.click(screen.getByRole('radio', { name: '年' }));
-    await screen.findByText('2023');
-    expect(screen.queryByText('07')).not.toBeInTheDocument();
+    await waitFor(() => {
+      const header = document.querySelector('[data-timeline-group-header]') as HTMLElement;
+      expect(header).not.toBeNull();
+      expect(within(header).getByText('2023')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('2023-07')).not.toBeInTheDocument();
   });
 
   it('图片点击打开预览弹窗且不跳转播放页', async () => {
@@ -400,15 +404,15 @@ describe('TimelinePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    // 默认日粒度：两个日期轴主标签 03-15 / 01-05
-    await screen.findByText('03-15');
-    expect(screen.getByText('01-05')).toBeInTheDocument();
+    // 默认日粒度：两个整串日期分组头 2025-03-15 / 2025-01-05（FR-138）
+    await screen.findByText('2025-03-15');
+    expect(screen.getByText('2025-01-05')).toBeInTheDocument();
 
-    // 切到「所有」：合并为单组（不再出现按日的日期轴标签），两张缩略图仍都在
+    // 切到「所有」：合并为单组（不再出现按日的整串日期标签），两张缩略图仍都在
     await user.click(screen.getByRole('radio', { name: '所有' }));
     await waitFor(() => {
-      expect(screen.queryByText('03-15')).not.toBeInTheDocument();
-      expect(screen.queryByText('01-05')).not.toBeInTheDocument();
+      expect(screen.queryByText('2025-03-15')).not.toBeInTheDocument();
+      expect(screen.queryByText('2025-01-05')).not.toBeInTheDocument();
     });
     expect(screen.getByAltText('a.jpg')).toBeInTheDocument();
     expect(screen.getByAltText('b.jpg')).toBeInTheDocument();
