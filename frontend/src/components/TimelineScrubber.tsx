@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { Box, Paper, SimpleGrid, Text } from '@mantine/core';
+import { Box, Paper, SimpleGrid, Stack, Text, UnstyledButton } from '@mantine/core';
 import MediaThumbnail from '@/components/MediaThumbnail';
 import { positionToGroupIndex } from '@/utils/timeline';
 import type { DateGroup } from '@/utils/timeline';
@@ -9,21 +9,29 @@ interface TimelineScrubberProps {
   groups: DateGroup[];
   // 松手 / 方向键确定目标分组时回调，参数为目标分组下标
   onSeek: (index: number) => void;
+  // 窄屏防误触形态（FR-143）：true 时隐藏 12px 可拖动细轨（屏幕边缘易误触），
+  // 改渲染可点击年份标签快速导航（点年份跳到该年最新分组）。
+  compact?: boolean;
 }
 
 // 浮层九宫格展示的缩略图上限（前 N 张）
 const PREVIEW_THUMBS = 6;
 
-/** 单个刻度标记：纵向比例位置（0=顶/最新，1=底/最旧）+ 显示文本（年份） */
+/**
+ * 单个刻度标记：纵向比例位置（0=顶/最新，1=底/最旧）+ 显示文本（年份）+ 该年最新分组下标。
+ * index 供窄屏年份快速导航点击跳转复用（FR-143）。
+ */
 interface TimelineTick {
   fraction: number;
   label: string;
+  index: number;
 }
 
 /**
- * 由分组列表计算年份刻度（FR-138）。
- * - 分组已倒序（顶部=最新）：每个年份在其首次出现处放一个年份刻度。
+ * 由分组列表计算年份刻度（FR-138 + FR-143）。
+ * - 分组已倒序（顶部=最新）：每个年份在其首次出现处放一个年份刻度（即该年最新分组）。
  * - 刻度纵向位置 = 该分组下标 / 分组总数，与轨道 hover/拖动同一映射口径。
+ * - index 记录该年首次出现（最新）分组的下标，供窄屏点击年份跳转（FR-143）。
  * 纯函数，无副作用，便于穷举测试。
  */
 function computeYearTicks(groups: DateGroup[]): TimelineTick[] {
@@ -36,7 +44,7 @@ function computeYearTicks(groups: DateGroup[]): TimelineTick[] {
     const year = g.date.slice(0, 4);
     if (!/^\d{4}$/.test(year) || seen.has(year)) return;
     seen.add(year);
-    ticks.push({ fraction: i / count, label: year });
+    ticks.push({ fraction: i / count, label: year, index: i });
   });
   return ticks;
 }
@@ -53,7 +61,7 @@ function computeYearTicks(groups: DateGroup[]): TimelineTick[] {
  * hover 与 drag 共用「指针 Y → 分组下标」纯函数 positionToGroupIndex；指针移动用 rAF 前沿节流，
  * 避免高频重渲染抖动。预览浮层 pointer-events:none + role="img" + aria-label（日期 + 数量）。
  */
-export default function TimelineScrubber({ groups, onSeek }: TimelineScrubberProps) {
+export default function TimelineScrubber({ groups, onSeek, compact = false }: TimelineScrubberProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   // 预览下标（null 表示不显示浮层，hover 与 drag 共用）
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -165,6 +173,40 @@ export default function TimelineScrubber({ groups, onSeek }: TimelineScrubberPro
   );
 
   if (count === 0) return null;
+
+  // 窄屏防误触形态（FR-143）：隐藏 12px 可拖动细轨（屏幕边缘易误触），
+  // 改渲染竖排可点击年份标签，点年份跳到该年最新分组（复用 onSeek + tick.index）。
+  if (compact) {
+    const ticks = computeYearTicks(groups);
+    if (ticks.length === 0) return null;
+    return (
+      <Box
+        data-testid="timeline-year-nav"
+        style={{ position: 'absolute', top: 0, right: -16, height: '100%' }}
+      >
+        <Stack gap={4} style={{ position: 'sticky', top: 8 }}>
+          {ticks.map((tick) => (
+            <UnstyledButton
+              key={tick.label}
+              aria-label={`跳到 ${tick.label} 年`}
+              onClick={() => onSeek(tick.index)}
+              style={{
+                padding: '4px 6px',
+                borderRadius: 6,
+                background: 'var(--mantine-color-default)',
+                border: '1px solid var(--mantine-color-default-border)',
+                lineHeight: 1,
+              }}
+            >
+              <Text size="xs" c="dimmed">
+                {tick.label}
+              </Text>
+            </UnstyledButton>
+          ))}
+        </Stack>
+      </Box>
+    );
+  }
 
   const activeGroup = previewIndex !== null ? groups[previewIndex] : null;
   const previewThumbs = activeGroup ? activeGroup.files.slice(0, PREVIEW_THUMBS) : [];

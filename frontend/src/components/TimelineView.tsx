@@ -46,6 +46,7 @@ import {
 } from '@/utils/timelineGrid';
 import MediaThumbnail from '@/components/MediaThumbnail';
 import MediaCardOverlay from '@/components/MediaCardOverlay';
+import { useMediaQuery } from '@mantine/hooks';
 import TimelineScrubber from '@/components/TimelineScrubber';
 import MediaContextMenu, { type ContextMenuState } from '@/components/MediaContextMenu';
 import SelectionBatchBar from '@/components/SelectionBatchBar';
@@ -304,6 +305,9 @@ function TimelineViewInner(
   const listRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
   const containerWidth = useElementWidth(listRef);
+  // 窄屏判断（FR-143）：窄屏时间轴标尺切换为防误触的年份快速导航形态（compact）。
+  // 取 Mantine sm 断点（48em）；SSR/未知时回退桌面态。
+  const isNarrow = useMediaQuery('(max-width: 48em)') ?? false;
 
   // 分组结果记忆化：既稳定下方 useMemo 的依赖，又避免每次渲染重复分组
   const groups = useMemo(
@@ -526,7 +530,7 @@ function TimelineViewInner(
       {/* 虚拟化容器：高度撑满全部行总高，内部按虚拟项绝对定位 */}
       <Box ref={listRef} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
         {/* 可拖动时间 scrubber（FR-68）：拖动浮层预览、松手按分组跳转——映射到该组头行下标 */}
-        <TimelineScrubber groups={groups} onSeek={scrollToGroupIndex} />
+        <TimelineScrubber groups={groups} onSeek={scrollToGroupIndex} compact={isNarrow} />
         {virtualItems.map((virtualItem) => {
           const row = rows[virtualItem.index];
           if (!row) return null;

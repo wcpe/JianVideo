@@ -12,9 +12,15 @@ import {
   Drawer,
   Box,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconSearch, IconRefresh, IconFilter, IconCalendarSearch } from '@tabler/icons-react';
+import {
+  IconSearch,
+  IconRefresh,
+  IconFilter,
+  IconCalendarSearch,
+  IconFilterOff,
+} from '@tabler/icons-react';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
 import { useScanProgress } from '@/hooks/useScanProgress';
@@ -27,6 +33,7 @@ import OnThisDay from '@/components/OnThisDay';
 import RecentlyViewed from '@/components/RecentlyViewed';
 import MediaDetailPanel from '@/components/MediaDetailPanel';
 import PageHeader from '@/components/PageHeader';
+import PullToRefresh from '@/components/PullToRefresh';
 import ConfirmModal from '@/components/ConfirmModal';
 import BatchActionsModals from '@/components/BatchActionsModals';
 import { useBatchActions } from '@/hooks/useBatchActions';
@@ -60,6 +67,8 @@ export default function TimelinePage() {
   const [deleting, setDeleting] = useState(false);
   // 移动端筛选抽屉开合（FR-86）：窄屏将筛选控件收进抽屉，搜索框常驻
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
+  // 窄屏判断（FR-143）：仅窄屏启用下拉刷新；取 Mantine sm 断点（48em），SSR/未知回退桌面态
+  const isNarrow = useMediaQuery('(max-width: 48em)') ?? false;
   // 承接页眉全局搜索（FR-132）：从 URL ?search= 取初值，作为搜索框初始关键词、首屏即按该词请求
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') ?? '';
@@ -323,7 +332,23 @@ export default function TimelinePage() {
         hiddenFrom="sm"
         closeButtonProps={{ 'aria-label': '关闭筛选' }}
       >
-        {filtersContent}
+        <Stack gap="lg">
+          {filtersContent}
+          {/* 抽屉底部一键重置（FR-143）：窄屏逐项清空筛选繁琐，提供整体重置入口；
+              无筛选生效时禁用，重置后关闭抽屉回到全部结果 */}
+          <Button
+            variant="light"
+            color="gray"
+            leftSection={<IconFilterOff size={16} />}
+            disabled={!filterActive}
+            onClick={() => {
+              clearFilters();
+              filterDrawer.close();
+            }}
+          >
+            重置筛选
+          </Button>
+        </Stack>
       </Drawer>
 
       {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
@@ -335,27 +360,30 @@ export default function TimelinePage() {
       {/* 那年今日（FR-72）：往年同一天拍摄的媒体回忆，空列表时自动隐藏 */}
       <OnThisDay />
 
-      <TimelineView
-        ref={timelineRef}
-        mediaFiles={infinite.items}
-        loading={infinite.loading && infinite.items.length === 0}
-        error={infinite.error}
-        customImageExtensions={exts}
-        onErrorClose={() => infinite.setError(null)}
-        onOpenFile={handleOpen}
-        onToggleFavorite={handleToggleFavorite}
-        onLoadMore={infinite.loadMore}
-        hasMore={infinite.hasMore}
-        loadingMore={infinite.loading && infinite.items.length > 0}
-        granularity={granularity}
-        filtered={filterActive}
-        onClearFilter={clearFilters}
-        onBatchDelete={(ids) => setPendingDelete(ids)}
-        onDeleteOne={(f) => setPendingDelete([f.id])}
-        onBatchAddToAlbum={batch.openAddToAlbum}
-        onBatchAddTag={batch.openAddTag}
-        onBatchDownload={batch.download}
-      />
+      {/* 下拉刷新（FR-143）：仅窄屏启用，页面顶部下拉松手重载首屏；桌面（enabled=false）纯透传 */}
+      <PullToRefresh enabled={isNarrow} onRefresh={() => infinite.reload()}>
+        <TimelineView
+          ref={timelineRef}
+          mediaFiles={infinite.items}
+          loading={infinite.loading && infinite.items.length === 0}
+          error={infinite.error}
+          customImageExtensions={exts}
+          onErrorClose={() => infinite.setError(null)}
+          onOpenFile={handleOpen}
+          onToggleFavorite={handleToggleFavorite}
+          onLoadMore={infinite.loadMore}
+          hasMore={infinite.hasMore}
+          loadingMore={infinite.loading && infinite.items.length > 0}
+          granularity={granularity}
+          filtered={filterActive}
+          onClearFilter={clearFilters}
+          onBatchDelete={(ids) => setPendingDelete(ids)}
+          onDeleteOne={(f) => setPendingDelete([f.id])}
+          onBatchAddToAlbum={batch.openAddToAlbum}
+          onBatchAddTag={batch.openAddTag}
+          onBatchDownload={batch.download}
+        />
+      </PullToRefresh>
 
       <BatchActionsModals state={batch.modalState} />
 
