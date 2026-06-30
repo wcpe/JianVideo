@@ -82,16 +82,11 @@ interface TimelineViewProps {
 /** 单个日期组的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
 const GROUP_ESTIMATE_SIZE = 320;
 
-/** 把分组键拆成年份与月-日两段，便于竖向日期轴展示（支持 年/年-月/年-月-日 三种粒度，FR-32） */
-function splitDate(date: string): { year: string; monthDay: string } {
-  if (/^\d{4}$/.test(date)) return { year: date, monthDay: '' }; // 年粒度：仅年
-  if (/^\d{4}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) }; // 年-月
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return { year: date.slice(0, 4), monthDay: date.slice(5) }; // 年-月-日
-  // 非法/未知日期整段作为月日展示，年份留空
-  return { year: '', monthDay: date };
-}
-
-/** 渲染单个日期组：左侧竖向日期轴 + 右侧媒体缩略图网格 */
+/**
+ * 渲染单个日期组：顶部横向分组头 + 下方占满主区的媒体缩略图网格。
+ * FR-138（ADR-0049）：移除左侧竖向日期轴，分组头改为横向轻量标题，网格占满主区，
+ * 时间导航统一交由右侧 TimelineScrubber 承担。
+ */
 function DateGroupRow({
   group,
   customImageExtensions,
@@ -105,54 +100,29 @@ function DateGroupRow({
   onToggleFavorite?: (file: MediaFile) => void;
   selection: SelectionContext;
 }) {
-  const { year, monthDay } = splitDate(group.date);
-  // 主标签：日/月粒度为月日、年粒度为年；次标签：仅日/月粒度在上方显示年
-  const primary = monthDay || year;
-  const secondary = monthDay ? year : '';
   return (
-    <Group align="flex-start" wrap="nowrap" gap="md" pb="lg">
-      {/* 左侧竖向日期轴（FR-100 时间锚视觉）：紫圆点 + 竖线 + 年/月日。
-          苹果风收紧（FR-120）：分组头更轻——更小圆点、收窄字号、更紧间距。 */}
-      <Box style={{ width: 80, flexShrink: 0, position: 'relative' }}>
-        {/* 次标签（年）在锚点上方，弱化处理 */}
-        {secondary && (
-          <Text size="xs" c="dimmed" pl={20} mb={2}>
-            {secondary}
-          </Text>
-        )}
-        <Group gap={8} wrap="nowrap" align="center">
-          {/* 锚点圆点：品牌紫实心 + 浅紫光晕环，收小更克制 */}
-          <Box
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              flexShrink: 0,
-              background: 'var(--mantine-color-purple-6)',
-              boxShadow: '0 0 0 3px var(--mantine-color-purple-light)',
-            }}
-          />
-          {/* 主标签（月-日 / 年）：时间锚，收窄字号更轻 */}
-          <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>
-            {primary}
-          </Text>
-        </Group>
-        {/* 竖线营造时间线视觉：起点对齐圆点中心 */}
+    <Stack gap="xs" pb="lg">
+      {/* 横向分组头（FR-138）：分组日期 + 该组数量，轻量克制；不再是左侧竖轴。 */}
+      <Group gap={8} align="center" wrap="nowrap" data-timeline-group-header>
         <Box
           style={{
-            position: 'absolute',
-            left: 4,
-            top: 18,
-            bottom: -20,
-            width: 2,
-            background: 'var(--mantine-color-default-border)',
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background: 'var(--mantine-color-purple-6)',
           }}
         />
-      </Box>
+        <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>
+          {group.date}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {group.files.length} 项
+        </Text>
+      </Group>
 
-      {/* 右侧媒体卡片网格：响应式列数（FR-99），随容器宽度自适应增/减列。
-          苹果风收紧（FR-120）：列数更密、间距更小，配合方形密铺更紧致。 */}
-      <Box style={{ flex: 1, minWidth: 0 }}>
+      {/* 媒体卡片网格占满主区（FR-138 + FR-99）：响应式列数随容器宽度自适应增/减列。 */}
+      <Box style={{ minWidth: 0 }}>
         <SimpleGrid
           type="container"
           cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }}
@@ -275,7 +245,7 @@ function DateGroupRow({
           })}
         </SimpleGrid>
       </Box>
-    </Group>
+    </Stack>
   );
 }
 

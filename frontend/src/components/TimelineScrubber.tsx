@@ -14,9 +14,37 @@ interface TimelineScrubberProps {
 // 浮层九宫格展示的缩略图上限（前 N 张）
 const PREVIEW_THUMBS = 6;
 
+/** 单个刻度标记：纵向比例位置（0=顶/最新，1=底/最旧）+ 显示文本（年份） */
+interface TimelineTick {
+  fraction: number;
+  label: string;
+}
+
 /**
- * 时间轴时间标尺 scrubber（FR-68 + FR-120）：右侧竖向轨道。
+ * 由分组列表计算年份刻度（FR-138）。
+ * - 分组已倒序（顶部=最新）：每个年份在其首次出现处放一个年份刻度。
+ * - 刻度纵向位置 = 该分组下标 / 分组总数，与轨道 hover/拖动同一映射口径。
+ * 纯函数，无副作用，便于穷举测试。
+ */
+function computeYearTicks(groups: DateGroup[]): TimelineTick[] {
+  const ticks: TimelineTick[] = [];
+  const seen = new Set<string>();
+  const count = groups.length;
+  if (count === 0) return ticks;
+  groups.forEach((g, i) => {
+    // 分组键形如 YYYY / YYYY-MM / YYYY-MM-DD，取前 4 位作年份；非法日期（如「未知日期」）跳过
+    const year = g.date.slice(0, 4);
+    if (!/^\d{4}$/.test(year) || seen.has(year)) return;
+    seen.add(year);
+    ticks.push({ fraction: i / count, label: year });
+  });
+  return ticks;
+}
+
+/**
+ * 时间轴时间标尺 scrubber（FR-68 + FR-120 + FR-138）：右侧竖向轨道，作为唯一完整时间轴导航条。
  *
+ * - 常驻年份刻度（FR-138）：轨道旁按 fraction 纵向布点，不交互时也能看出覆盖的时间段。
  * - hover（指针未按下）即按指针 Y 算目标分组、在指针处弹出预览浮层（分组日期 + 该组数量 +
  *   前若干张缩略图九宫格）；移出轨道隐藏（FR-120 苹果风）。
  * - 拖动（按下）持续更新预览并松手跳转到对应分组（FR-68 保留）。
@@ -140,6 +168,8 @@ export default function TimelineScrubber({ groups, onSeek }: TimelineScrubberPro
 
   const activeGroup = previewIndex !== null ? groups[previewIndex] : null;
   const previewThumbs = activeGroup ? activeGroup.files.slice(0, PREVIEW_THUMBS) : [];
+  // 常驻年份刻度（FR-138）：不交互时也能看出当前轨道覆盖的时间段
+  const yearTicks = computeYearTicks(groups);
 
   return (
     <Box
@@ -168,6 +198,38 @@ export default function TimelineScrubber({ groups, onSeek }: TimelineScrubberPro
         touchAction: 'none',
       }}
     >
+      {/* 常驻年份刻度层（FR-138）：贴轨道左侧按 fraction 纵向布点，pointer-events:none 不挡轨道交互。
+          作为唯一完整时间轴的静态参照，hover/拖动浮层叠加其上。 */}
+      <Box
+        data-testid="timeline-ticks"
+        aria-hidden
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 16,
+          height: '100%',
+          pointerEvents: 'none',
+        }}
+      >
+        {yearTicks.map((tick) => (
+          <Text
+            key={tick.label}
+            size="xs"
+            c="dimmed"
+            style={{
+              position: 'absolute',
+              top: `${tick.fraction * 100}%`,
+              right: 0,
+              transform: 'translateY(-50%)',
+              whiteSpace: 'nowrap',
+              lineHeight: 1,
+            }}
+          >
+            {tick.label}
+          </Text>
+        ))}
+      </Box>
+
       {/* 预览浮层（FR-120）：贴着指针纵向位置，展示目标分组日期 + 数量 + 前若干张缩略图九宫格。
           pointer-events:none 不挡轨道交互；role="img" + aria-label 暴露日期与数量给无障碍。 */}
       {activeGroup && (
