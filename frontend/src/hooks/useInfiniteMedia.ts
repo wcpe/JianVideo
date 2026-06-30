@@ -8,6 +8,8 @@ interface UseInfiniteMediaOptions {
   // 收藏/标签筛选（FR-41）：favorite=true 仅收藏，tagId>0 仅含该标签
   favorite?: boolean;
   tagId?: number;
+  // 媒体库（图库）筛选（FR-144）：libraryId>0 仅含该库媒体，0 表示全部图库不过滤
+  libraryId?: number;
   // 结构化筛选（FR-35/36）：类型 / 最小大小（字节）/ 拍摄时间范围（YYYY-MM-DD）
   mediaType?: 'image' | 'video' | '';
   sizeMin?: number;
@@ -29,6 +31,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
     sort = 'time_desc',
     favorite = false,
     tagId = 0,
+    libraryId = 0,
     mediaType = '',
     sizeMin = 0,
     timeFrom = '',
@@ -76,6 +79,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
           sort,
           favorite: favorite || undefined,
           tag_id: tagId || undefined,
+          library_id: libraryId || undefined,
           type: mediaType || undefined,
           size_min: sizeMin || undefined,
           time_from: timeFrom || undefined,
@@ -96,7 +100,7 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
         fetchingRef.current = false;
       }
     },
-    [pageSize, sort, favorite, tagId, mediaType, sizeMin, timeFrom, timeTo],
+    [pageSize, sort, favorite, tagId, libraryId, mediaType, sizeMin, timeFrom, timeTo],
   );
 
   // 搜索防抖 400ms

@@ -26,6 +26,7 @@ import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
 import { useScanProgress } from '@/hooks/useScanProgress';
 import TimelineView, { type TimelineViewHandle } from '@/components/TimelineView';
 import CategoryFilter from '@/components/CategoryFilter';
+import LibraryFilter from '@/components/LibraryFilter';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
 import SearchSyntaxHelp from '@/components/SearchSyntaxHelp';
 import ContinueWatching from '@/components/ContinueWatching';
@@ -49,6 +50,8 @@ export default function TimelinePage() {
   // 收藏/标签筛选（FR-41）
   const [favorite, setFavorite] = useState(false);
   const [tagId, setTagId] = useState(0);
+  // 媒体库（图库）筛选（FR-144）：0 表示全部图库不过滤，>0 仅含该库媒体
+  const [libraryId, setLibraryId] = useState(0);
   // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
   const [sizeMin, setSizeMin] = useState(0);
@@ -75,6 +78,7 @@ export default function TimelinePage() {
   const infinite = useInfiniteMedia({
     favorite,
     tagId,
+    libraryId,
     mediaType,
     sizeMin,
     timeFrom,
@@ -107,12 +111,13 @@ export default function TimelinePage() {
         infinite.searchInput.trim() ||
         favorite ||
         tagId ||
+        libraryId ||
         mediaType ||
         sizeMin ||
         timeFrom ||
         timeTo
       ),
-    [infinite.searchInput, favorite, tagId, mediaType, sizeMin, timeFrom, timeTo],
+    [infinite.searchInput, favorite, tagId, libraryId, mediaType, sizeMin, timeFrom, timeTo],
   );
 
   // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
@@ -120,6 +125,7 @@ export default function TimelinePage() {
     infinite.setSearchInput('');
     setFavorite(false);
     setTagId(0);
+    setLibraryId(0);
     setMediaType('');
     setSizeMin(0);
     setTimeFrom('');
@@ -202,6 +208,8 @@ export default function TimelinePage() {
             tagId={tagId}
             onTagIdChange={setTagId}
           />
+          {/* 媒体库（图库）筛选（FR-144）：按图库过滤，复用后端 library_id；含多选模式入口 */}
+          <LibraryFilter libraryId={libraryId} onLibraryIdChange={setLibraryId} />
           <MediaQueryFilters
             mediaType={mediaType}
             onMediaTypeChange={setMediaType}
