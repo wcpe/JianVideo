@@ -32,6 +32,7 @@ import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDir
 import DirectoryBrowser from '@/components/DirectoryBrowser';
 import BrowseTabBar from '@/components/BrowseTabBar';
 import { useBrowseTabsStore, type BrowseTab } from '@/stores/browse-tabs';
+import { useBrowseTabsPersistence } from '@/stores/useBrowseTabsPersistence';
 import { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser.helpers';
 import DirectoryTree from '@/components/DirectoryTree';
 import DirectoryAddressBar from '@/components/DirectoryAddressBar';
@@ -569,6 +570,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
  * 每个标签是独立会话实例，互不串扰。单标签时与原资源管理器布局行为等价。
  */
 export default function BrowsePage() {
+  // 标签与上次位置持久化接线（FR-151）：恢复上次打开的标签、变化时防抖写回后端
+  useBrowseTabsPersistence();
   const tabs = useBrowseTabsStore((s) => s.tabs);
   const activeTabId = useBrowseTabsStore((s) => s.activeTabId);
   const addTab = useBrowseTabsStore((s) => s.addTab);
