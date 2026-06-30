@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Stack,
@@ -14,11 +14,11 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconSearch, IconRefresh, IconFilter } from '@tabler/icons-react';
+import { IconSearch, IconRefresh, IconFilter, IconCalendarSearch } from '@tabler/icons-react';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
 import { useScanProgress } from '@/hooks/useScanProgress';
-import TimelineView from '@/components/TimelineView';
+import TimelineView, { type TimelineViewHandle } from '@/components/TimelineView';
 import CategoryFilter from '@/components/CategoryFilter';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
 import SearchSyntaxHelp from '@/components/SearchSyntaxHelp';
@@ -49,6 +49,12 @@ export default function TimelinePage() {
   const [timeTo, setTimeTo] = useState('');
   // 时间轴缩放粒度（FR-32）：按媒体时间组织，日/月/年缩放
   const [granularity, setGranularity] = useState<TimelineGranularity>('day');
+  // 时间轴命令式句柄（FR-142）：日期跳转 + 粒度切换视口锁定
+  const timelineRef = useRef<TimelineViewHandle>(null);
+  // 「跳转到日期」输入（FR-142）：YYYY / YYYY-MM / YYYY-MM-DD
+  const [jumpDate, setJumpDate] = useState('');
+  // 粒度切换视口锁定（FR-142）：切换前记录视口顶部分组日期，切换后据其重新定位，避免视口漂移
+  const lockDateRef = useRef<string>('');
   // 批量删除（FR-69）：待确认删除 id 列表（非空即弹确认框）+ 删除进行中
   const [pendingDelete, setPendingDelete] = useState<number[]>([]);
   const [deleting, setDeleting] = useState(false);
@@ -111,6 +117,38 @@ export default function TimelinePage() {
     setTimeTo('');
   }, [infinite]);
 
+  // 跳转到日期（FR-142）：解析输入定位到对应分组；非法/无命中时提示不跳转
+  const handleJumpToDate = useCallback(() => {
+    const query = jumpDate.trim();
+    if (!query) return;
+    const ok = timelineRef.current?.scrollToDate(query) ?? false;
+    if (!ok) {
+      notifications.show({
+        color: 'yellow',
+        message: '无法识别该日期，请输入 YYYY、YYYY-MM 或 YYYY-MM-DD',
+      });
+    }
+  }, [jumpDate]);
+
+  // 切换缩放粒度（FR-142 视口锁定）：切换前记录视口顶部分组日期，切换后由 effect 重新定位。
+  // 「所有」粒度为单组、锁定无意义，故不记录（lockDateRef 置空）。
+  const handleGranularityChange = useCallback(
+    (next: TimelineGranularity) => {
+      lockDateRef.current =
+        next === 'all' ? '' : (timelineRef.current?.getTopVisibleGroupDate() ?? '');
+      setGranularity(next);
+    },
+    [],
+  );
+
+  // 粒度变化落地后据切换前记录的视口日期重新定位（FR-142），消费一次即清空避免重复跳转。
+  useEffect(() => {
+    const date = lockDateRef.current;
+    if (!date) return;
+    lockDateRef.current = '';
+    timelineRef.current?.scrollToDate(date);
+  }, [granularity]);
+
   // 切换收藏（FR-41）：调用接口后刷新列表
   const handleToggleFavorite = useCallback(
     async (f: MediaFile) => {
@@ -168,26 +206,45 @@ export default function TimelinePage() {
         </Stack>
       </Box>
 
-      {/* 视图组（FR-100）：时间轴缩放（FR-32 + FR-120）年/月/日/所有粒度切换 */}
+      {/* 视图组（FR-100）：时间轴缩放（FR-32 + FR-120）年/月/日/所有粒度切换 + 日期跳转（FR-142） */}
       <Box aria-label="视图" role="group">
         <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={6}>
           视图
         </Text>
-        <Group gap="xs" align="center">
-          <Text size="xs" c="dimmed">
-            缩放
-          </Text>
-          <SegmentedControl
-            aria-label="时间轴缩放"
+        <Group gap="sm" align="center" wrap="wrap">
+          <Group gap="xs" align="center">
+            <Text size="xs" c="dimmed">
+              缩放
+            </Text>
+            <SegmentedControl
+              aria-label="时间轴缩放"
+              size="xs"
+              value={granularity}
+              // 粒度切换走视口锁定（FR-142）：切换前记录视口日期，切换后重新定位
+              onChange={(v) => handleGranularityChange(v as TimelineGranularity)}
+              data={[
+                { value: 'year', label: '年' },
+                { value: 'month', label: '月' },
+                { value: 'day', label: '日' },
+                { value: 'all', label: '所有' },
+              ]}
+            />
+          </Group>
+          {/* 跳转到日期（FR-142）：输入 YYYY / YYYY-MM / YYYY-MM-DD，回车定位到对应分组 */}
+          <TextInput
+            aria-label="跳转到日期"
+            placeholder="跳转：2025 / 2025-08 / 2025-08-15"
+            leftSection={<IconCalendarSearch size={14} />}
             size="xs"
-            value={granularity}
-            onChange={(v) => setGranularity(v as TimelineGranularity)}
-            data={[
-              { value: 'year', label: '年' },
-              { value: 'month', label: '月' },
-              { value: 'day', label: '日' },
-              { value: 'all', label: '所有' },
-            ]}
+            value={jumpDate}
+            onChange={(e) => setJumpDate(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleJumpToDate();
+              }
+            }}
+            style={{ width: 220 }}
           />
         </Group>
       </Box>
@@ -279,6 +336,7 @@ export default function TimelinePage() {
       <OnThisDay />
 
       <TimelineView
+        ref={timelineRef}
         mediaFiles={infinite.items}
         loading={infinite.loading && infinite.items.length === 0}
         error={infinite.error}

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { groupMediaByDate, positionToGroupIndex } from './timeline';
+import {
+  groupMediaByDate,
+  positionToGroupIndex,
+  normalizeDateQuery,
+  resolveDateToGroupIndex,
+  groupDateAtIndex,
+} from './timeline';
+import type { DateGroup } from './timeline';
 import type { MediaFile } from '@/types';
 
 /** 构造测试用媒体文件，仅关心 id 与 added_at */
@@ -171,5 +178,123 @@ describe('positionToGroupIndex', () => {
   it('空组（count<=0）返回 0', () => {
     expect(positionToGroupIndex(0.5, 0)).toBe(0);
     expect(positionToGroupIndex(0.5, -2)).toBe(0);
+  });
+});
+
+// FR-142：日期查询规整
+describe('normalizeDateQuery', () => {
+  it('年 YYYY 补全到当年最后一天', () => {
+    expect(normalizeDateQuery('2025')).toBe('2025-12-31');
+  });
+
+  it('月 YYYY-MM 补全到当月最后一天（含 2 月闰年判定）', () => {
+    expect(normalizeDateQuery('2025-01')).toBe('2025-01-31');
+    expect(normalizeDateQuery('2025-02')).toBe('2025-02-28'); // 平年
+    expect(normalizeDateQuery('2024-02')).toBe('2024-02-29'); // 闰年
+    expect(normalizeDateQuery('2025-04')).toBe('2025-04-30');
+  });
+
+  it('日 YYYY-MM-DD 原样补零规整', () => {
+    expect(normalizeDateQuery('2025-03-15')).toBe('2025-03-15');
+    expect(normalizeDateQuery('2025-3-5')).toBe('2025-03-05');
+  });
+
+  it('接受 / 分隔并规整为 -', () => {
+    expect(normalizeDateQuery('2025/03')).toBe('2025-03-31');
+    expect(normalizeDateQuery('2025/03/15')).toBe('2025-03-15');
+  });
+
+  it('去除首尾空白后解析', () => {
+    expect(normalizeDateQuery('  2025-03  ')).toBe('2025-03-31');
+  });
+
+  it('非法输入返回空串', () => {
+    expect(normalizeDateQuery('')).toBe('');
+    expect(normalizeDateQuery('abc')).toBe('');
+    expect(normalizeDateQuery('2025-13')).toBe(''); // 月越界
+    expect(normalizeDateQuery('2025-00')).toBe(''); // 月越界
+    expect(normalizeDateQuery('2025-03-40')).toBe(''); // 日越界
+    expect(normalizeDateQuery('25-03')).toBe(''); // 年位数不足
+  });
+});
+
+// FR-142：日期查询 → 目标分组下标
+describe('resolveDateToGroupIndex', () => {
+  // 分组已倒序：顶部=最新
+  const dayGroups: DateGroup[] = [
+    { date: '2025-03-15', files: [] },
+    { date: '2025-01-09', files: [] },
+    { date: '2024-12-31', files: [] },
+    { date: '2024-06-01', files: [] },
+  ];
+
+  it('精确命中某日分组', () => {
+    expect(resolveDateToGroupIndex(dayGroups, '2025-01-09')).toBe(1);
+  });
+
+  it('查询落在两组之间时取不晚于查询日的最新一组', () => {
+    // 2025-02 末（2025-02-28）≤ 之的最新分组是 2025-01-09（下标 1）
+    expect(resolveDateToGroupIndex(dayGroups, '2025-02')).toBe(1);
+  });
+
+  it('按年查询落到该年内最新分组', () => {
+    // 2024 末（2024-12-31）→ 命中 2024-12-31（下标 2）
+    expect(resolveDateToGroupIndex(dayGroups, '2024')).toBe(2);
+  });
+
+  it('查询晚于全部数据落到最新分组（下标 0）', () => {
+    expect(resolveDateToGroupIndex(dayGroups, '2030')).toBe(0);
+  });
+
+  it('查询早于全部数据落到最旧的有效分组（末位）', () => {
+    expect(resolveDateToGroupIndex(dayGroups, '2000')).toBe(3);
+  });
+
+  it('跳过「未知日期」非法分组', () => {
+    const withUnknown: DateGroup[] = [
+      { date: '2025-01-09', files: [] },
+      { date: '未知日期', files: [] },
+    ];
+    // 查询早于全部有效分组 → 落到最旧的有效分组（下标 0，未知日期被跳过）
+    expect(resolveDateToGroupIndex(withUnknown, '2000')).toBe(0);
+  });
+
+  it('与月粒度分组键同口径比较', () => {
+    const monthGroups: DateGroup[] = [
+      { date: '2025-03', files: [] },
+      { date: '2025-01', files: [] },
+      { date: '2024-12', files: [] },
+    ];
+    expect(resolveDateToGroupIndex(monthGroups, '2025-03-15')).toBe(0);
+    expect(resolveDateToGroupIndex(monthGroups, '2025-02')).toBe(1);
+    expect(resolveDateToGroupIndex(monthGroups, '2024')).toBe(2);
+  });
+
+  it('查询非法返回 -1', () => {
+    expect(resolveDateToGroupIndex(dayGroups, 'abc')).toBe(-1);
+    expect(resolveDateToGroupIndex(dayGroups, '')).toBe(-1);
+  });
+
+  it('空分组返回 -1', () => {
+    expect(resolveDateToGroupIndex([], '2025')).toBe(-1);
+  });
+});
+
+// FR-142：取指定下标分组日期（视口锁定用）
+describe('groupDateAtIndex', () => {
+  const groups: DateGroup[] = [
+    { date: '2025-03-15', files: [] },
+    { date: '2025-01-09', files: [] },
+  ];
+
+  it('返回给定下标分组的日期键', () => {
+    expect(groupDateAtIndex(groups, 0)).toBe('2025-03-15');
+    expect(groupDateAtIndex(groups, 1)).toBe('2025-01-09');
+  });
+
+  it('越界返回空串', () => {
+    expect(groupDateAtIndex(groups, -1)).toBe('');
+    expect(groupDateAtIndex(groups, 2)).toBe('');
+    expect(groupDateAtIndex([], 0)).toBe('');
   });
 });

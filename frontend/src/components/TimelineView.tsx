@@ -1,4 +1,12 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import {
+  useRef,
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+} from 'react';
 import {
   SimpleGrid,
   Card,
@@ -25,7 +33,11 @@ import {
 import EmptyState from '@/components/EmptyState';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { isImageFile, mediaDisplayName } from '@/utils/media';
-import { groupMediaByDate } from '@/utils/timeline';
+import {
+  groupMediaByDate,
+  resolveDateToGroupIndex,
+  groupDateAtIndex,
+} from '@/utils/timeline';
 import { useElementWidth } from '@/hooks/useElementWidth';
 import {
   gridColumnsForWidth,
@@ -52,6 +64,16 @@ interface SelectionContext {
   flatIndexOf: (id: number) => number;
   onCardClick: (index: number, mods: ClickModifiers) => void;
   onCardContextMenu: (id: number, e: React.MouseEvent) => void;
+}
+
+/**
+ * 时间轴命令式句柄（FR-142）：供 TimelinePage 实现日期跳转与粒度切换视口锁定。
+ * - scrollToDate：按日期查询（YYYY/-MM/-DD）滚动到对应分组，命中返回 true、非法/无命中返回 false。
+ * - getTopVisibleGroupDate：返回当前视口顶部分组的日期键，用于粒度切换前记录视口位置。
+ */
+export interface TimelineViewHandle {
+  scrollToDate(query: string): boolean;
+  getTopVisibleGroupDate(): string;
 }
 
 interface TimelineViewProps {
@@ -252,28 +274,32 @@ function MediaGridCard({
 /**
  * 时间轴视图：按日期分组后展平为「头行 + 网格行」，对一维行列表做窗口虚拟化（FR-141）。
  * 卡片级虚拟化以网格行为单元，单日上千卡片也只渲染视口附近若干行；列数与缩略图尺寸随容器宽度自适应。
+ * 经 forwardRef 暴露日期跳转与视口锁定句柄（FR-142）。
  */
-export default function TimelineView({
-  mediaFiles,
-  loading,
-  error,
-  customImageExtensions,
-  onErrorClose,
-  onOpenFile,
-  onToggleFavorite,
-  onLoadMore,
-  hasMore,
-  loadingMore,
-  granularity = 'day',
-  filtered = false,
-  onClearFilter,
-  onSelectionChange,
-  onBatchDelete,
-  onDeleteOne,
-  onBatchAddToAlbum,
-  onBatchAddTag,
-  onBatchDownload,
-}: TimelineViewProps) {
+function TimelineViewInner(
+  {
+    mediaFiles,
+    loading,
+    error,
+    customImageExtensions,
+    onErrorClose,
+    onOpenFile,
+    onToggleFavorite,
+    onLoadMore,
+    hasMore,
+    loadingMore,
+    granularity = 'day',
+    filtered = false,
+    onClearFilter,
+    onSelectionChange,
+    onBatchDelete,
+    onDeleteOne,
+    onBatchAddToAlbum,
+    onBatchAddTag,
+    onBatchDownload,
+  }: TimelineViewProps,
+  ref: React.Ref<TimelineViewHandle>,
+) {
   // 列表容器 ref：既用于计算窗口虚拟化的 scrollMargin，又用于按真实宽度推导网格列数（FR-141）。
   const listRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -382,6 +408,43 @@ export default function TimelineView({
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  // 按分组下标滚动到该组头行（FR-68 scrubber 与 FR-142 日期跳转共用）。
+  const scrollToGroupIndex = useCallback(
+    (groupIndex: number) => {
+      const rowIndex = groupIndexToRow[groupIndex] ?? 0;
+      virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    },
+    [groupIndexToRow, virtualizer],
+  );
+
+  // 命令式句柄（FR-142）：日期跳转 + 视口锁定。
+  // - scrollToDate：纯函数 resolveDateToGroupIndex 把日期查询映射到分组下标后滚动；无命中返回 false。
+  // - getTopVisibleGroupDate：取当前视口最靠上的虚拟行，二分定位其所属分组日期键。
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToDate(query: string): boolean {
+        const groupIndex = resolveDateToGroupIndex(groups, query);
+        if (groupIndex < 0) return false;
+        scrollToGroupIndex(groupIndex);
+        return true;
+      },
+      getTopVisibleGroupDate(): string {
+        // 取视口内最靠上的虚拟行下标；无虚拟项（未挂载/空）回退首组
+        const items = virtualizer.getVirtualItems();
+        const topRow = items.length > 0 ? items[0].index : 0;
+        // 行下标 → 分组下标：groupIndexToRow 升序，取最后一个 <= topRow 的分组
+        let groupIndex = 0;
+        for (let g = 0; g < groupIndexToRow.length; g++) {
+          if (groupIndexToRow[g] <= topRow) groupIndex = g;
+          else break;
+        }
+        return groupDateAtIndex(groups, groupIndex);
+      },
+    }),
+    [groups, groupIndexToRow, scrollToGroupIndex, virtualizer],
+  );
+
   // 滚动加载更多：底部哨兵进入视口时触发 onLoadMore（IntersectionObserver，避免依赖 lastIndex 变化）。
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<() => void>(() => {});
@@ -463,12 +526,7 @@ export default function TimelineView({
       {/* 虚拟化容器：高度撑满全部行总高，内部按虚拟项绝对定位 */}
       <Box ref={listRef} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
         {/* 可拖动时间 scrubber（FR-68）：拖动浮层预览、松手按分组跳转——映射到该组头行下标 */}
-        <TimelineScrubber
-          groups={groups}
-          onSeek={(index) =>
-            virtualizer.scrollToIndex(groupIndexToRow[index] ?? 0, { align: 'start' })
-          }
-        />
+        <TimelineScrubber groups={groups} onSeek={scrollToGroupIndex} />
         {virtualItems.map((virtualItem) => {
           const row = rows[virtualItem.index];
           if (!row) return null;
@@ -564,3 +622,8 @@ export default function TimelineView({
     </>
   );
 }
+
+/** 时间轴视图：经 forwardRef 暴露 TimelineViewHandle（FR-142 日期跳转 / 视口锁定）。 */
+const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(TimelineViewInner);
+TimelineView.displayName = 'TimelineView';
+export default TimelineView;

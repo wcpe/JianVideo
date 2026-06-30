@@ -86,6 +86,83 @@ export function positionToGroupIndex(fraction: number, groupCount: number): numb
   return Math.min(groupCount - 1, index);
 }
 
+/**
+ * 把日期查询规整为 YYYY-MM-DD 前缀比较基准（FR-142）。
+ * - 接受 YYYY / YYYY-MM / YYYY-MM-DD（可含 `/` 或 `-` 分隔），按粒度补全到日：
+ *   年补到当年最后一天、月补到当月最后一天，使「跳到某年/某月」落在该区间最新的一天。
+ * - 非法输入返回空串。纯函数，无副作用。
+ */
+export function normalizeDateQuery(raw: string): string {
+  const trimmed = raw.trim().replace(/\//g, '-');
+  // 年 YYYY → 当年 12-31（区间右端，便于落到该年最新分组）
+  if (/^\d{4}$/.test(trimmed)) return `${trimmed}-12-31`;
+  // 月 YYYY-MM → 当月最后一天
+  const month = /^(\d{4})-(\d{1,2})$/.exec(trimmed);
+  if (month) {
+    const y = month[1];
+    const m = Number(month[2]);
+    if (m < 1 || m > 12) return '';
+    const lastDay = new Date(Number(y), m, 0).getDate(); // 第 0 天即上月末，等价当月最后一天
+    return `${y}-${pad2(m)}-${pad2(lastDay)}`;
+  }
+  // 日 YYYY-MM-DD（允许个位月/日，补零规整）
+  const day = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
+  if (day) {
+    const m = Number(day[2]);
+    const d = Number(day[3]);
+    if (m < 1 || m > 12 || d < 1 || d > 31) return '';
+    return `${day[1]}-${pad2(m)}-${pad2(d)}`;
+  }
+  return '';
+}
+
+/** 两位补零 */
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+/** 把分组键（YYYY / YYYY-MM / YYYY-MM-DD）补全到其区间起始日 YYYY-MM-DD；非法返回空串 */
+function groupStartKey(date: string): string {
+  if (/^\d{4}$/.test(date)) return `${date}-01-01`; // 年 → 当年第一天
+  if (/^\d{4}-\d{2}$/.test(date)) return `${date}-01`; // 月 → 当月第一天
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date; // 日 → 原样
+  return '';
+}
+
+/**
+ * 把日期查询解析为目标分组下标（FR-142）。
+ * - 分组已倒序（顶部=最新=下标 0、底部=最旧）。
+ * - 查询规整到其区间右端（normalizeDateQuery），分组取区间左端（起始日）比较：
+ *   取「起始日不晚于查询区间末」的第一个（即最新的）分组——跳到某年/某月时
+ *   落在该区间内最新的一组；按日查询落在覆盖该日的分组（无论分组粒度）。
+ * - 若所有分组都晚于查询区间（查询早于全部数据），落到最旧的有效分组（末位）。
+ * - 查询非法或无有效分组返回 -1（调用方据此不跳转）。
+ * 纯函数，无副作用，便于穷举测试。
+ */
+export function resolveDateToGroupIndex(groups: DateGroup[], rawQuery: string): number {
+  const target = normalizeDateQuery(rawQuery);
+  if (!target) return -1;
+  let lastValid = -1;
+  for (let i = 0; i < groups.length; i++) {
+    const start = groupStartKey(groups[i].date);
+    if (!start) continue; // 跳过「未知日期」等非法分组
+    lastValid = i;
+    // 分组倒序，首个起始日 <= 查询区间末的分组即目标
+    if (start <= target) return i;
+  }
+  // 查询早于全部数据：落到最旧的有效分组
+  return lastValid;
+}
+
+/**
+ * 取分组列表中给定下标处分组的日期键（FR-142 视口锁定用）。
+ * 越界或空返回空串，便于调用方在粒度切换后据此重新定位。纯函数。
+ */
+export function groupDateAtIndex(groups: DateGroup[], index: number): string {
+  if (index < 0 || index >= groups.length) return '';
+  return groups[index].date;
+}
+
 /** 日期组排序：有效日期倒序，“未知日期”始终最后 */
 function compareDateGroup(a: DateGroup, b: DateGroup): number {
   if (a.date === UNKNOWN_DATE) return 1;
