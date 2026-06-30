@@ -49,8 +49,8 @@ describe('TimelinePage 筛选分组（FR-100）', () => {
     expect(contentGroup).toBeInTheDocument();
     expect(viewGroup).toBeInTheDocument();
 
-    // 内容筛选组内含收藏开关与类型筛选；视图组内含缩放
-    expect(within(contentGroup).getByRole('switch', { name: '仅收藏' })).toBeInTheDocument();
+    // 内容筛选组内含分类筛选（FR-139）与类型筛选；视图组内含缩放
+    expect(within(contentGroup).getByRole('combobox', { name: '分类' })).toBeInTheDocument();
     expect(within(contentGroup).getByRole('radiogroup', { name: '类型筛选' })).toBeInTheDocument();
     expect(within(viewGroup).getByRole('radiogroup', { name: '时间轴缩放' })).toBeInTheDocument();
   });

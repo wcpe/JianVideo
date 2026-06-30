@@ -51,7 +51,7 @@ describe('TimelinePage 移动端筛选折叠（FR-86）', () => {
     expect(screen.getByRole('button', { name: '筛选' })).toBeInTheDocument();
   });
 
-  it('默认抽屉关闭：抽屉内的「仅收藏」控件未渲染', async () => {
+  it('默认抽屉关闭：抽屉内的筛选控件未渲染', async () => {
     renderPage();
     await screen.findByPlaceholderText(/搜索：文件名/);
 
@@ -78,8 +78,8 @@ describe('TimelinePage 移动端筛选折叠（FR-86）', () => {
     await user.click(screen.getByRole('button', { name: '筛选' }));
     const dialog = await screen.findByRole('dialog');
 
-    // 抽屉内切换「仅收藏」→ 请求带 favorite=true
-    await user.click(within(dialog).getByRole('switch', { name: '仅收藏' }));
+    // 抽屉内分类选「收藏夹」（FR-139）→ 请求带 favorite=true
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: '分类' }), 'favorite');
     await waitFor(() => expect(favoriteParams).toContain('true'));
   });
 
@@ -88,20 +88,20 @@ describe('TimelinePage 移动端筛选折叠（FR-86）', () => {
     renderPage();
     await screen.findByPlaceholderText(/搜索：文件名/);
 
-    // 打开 → 勾选「仅收藏」
+    // 打开 → 分类选「收藏夹」（FR-139）
     await user.click(screen.getByRole('button', { name: '筛选' }));
     let dialog = await screen.findByRole('dialog');
-    const toggle = within(dialog).getByRole('switch', { name: '仅收藏' });
-    await user.click(toggle);
-    await waitFor(() => expect(toggle).toBeChecked());
+    const select = within(dialog).getByRole('combobox', { name: '分类' });
+    await user.selectOptions(select, 'favorite');
+    await waitFor(() => expect(select).toHaveValue('favorite'));
 
     // 关闭抽屉（点抽屉关闭按钮，aria-label 显式设为「关闭筛选」）
     await user.click(within(dialog).getByRole('button', { name: '关闭筛选' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
-    // 再次打开 → 「仅收藏」仍为已选（状态由页面持有，未被抽屉开合重置）
+    // 再次打开 → 分类仍为「收藏夹」（状态由页面持有，未被抽屉开合重置）
     await user.click(screen.getByRole('button', { name: '筛选' }));
     dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('switch', { name: '仅收藏' })).toBeChecked();
+    expect(within(dialog).getByRole('combobox', { name: '分类' })).toHaveValue('favorite');
   });
 });

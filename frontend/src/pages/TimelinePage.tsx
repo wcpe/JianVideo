@@ -19,7 +19,7 @@ import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
 import { useScanProgress } from '@/hooks/useScanProgress';
 import TimelineView from '@/components/TimelineView';
-import MediaFilterBar from '@/components/MediaFilterBar';
+import CategoryFilter from '@/components/CategoryFilter';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
 import SearchSyntaxHelp from '@/components/SearchSyntaxHelp';
 import ContinueWatching from '@/components/ContinueWatching';
@@ -149,7 +149,7 @@ export default function TimelinePage() {
           内容筛选
         </Text>
         <Stack gap="sm">
-          <MediaFilterBar
+          <CategoryFilter
             favorite={favorite}
             onFavoriteChange={setFavorite}
             tagId={tagId}
@@ -214,41 +214,47 @@ export default function TimelinePage() {
         }
       />
 
-      {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
-      <ContinueWatching />
+      {/* 工具栏冻结吸顶（FR-139）：搜索 + 内容筛选 + 视图聚合为顶部工具栏，滚动时 sticky 吸顶。
+          页面滚动容器为 window，吸顶基准取 AppShell 头部偏移；半透明底色让下方内容滚过时不穿透。 */}
+      <Box
+        data-testid="timeline-toolbar"
+        style={{
+          position: 'sticky',
+          top: 'var(--app-shell-header-offset, 0px)',
+          zIndex: 3,
+          background: 'var(--mantine-color-body)',
+          paddingBottom: 'var(--mantine-spacing-sm)',
+        }}
+      >
+        <Stack gap="sm">
+          {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词）：移动端亦常驻不收进抽屉（FR-86） */}
+          <Group gap="xs" align="center" wrap="nowrap">
+            <TextInput
+              placeholder="搜索：文件名/显示名/相机/镜头，或 ext: type: size: camera: lens:"
+              leftSection={<IconSearch size={14} />}
+              value={infinite.searchInput}
+              onChange={(e) => infinite.setSearchInput(e.target.value)}
+              size="sm"
+              style={{ flex: 1 }}
+            />
+            {/* 搜索语法帮助（FR-136）：说明可搜字段与表达式 token */}
+            <SearchSyntaxHelp />
+            {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
+            <Button
+              variant="default"
+              size="sm"
+              leftSection={<IconFilter size={16} />}
+              onClick={filterDrawer.open}
+              hiddenFrom="sm"
+            >
+              筛选
+            </Button>
+          </Group>
 
-      {/* 最近查看（FR-120）：最近打开过的媒体回忆，空列表时自动隐藏 */}
-      <RecentlyViewed />
-
-      {/* 那年今日（FR-72）：往年同一天拍摄的媒体回忆，空列表时自动隐藏 */}
-      <OnThisDay />
-
-      {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词）：移动端亦常驻不收进抽屉（FR-86） */}
-      <Group gap="xs" align="center" wrap="nowrap">
-        <TextInput
-          placeholder="搜索：文件名/显示名/相机/镜头，或 ext: type: size: camera: lens:"
-          leftSection={<IconSearch size={14} />}
-          value={infinite.searchInput}
-          onChange={(e) => infinite.setSearchInput(e.target.value)}
-          size="sm"
-          style={{ flex: 1 }}
-        />
-        {/* 搜索语法帮助（FR-136）：说明可搜字段与表达式 token */}
-        <SearchSyntaxHelp />
-        {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
-        <Button
-          variant="default"
-          size="sm"
-          leftSection={<IconFilter size={16} />}
-          onClick={filterDrawer.open}
-          hiddenFrom="sm"
-        >
-          筛选
-        </Button>
-      </Group>
-
-      {/* 桌面端筛选区内联铺开（FR-86）：窄屏隐藏，改由抽屉承载 */}
-      <Box visibleFrom="sm">{filtersContent}</Box>
+          {/* 桌面端筛选区内联铺开（FR-86）：窄屏隐藏，改由抽屉承载 */}
+          <Box visibleFrom="sm">{filtersContent}</Box>
+        </Stack>
+      </Box>
 
       {/* 移动端筛选抽屉（FR-86）：承载与桌面同一套受控筛选控件 */}
       <Drawer
@@ -262,6 +268,15 @@ export default function TimelinePage() {
       >
         {filtersContent}
       </Drawer>
+
+      {/* 继续观看（FR-44）：有进度未看完的媒体，空列表时自动隐藏 */}
+      <ContinueWatching />
+
+      {/* 最近查看（FR-120）：最近打开过的媒体回忆，空列表时自动隐藏 */}
+      <RecentlyViewed />
+
+      {/* 那年今日（FR-72）：往年同一天拍摄的媒体回忆，空列表时自动隐藏 */}
+      <OnThisDay />
 
       <TimelineView
         mediaFiles={infinite.items}

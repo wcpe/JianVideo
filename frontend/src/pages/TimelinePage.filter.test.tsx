@@ -31,7 +31,7 @@ describe('TimelinePage 收藏与标签筛选（FR-41）', () => {
     vi.clearAllMocks();
   });
 
-  it('开启「仅收藏」后媒体请求带上 favorite=true', async () => {
+  it('选择分类「收藏夹」后媒体请求带上 favorite=true', async () => {
     const favoriteParams: (string | null)[] = [];
     server.use(
       http.get('*/api/library/media', ({ request }) => {
@@ -45,8 +45,9 @@ describe('TimelinePage 收藏与标签筛选（FR-41）', () => {
     // 首屏请求 favorite 为空
     await waitFor(() => expect(favoriteParams.length).toBeGreaterThan(0));
 
-    const toggle = await screen.findByRole('switch', { name: '仅收藏' });
-    await userEvent.click(toggle);
+    // 分类入口（FR-139）选择内置「收藏夹」映射 favorite
+    const select = await screen.findByRole('combobox', { name: '分类' });
+    await userEvent.selectOptions(select, 'favorite');
 
     await waitFor(() => {
       expect(favoriteParams).toContain('true');
@@ -107,10 +108,10 @@ describe('TimelinePage 收藏与标签筛选（FR-41）', () => {
     renderPage();
     await waitFor(() => expect(tagParams.length).toBeGreaterThan(0));
 
-    // 在原生下拉中选择「精选」
-    const select = await screen.findByRole('combobox', { name: '标签筛选' });
+    // 分类入口（FR-139）选择标签「精选」映射 tag_id
+    const select = await screen.findByRole('combobox', { name: '分类' });
     await waitFor(() => expect(screen.getByRole('option', { name: '精选' })).toBeInTheDocument());
-    await userEvent.selectOptions(select, '7');
+    await userEvent.selectOptions(select, 'tag:7');
 
     await waitFor(() => {
       expect(tagParams).toContain('7');
