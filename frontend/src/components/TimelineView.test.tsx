@@ -72,6 +72,23 @@ describe('TimelineView 滚动加载', () => {
   });
 });
 
+describe('TimelineView 卡片级虚拟化与缩略图自适应（FR-141）', () => {
+  beforeEach(() => {
+    ioCb = null;
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;
+  });
+
+  it('同一日期组按列切成网格行渲染，缩略图请求收敛为列宽像素 sizes', () => {
+    // 单组多张：渲染后应出现卡片缩略图，且 sizes 为定宽像素（证明 requestSize 已贯通到卡片）
+    renderView({ mediaFiles: [file(1), file(2), file(3), file(4), file(5)] });
+    const img = screen.getByAltText('f1.png') as HTMLImageElement;
+    // requestSize 贯通后 sizes 形如「<px>px」，而非按视口宽度的静态启发式表达式
+    expect(img.getAttribute('sizes')).toMatch(/^\d+px$/);
+    // 网格行内卡片均渲染（jsdom 无布局，虚拟化按预估高度全量近似渲染可见行）
+    expect(screen.getByAltText('f5.png')).toBeInTheDocument();
+  });
+});
+
 describe('TimelineView 空态区分（FR-98）', () => {
   beforeEach(() => {
     (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;

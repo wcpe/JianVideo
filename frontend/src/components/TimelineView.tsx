@@ -26,6 +26,12 @@ import EmptyState from '@/components/EmptyState';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { isImageFile, mediaDisplayName } from '@/utils/media';
 import { groupMediaByDate } from '@/utils/timeline';
+import { useElementWidth } from '@/hooks/useElementWidth';
+import {
+  gridColumnsForWidth,
+  thumbnailSizeForColumn,
+  buildTimelineRows,
+} from '@/utils/timelineGrid';
 import MediaThumbnail from '@/components/MediaThumbnail';
 import MediaCardOverlay from '@/components/MediaCardOverlay';
 import TimelineScrubber from '@/components/TimelineScrubber';
@@ -79,183 +85,173 @@ interface TimelineViewProps {
   onBatchDownload?: (ids: number[]) => void;
 }
 
-/** 单个日期组的预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
-const GROUP_ESTIMATE_SIZE = 320;
+/** 分组头行预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
+const HEADER_ROW_ESTIMATE = 36;
+/** 单行卡片预估高度（方形卡 + 间距，会被实际测量覆盖） */
+const CARDS_ROW_ESTIMATE = 180;
 
-/**
- * 渲染单个日期组：顶部横向分组头 + 下方占满主区的媒体缩略图网格。
- * FR-138（ADR-0049）：移除左侧竖向日期轴，分组头改为横向轻量标题，网格占满主区，
- * 时间导航统一交由右侧 TimelineScrubber 承担。
- */
-function DateGroupRow({
-  group,
-  customImageExtensions,
+/** 渲染单个日期分组头（FR-138）：圆点 + 整串日期 + 该组数量，横向轻量标题。 */
+function DateGroupHeader({ group }: { group: DateGroup }) {
+  return (
+    <Group
+      gap={8}
+      align="center"
+      wrap="nowrap"
+      data-timeline-group-header
+      pt="lg"
+      pb="xs"
+    >
+      <Box
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          flexShrink: 0,
+          background: 'var(--mantine-color-purple-6)',
+        }}
+      />
+      <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>
+        {group.date}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {group.files.length} 项
+      </Text>
+    </Group>
+  );
+}
+
+/** 单张媒体卡（FR-99 + FR-140）：缩略图铺满 + 叠层信息 + 角部操作。 */
+function MediaGridCard({
+  file,
+  isImage,
+  requestSize,
   onOpenFile,
   onToggleFavorite,
   selection,
 }: {
-  group: DateGroup;
-  customImageExtensions: Record<number, string[]>;
+  file: MediaFile;
+  isImage: boolean;
+  requestSize: number;
   onOpenFile: (file: MediaFile) => void;
   onToggleFavorite?: (file: MediaFile) => void;
   selection: SelectionContext;
 }) {
+  const selected = selection.enabled && selection.isSelected(file.id);
+  // 时间轴沿用「普通单击=打开」的画廊式交互；多选仅在带修饰键（Ctrl/Cmd/Shift）或复选框模式下触发。
+  const handleClick = (e: React.MouseEvent) => {
+    const isSelectGesture = e.ctrlKey || e.metaKey || e.shiftKey || selection.checkboxMode;
+    if (selection.enabled && isSelectGesture) {
+      selection.onCardClick(selection.flatIndexOf(file.id), e);
+    } else {
+      onOpenFile(file);
+    }
+  };
   return (
-    <Stack gap="xs" pb="lg">
-      {/* 横向分组头（FR-138）：分组日期 + 该组数量，轻量克制；不再是左侧竖轴。 */}
-      <Group gap={8} align="center" wrap="nowrap" data-timeline-group-header>
-        <Box
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: 'var(--mantine-color-purple-6)',
-          }}
+    <Card
+      withBorder
+      p={0}
+      radius="md"
+      style={{
+        cursor: 'pointer',
+        borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined,
+        overflow: 'hidden',
+      }}
+      onClick={handleClick}
+      onContextMenu={(e) => selection.onCardContextMenu(file.id, e)}
+      className="hover-card media-card"
+      data-selected={selected || undefined}
+    >
+      {/* 缩略图铺满卡面 + 叠层信息（FR-99）：信息密度叠到底部渐变层 */}
+      <Box style={{ position: 'relative' }}>
+        <MediaThumbnail
+          mediaID={file.id}
+          fileName={file.file_name}
+          aspectRatio="1"
+          objectFit="cover"
+          requestSize={requestSize}
+          overlay={
+            <MediaCardOverlay
+              file={file}
+              isImage={isImage}
+              selected={selected}
+              checkboxMode={selection.checkboxMode}
+            />
+          }
         />
-        <Text fw={600} size="sm" style={{ lineHeight: 1.1 }}>
-          {group.date}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {group.files.length} 项
-        </Text>
-      </Group>
-
-      {/* 媒体卡片网格占满主区（FR-138 + FR-99）：响应式列数随容器宽度自适应增/减列。 */}
-      <Box style={{ minWidth: 0 }}>
-        <SimpleGrid
-          type="container"
-          cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }}
-          spacing="xs"
-          verticalSpacing="xs"
+        {selection.enabled && selection.checkboxMode && (
+          <Checkbox
+            size="xs"
+            checked={selected}
+            readOnly
+            tabIndex={-1}
+            aria-label={`选择 ${mediaDisplayName(file)}`}
+            style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
+          />
+        )}
+        {/* 左下角常驻收藏（FR-140）：常显可点的收藏按钮，复用 favorite API。 */}
+        {onToggleFavorite && (
+          <ActionIcon
+            variant="filled"
+            color={file.favorite ? 'yellow' : 'dark'}
+            size="sm"
+            radius="xl"
+            aria-label={file.favorite ? '取消收藏' : '收藏'}
+            title={file.favorite ? '取消收藏' : '收藏'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(file);
+            }}
+            style={{ position: 'absolute', left: 6, bottom: 6, zIndex: 6 }}
+          >
+            {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+          </ActionIcon>
+        )}
+        {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 更多 */}
+        <Group
+          gap={6}
+          wrap="nowrap"
+          className="media-card-actions"
+          style={{ position: 'absolute', top: 6, right: 6, zIndex: 6 }}
         >
-          {group.files.map((file) => {
-            const isImage = isImageFile(file, customImageExtensions);
-            const selected = selection.enabled && selection.isSelected(file.id);
-            // 时间轴沿用「普通单击=打开」的画廊式交互；多选仅在带修饰键（Ctrl/Cmd/Shift）或复选框模式下触发。
-            // 这样既不回归既有点击打开预览/播放流程，又叠加桌面级多选手势。
-            const handleClick = (e: React.MouseEvent) => {
-              const isSelectGesture =
-                e.ctrlKey || e.metaKey || e.shiftKey || selection.checkboxMode;
-              if (selection.enabled && isSelectGesture) {
-                selection.onCardClick(selection.flatIndexOf(file.id), e);
-              } else {
-                onOpenFile(file);
-              }
-            };
-            return (
-              <Card
-                key={file.id}
-                withBorder
-                p={0}
-                radius="md"
-                style={{
-                  cursor: 'pointer',
-                  borderColor: selected ? 'var(--mantine-color-purple-6)' : undefined,
-                  overflow: 'hidden',
-                }}
-                onClick={handleClick}
-                onContextMenu={(e) => selection.onCardContextMenu(file.id, e)}
-                className="hover-card media-card"
-                data-selected={selected || undefined}
-              >
-                {/* 缩略图铺满卡面 + 叠层信息（FR-99）：信息密度叠到底部渐变层，不再多行占高 */}
-                <Box style={{ position: 'relative' }}>
-                  <MediaThumbnail
-                    mediaID={file.id}
-                    fileName={file.file_name}
-                    aspectRatio="1"
-                    objectFit="cover"
-                    overlay={
-                      <MediaCardOverlay
-                        file={file}
-                        isImage={isImage}
-                        selected={selected}
-                        checkboxMode={selection.checkboxMode}
-                      />
-                    }
-                  />
-                  {selection.enabled && selection.checkboxMode && (
-                    <Checkbox
-                      size="xs"
-                      checked={selected}
-                      readOnly
-                      tabIndex={-1}
-                      aria-label={`选择 ${mediaDisplayName(file)}`}
-                      style={{ position: 'absolute', top: 6, left: 6, zIndex: 5 }}
-                    />
-                  )}
-                  {/* 左下角常驻收藏（FR-140）：常显可点的收藏按钮，复用 favorite API。
-                      与左上选择框（top/left）、右下时长角标（bottom/right）、右上 hover 操作（top/right）四角避让不冲突。
-                      底部信息渐变层 pointerEvents:none，不拦截本按钮点击。 */}
-                  {onToggleFavorite && (
-                    <ActionIcon
-                      variant="filled"
-                      color={file.favorite ? 'yellow' : 'dark'}
-                      size="sm"
-                      radius="xl"
-                      aria-label={file.favorite ? '取消收藏' : '收藏'}
-                      title={file.favorite ? '取消收藏' : '收藏'}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleFavorite(file);
-                      }}
-                      style={{ position: 'absolute', left: 6, bottom: 6, zIndex: 6 }}
-                    >
-                      {file.favorite ? <IconStarFilled size={14} /> : <IconStar size={14} />}
-                    </ActionIcon>
-                  )}
-                  {/* hover 快捷操作浮层（FR-99）：默认隐藏，卡片悬停显现；播放 / 更多 */}
-                  <Group
-                    gap={6}
-                    wrap="nowrap"
-                    className="media-card-actions"
-                    style={{ position: 'absolute', top: 6, right: 6, zIndex: 6 }}
-                  >
-                    <ActionIcon
-                      variant="filled"
-                      color="dark"
-                      size="sm"
-                      radius="xl"
-                      aria-label="播放"
-                      title="播放"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenFile(file);
-                      }}
-                    >
-                      <IconPlayerPlay size={14} />
-                    </ActionIcon>
-                    {selection.enabled && (
-                      <ActionIcon
-                        variant="filled"
-                        color="dark"
-                        size="sm"
-                        radius="xl"
-                        aria-label="更多操作"
-                        title="更多操作"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          selection.onCardContextMenu(file.id, e);
-                        }}
-                      >
-                        <IconDots size={14} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                </Box>
-              </Card>
-            );
-          })}
-        </SimpleGrid>
+          <ActionIcon
+            variant="filled"
+            color="dark"
+            size="sm"
+            radius="xl"
+            aria-label="播放"
+            title="播放"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenFile(file);
+            }}
+          >
+            <IconPlayerPlay size={14} />
+          </ActionIcon>
+          {selection.enabled && (
+            <ActionIcon
+              variant="filled"
+              color="dark"
+              size="sm"
+              radius="xl"
+              aria-label="更多操作"
+              title="更多操作"
+              onClick={(e) => {
+                e.stopPropagation();
+                selection.onCardContextMenu(file.id, e);
+              }}
+            >
+              <IconDots size={14} />
+            </ActionIcon>
+          )}
+        </Group>
       </Box>
-    </Stack>
+    </Card>
   );
 }
 
 /**
- * 时间轴视图：按日期分组后用窗口虚拟化渲染日期组列表。
- * 只渲染可见区 + overscan，千条数据也流畅；滚动到底部自动加载更多。
+ * 时间轴视图：按日期分组后展平为「头行 + 网格行」，对一维行列表做窗口虚拟化（FR-141）。
+ * 卡片级虚拟化以网格行为单元，单日上千卡片也只渲染视口附近若干行；列数与缩略图尺寸随容器宽度自适应。
  */
 export default function TimelineView({
   mediaFiles,
@@ -278,14 +274,28 @@ export default function TimelineView({
   onBatchAddTag,
   onBatchDownload,
 }: TimelineViewProps) {
-  // 列表容器 ref，用于计算窗口虚拟化所需的 scrollMargin（列表相对文档顶部的偏移）
+  // 列表容器 ref：既用于计算窗口虚拟化的 scrollMargin，又用于按真实宽度推导网格列数（FR-141）。
   const listRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
+  const containerWidth = useElementWidth(listRef);
 
   // 分组结果记忆化：既稳定下方 useMemo 的依赖，又避免每次渲染重复分组
   const groups = useMemo(
     () => (error || loading ? [] : groupMediaByDate(mediaFiles, granularity)),
     [error, loading, mediaFiles, granularity],
+  );
+
+  // 网格列数与缩略图请求尺寸（FR-141）：按容器宽度推导列数，再按单卡列宽 + DPR 选缩略图档。
+  const columns = gridColumnsForWidth(containerWidth);
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  // 单卡列宽 ≈ 容器宽 / 列数（忽略间距的近似已足够选档）；宽度未测得时用 0，由 thumbnailSizeForColumn 兜底。
+  const columnWidth = containerWidth > 0 ? containerWidth / columns : 0;
+  const requestSize = thumbnailSizeForColumn(columnWidth, dpr);
+
+  // 展平为头行 + 网格行（FR-141）：列数变化即重切，卡片级虚拟化以网格行为单元。
+  const { rows, groupIndexToRow } = useMemo(
+    () => buildTimelineRows(groups, columns),
+    [groups, columns],
   );
 
   // 父组件关心选择（提供任一选择相关回调）时启用选择手势与右键菜单
@@ -297,8 +307,7 @@ export default function TimelineView({
     onBatchAddTag ||
     onBatchDownload
   );
-  // 全部已加载项按分组渲染顺序展平为有序 id 列表——Ctrl+A / Shift 区间均以此为范围（虚拟列表边界：
-  // 已加载多少就能选多少，未滚动触发 loadMore 的项不在范围内）。flatIndexOf 供卡片把 id 反查为下标。
+  // 全部已加载项按分组渲染顺序展平为有序 id 列表——Ctrl+A / Shift 区间均以此为范围。
   const flatIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f.id)), [groups]);
   const flatIndex = useMemo(() => {
     const map = new Map<number, number>();
@@ -361,20 +370,19 @@ export default function TimelineView({
     if (listRef.current) {
       setScrollMargin(listRef.current.getBoundingClientRect().top + window.scrollY);
     }
-  }, [groups.length]);
+  }, [rows.length]);
 
   const virtualizer = useWindowVirtualizer({
-    count: groups.length,
-    estimateSize: () => GROUP_ESTIMATE_SIZE,
-    overscan: 4,
+    count: rows.length,
+    estimateSize: (index) =>
+      rows[index]?.type === 'header' ? HEADER_ROW_ESTIMATE : CARDS_ROW_ESTIMATE,
+    overscan: 8,
     scrollMargin,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
 
-  // 滚动加载更多：底部哨兵进入视口时触发 onLoadMore。
-  // 用 IntersectionObserver 而非依赖虚拟化 lastIndex 变化——group 级虚拟化下，已加载日期组
-  // 全部渲染后 lastIndex 不再变化，会导致 loadMore 不再触发（无限滚动失效）。
+  // 滚动加载更多：底部哨兵进入视口时触发 onLoadMore（IntersectionObserver，避免依赖 lastIndex 变化）。
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef<() => void>(() => {});
   useEffect(() => {
@@ -452,18 +460,21 @@ export default function TimelineView({
 
   return (
     <>
-      {/* 虚拟化容器：高度撑满全部日期组总高，内部按虚拟项绝对定位 */}
+      {/* 虚拟化容器：高度撑满全部行总高，内部按虚拟项绝对定位 */}
       <Box ref={listRef} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
-        {/* 可拖动时间 scrubber（FR-68）：拖动浮层预览、松手滚动跳转到目标分组 */}
+        {/* 可拖动时间 scrubber（FR-68）：拖动浮层预览、松手按分组跳转——映射到该组头行下标 */}
         <TimelineScrubber
           groups={groups}
-          onSeek={(index) => virtualizer.scrollToIndex(index, { align: 'start' })}
+          onSeek={(index) =>
+            virtualizer.scrollToIndex(groupIndexToRow[index] ?? 0, { align: 'start' })
+          }
         />
         {virtualItems.map((virtualItem) => {
-          const group = groups[virtualItem.index];
+          const row = rows[virtualItem.index];
+          if (!row) return null;
           return (
             <Box
-              key={group.date}
+              key={virtualItem.key}
               data-index={virtualItem.index}
               ref={virtualizer.measureElement}
               style={{
@@ -475,13 +486,29 @@ export default function TimelineView({
                 transform: `translateY(${virtualItem.start - virtualizer.options.scrollMargin}px)`,
               }}
             >
-              <DateGroupRow
-                group={group}
-                customImageExtensions={customImageExtensions}
-                onOpenFile={onOpenFile}
-                onToggleFavorite={onToggleFavorite}
-                selection={selection}
-              />
+              {row.type === 'header' ? (
+                <DateGroupHeader group={row.group} />
+              ) : (
+                <SimpleGrid
+                  type="container"
+                  cols={{ '180px': 3, '480px': 4, '760px': 5, '1040px': 6, '1360px': 8 }}
+                  spacing="xs"
+                  verticalSpacing="xs"
+                  pb="xs"
+                >
+                  {row.files.map((file) => (
+                    <MediaGridCard
+                      key={file.id}
+                      file={file}
+                      isImage={isImageFile(file, customImageExtensions)}
+                      requestSize={requestSize}
+                      onOpenFile={onOpenFile}
+                      onToggleFavorite={onToggleFavorite}
+                      selection={selection}
+                    />
+                  ))}
+                </SimpleGrid>
+              )}
             </Box>
           );
         })}

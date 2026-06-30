@@ -12,6 +12,7 @@ function renderThumb(props?: Partial<React.ComponentProps<typeof MediaThumbnail>
         aspectRatio={props?.aspectRatio}
         objectFit={props?.objectFit}
         overlay={props?.overlay}
+        requestSize={props?.requestSize}
       />
     </MantineProvider>,
   );
@@ -34,6 +35,18 @@ describe('MediaThumbnail', () => {
     expect(img.getAttribute('srcset')).toContain('640w');
     // sizes 提供按列宽选择依据
     expect(img.getAttribute('sizes')).toBeTruthy();
+  });
+
+  it('传入 requestSize 时基准 src 用该档、sizes 收敛为该列宽（FR-141）', () => {
+    renderThumb({ requestSize: 640 });
+    const img = screen.getByAltText('pic.png') as HTMLImageElement;
+    // 基准 src 用给定档（而非默认 320）
+    expect(img.getAttribute('src')).toContain('size=640');
+    // sizes 收敛为该列宽像素，让浏览器据真实列宽从 srcset 选档
+    expect(img.getAttribute('sizes')).toBe('640px');
+    // srcset 仍保留三档候选
+    expect(img.getAttribute('srcset')).toContain('size=160');
+    expect(img.getAttribute('srcset')).toContain('size=640');
   });
 
   it('初始以骨架覆盖占位，加载完成后骨架移除', () => {

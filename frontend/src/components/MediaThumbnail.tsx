@@ -11,6 +11,10 @@ interface MediaThumbnailProps {
   objectFit?: 'contain' | 'cover';
   // 叠层内容（FR-99）：渲染在缩略图之上（角标 / 播放叠层 / 信息层等），加载/降级态亦保留。
   overlay?: React.ReactNode;
+  // 请求缩略图尺寸（FR-141）：调用方按网格列宽/DPR 算出的目标档（白名单 160/320/640）。
+  // 传入时作为基准 src 尺寸并把 sizes 收敛为该列宽，使浏览器按真实列宽而非静态启发式选档；
+  // 不传则沿用默认 320 基准 + 静态 sizes（保持既有详情/列表行为不变）。
+  requestSize?: number;
 }
 
 // 受支持的多尺寸缩略图宽度（与后端 thumbnailSizes 白名单一致，FR-81 P12）。
@@ -30,7 +34,10 @@ export default function MediaThumbnail({
   aspectRatio = '16/9',
   objectFit = 'contain',
   overlay,
+  requestSize,
 }: MediaThumbnailProps) {
+  // 基准请求尺寸（FR-141）：调用方给定列宽自适应档则用之，否则沿用默认 320。
+  const baseSize = requestSize ?? 320;
   // 状态机：loading 显骨架、loaded 显图、error 显降级占位。
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   // reloadKey 自增以强制 <img> 重新发起请求（202 轮询时用）。
@@ -87,9 +94,13 @@ export default function MediaThumbnail({
       {status !== 'error' && (
         <img
           key={reloadKey}
-          src={thumbnailURL(mediaID, 320)}
+          src={thumbnailURL(mediaID, baseSize)}
           srcSet={THUMB_SIZES.map((s) => `${thumbnailURL(mediaID, s)} ${s}w`).join(', ')}
-          sizes="(max-width: 600px) 50vw, (max-width: 1200px) 25vw, 320px"
+          // 列宽自适应（FR-141）：调用方给定档时把 sizes 收敛为该档像素，浏览器据真实列宽选 srcset；
+          // 未给定则沿用按视口宽度的静态启发式。
+          sizes={
+            requestSize ? `${requestSize}px` : '(max-width: 600px) 50vw, (max-width: 1200px) 25vw, 320px'
+          }
           alt={fileName}
           loading="lazy"
           onLoad={handleLoad}
