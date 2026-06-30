@@ -30,6 +30,8 @@ import {
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDirectoryBrowse';
 import DirectoryBrowser from '@/components/DirectoryBrowser';
+import BrowseTabBar from '@/components/BrowseTabBar';
+import { useBrowseTabsStore, type BrowseTab } from '@/stores/browse-tabs';
 import { sortFiles, type DisplayMode } from '@/components/DirectoryBrowser.helpers';
 import DirectoryTree from '@/components/DirectoryTree';
 import DirectoryAddressBar from '@/components/DirectoryAddressBar';
@@ -45,25 +47,30 @@ import * as libApi from '@/api/library';
 import type { MediaFile } from '@/types';
 
 /**
- * 目录浏览页（FR-121 资源管理器布局）：左导航树 + 可点地址栏 + 工具栏 + 视图模式（详情/列表/大中小）
+ * 单个浏览会话（FR-121 资源管理器布局）：左导航树 + 可点地址栏 + 工具栏 + 视图模式（详情/列表/大中小）
  * + 排序（接后端 sort）+ 状态栏。复用 FR-33 视图、FR-36 筛选搜索、FR-69 多选、FR-91 批量、FR-34 详情。
  * 无筛选：浏览真实路径树；有筛选/搜索：按当前目录路径（前缀，递归）查媒体接口展示匹配结果。只读浏览。
+ *
+ * FR-150：由外层 BrowsePage 按 activeTabId 以 key 重挂——每个标签一个独立会话实例，
+ * 挂载时用 tab 快照初始化位置/排序/筛选态，运行期变化实时写回 store 对应标签。
  */
-export default function BrowsePage() {
+function BrowseSession({ tab }: { tab: BrowseTab }) {
   const [searchParams] = useSearchParams();
   const paths = useLibraryPaths(undefined);
-  const browse = useDirectoryBrowse();
+  const browse = useDirectoryBrowse(tab.sort);
   const exts = paths.customImageExtensions;
+  // 写回 store 的稳定引用（FR-150）：实时把会话态镜像回激活标签，避免依赖抖动
+  const updateActiveTab = useBrowseTabsStore((s) => s.updateActiveTab);
 
-  // 展示方式（FR-121）：详情 / 列表 / 大中小图标
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('details');
-  // 筛选/搜索（FR-36）：表达式搜索 + 结构化筛选
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
-  const [sizeMin, setSizeMin] = useState(0);
-  const [timeFrom, setTimeFrom] = useState('');
-  const [timeTo, setTimeTo] = useState('');
+  // 展示方式（FR-121）：详情 / 列表 / 大中小图标。初值取自标签快照（FR-150）
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => tab.displayMode);
+  // 筛选/搜索（FR-36）：表达式搜索 + 结构化筛选。初值取自标签快照（FR-150）
+  const [searchInput, setSearchInput] = useState(() => tab.search);
+  const [search, setSearch] = useState(() => tab.search);
+  const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>(() => tab.mediaType);
+  const [sizeMin, setSizeMin] = useState(() => tab.sizeMin);
+  const [timeFrom, setTimeFrom] = useState(() => tab.timeFrom);
+  const [timeTo, setTimeTo] = useState(() => tab.timeTo);
   // 详情面板选中下标（FR-34）
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
   // 筛选结果（FR-36）
@@ -100,18 +107,45 @@ export default function BrowsePage() {
     setTimeTo('');
   }, []);
 
-  // 带定位查询参数（path）时直接进该目录浏览；否则以真实路径树根初始化（FR-121）。
+  // 初始化浏览起点（FR-121/FR-150）：标签自带位置（含恢复的标签）优先，
+  // 仅根标签保留 ?path= 定位查询参数兜底（如库管理页跳转），否则以真实路径树根初始化。
   // library_id 已弃用（后端按真实路径跨库聚合），仅用 path。
+  // 每次按 activeTabId 重挂得到全新 hook 实例（initialized 守卫复位），故只跑一次。
   useEffect(() => {
-    const path = searchParams.get('path');
-    if (path) {
-      browse.initPath(path);
+    if (tab.path !== BROWSE_ROOT) {
+      browse.initPath(tab.path);
     } else {
-      browse.initRoot();
+      const path = searchParams.get('path');
+      if (path) browse.initPath(path);
+      else browse.initRoot();
     }
-    // 仅依查询参数初始化一次（hook 内部以 initialized 守卫防重复）
+    // 挂载时初始化一次（hook 内部以 initialized 守卫防重复）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, []);
+
+  // 会话态实时写回激活标签（FR-150）：仅写 store、不读，store 变更不回流本组件，无环。
+  useEffect(() => {
+    updateActiveTab({
+      path: browse.currentPath,
+      sort: browse.sort,
+      displayMode,
+      search,
+      mediaType,
+      sizeMin,
+      timeFrom,
+      timeTo,
+    });
+  }, [
+    browse.currentPath,
+    browse.sort,
+    displayMode,
+    search,
+    mediaType,
+    sizeMin,
+    timeFrom,
+    timeTo,
+    updateActiveTab,
+  ]);
 
   // 切换路径即退出筛选态（避免跨目录残留筛选结果）
   useEffect(() => {
@@ -269,8 +303,6 @@ export default function BrowsePage() {
 
   return (
     <Stack gap="sm">
-      <PageHeader title="目录浏览" />
-
       {/* 工具栏（FR-121）：导航（上一级/刷新/移动端目录树）+ 批量动作（FR-91/FR-69）+ 视图模式 + 排序 */}
       <Group gap="xs" align="center" wrap="wrap">
         <Tooltip label="上一级">
@@ -527,6 +559,34 @@ export default function BrowsePage() {
         onCancel={() => setPendingDelete([])}
         loading={deleting}
       />
+    </Stack>
+  );
+}
+
+/**
+ * 目录浏览页（FR-150）：顶部多标签栏（参考 Windows 资源管理器）+ 当前标签对应的浏览会话。
+ * 标签状态（位置/排序/筛选）由 browse-tabs store 持有；切换标签以 key 重挂 BrowseSession，
+ * 每个标签是独立会话实例，互不串扰。单标签时与原资源管理器布局行为等价。
+ */
+export default function BrowsePage() {
+  const tabs = useBrowseTabsStore((s) => s.tabs);
+  const activeTabId = useBrowseTabsStore((s) => s.activeTabId);
+  const addTab = useBrowseTabsStore((s) => s.addTab);
+  const closeTab = useBrowseTabsStore((s) => s.closeTab);
+  const setActiveTab = useBrowseTabsStore((s) => s.setActiveTab);
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+
+  return (
+    <Stack gap="sm">
+      <PageHeader title="目录浏览" />
+      <BrowseTabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSelect={setActiveTab}
+        onClose={closeTab}
+        onAdd={() => addTab()}
+      />
+      <BrowseSession key={activeTab.id} tab={activeTab} />
     </Stack>
   );
 }

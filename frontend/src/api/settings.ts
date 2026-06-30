@@ -18,6 +18,10 @@ export const SETTING_KEY_MAGICK_PATH = 'magick_path';
 export const SETTING_KEY_NETWORK_PROXY = 'network_proxy';
 // 运行时调试日志开关（FR-110），"1"=开启详细日志、其余=安静；与后端 settings 常量一致
 export const SETTING_KEY_DEBUG_LOG = 'debug_log';
+// 目录浏览打开的标签列表（FR-151），JSON 数组：每项 {path,sort,displayMode}
+export const SETTING_KEY_OPEN_TABS = 'open_tabs';
+// 目录浏览上次浏览位置（FR-151），字符串路径，用于恢复时定位激活标签
+export const SETTING_KEY_LAST_OPENED_PATH = 'last_opened_path';
 
 function mockDelay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

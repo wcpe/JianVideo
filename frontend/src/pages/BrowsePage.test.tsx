@@ -6,6 +6,14 @@ import { MantineProvider } from '@mantine/core';
 import { http, HttpResponse } from 'msw';
 import BrowsePage from './BrowsePage';
 import { server } from '@/mocks/beforeAll';
+import { useBrowseTabsStore, createBrowseTab } from '@/stores/browse-tabs';
+import { BROWSE_ROOT } from '@/hooks/useDirectoryBrowse';
+
+// FR-150：标签 store 为模块单例，跨用例复位为初始单根标签，避免上个用例切换的目录位置污染下个用例。
+function resetBrowseTabs() {
+  const tab = createBrowseTab(BROWSE_ROOT);
+  useBrowseTabsStore.setState({ tabs: [tab], activeTabId: tab.id, hydrated: true });
+}
 
 const mockNavigate = vi.fn();
 
@@ -58,6 +66,7 @@ function media(over: Record<string, unknown>) {
 describe('BrowsePage 资源管理器布局（FR-121）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBrowseTabs();
   });
 
   it('无定位参数时以真实路径树根初始化，列出盘符根（不带 library_id）', async () => {
@@ -377,6 +386,7 @@ describe('BrowsePage 资源管理器布局（FR-121）', () => {
 describe('BrowsePage 当前目录搜索/筛选（FR-36，消费 FR-35）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBrowseTabs();
   });
 
   it('目录下搜索按当前路径查媒体接口，透传表达式与类型', async () => {
@@ -445,6 +455,7 @@ describe('BrowsePage 当前目录搜索/筛选（FR-36，消费 FR-35）', () =>
 describe('BrowsePage 移动端折叠（FR-86）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBrowseTabs();
     server.use(
       http.get('*/api/library/browse', ({ request }) => {
         const parentPath = new URL(request.url).searchParams.get('parent_path');

@@ -12,9 +12,9 @@ export type BrowseSort = 'name' | 'size' | 'type' | 'time';
  * 目录浏览数据 hook（FR-121 真实路径树）：仅按真实路径 parent_path 跨库导航，
  * 排序经后端 sort 参数生效（name/size/type/time）。不再依赖 library_id。
  */
-export function useDirectoryBrowse() {
+export function useDirectoryBrowse(initialSort: BrowseSort = 'name') {
   const [currentPath, setCurrentPath] = useState<string>(BROWSE_ROOT);
-  const [sort, setSortState] = useState<BrowseSort>('name');
+  const [sort, setSortState] = useState<BrowseSort>(initialSort);
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([]);
   const [directories, setDirectories] = useState<DirInfo[]>([]);
   const [files, setFiles] = useState<MediaFile[]>([]);
