@@ -19,6 +19,20 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* 页眉宽度不随全局滚动条变化：
+   html 的 scrollbar-gutter:stable 只让「普通流」内容（AppShell.Main）右缘让开滚动条槽位；
+   而 AppShell 的页眉/页脚是 position:fixed、inset-inline:0，相对视口（含滚动条区）铺满，
+   宽度比内容区多出一个滚动条槽位——切页出/隐滚动条时表现为页眉右侧内容相对内容区偏移/跳动。
+   修复：AppShell 根为普通流、宽度=内容区（不含滚动条），100vw 为含滚动条的视口宽，二者差即槽位宽；
+   把该差值存为变量，供固定定位的页眉/页脚做右侧内偏，使其右缘与内容区对齐、不随滚动条有无跳动。 */
+.mantine-AppShell-root {
+  --app-scrollbar-gutter-width: calc(100vw - 100%);
+}
+.mantine-AppShell-header,
+.mantine-AppShell-footer {
+  inset-inline-end: var(--app-scrollbar-gutter-width, 0px);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -242,6 +256,11 @@ body.play-immersive {
   overflow: hidden;
   /* 沉浸态已禁滚动（无滚动条），复位 FR-133 的滚动条预留，避免右侧留出无用空槽 */
   scrollbar-gutter: auto;
+}
+
+/* 沉浸态无滚动条：滚动条槽位宽度复位为 0，页眉/页脚不再右侧内偏（避免右侧留出无用空隙） */
+body.play-immersive .mantine-AppShell-root {
+  --app-scrollbar-gutter-width: 0px;
 }
 
 body.play-immersive .mantine-AppShell-main {
