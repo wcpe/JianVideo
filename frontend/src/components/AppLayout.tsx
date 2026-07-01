@@ -56,6 +56,7 @@ import UpdateIndicator from './UpdateIndicator';
 import CommandPalette, { type Command } from './CommandPalette';
 import RouteTransition from './RouteTransition';
 import UploadModal from './UploadModal';
+import SearchSyntaxHelp from './SearchSyntaxHelp';
 
 // 桌面导航收缩态的 navbar 宽度（像素）：仅留图标。
 // 展开态宽度改由 useNavWidth 提供（可拖拽调整、持久化），不再固定。
@@ -411,7 +412,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* 页眉居中全局搜索（FR-132）：占据中部弹性区并水平居中，
               输入框宽度有上限以保持居中观感；回车搜全部媒体（跳时间轴，FR-35），「/」快捷键聚焦。
               窄屏（移动端）隐藏，避免与汉堡/品牌挤占；移动端搜索仍走时间轴页内搜索框（FR-86）。 */}
-          <Group justify="center" style={{ flex: 1 }} visibleFrom="sm">
+          <Group justify="center" gap="xs" wrap="nowrap" style={{ flex: 1 }} visibleFrom="sm">
             <TextInput
               ref={searchInputRef}
               aria-label="全局搜索"
@@ -424,6 +425,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               }}
               style={{ width: '100%', maxWidth: 420 }}
             />
+            {/* 搜索语法帮助（FR-136）：说明可搜字段与表达式 token；随全局搜索统一入口移入页眉 */}
+            <SearchSyntaxHelp />
           </Group>
 
           <Group gap="sm">

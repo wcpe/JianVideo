@@ -15,7 +15,6 @@ import {
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
-  IconSearch,
   IconRefresh,
   IconFilter,
   IconCalendarSearch,
@@ -28,7 +27,6 @@ import TimelineView, { type TimelineViewHandle } from '@/components/TimelineView
 import CategoryFilter from '@/components/CategoryFilter';
 import LibraryFilter from '@/components/LibraryFilter';
 import MediaQueryFilters from '@/components/MediaQueryFilters';
-import SearchSyntaxHelp from '@/components/SearchSyntaxHelp';
 import ContinueWatching from '@/components/ContinueWatching';
 import OnThisDay from '@/components/OnThisDay';
 import RecentlyViewed from '@/components/RecentlyViewed';
@@ -70,10 +68,12 @@ function nextDay(day: string): string {
 
 /** 时间轴页：按日期分组的时间线浏览，虚拟滚动 + 滚动加载更多 */
 export default function TimelinePage() {
-  // 承接页眉全局搜索（FR-132）：从 URL ?search= 取初值，作为搜索框初始关键词、首屏即按该词请求。
+  // 搜索统一到页眉全局搜索（FR-132）：搜索唯一入口为页眉，时间轴页不再有独立搜索框。
+  // 从 URL ?search= 取初值供首屏请求；页眉改写 ?search= 后经下方 effect 联动驱动本页筛选。
   // 回忆卡片跳「那天」（FR-145）：从 URL ?date=YYYY-MM-DD 取初值，首屏即按当天筛选并滚动到该日分组。
   const [searchParams] = useSearchParams();
-  const initialSearch = searchParams.get('search') ?? '';
+  const urlSearch = searchParams.get('search') ?? '';
+  const initialSearch = urlSearch;
   const initialDate = normalizeDayQuery(searchParams.get('date'));
   // 文件详情面板（FR-34）：选中项下标，null 表示关闭
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
@@ -115,6 +115,14 @@ export default function TimelinePage() {
     sort: 'media_time',
     initialSearch,
   });
+  // 页眉全局搜索联动（FR-132）：页眉改写 URL ?search= 后，把新关键词同步到本页搜索态，
+  // 驱动时间轴按新词重新请求；与已挂载页联动（不再依赖页内搜索框）。仅在 URL search 变化时同步。
+  useEffect(() => {
+    infinite.setSearchInput(urlSearch);
+    // 仅随 URL search 变化联动；setSearchInput 稳定，无需入依赖以免每次渲染重置用户态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSearch]);
+
   // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
   const batch = useBatchActions();
   const paths = useLibraryPaths(undefined);
@@ -336,25 +344,13 @@ export default function TimelinePage() {
         }}
       >
         <Stack gap="sm">
-          {/* 搜索（FR-35 表达式：ext: / type: / size: / 裸词）：移动端亦常驻不收进抽屉（FR-86） */}
-          <Group gap="xs" align="center" wrap="nowrap">
-            <TextInput
-              placeholder="搜索：文件名/显示名/相机/镜头，或 ext: type: size: camera: lens:"
-              leftSection={<IconSearch size={14} />}
-              value={infinite.searchInput}
-              onChange={(e) => infinite.setSearchInput(e.target.value)}
-              size="sm"
-              style={{ flex: 1 }}
-            />
-            {/* 搜索语法帮助（FR-136）：说明可搜字段与表达式 token */}
-            <SearchSyntaxHelp />
-            {/* 移动端「筛选」入口（FR-86）：打开抽屉，桌面隐藏 */}
+          {/* 移动端「筛选」入口（FR-86）：搜索已统一到页眉，页内不再有搜索框；窄屏保留筛选抽屉入口，桌面隐藏 */}
+          <Group justify="flex-end" hiddenFrom="sm">
             <Button
               variant="default"
               size="sm"
               leftSection={<IconFilter size={16} />}
               onClick={filterDrawer.open}
-              hiddenFrom="sm"
             >
               筛选
             </Button>

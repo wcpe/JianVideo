@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { http, HttpResponse, delay } from 'msw';
 import TimelinePage from './TimelinePage';
@@ -541,7 +541,7 @@ describe('TimelinePage 承接页眉全局搜索（FR-132）', () => {
     );
   }
 
-  it('URL 带 ?search= 时初始即以该关键词请求媒体并回填搜索框', async () => {
+  it('URL 带 ?search= 时初始即以该关键词请求媒体（搜索统一到页眉，页内不再有搜索框）', async () => {
     let requestedSearch: string | null = null;
     server.use(
       http.get('*/api/library/media', ({ request }) => {
@@ -556,9 +556,44 @@ describe('TimelinePage 承接页眉全局搜索（FR-132）', () => {
     await waitFor(() => {
       expect(requestedSearch).toBe('海边');
     });
-    // 搜索框回填该关键词
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('海边')).toBeInTheDocument();
-    });
+    // 搜索统一到页眉：时间轴页内不再渲染独立搜索框（页眉搜索是唯一入口）
+    expect(screen.queryByPlaceholderText(/搜索/)).not.toBeInTheDocument();
+  });
+
+  it('页眉搜索改变 URL ?search= 后驱动已挂载时间轴按新词重新请求（联动 FR-132）', async () => {
+    const searches: (string | null)[] = [];
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        searches.push(new URL(request.url).searchParams.get('search'));
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 });
+      }),
+    );
+
+    render(
+      <MantineProvider>
+        <MemoryRouter initialEntries={['/timeline?search=' + encodeURIComponent('海边')]}>
+          {/* 模拟页眉全局搜索改写 URL ?search=：真实 useSearchParams 改参数（页眉 navigate 的等价效果） */}
+          <SearchParamSetter to="森林" />
+          <TimelinePage />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    // 首屏按初始词请求
+    await waitFor(() => expect(searches).toContain('海边'));
+
+    // 页眉改写 search → 时间轴据新 URL 参数联动重新请求（不依赖页内搜索框）
+    await userEvent.click(screen.getByRole('button', { name: '改搜索' }));
+    await waitFor(() => expect(searches).toContain('森林'));
   });
 });
+
+// 测试辅助：用真实 useSearchParams 改写 ?search=，模拟页眉全局搜索改写 URL（不受 useNavigate mock 影响）
+function SearchParamSetter({ to }: { to: string }) {
+  const [, setSearchParams] = useSearchParams();
+  return (
+    <button type="button" onClick={() => setSearchParams({ search: to })}>
+      改搜索
+    </button>
+  );
+}
