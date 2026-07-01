@@ -59,12 +59,9 @@ describe('OnThisDay', () => {
     vi.clearAllMocks();
   });
 
-  it('展示那年今日回忆并标注 X 年前的今天，点击进入播放', async () => {
-    server.use(
-      http.get('*/api/library/on-this-day', () =>
-        HttpResponse.json({ items: [buildMemory(7, '海边日落.jpg', 3)] }),
-      ),
-    );
+  it('展示那年今日回忆并标注 X 年前的今天，卡片主体点击跳到那天（FR-145）', async () => {
+    const mem = buildMemory(7, '海边日落.jpg', 3);
+    server.use(http.get('*/api/library/on-this-day', () => HttpResponse.json({ items: [mem] })));
 
     renderComp();
 
@@ -73,8 +70,28 @@ describe('OnThisDay', () => {
       expect(screen.getByText('海边日落.jpg')).toBeInTheDocument();
       expect(screen.getByText('3 年前的今天')).toBeInTheDocument();
     });
+    // 横向轮播容器渲染（FR-145）
+    expect(screen.getByTestId('carousel-track')).toBeInTheDocument();
 
+    // 卡片主体点击：跳到那天时间轴并按日期筛选（FR-145）——那天取 media_time 的本地日期
+    const mt = new Date(mem.media_time!);
+    const day = `${mt.getFullYear()}-${String(mt.getMonth() + 1).padStart(2, '0')}-${String(mt.getDate()).padStart(2, '0')}`;
     await userEvent.click(screen.getByRole('button', { name: /那年今日 海边日落\.jpg/ }));
+    expect(mockNavigate).toHaveBeenCalledWith(`/timeline?date=${day}`);
+  });
+
+  it('卡片播放入口点击进入播放页（FR-145）', async () => {
+    server.use(
+      http.get('*/api/library/on-this-day', () =>
+        HttpResponse.json({ items: [buildMemory(7, '海边日落.jpg', 3)] }),
+      ),
+    );
+
+    renderComp();
+
+    await waitFor(() => expect(screen.getByText('海边日落.jpg')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /播放 海边日落\.jpg/ }));
     expect(mockNavigate).toHaveBeenCalledWith('/play/7');
   });
 

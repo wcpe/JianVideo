@@ -60,6 +60,15 @@ function extractDateKey(file: MediaFile, granularity: TimelineGranularity): stri
   }
 }
 
+/**
+ * 取媒体「那天」的日期键 YYYY-MM-DD（FR-145）：供回忆卡片点击跳转那天用。
+ * 时间源按 media_time → added_at → modified_at 降级取首个有效日期；皆非法返回空串。
+ * 纯函数，无副作用。
+ */
+export function mediaDayKey(file: MediaFile): string {
+  return pickValidDate(file.media_time, file.added_at, file.modified_at);
+}
+
 /** 从候选时间串中取第一个有效的日期（YYYY-MM-DD 前缀），无则返回空串 */
 function pickValidDate(...candidates: (string | null | undefined)[]): string {
   for (const raw of candidates) {

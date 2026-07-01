@@ -43,8 +43,38 @@ import * as libApi from '@/api/library';
 import type { TimelineGranularity } from '@/utils/timeline';
 import type { MediaFile } from '@/types';
 
+/**
+ * 规范化 ?date= 查询为合法 YYYY-MM-DD（FR-145）：仅接受严格 YYYY-MM-DD 且为真实日历日；
+ * 非法（格式不符 / 越界 / 溢出如 2 月 30 日）返回空串。纯函数。
+ */
+function normalizeDayQuery(raw: string | null): string {
+  const s = (raw ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  // 回读校验：溢出日期（如 2-30）会被规整到别的日子，比对拒绝
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return '';
+  return s;
+}
+
+/**
+ * 取某日的次日 YYYY-MM-DD（FR-145）：当天筛选上界用（后端 <= 次日零点即含当天整天）。
+ * 入参须为合法 YYYY-MM-DD；非法返回空串。纯函数。
+ */
+function nextDay(day: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+  const [y, m, d] = day.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
 /** 时间轴页：按日期分组的时间线浏览，虚拟滚动 + 滚动加载更多 */
 export default function TimelinePage() {
+  // 承接页眉全局搜索（FR-132）：从 URL ?search= 取初值，作为搜索框初始关键词、首屏即按该词请求。
+  // 回忆卡片跳「那天」（FR-145）：从 URL ?date=YYYY-MM-DD 取初值，首屏即按当天筛选并滚动到该日分组。
+  const [searchParams] = useSearchParams();
+  const initialSearch = searchParams.get('search') ?? '';
+  const initialDate = normalizeDayQuery(searchParams.get('date'));
   // 文件详情面板（FR-34）：选中项下标，null 表示关闭
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
   // 收藏/标签筛选（FR-41）
@@ -55,8 +85,10 @@ export default function TimelinePage() {
   // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
   const [sizeMin, setSizeMin] = useState(0);
-  const [timeFrom, setTimeFrom] = useState('');
-  const [timeTo, setTimeTo] = useState('');
+  // 拍摄时间范围（FR-36 + FR-145）：从 ?date= 初始化为当天区间——下界当天零点、上界次日零点
+  // （后端 <= 次日零点即含当天整天）；无 ?date= 时为空、不过滤。
+  const [timeFrom, setTimeFrom] = useState(initialDate);
+  const [timeTo, setTimeTo] = useState(initialDate ? nextDay(initialDate) : '');
   // 时间轴缩放粒度（FR-32）：按媒体时间组织，日/月/年缩放
   const [granularity, setGranularity] = useState<TimelineGranularity>('day');
   // 时间轴命令式句柄（FR-142）：日期跳转 + 粒度切换视口锁定
@@ -72,9 +104,6 @@ export default function TimelinePage() {
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
   // 窄屏判断（FR-143）：仅窄屏启用下拉刷新；取 Mantine sm 断点（48em），SSR/未知回退桌面态
   const isNarrow = useMediaQuery('(max-width: 48em)') ?? false;
-  // 承接页眉全局搜索（FR-132）：从 URL ?search= 取初值，作为搜索框初始关键词、首屏即按该词请求
-  const [searchParams] = useSearchParams();
-  const initialSearch = searchParams.get('search') ?? '';
   const infinite = useInfiniteMedia({
     favorite,
     tagId,
@@ -163,6 +192,15 @@ export default function TimelinePage() {
     lockDateRef.current = '';
     timelineRef.current?.scrollToDate(date);
   }, [granularity]);
+
+  // ?date= 跳「那天」（FR-145）：首屏数据到位后滚动到该日分组，仅执行一次（ref 消费标记避免重复）。
+  const jumpConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!initialDate || jumpConsumedRef.current) return;
+    if (infinite.items.length === 0) return;
+    jumpConsumedRef.current = true;
+    timelineRef.current?.scrollToDate(initialDate);
+  }, [initialDate, infinite.items.length]);
 
   // 切换收藏（FR-41）：调用接口后刷新列表
   const handleToggleFavorite = useCallback(

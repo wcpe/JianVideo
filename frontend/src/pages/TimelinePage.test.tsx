@@ -24,10 +24,10 @@ vi.mock('@mantine/notifications', () => ({
   },
 }));
 
-function renderPage() {
+function renderPage(entry = '/') {
   return render(
     <MantineProvider>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[entry]}>
         <TimelinePage />
       </MemoryRouter>
     </MantineProvider>,
@@ -52,6 +52,28 @@ describe('TimelinePage', () => {
 
     await waitFor(() => {
       expect(requestedSort).toBe('media_time');
+    });
+  });
+
+  it('URL ?date= 初始化按当天筛选时间轴（FR-145）', async () => {
+    let from: string | null = null;
+    let to: string | null = null;
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        const q = new URL(request.url).searchParams;
+        from = q.get('time_from');
+        to = q.get('time_to');
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 });
+      }),
+    );
+
+    renderPage('/timeline?date=2025-06-01');
+
+    await waitFor(() => {
+      // 首屏请求即按当天时间下界筛选（当天 00:00）
+      expect(from).toBe('2025-06-01');
+      // 上界覆盖当天末尾（次日零点，右开等价于含当天），确保整天纳入
+      expect(to).toBe('2025-06-02');
     });
   });
 

@@ -1,9 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Badge, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
-import MediaThumbnail from '@/components/MediaThumbnail';
+import MemoryCarousel from '@/components/MemoryCarousel';
+import MemoryCard from '@/components/MemoryCard';
 import * as libApi from '@/api/library';
-import { mediaDisplayName } from '@/utils/media';
 import type { MediaFile } from '@/types';
 
 /**
@@ -19,14 +17,13 @@ function yearsAgoLabel(mediaTime?: string | null): string {
 }
 
 /**
- * 首页「那年今日」回忆区块（FR-72）。
+ * 首页「那年今日」回忆区块（FR-72 + FR-145）。
  *
- * 拉取往年同一天（媒体时间命中今天月-日、年份非今年）拍摄的媒体，
- * 横向滚动展示缩略图卡片，每项标注「X 年前的今天」；点击进入播放页。
- * 列表为空时整块不渲染。
+ * 拉取往年同一天（媒体时间命中今天月-日、年份非今年）拍摄的媒体，横向轮播展示缩略图卡片
+ * （左右滚动按钮 + scroll-snap），每项标注「X 年前的今天」；卡片主体点击跳到那天并按日期
+ * 筛选时间轴，卡片提供独立播放入口（FR-145）。列表为空时整块不渲染。
  */
 export default function OnThisDay() {
-  const navigate = useNavigate();
   const [items, setItems] = useState<MediaFile[]>([]);
 
   const load = useCallback(() => {
@@ -43,43 +40,15 @@ export default function OnThisDay() {
   if (items.length === 0) return null;
 
   return (
-    <Stack gap="xs" data-testid="on-this-day">
-      <Title order={4}>那年今日</Title>
-      {/* 横向滚动容器：用原生溢出滚动，避免 Mantine ScrollArea 依赖 getComputedStyle */}
-      <Box style={{ overflowX: 'auto', paddingBottom: 4 }}>
-        <Group gap="sm" wrap="nowrap" align="stretch">
-          {items.map((f) => {
-            const name = mediaDisplayName(f);
-            const label = yearsAgoLabel(f.media_time);
-            return (
-              <Card
-                key={f.id}
-                withBorder
-                padding="xs"
-                radius="md"
-                role="button"
-                aria-label={`那年今日 ${name}`}
-                onClick={() => navigate(`/play/${f.id}`)}
-                style={{ width: 200, flexShrink: 0, cursor: 'pointer' }}
-              >
-                <Card.Section>
-                  <MediaThumbnail mediaID={f.id} fileName={f.file_name} />
-                </Card.Section>
-                <Box mt="xs">
-                  <Text size="sm" fw={500} truncate>
-                    {name}
-                  </Text>
-                  {label && (
-                    <Badge size="sm" variant="light" color="purple" mt={6}>
-                      {label}
-                    </Badge>
-                  )}
-                </Box>
-              </Card>
-            );
-          })}
-        </Group>
-      </Box>
-    </Stack>
+    <MemoryCarousel title="那年今日" testId="on-this-day">
+      {items.map((f) => (
+        <MemoryCard
+          key={f.id}
+          file={f}
+          labelPrefix="那年今日"
+          badge={yearsAgoLabel(f.media_time)}
+        />
+      ))}
+    </MemoryCarousel>
   );
 }

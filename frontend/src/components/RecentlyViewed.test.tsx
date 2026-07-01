@@ -21,6 +21,7 @@ vi.mock('@/components/MediaThumbnail', () => ({
 }));
 
 // 构造一条最近查看媒体，含 last_viewed_at；display_name 优先于 file_name 展示（FR-30）。
+// media_time 固定为 2025-06-01，供 FR-145 卡片点击跳「那天」断言。
 function buildViewed(id: number, name: string, displayName?: string): MediaFile {
   return {
     id,
@@ -38,6 +39,7 @@ function buildViewed(id: number, name: string, displayName?: string): MediaFile 
     subtitle_tracks: '',
     added_at: '2025-01-01T12:00:00Z',
     modified_at: '2025-01-01T12:00:00Z',
+    media_time: '2025-06-01T12:00:00Z',
     last_viewed_at: '2025-06-01T12:00:00Z',
     display_name: displayName,
   };
@@ -58,7 +60,7 @@ describe('RecentlyViewed', () => {
     vi.clearAllMocks();
   });
 
-  it('展示最近查看媒体并以展示名标注，点击进入查看', async () => {
+  it('展示最近查看媒体并以展示名标注，卡片主体点击跳到那天并按日期筛选（FR-145）', async () => {
     server.use(
       http.get('*/api/library/recently-viewed', () =>
         HttpResponse.json({ items: [buildViewed(9, '海边日落.jpg', '我的日落')] }),
@@ -72,8 +74,26 @@ describe('RecentlyViewed', () => {
       // 展示名优先（FR-30）
       expect(screen.getByText('我的日落')).toBeInTheDocument();
     });
+    // 横向轮播容器渲染（FR-145）
+    expect(screen.getByTestId('carousel-track')).toBeInTheDocument();
 
+    // 卡片主体点击：跳到那天时间轴并按日期筛选（FR-145）
     await userEvent.click(screen.getByRole('button', { name: /最近查看 我的日落/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/timeline?date=2025-06-01');
+  });
+
+  it('卡片播放入口点击进入播放页（FR-145）', async () => {
+    server.use(
+      http.get('*/api/library/recently-viewed', () =>
+        HttpResponse.json({ items: [buildViewed(9, '海边日落.jpg', '我的日落')] }),
+      ),
+    );
+
+    renderComp();
+
+    await waitFor(() => expect(screen.getByText('我的日落')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /播放 我的日落/ }));
     expect(mockNavigate).toHaveBeenCalledWith('/play/9');
   });
 
