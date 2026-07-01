@@ -5,6 +5,7 @@ import {
   normalizeDateQuery,
   resolveDateToGroupIndex,
   groupDateAtIndex,
+  summarizeGroup,
 } from './timeline';
 import type { DateGroup } from './timeline';
 import type { MediaFile } from '@/types';
@@ -296,5 +297,66 @@ describe('groupDateAtIndex', () => {
     expect(groupDateAtIndex(groups, -1)).toBe('');
     expect(groupDateAtIndex(groups, 2)).toBe('');
     expect(groupDateAtIndex([], 0)).toBe('');
+  });
+});
+
+describe('summarizeGroup（FR-146 分组头聚合）', () => {
+  /** 构造带相机/地点的媒体文件 */
+  function makeMeta(id: number, camera?: string, location?: string): MediaFile {
+    return { ...makeFile(id, '2025-01-01T00:00:00Z'), camera, location };
+  }
+
+  it('数量取组内条数', () => {
+    const group: DateGroup = {
+      date: '2025-01-01',
+      files: [makeMeta(1), makeMeta(2), makeMeta(3)],
+    };
+    expect(summarizeGroup(group).count).toBe(3);
+  });
+
+  it('设备取组内最常见相机', () => {
+    const group: DateGroup = {
+      date: '2025-01-01',
+      files: [
+        makeMeta(1, 'Canon EOS R5'),
+        makeMeta(2, 'iPhone 15'),
+        makeMeta(3, 'iPhone 15'),
+      ],
+    };
+    expect(summarizeGroup(group).camera).toBe('iPhone 15');
+  });
+
+  it('地点取组内最常见地名', () => {
+    const group: DateGroup = {
+      date: '2025-01-01',
+      files: [
+        makeMeta(1, undefined, '浙江·杭州'),
+        makeMeta(2, undefined, '北京·北京'),
+        makeMeta(3, undefined, '浙江·杭州'),
+      ],
+    };
+    expect(summarizeGroup(group).location).toBe('浙江·杭州');
+  });
+
+  it('无相机/地点时对应维度为空串', () => {
+    const group: DateGroup = { date: '2025-01-01', files: [makeMeta(1), makeMeta(2)] };
+    const s = summarizeGroup(group);
+    expect(s.camera).toBe('');
+    expect(s.location).toBe('');
+  });
+
+  it('忽略空白值，并列取先出现者', () => {
+    const group: DateGroup = {
+      date: '2025-01-01',
+      files: [
+        makeMeta(1, '  ', ''),
+        makeMeta(2, 'A', '甲'),
+        makeMeta(3, 'B', '乙'),
+      ],
+    };
+    // A 与 B 各 1 次并列，取先出现的 A；地点同理取先出现的甲
+    const s = summarizeGroup(group);
+    expect(s.camera).toBe('A');
+    expect(s.location).toBe('甲');
   });
 });

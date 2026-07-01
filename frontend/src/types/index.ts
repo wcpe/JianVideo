@@ -55,6 +55,8 @@ export interface MediaFile {
   iso?: number;
   gps_lat?: number;
   gps_lon?: number;
+  /** 逆地理编码地名（FR-146 接线 FR-147）：由 GPS 就近解析的「省·市」，无 GPS 则空，旧数据可能缺省 */
+  location?: string;
 }
 
 /** 感知哈希去重重复组（FR-70）：一组互为近似重复的媒体，至少 2 项 */

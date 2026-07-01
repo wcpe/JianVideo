@@ -1,6 +1,45 @@
 package library
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/wcpe/JianVideo/internal/db/models"
+)
+
+// TestResolveMediaLocation 验证由媒体 GPS 就近解析并写入 Location（FR-146 接线 FR-147）。
+// 有 GPS 命中城市则写入「省·市」，无 GPS / 越界 / 超范围则保持空。
+func TestResolveMediaLocation(t *testing.T) {
+	g := NewOfflineGeocoder()
+	cases := []struct {
+		name string
+		lat  float64
+		lon  float64
+		want string
+	}{
+		{name: "杭州坐标写入地名", lat: 30.2592, lon: 120.1300, want: "浙江·杭州"},
+		{name: "无 GPS 保持空", lat: 0, lon: 0, want: ""},
+		{name: "越界保持空", lat: 95, lon: 120, want: ""},
+		{name: "远海超范围保持空", lat: 0, lon: -160, want: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mf := &models.MediaFile{GPSLat: c.lat, GPSLon: c.lon}
+			resolveMediaLocation(mf, g)
+			if mf.Location != c.want {
+				t.Fatalf("坐标 (%f,%f) 期望地名 %q，实际 %q", c.lat, c.lon, c.want, mf.Location)
+			}
+		})
+	}
+}
+
+// TestResolveMediaLocation_NilGeocoder geocoder 为 nil 时不解析、不 panic、地名保持空。
+func TestResolveMediaLocation_NilGeocoder(t *testing.T) {
+	mf := &models.MediaFile{GPSLat: 30.2592, GPSLon: 120.1300}
+	resolveMediaLocation(mf, nil)
+	if mf.Location != "" {
+		t.Fatalf("geocoder 为 nil 时地名应保持空，实际 %q", mf.Location)
+	}
+}
 
 // TestOfflineGeocoder_KnownCoordinates 覆盖若干已知城市坐标，验证就近匹配到「省·市」可读地名。
 func TestOfflineGeocoder_KnownCoordinates(t *testing.T) {

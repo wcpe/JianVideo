@@ -89,6 +89,68 @@ describe('TimelineView 卡片级虚拟化与缩略图自适应（FR-141）', () 
   });
 });
 
+describe('TimelineView 分组头聚合与组级全选（FR-146）', () => {
+  beforeEach(() => {
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;
+  });
+
+  // 带相机/地点的同日媒体
+  const withMeta = (id: number, camera: string, location: string): MediaFile => ({
+    ...file(id),
+    camera,
+    location,
+  });
+
+  it('分组头展示数量 + 主要设备 + 地点', () => {
+    renderView({
+      mediaFiles: [
+        withMeta(1, 'iPhone 15', '浙江·杭州'),
+        withMeta(2, 'iPhone 15', '浙江·杭州'),
+        withMeta(3, 'Canon EOS R5', '北京·北京'),
+      ],
+    });
+    // 数量
+    expect(screen.getByText('3 项')).toBeInTheDocument();
+    // 最常见设备与地点
+    expect(screen.getByText('iPhone 15')).toBeInTheDocument();
+    expect(screen.getByText('浙江·杭州')).toBeInTheDocument();
+  });
+
+  it('无 GPS 时不显示地点', () => {
+    renderView({ mediaFiles: [withMeta(1, 'iPhone 15', ''), withMeta(2, 'iPhone 15', '')] });
+    expect(screen.getByText('iPhone 15')).toBeInTheDocument();
+    // 地点维度无数据，不出现任何「省·市」文本（此处以杭州为反例）
+    expect(screen.queryByText('浙江·杭州')).toBeNull();
+  });
+
+  it('「选当天全部」一键选中该日全部媒体（day 粒度，FR-146）', async () => {
+    const onSelectionChange = vi.fn();
+    renderView({
+      mediaFiles: [file(1), file(2), file(3)],
+      granularity: 'day',
+      onSelectionChange,
+    });
+    await userEvent.click(screen.getByRole('button', { name: '选当天全部' }));
+    // 最后一次回调即当天全部 id（升序）
+    expect(onSelectionChange).toHaveBeenLastCalledWith([1, 2, 3]);
+  });
+
+  it('month 粒度下组级全选文案为「选当月全部」', () => {
+    renderView({
+      mediaFiles: [file(1), file(2)],
+      granularity: 'month',
+      onSelectionChange: () => {},
+    });
+    expect(screen.getByRole('button', { name: '选当月全部' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选当天全部' })).toBeNull();
+  });
+
+  it('未启用选择时不渲染组级全选入口', () => {
+    renderView({ mediaFiles: [file(1), file(2)], granularity: 'day' });
+    expect(screen.queryByRole('button', { name: '选当天全部' })).toBeNull();
+  });
+});
+
 describe('TimelineView 空态区分（FR-98）', () => {
   beforeEach(() => {
     (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = MockIO;

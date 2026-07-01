@@ -156,6 +156,10 @@ func enrichMediaMetadata(mf *models.MediaFile) {
 	mediaTime, source := ResolveMediaTime(exifTime, filenameTime, created, modified)
 	mf.MediaTime = &mediaTime
 	mf.MediaTimeSource = source
+
+	// 逆地理编码地名（FR-146 接线 FR-147）：有 GPS 时就近解析「省·市」写入 location，
+	// 无 GPS / 越界 / 超范围则保持空。纯增量，不覆盖已提取的其它字段。
+	resolveMediaLocation(mf, defaultGeocoder)
 }
 
 // applyVideoMetadata 把视频探测结果写入媒体记录字段。

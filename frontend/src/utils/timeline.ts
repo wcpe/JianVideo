@@ -69,6 +69,44 @@ export function mediaDayKey(file: MediaFile): string {
   return pickValidDate(file.media_time, file.added_at, file.modified_at);
 }
 
+/** 日期分组头聚合信息（FR-146）：数量 + 主要设备/相机 + 主要地点。空串表示该维度无数据、不展示。 */
+export interface GroupSummary {
+  count: number; // 组内条数
+  camera: string; // 组内出现最多的相机/设备型号，无则空串
+  location: string; // 组内出现最多的地点（逆地理编码「省·市」），无则空串
+}
+
+/**
+ * 聚合日期分组头信息（FR-146）：数量 = 组内条数；设备 = 组内最常见 camera；地点 = 组内最常见 location。
+ * 忽略空白值；出现次数并列时取先出现者（保持输入稳定顺序）。纯函数，无副作用。
+ */
+export function summarizeGroup(group: DateGroup): GroupSummary {
+  return {
+    count: group.files.length,
+    camera: mostCommon(group.files.map((f) => f.camera)),
+    location: mostCommon(group.files.map((f) => f.location)),
+  };
+}
+
+/** 取字符串列表中出现次数最多的非空值；并列取先出现者；全为空返回空串。纯函数。 */
+function mostCommon(values: (string | null | undefined)[]): string {
+  const counts = new Map<string, number>();
+  let best = '';
+  let bestCount = 0;
+  for (const raw of values) {
+    const v = (raw ?? '').trim();
+    if (!v) continue;
+    const next = (counts.get(v) ?? 0) + 1;
+    counts.set(v, next);
+    // 严格大于才更新，保证并列时保留先达到该计数者（先出现者）
+    if (next > bestCount) {
+      best = v;
+      bestCount = next;
+    }
+  }
+  return best;
+}
+
 /** 从候选时间串中取第一个有效的日期（YYYY-MM-DD 前缀），无则返回空串 */
 function pickValidDate(...candidates: (string | null | undefined)[]): string {
   for (const raw of candidates) {

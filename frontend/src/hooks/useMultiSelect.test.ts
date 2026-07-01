@@ -60,6 +60,22 @@ describe('useMultiSelect（FR-69 多选基建）', () => {
     expect(selected(result.current.selectedIds)).toEqual([]);
   });
 
+  it('selectIds 组级全选：并入给定 id（保留原有选中）（FR-146）', () => {
+    const { result } = renderHook(() => useMultiSelect(ids));
+    act(() => result.current.handleItemClick(0, {})); // 选 10
+    act(() => result.current.selectIds([30, 40])); // 并入 30、40
+    expect(selected(result.current.selectedIds)).toEqual([10, 30, 40]);
+    // 再并入含已选项不重复
+    act(() => result.current.selectIds([40, 50]));
+    expect(selected(result.current.selectedIds)).toEqual([10, 30, 40, 50]);
+  });
+
+  it('selectIds 忽略不在当前列表内的 id（FR-146）', () => {
+    const { result } = renderHook(() => useMultiSelect(ids));
+    act(() => result.current.selectIds([30, 999])); // 999 不在列表内
+    expect(selected(result.current.selectedIds)).toEqual([30]);
+  });
+
   it('invertSelection 反选：已选与未选互换', () => {
     const { result } = renderHook(() => useMultiSelect(ids));
     act(() => result.current.handleItemClick(0, {})); // 选 10

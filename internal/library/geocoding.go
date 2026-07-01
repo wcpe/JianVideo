@@ -3,7 +3,25 @@ package library
 import (
 	"fmt"
 	"math"
+
+	"github.com/wcpe/JianVideo/internal/db/models"
 )
+
+// defaultGeocoder 富化链默认使用的逆地理编码器（FR-146 接线 FR-147）。
+// 离线内置城市表、无外部依赖，包初始化即可用。
+var defaultGeocoder = NewOfflineGeocoder()
+
+// resolveMediaLocation 由媒体 GPS 就近解析可读地名并写入 mf.Location（FR-146）。
+// 无坐标 / 坐标越界 / 超出就近范围时不写入（保持原值，通常为空）；geocoder 为 nil 时直接返回。
+// 纯函数（除写入入参字段外无副作用），便于穷举单测。
+func resolveMediaLocation(mf *models.MediaFile, g Geocoder) {
+	if g == nil {
+		return
+	}
+	if name, ok := g.Resolve(mf.GPSLat, mf.GPSLon); ok {
+		mf.Location = name
+	}
+}
 
 // Geocoder 逆地理编码服务：把 GPS 经纬度解析为可读地名（粗粒度：省 / 市级）。
 // 供时间轴分组头 / 聚合处展示（FR-147，见 ADR-0050）。

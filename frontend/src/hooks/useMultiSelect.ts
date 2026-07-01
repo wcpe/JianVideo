@@ -19,6 +19,8 @@ export interface MultiSelect {
   toggle: (id: number) => void;
   /** 全选当前全部已加载项 */
   selectAll: () => void;
+  /** 组级全选（FR-146）：把给定 id 并入选中集（保留原有选中），忽略不在当前列表内的 id */
+  selectIds: (ids: number[]) => void;
   /** 反选：已选与未选互换（范围为当前全部已加载项） */
   invertSelection: () => void;
   /** 清空选择 */
@@ -116,6 +118,21 @@ export function useMultiSelect(orderedIds: number[]): MultiSelect {
     setSelectedIds(new Set(orderedIds));
   }, [orderedIds]);
 
+  // 组级全选（FR-146）：把给定 id 并入已选集；只并入当前列表内的 id，剔除陈旧 id
+  const selectIds = useCallback(
+    (ids: number[]) => {
+      const valid = new Set(orderedIds);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) {
+          if (valid.has(id)) next.add(id);
+        }
+        return next;
+      });
+    },
+    [orderedIds],
+  );
+
   const invertSelection = useCallback(() => {
     setSelectedIds((prev) => {
       const next = new Set<number>();
@@ -140,6 +157,7 @@ export function useMultiSelect(orderedIds: number[]): MultiSelect {
     handleItemClick,
     toggle,
     selectAll,
+    selectIds,
     invertSelection,
     clear,
     isSelected,

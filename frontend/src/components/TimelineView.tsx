@@ -29,6 +29,9 @@ import {
   IconSearchOff,
   IconPlayerPlay,
   IconDots,
+  IconCamera,
+  IconMapPin,
+  IconChecks,
 } from '@tabler/icons-react';
 import EmptyState from '@/components/EmptyState';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -37,6 +40,7 @@ import {
   groupMediaByDate,
   resolveDateToGroupIndex,
   groupDateAtIndex,
+  summarizeGroup,
 } from '@/utils/timeline';
 import { useElementWidth } from '@/hooks/useElementWidth';
 import {
@@ -113,8 +117,30 @@ const HEADER_ROW_ESTIMATE = 36;
 /** 单行卡片预估高度（方形卡 + 间距，会被实际测量覆盖） */
 const CARDS_ROW_ESTIMATE = 180;
 
-/** 渲染单个日期分组头（FR-138）：圆点 + 整串日期 + 该组数量，横向轻量标题。 */
-function DateGroupHeader({ group }: { group: DateGroup }) {
+/** 组级全选按钮文案（FR-146）：按粒度区分「选当天/当月全部」；年/所有粒度无组级全选。 */
+const GROUP_SELECT_LABEL: Partial<Record<TimelineGranularity, string>> = {
+  day: '选当天全部',
+  month: '选当月全部',
+};
+
+/**
+ * 渲染单个日期分组头（FR-138 + FR-146）：圆点 + 整串日期 + 聚合信息（数量 / 主要设备 / 地点），
+ * 横向轻量标题。选择启用且为日/月粒度时，附「选当天/当月全部」组级全选入口（FR-146）。
+ */
+function DateGroupHeader({
+  group,
+  granularity,
+  selectionEnabled,
+  onSelectGroup,
+}: {
+  group: DateGroup;
+  granularity: TimelineGranularity;
+  selectionEnabled: boolean;
+  onSelectGroup: (ids: number[]) => void;
+}) {
+  // 聚合数量 / 主要设备 / 地点（FR-146）；空维度不展示
+  const summary = summarizeGroup(group);
+  const selectLabel = GROUP_SELECT_LABEL[granularity];
   return (
     <Group
       gap={8}
@@ -137,8 +163,39 @@ function DateGroupHeader({ group }: { group: DateGroup }) {
         {group.date}
       </Text>
       <Text size="xs" c="dimmed">
-        {group.files.length} 项
+        {summary.count} 项
       </Text>
+      {/* 主要设备/相机（FR-146）：组内最常见 camera，无则不显示 */}
+      {summary.camera && (
+        <Group gap={2} align="center" wrap="nowrap" c="dimmed">
+          <IconCamera size={13} />
+          <Text size="xs" truncate maw={160}>
+            {summary.camera}
+          </Text>
+        </Group>
+      )}
+      {/* 地点（FR-146 接线 FR-147）：组内最常见 location，无 GPS 则不显示 */}
+      {summary.location && (
+        <Group gap={2} align="center" wrap="nowrap" c="dimmed">
+          <IconMapPin size={13} />
+          <Text size="xs" truncate maw={160}>
+            {summary.location}
+          </Text>
+        </Group>
+      )}
+      {/* 组级全选（FR-146）：日/月粒度下一键选中该日/该月全部已加载媒体 */}
+      {selectionEnabled && selectLabel && (
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label={selectLabel}
+          title={selectLabel}
+          onClick={() => onSelectGroup(group.files.map((f) => f.id))}
+        >
+          <IconChecks size={15} />
+        </ActionIcon>
+      )}
     </Group>
   );
 }
@@ -549,7 +606,12 @@ function TimelineViewInner(
               }}
             >
               {row.type === 'header' ? (
-                <DateGroupHeader group={row.group} />
+                <DateGroupHeader
+                  group={row.group}
+                  granularity={granularity}
+                  selectionEnabled={selectionEnabled}
+                  onSelectGroup={select.selectIds}
+                />
               ) : (
                 <SimpleGrid
                   type="container"
