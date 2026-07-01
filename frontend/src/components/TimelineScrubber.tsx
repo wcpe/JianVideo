@@ -61,7 +61,11 @@ function computeYearTicks(groups: DateGroup[]): TimelineTick[] {
  * hover 与 drag 共用「指针 Y → 分组下标」纯函数 positionToGroupIndex；指针移动用 rAF 前沿节流，
  * 避免高频重渲染抖动。预览浮层 pointer-events:none + role="img" + aria-label（日期 + 数量）。
  */
-export default function TimelineScrubber({ groups, onSeek, compact = false }: TimelineScrubberProps) {
+export default function TimelineScrubber({
+  groups,
+  onSeek,
+  compact = false,
+}: TimelineScrubberProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   // 预览下标（null 表示不显示浮层，hover 与 drag 共用）
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);

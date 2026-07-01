@@ -176,14 +176,11 @@ export default function TimelinePage() {
 
   // 切换缩放粒度（FR-142 视口锁定）：切换前记录视口顶部分组日期，切换后由 effect 重新定位。
   // 「所有」粒度为单组、锁定无意义，故不记录（lockDateRef 置空）。
-  const handleGranularityChange = useCallback(
-    (next: TimelineGranularity) => {
-      lockDateRef.current =
-        next === 'all' ? '' : (timelineRef.current?.getTopVisibleGroupDate() ?? '');
-      setGranularity(next);
-    },
-    [],
-  );
+  const handleGranularityChange = useCallback((next: TimelineGranularity) => {
+    lockDateRef.current =
+      next === 'all' ? '' : (timelineRef.current?.getTopVisibleGroupDate() ?? '');
+    setGranularity(next);
+  }, []);
 
   // 粒度变化落地后据切换前记录的视口日期重新定位（FR-142），消费一次即清空避免重复跳转。
   useEffect(() => {

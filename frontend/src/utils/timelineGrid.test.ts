@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  gridColumnsForWidth,
-  thumbnailSizeForColumn,
-  buildTimelineRows,
-} from './timelineGrid';
+import { gridColumnsForWidth, thumbnailSizeForColumn, buildTimelineRows } from './timelineGrid';
 import type { DateGroup } from './timeline';
 import type { MediaFile } from '@/types';
 
@@ -106,10 +102,7 @@ describe('buildTimelineRows（FR-141 展平为「头行 + 网格行」以便卡�
   });
 
   it('列数至少按 1 处理，避免切片死循环', () => {
-    const { rows } = buildTimelineRows(
-      [{ date: '2025-01-09', files: [file(1), file(2)] }],
-      0,
-    );
+    const { rows } = buildTimelineRows([{ date: '2025-01-09', files: [file(1), file(2)] }], 0);
     // 列数兜底为 1：1 头 + 2 网格行
     expect(rows.filter((r) => r.type === 'cards').length).toBe(2);
   });

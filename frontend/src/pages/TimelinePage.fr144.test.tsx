@@ -41,8 +41,22 @@ describe('TimelinePage 媒体库筛选（FR-144）', () => {
       http.get('*/api/library/paths', () =>
         HttpResponse.json({
           items: [
-            { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T00:00:00Z' },
-            { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T00:00:00Z' },
+            {
+              id: 1,
+              path: 'D:\\Videos\\Movies',
+              type: 'local',
+              label: '电影',
+              enabled: true,
+              created_at: '2025-01-01T00:00:00Z',
+            },
+            {
+              id: 2,
+              path: 'D:\\Videos\\TV',
+              type: 'local',
+              label: '电视剧',
+              enabled: true,
+              created_at: '2025-01-02T00:00:00Z',
+            },
           ],
         }),
       ),

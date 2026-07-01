@@ -21,9 +21,30 @@ function useLibsResponse() {
     http.get('*/api/library/paths', () =>
       HttpResponse.json({
         items: [
-          { id: 1, path: 'D:\\Videos\\Movies', type: 'local', label: '电影', enabled: true, created_at: '2025-01-01T00:00:00Z' },
-          { id: 2, path: 'D:\\Videos\\TV', type: 'local', label: '电视剧', enabled: true, created_at: '2025-01-02T00:00:00Z' },
-          { id: 3, path: 'D:\\Videos\\Anime', type: 'local', label: '动漫', enabled: true, created_at: '2025-01-03T00:00:00Z' },
+          {
+            id: 1,
+            path: 'D:\\Videos\\Movies',
+            type: 'local',
+            label: '电影',
+            enabled: true,
+            created_at: '2025-01-01T00:00:00Z',
+          },
+          {
+            id: 2,
+            path: 'D:\\Videos\\TV',
+            type: 'local',
+            label: '电视剧',
+            enabled: true,
+            created_at: '2025-01-02T00:00:00Z',
+          },
+          {
+            id: 3,
+            path: 'D:\\Videos\\Anime',
+            type: 'local',
+            label: '动漫',
+            enabled: true,
+            created_at: '2025-01-03T00:00:00Z',
+          },
         ],
       }),
     ),
@@ -34,7 +55,10 @@ function useLibsResponse() {
 function renderFilter(props: Partial<React.ComponentProps<typeof LibraryFilter>> = {}) {
   return render(
     <MantineProvider>
-      <LibraryFilter libraryId={props.libraryId ?? 0} onLibraryIdChange={props.onLibraryIdChange ?? (() => {})} />
+      <LibraryFilter
+        libraryId={props.libraryId ?? 0}
+        onLibraryIdChange={props.onLibraryIdChange ?? (() => {})}
+      />
     </MantineProvider>,
   );
 }
@@ -48,7 +72,9 @@ describe('LibraryFilter 媒体库筛选（FR-144）', () => {
   it('下拉含「全部图库」与各图库项', async () => {
     renderFilter();
     const select = await screen.findByRole('combobox', { name: '图库' });
-    await waitFor(() => expect(screen.getByRole('option', { name: '全部图库' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: '全部图库' })).toBeInTheDocument(),
+    );
     await waitFor(() => expect(screen.getByRole('option', { name: '电影' })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole('option', { name: '动漫' })).toBeInTheDocument());
     expect(select).toBeInTheDocument();
@@ -84,9 +110,7 @@ describe('LibraryFilter 媒体库筛选（FR-144）', () => {
     const entry = screen.getByRole('button', { name: '多选模式' });
     await userEvent.click(entry);
     // 进入多选后以复选框列出各库
-    await waitFor(() =>
-      expect(screen.getByRole('checkbox', { name: '电影' })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: '电影' })).toBeInTheDocument());
     expect(screen.getByRole('checkbox', { name: '动漫' })).toBeInTheDocument();
   });
 

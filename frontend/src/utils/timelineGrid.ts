@@ -40,8 +40,7 @@ export function thumbnailSizeForColumn(columnWidth: number, dpr: number): number
 
 /** 时间轴展平行：分组头行，或同一组内按列切出的一行卡片（FR-141）。 */
 export type TimelineRow =
-  | { type: 'header'; group: DateGroup }
-  | { type: 'cards'; groupDate: string; files: MediaFile[] };
+  { type: 'header'; group: DateGroup } | { type: 'cards'; groupDate: string; files: MediaFile[] };
 
 /** 展平结果：行列表 + 分组下标到其头行下标的映射（供 scrubber 跳转定位）。 */
 export interface TimelineRowsResult {
@@ -55,10 +54,7 @@ export interface TimelineRowsResult {
  * 仅渲染视口附近的网格行，单日上千卡片也只渲染可见若干行。
  * groupIndexToRow 让右侧 scrubber 仍按「分组」跳转——映射到该组头行下标即可。
  */
-export function buildTimelineRows(
-  groups: DateGroup[],
-  columns: number,
-): TimelineRowsResult {
+export function buildTimelineRows(groups: DateGroup[], columns: number): TimelineRowsResult {
   const cols = Math.max(1, Math.floor(columns));
   const rows: TimelineRow[] = [];
   const groupIndexToRow: number[] = [];

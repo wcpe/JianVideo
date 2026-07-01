@@ -99,7 +99,9 @@ export default function MediaThumbnail({
           // 列宽自适应（FR-141）：调用方给定档时把 sizes 收敛为该档像素，浏览器据真实列宽选 srcset；
           // 未给定则沿用按视口宽度的静态启发式。
           sizes={
-            requestSize ? `${requestSize}px` : '(max-width: 600px) 50vw, (max-width: 1200px) 25vw, 320px'
+            requestSize
+              ? `${requestSize}px`
+              : '(max-width: 600px) 50vw, (max-width: 1200px) 25vw, 320px'
           }
           alt={fileName}
           loading="lazy"

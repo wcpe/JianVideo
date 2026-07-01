@@ -317,11 +317,7 @@ describe('summarizeGroup（FR-146 分组头聚合）', () => {
   it('设备取组内最常见相机', () => {
     const group: DateGroup = {
       date: '2025-01-01',
-      files: [
-        makeMeta(1, 'Canon EOS R5'),
-        makeMeta(2, 'iPhone 15'),
-        makeMeta(3, 'iPhone 15'),
-      ],
+      files: [makeMeta(1, 'Canon EOS R5'), makeMeta(2, 'iPhone 15'), makeMeta(3, 'iPhone 15')],
     };
     expect(summarizeGroup(group).camera).toBe('iPhone 15');
   });
@@ -348,11 +344,7 @@ describe('summarizeGroup（FR-146 分组头聚合）', () => {
   it('忽略空白值，并列取先出现者', () => {
     const group: DateGroup = {
       date: '2025-01-01',
-      files: [
-        makeMeta(1, '  ', ''),
-        makeMeta(2, 'A', '甲'),
-        makeMeta(3, 'B', '乙'),
-      ],
+      files: [makeMeta(1, '  ', ''), makeMeta(2, 'A', '甲'), makeMeta(3, 'B', '乙')],
     };
     // A 与 B 各 1 次并列，取先出现的 A；地点同理取先出现的甲
     const s = summarizeGroup(group);

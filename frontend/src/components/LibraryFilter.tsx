@@ -68,7 +68,12 @@ export default function LibraryFilter({ libraryId, onLibraryIdChange }: LibraryF
         >
           <Stack gap={4}>
             {libraries.map((lib) => (
-              <Checkbox key={lib.id} value={String(lib.id)} label={lib.label || lib.path} size="sm" />
+              <Checkbox
+                key={lib.id}
+                value={String(lib.id)}
+                label={lib.label || lib.path}
+                size="sm"
+              />
             ))}
           </Stack>
         </Checkbox.Group>

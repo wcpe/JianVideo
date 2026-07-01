@@ -142,14 +142,7 @@ function DateGroupHeader({
   const summary = summarizeGroup(group);
   const selectLabel = GROUP_SELECT_LABEL[granularity];
   return (
-    <Group
-      gap={8}
-      align="center"
-      wrap="nowrap"
-      data-timeline-group-header
-      pt="lg"
-      pb="xs"
-    >
+    <Group gap={8} align="center" wrap="nowrap" data-timeline-group-header pt="lg" pb="xs">
       <Box
         style={{
           width: 8,
