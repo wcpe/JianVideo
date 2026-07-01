@@ -59,7 +59,7 @@ func setupUploadRouter(t *testing.T) (*gin.Engine, *gorm.DB, string, *int64) {
 
 	var scanCalls int64
 	// 扫描 exec 替身：仅计数，不实际遍历，避免测试触盘扫描
-	exec := func(libraryID int64, path, dirType, mode string) (int, error) {
+	exec := func(_ int64, _, _, _ string) (int, error) {
 		atomic.AddInt64(&scanCalls, 1)
 		return 0, nil
 	}
