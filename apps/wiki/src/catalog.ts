@@ -42,6 +42,7 @@ const wikiOnlyCatalog: readonly UiPreviewDescriptor[] = [
     title: 'API client 示例',
     group: 'space',
     states: ['default', 'loading', 'error'],
+    scenarioIds: ['normal-library', 'permission-denied'],
     snippet: createSnippet('ClientDemoPanel', '@jianvideo/wiki'),
   },
 ] as const;
