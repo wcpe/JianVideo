@@ -1,6 +1,6 @@
 # 功能规格：PixiJS 高密度渲染原型与前后端 Benchmark harness
 
-> 状态：草拟　·　关联 PRD：FR2-063　·　阶段：P1 `0.22.x`　·　分支：未指定
+> 状态：已实现　·　关联 PRD：FR2-063　·　阶段：P1 `0.22.x`　·　分支：未指定
 
 ## 1. 背景与目标
 
@@ -45,14 +45,14 @@
 
 ## 4. 任务拆分
 
-- [ ] 在 `packages/mock` 实现三档索引数据集的确定性 seed 生成（`media-index-1m/5m/10m`），字段覆盖 Space、路径、时间、类型、时长、转码状态、AI 状态、缩略图/HLS 状态。
-- [ ] 在 `packages/render-pixi` 实现网格 + 时间轴原型：纹理池、可见窗口 + overscan、缩略图占位、过期请求取消，React 只做壳层。
-- [ ] 在 `packages/benchmark` 实现前端 Benchmark harness：滚动脚本 + 指标采集 + 分位数报告，输出 [fr2-003] §3/§6 指标。
-- [ ] 在 `apps/mock-studio` 组织后端查询 Benchmark：分页、路径前缀、筛选组合、任务队列查询，出对照 [fr2-003] §4 的报告。
-- [ ] 实现 HLS 预览样例：视频预览卡 + 缩略图轨（mock），预览与滚动解耦并限流可取消。
+- [x] 在 `packages/mock` 实现三档索引数据集的确定性 seed 生成（`media-index-1m/5m/10m`），字段覆盖 Space、路径、时间、类型、时长、转码状态、AI 状态、缩略图/HLS 状态。
+- [x] 在 `packages/render-pixi` 实现网格 + 时间轴原型：纹理池、可见窗口 + overscan、缩略图占位、过期请求取消，React 只做壳层。
+- [x] 在 `packages/benchmark` 实现前端 Benchmark harness：滚动脚本 + 指标采集 + 分位数报告，输出 [fr2-003] §3/§6 指标。
+- [x] 在 `apps/mock-studio` 组织后端查询 Benchmark：分页、路径前缀、筛选组合、任务队列查询，出对照 [fr2-003] §4 的报告。
+- [x] 实现 HLS 预览样例：视频预览卡 + 缩略图轨（mock），预览与滚动解耦并限流可取消。
 - [ ] 在 `apps/wiki` 接入 PixiJS 样例页与 HLS 预览卡，独立可预览。
-- [ ] 产出一份本机 Benchmark 实测报告（进 `.tmp/` 或 CI artifact，不入库），标注是否达标与超限项映射。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 产出一份本机 Benchmark 实测报告（进 `.tmp/` 或 CI artifact，不入库），标注是否达标与超限项映射。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

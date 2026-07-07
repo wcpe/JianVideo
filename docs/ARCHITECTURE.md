@@ -126,6 +126,17 @@ jianvideo/
 
 端能力检测由 `media-client` 的纯函数输出 `platform`（Web/Desktop/Mobile/TV/车机）、`pointer`、`touch` 与 `network`，`packages/theme` 只消费该结果决定密度，不重复探测平台。`apps/wiki` 通过独立 client demo 展示媒体列表、详情、分页、任务轮询与 Space 切换。
 
+### 2.3 P1 PixiJS 与 Benchmark 原型包
+
+FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接入真实后端索引或转码管线：
+
+| 包 / 应用 | 当前职责 |
+|---|---|
+| `packages/render-pixi` | 提供百万素材窗口化计算、网格 overscan、纹理池 LRU、HLS 预览触发判定、Pixi 指标快照与真实 `pixi.js` 预览挂载 API；React 侧只持有挂载点与控制态。 |
+| `packages/mock` | 提供 `media-index-1m` / `media-index-5m` / `media-index-10m` 的确定性 seed 数据源与窗口查询；按位置即时生成记录，窗口查询只保留返回窗口对象。 |
+| `packages/benchmark` | 提供 FR2-003 前端阈值判定、后端查询阈值判定、Go/SQLite 真实索引查询 harness 与 Markdown summary 输出；报告产物写入 `.tmp/benchmark/fr2-063/`，不入库。 |
+| `apps/mock-studio` | 暴露 FR2-063 Benchmark 工作台入口、真实 PixiJS/WebGL 预览画布、Canvas 非空 E2E 验证与 HLS 预览请求计数，消费 mock 场景、render-pixi 与 benchmark 能力；headless WebGL 不可用时才退回 Canvas fallback 并在 `.tmp` 报告标注。 |
+
 ## 3. 数据模型
 
 ### 核心实体

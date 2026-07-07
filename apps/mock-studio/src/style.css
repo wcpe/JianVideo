@@ -17,6 +17,86 @@ body {
 
 .mock-studio-shell p {
   max-width: 720px;
-  margin: 0;
+  margin: 0 0 12px;
   color: #d1d5db;
+}
+
+.benchmark-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 336px;
+  gap: 18px;
+  max-width: 960px;
+  margin-top: 24px;
+  align-items: start;
+}
+
+.benchmark-panel h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.benchmark-panel dl {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.benchmark-panel dt {
+  color: #93c5fd;
+  font-size: 13px;
+}
+
+.benchmark-panel dd {
+  margin: 4px 0 0;
+  color: #f9fafb;
+}
+
+.benchmark-canvas {
+  width: 336px;
+  height: 128px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.benchmark-canvas-host {
+  width: 336px;
+  height: 128px;
+}
+
+.preview-card {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #334155;
+  background: #1f2937;
+}
+
+.preview-card-selected {
+  border-color: #38bdf8;
+}
+
+.preview-card button {
+  min-height: 36px;
+  border: 0;
+  padding: 0 12px;
+  background: #38bdf8;
+  color: #082f49;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .benchmark-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-canvas {
+    width: 100%;
+  }
+
+  .benchmark-canvas-host {
+    width: 100%;
+  }
 }

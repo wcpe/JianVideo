@@ -25,6 +25,54 @@ export interface MockScenario {
   readonly sampleAssetPath: string;
 }
 
+export type MockMediaDataset = 'media-index-1m' | 'media-index-5m' | 'media-index-10m';
+
+export type MockMediaType = 'image' | 'video';
+
+export type MockTranscodeStatus = 'failed' | 'pending' | 'ready';
+
+export type MockAiStatus = 'indexed' | 'pending' | 'review';
+
+export interface MockMediaRecord {
+  readonly id: string;
+  readonly position: number;
+  readonly spaceId: string;
+  readonly path: string;
+  readonly capturedAt: string;
+  readonly type: MockMediaType;
+  readonly durationSeconds: number;
+  readonly transcodeStatus: MockTranscodeStatus;
+  readonly aiStatus: MockAiStatus;
+  readonly hasThumbnail: boolean;
+  readonly hlsStatus: 'pending' | 'ready';
+}
+
+export interface MockMediaIndexOptions {
+  readonly dataset: MockMediaDataset;
+  readonly seed: string;
+}
+
+export interface MockMediaWindowQuery {
+  readonly limit: number;
+  readonly offset: number;
+  readonly pathPrefix?: string;
+  readonly spaceId?: string;
+  readonly type?: MockMediaType;
+}
+
+export interface MockMediaWindowResult {
+  readonly items: readonly MockMediaRecord[];
+  readonly scannedRows: number;
+  readonly total: number;
+}
+
+export interface MockMediaIndex {
+  readonly total: number;
+  readonly residentObjectCount: number;
+  get(position: number): MockMediaRecord;
+  queryWindow(query: MockMediaWindowQuery): MockMediaWindowResult;
+}
+
 export const mockScenarios: readonly MockScenario[] = [
   {
     id: 'empty-library',
@@ -292,4 +340,126 @@ function hasSensitivePattern(value: string): boolean {
     /\b(?:password|secret|token|apikey|api_key)\b/i,
     /@[^/]+\.[^/]+/,
   ].some((pattern) => pattern.test(value));
+}
+
+export function createMockMediaIndex(options: MockMediaIndexOptions): MockMediaIndex {
+  const total = resolveDatasetSize(options.dataset);
+  let residentObjectCount = 0;
+
+  return {
+    total,
+    get residentObjectCount() {
+      return residentObjectCount;
+    },
+    get(position: number) {
+      return createRecord(total, options.seed, position);
+    },
+    queryWindow(query: MockMediaWindowQuery) {
+      const items: MockMediaRecord[] = [];
+      const limit = Math.max(0, query.limit);
+      const offset = Math.max(0, query.offset);
+      let matched = 0;
+      let scannedRows = 0;
+
+      for (let position = 0; position < total && items.length < limit; position += 1) {
+        const record = createRecord(total, options.seed, position);
+        scannedRows += 1;
+        if (!matchesQuery(record, query)) {
+          continue;
+        }
+        if (matched < offset) {
+          matched += 1;
+          continue;
+        }
+        matched += 1;
+        items.push(record);
+      }
+
+      residentObjectCount = items.length;
+      return { items, scannedRows, total };
+    },
+  };
+}
+
+function resolveDatasetSize(dataset: MockMediaDataset): number {
+  if (dataset === 'media-index-1m') {
+    return 1_000_000;
+  }
+  if (dataset === 'media-index-5m') {
+    return 5_000_000;
+  }
+  return 10_000_000;
+}
+
+function createRecord(total: number, seed: string, position: number): MockMediaRecord {
+  const hash = hashSeed(seed);
+  const normalized = ((position % total) + total) % total;
+  const shifted = normalized + hash;
+  const spaceNumber = (shifted % 10) + 1;
+  const spaceId = `space-${spaceNumber.toString()}`;
+  const type: MockMediaType = shifted % 4 === 0 ? 'image' : 'video';
+  const year = 2020 + (shifted % 7);
+  const month = (shifted % 12) + 1;
+  const day = (shifted % 28) + 1;
+  const directory = shifted % 1_000;
+
+  return {
+    aiStatus: resolveAiStatus(shifted),
+    capturedAt: `${year.toString()}-${pad2(month)}-${pad2(day)}T00:00:00.000Z`,
+    durationSeconds: type === 'video' ? 15 + (shifted % 7_200) : 0,
+    hasThumbnail: shifted % 17 !== 0,
+    hlsStatus: shifted % 5 === 0 ? 'pending' : 'ready',
+    id: `media-${hash.toString(36)}-${normalized.toString(36)}`,
+    path: `/space-${spaceNumber.toString()}/library-${directory.toString().padStart(4, '0')}/asset-${normalized.toString().padStart(8, '0')}.${type === 'video' ? 'mp4' : 'jpg'}`,
+    position: normalized,
+    spaceId,
+    transcodeStatus: resolveTranscodeStatus(shifted),
+    type,
+  };
+}
+
+function matchesQuery(record: MockMediaRecord, query: MockMediaWindowQuery): boolean {
+  if (query.spaceId !== undefined && record.spaceId !== query.spaceId) {
+    return false;
+  }
+  if (query.type !== undefined && record.type !== query.type) {
+    return false;
+  }
+  if (query.pathPrefix !== undefined && !record.path.startsWith(query.pathPrefix)) {
+    return false;
+  }
+  return true;
+}
+
+function resolveTranscodeStatus(value: number): MockTranscodeStatus {
+  if (value % 19 === 0) {
+    return 'failed';
+  }
+  if (value % 5 === 0) {
+    return 'pending';
+  }
+  return 'ready';
+}
+
+function resolveAiStatus(value: number): MockAiStatus {
+  if (value % 23 === 0) {
+    return 'review';
+  }
+  if (value % 7 === 0) {
+    return 'pending';
+  }
+  return 'indexed';
+}
+
+function hashSeed(seed: string): number {
+  let hash = 2_166_136_261;
+  for (const char of seed) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function pad2(value: number): string {
+  return value.toString().padStart(2, '0');
 }

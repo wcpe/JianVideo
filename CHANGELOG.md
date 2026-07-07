@@ -9,6 +9,7 @@
 ### 新增
 - **FR2-006 API client 与多端基础**：`packages/media-client` 新增 Space 感知 API client、timeout/retry、统一 query key、媒体分页/详情查询、任务详情查询、旧任务状态 `completed/error` 兼容映射与端能力检测；`packages/mock` 新增最小 v2 mock fetch/handlers，覆盖媒体列表、详情、任务轮询与 Space 切换；`packages/theme` 消费端能力结果决定密度，`apps/wiki` 增加 client demo 展示列表、详情、分页、任务轮询和 Space 切换。
 - **Wiki UI 博物馆与 mockup 先行（FR2-005）**：`apps/wiki` 增加可交互的 UI 博物馆骨架，支持搜索、分组、场景切换、状态切换和 `@jianvideo/*` 代码片段展示；`packages/ui` 暴露首批控件预览描述，`packages/theme` 暴露主题 / 密度配置，`packages/mock` 补齐 HLS、缩略图、转码任务、AI 任务与 Space 权限 mock 场景，并增加敏感信息扫描测试。
+- **FR2-063 PixiJS 与 Benchmark 最小原型切片**：`packages/mock` 新增 100 万 / 500 万 / 1000 万确定性 mock 索引数据源与窗口查询；`packages/render-pixi` 新增网格窗口、纹理池 LRU、真实 `pixi.js` 预览挂载、HLS 预览触发判定与渲染指标快照；`packages/benchmark` 新增 FR2-003 前端 / 后端阈值判定、Go/SQLite 真实索引查询 harness 与 `.tmp/benchmark/fr2-063/` Markdown summary 输出；`apps/mock-studio` 增加 FR2-063 Benchmark 页面、真实 PixiJS 预览画布、Canvas 非空 E2E 验证入口与 hover/选中触发的 HLS 预览请求计数。
 
 ## 0.21.0（2026-07-08）
 

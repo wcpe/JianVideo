@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createMockMediaIndex,
   createMockFetch,
   findScenario,
   handleMockApiRequest,
@@ -126,5 +127,36 @@ describe('mock package', () => {
     const body = (await response.json()) as { readonly id: string };
 
     expect(body.id).toBe('media-studio-001');
+  });
+
+  it('同一 seed 生成稳定媒体条目', () => {
+    const first = createMockMediaIndex({ dataset: 'media-index-1m', seed: 'fr2-063' });
+    const second = createMockMediaIndex({ dataset: 'media-index-1m', seed: 'fr2-063' });
+    const other = createMockMediaIndex({ dataset: 'media-index-1m', seed: 'other-seed' });
+
+    expect(first.total).toBe(1_000_000);
+    expect(first.get(42)).toEqual(second.get(42));
+    expect(first.get(42).id).not.toBe(other.get(42).id);
+  });
+
+  it('窗口查询不常驻百万完整对象', () => {
+    const index = createMockMediaIndex({ dataset: 'media-index-1m', seed: 'fr2-063' });
+
+    const result = index.queryWindow({
+      limit: 50,
+      offset: 0,
+      spaceId: 'space-3',
+      type: 'video',
+    });
+
+    expect(result.items).toHaveLength(50);
+    expect(result.scannedRows).toBeLessThan(1_000);
+    expect(index.residentObjectCount).toBeLessThanOrEqual(50);
+  });
+
+  it('索引数据集覆盖 1m、5m 与 10m 三档', () => {
+    expect(createMockMediaIndex({ dataset: 'media-index-1m', seed: 'fr2-063' }).total).toBe(1_000_000);
+    expect(createMockMediaIndex({ dataset: 'media-index-5m', seed: 'fr2-063' }).total).toBe(5_000_000);
+    expect(createMockMediaIndex({ dataset: 'media-index-10m', seed: 'fr2-063' }).total).toBe(10_000_000);
   });
 });

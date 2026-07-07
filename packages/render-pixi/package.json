@@ -19,5 +19,8 @@
   "devDependencies": {
     "@jianvideo/eslint-config": "workspace:*",
     "@jianvideo/typescript-config": "workspace:*"
+  },
+  "dependencies": {
+    "pixi.js": "^8.19.0"
   }
 }
