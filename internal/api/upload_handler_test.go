@@ -120,12 +120,14 @@ func TestUpload_OriginalLandsOnDiskAndTriggersScan(t *testing.T) {
 		t.Fatalf("上传文件未落盘: %v", err)
 	}
 
-	// 应入队一条扫描任务（FR-149 触发增量扫描入库）
-	var taskCount int64
-	gdb.Model(&models.ScanTask{}).Count(&taskCount)
-	if taskCount != 1 {
-		t.Fatalf("期望入队 1 条扫描任务，实际 %d", taskCount)
-	}
+	// 应入队一条扫描任务（FR-149 触发增量扫描入库）；覆盖率模式下 SQLite 可能短暂被 worker 持锁，需重试。
+	waitFor(t, func() bool {
+		var taskCount int64
+		if err := gdb.Model(&models.ScanTask{}).Count(&taskCount).Error; err != nil {
+			return false
+		}
+		return taskCount == 1
+	})
 	// 等待 worker 真正执行扫描 exec（队列异步），最多等待若干轮
 	waitFor(t, func() bool { return atomic.LoadInt64(scanCalls) >= 1 })
 }

@@ -123,20 +123,18 @@ func (s *Service) StreamFile(w http.ResponseWriter, r *http.Request, mediaID int
 
 	// 更新或创建播放会话
 	s.mu.Lock()
-	sess, exists := s.sessions[mediaID]
-	if !exists {
-		sess = &models.PlaybackSession{
+	if _, exists := s.sessions[mediaID]; !exists {
+		s.sessions[mediaID] = &models.PlaybackSession{
 			MediaID:  mediaID,
 			ClientIP: getClientIP(r),
 			Duration: duration,
 			FileSize: fileSize,
 		}
-		s.sessions[mediaID] = sess
 	}
 	s.mu.Unlock()
 
 	// 记录访问日志
-	log.Printf("[INFO] 播放请求: mediaID=%d, client=%s, range=%q", mediaID, sess.ClientIP, r.Header.Get("Range"))
+	log.Printf("[INFO] 播放请求: mediaID=%d", mediaID)
 
 	// 使用 http.ServeContent 自动处理 Range 请求
 	http.ServeContent(w, r, filepath.Base(filePath), time.Now(), f)

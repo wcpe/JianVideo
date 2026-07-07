@@ -230,7 +230,7 @@ func parseASSTimestamp(ts string) float64 {
 	if len(secParts) == 2 {
 		// ASS 使用百分秒（centiseconds），转为秒
 		centiseconds, _ = strconv.ParseFloat(secParts[1], 64)
-		centiseconds = centiseconds / 100.0
+		centiseconds /= 100.0
 	}
 
 	return hours*3600 + minutes*60 + seconds + centiseconds

@@ -39,7 +39,7 @@ func countingService(t *testing.T, tag string) (*Service, func() int64, *atomic.
 	t.Cleanup(srv.Close)
 	base = srv.URL
 	s := &Service{baseURL: srv.URL, owner: "wcpe", repo: "JianVideo", client: srv.Client(), cache: map[Channel]cachedCheck{}}
-	return s, func() int64 { return calls.Load() }, &fail
+	return s, calls.Load, &fail
 }
 
 // TestCheck_CacheHitWithinTTL TTL 内第二次 Check 命中缓存，不再请求 GitHub。

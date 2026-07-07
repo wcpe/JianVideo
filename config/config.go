@@ -48,7 +48,7 @@ func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		n := atoi(v)
 		if n == 0 && v != "0" {
-			log.Printf("[WARN] 无效的 %s 值: %q，使用默认值 %d", key, v, def)
+			log.Printf("[WARN] 无效的 %s 值，使用默认值 %d", key, def)
 			return def
 		}
 		return n

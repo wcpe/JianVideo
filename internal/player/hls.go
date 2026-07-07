@@ -26,7 +26,7 @@ type HLSSegmentWriter struct {
 // quality 为码率档位名（如 "1080p"、"720p"、"480p"）。
 func NewHLSSegmentWriter(baseDir string, mediaID int64, quality string) (*HLSSegmentWriter, error) {
 	mediaDir := filepath.Join(baseDir, fmt.Sprintf("%d", mediaID))
-	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+	if err := os.MkdirAll(mediaDir, 0o750); err != nil {
 		return nil, fmt.Errorf("创建 HLS 目录失败: %w", err)
 	}
 

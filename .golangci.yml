@@ -8,19 +8,86 @@ run:
   timeout: 5m
 
 linters:
-  # 在默认集（errcheck/govet/ineffassign/staticcheck/unused）之上补齐高价值检查器
+  # 在默认集基础上显式固定高价值检查器，避免不同版本默认集漂移
   enable:
     - bodyclose
     - errcheck
+    - gocritic
+    - gosec
     - govet
     - ineffassign
+    - misspell
     - revive
     - sqlclosecheck
     - staticcheck
+    - unparam
+    - unused
   exclusions:
     # 前端依赖目录非本仓 Go 源码（不入库的第三方生成代码），不纳入静态检查
     paths:
       - frontend/node_modules
+    rules:
+      # 测试辅助代码会刻意构造不完整 Cookie、临时文件权限和固定参数；安全门禁聚焦生产路径
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+      # dHash 按位保存到 int64 字段，读取时需要按原始 64 位恢复，非数值意义转换
+      - path: internal/library/dedup\.go
+        linters:
+          - gosec
+        text: "G115:"
+      # 外部媒体工具由配置解析与固定参数构造约束，保留集中说明，不在代码内散落 nolint
+      - path: internal/library/(imageconvert|metadata|thumbnail)\.go
+        linters:
+          - gosec
+        text: "G204:"
+      - path: internal/library/(metadata|upload)\.go
+        linters:
+          - gosec
+        text: "G304:"
+      - path: internal/transcoder/(codec|encoder_probe)\.go
+        linters:
+          - gosec
+        text: "G204:"
+      - path: internal/transcoder/pipeline\.go
+        linters:
+          - gosec
+        text: "G204:"
+      - path: internal/transcoder/subtitle\.go
+        linters:
+          - gosec
+        text: "G304:"
+      # HLS 文件只在应用私有 HLS 根目录下按 mediaID/档位读写，由路由层做路径清理
+      - path: internal/player/(hls|hls_manager)\.go
+        linters:
+          - gosec
+        text: "G(304|306):"
+      # dHash 只读取本应用生成的缩略图缓存路径
+      - path: internal/library/dhash\.go
+        linters:
+          - gosec
+        text: "G304:"
+      # 播放服务只打开已入库媒体路径，访问入口已过鉴权与媒体记录查找
+      - path: internal/playback/service\.go
+        linters:
+          - gosec
+        text: "G304:"
+      # SMB 密码仅在 smb 包内序列化后立即加密落盘，不作为 HTTP 明文响应
+      - path: internal/smb/credentials\.go
+        linters:
+          - gosec
+        text: "G(117|304):"
+      # 自更新必须给新二进制可执行权限，且目标路径来自当前可执行文件或已校验资产
+      - path: internal/update/(apply|asset|download)\.go
+        linters:
+          - gosec
+        text: "G(204|302|304|702):"
+      # 转码模块必须调用 ffmpeg/ffprobe，路径来源由配置解析与可用性探测约束
+      - path: internal/transcoder/(fmp4|hls_pre_slice|multi_pipeline)\.go
+        linters:
+          - gosec
+        text: "G204:"
 
 formatters:
   # 格式化检查（gofmt/goimports），由 `golangci-lint fmt` 应用、`run` 报告

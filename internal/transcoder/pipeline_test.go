@@ -123,9 +123,7 @@ func TestSelectBestEncoder_Fallback(t *testing.T) {
 	// 在没有硬件加速的环境中，应降级为软件编码
 	if deviceType != "" {
 		t.Logf("检测到硬件加速: %s (%s)，跳过降级验证", name, deviceType)
-	} else {
-		if name != "libx264" {
-			t.Fatalf("期望软件编码为 libx264, 实际 %s", name)
-		}
+	} else if name != "libx264" {
+		t.Fatalf("期望软件编码为 libx264, 实际 %s", name)
 	}
 }

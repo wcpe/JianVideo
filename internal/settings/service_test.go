@@ -166,8 +166,10 @@ func TestDebugLog(t *testing.T) {
 
 // TestParseDebugLog 纯函数解析各取值。
 func TestParseDebugLog(t *testing.T) {
+	const paddedTrueSetting = " 1 "
+
 	cases := map[string]bool{
-		"1": true, "true": true, " 1 ": true,
+		"1": true, "true": true, paddedTrueSetting: true,
 		"0": false, "false": false, "": false, "yes": false,
 	}
 	for in, want := range cases {

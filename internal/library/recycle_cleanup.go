@@ -90,7 +90,7 @@ func (s *Service) CleanupRecycle(drivePaths map[string]string) (CleanupResult, e
 			dateDir = mf.DeletedAt.Format("2006-01-02")
 		}
 		targetDir := filepath.Join(filepath.FromSlash(normalized[drive]), dateDir)
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		if err := os.MkdirAll(targetDir, 0o750); err != nil {
 			log.Printf("[WARN] 回收站清理：创建目标目录失败: %s, err=%v", targetDir, err)
 			result.Failed++
 			continue

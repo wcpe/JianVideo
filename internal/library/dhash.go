@@ -69,11 +69,19 @@ func resizeGrayNearest(img image.Image, w, h int) []uint8 {
 			}
 			// image 的 RGBA() 返回 16 位预乘分量，右移 8 位回到 0-255
 			r, g, bl, _ := img.At(sx, sy).RGBA()
-			r8, g8, b8 := r>>8, g>>8, bl>>8
-			out[y*w+x] = uint8((299*r8 + 587*g8 + 114*b8) / 1000)
+			out[y*w+x] = weightedGray(r>>8, g>>8, bl>>8)
 		}
 	}
 	return out
+}
+
+// weightedGray 把 0-255 的 RGB 分量转换为灰度值。
+func weightedGray(r, g, b uint32) uint8 {
+	gray := (299*uint64(r) + 587*uint64(g) + 114*uint64(b)) / 1000
+	if gray > 255 {
+		return 255
+	}
+	return uint8(gray)
 }
 
 // hammingDistance 计算两个 64 位哈希的汉明距离（不同位的个数）。

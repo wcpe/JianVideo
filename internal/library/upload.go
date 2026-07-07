@@ -110,12 +110,12 @@ func ResolveUploadConflict(path string, exists func(string) bool) (string, error
 // 先写 destPath+".part" 再 rename，避免半截文件被扫描索引。写入失败尽力清理临时文件。
 func SaveUploadFile(destPath string, src io.Reader) error {
 	diskDest := filepath.FromSlash(destPath)
-	if err := os.MkdirAll(filepath.Dir(diskDest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(diskDest), 0o750); err != nil {
 		return fmt.Errorf("创建上传目录失败: %w", err)
 	}
 
 	tmpPath := diskDest + ".part"
-	f, err := os.Create(tmpPath)
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}

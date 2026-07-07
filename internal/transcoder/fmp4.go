@@ -165,7 +165,7 @@ func RunFMP4ToDir(ctx context.Context, mediaID int64, inputPath, codec, outputDi
 	if err := os.RemoveAll(outputDir); err != nil {
 		return nil, fmt.Errorf("清理旧 fMP4 产物失败: %w", err)
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return nil, fmt.Errorf("创建 fMP4 输出目录失败: %w", err)
 	}
 

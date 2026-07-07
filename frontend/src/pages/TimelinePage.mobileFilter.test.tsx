@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw';
 import TimelinePage from './TimelinePage';
 import { server } from '@/mocks/beforeAll';
 
-// 移动端筛选折叠（FR-86）：搜索框常驻、筛选控件收进「筛选」抽屉。
+// 移动端筛选折叠（FR-86）：筛选控件收进「筛选」抽屉。
 // jsdom 下 matchMedia.matches=false，hiddenFrom/visibleFrom 仅做 CSS 显隐、元素不卸载；
 // 抽屉 Drawer 关闭时其内容不渲染到 DOM，故未打开前文档中无重复筛选控件。
 // 本测试以「触发器存在 + 抽屉内控件可达 + 调整带参 + 收起保留」断言，不依赖真实视口尺寸。
@@ -42,18 +42,16 @@ describe('TimelinePage 移动端筛选折叠（FR-86）', () => {
     );
   });
 
-  it('提供「筛选」抽屉触发器，搜索框常驻在抽屉之外', async () => {
+  it('提供「筛选」抽屉触发器', async () => {
     renderPage();
 
-    // 搜索框常驻（不收进抽屉）
-    expect(await screen.findByPlaceholderText(/搜索：文件名/)).toBeInTheDocument();
     // 移动端「筛选」触发按钮存在
-    expect(screen.getByRole('button', { name: '筛选' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '筛选' })).toBeInTheDocument();
   });
 
   it('默认抽屉关闭：抽屉内的筛选控件未渲染', async () => {
     renderPage();
-    await screen.findByPlaceholderText(/搜索：文件名/);
+    await screen.findByRole('button', { name: '筛选' });
 
     // 抽屉未打开时（桌面内联区在 jsdom 中以 visibleFrom 隐藏但元素存在，
     // 仍可查到一份内联控件；抽屉那份不渲染）——断言不存在重复弹层 dialog
@@ -86,7 +84,7 @@ describe('TimelinePage 移动端筛选折叠（FR-86）', () => {
   it('收起抽屉后再次打开，已选筛选项保留', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByPlaceholderText(/搜索：文件名/);
+    await screen.findByRole('button', { name: '筛选' });
 
     // 打开 → 分类选「收藏夹」（FR-139）
     await user.click(screen.getByRole('button', { name: '筛选' }));

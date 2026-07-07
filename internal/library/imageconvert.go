@@ -75,7 +75,7 @@ var (
 func InitConvertCacheDir(baseDir string) {
 	convertCacheDirOnce.Do(func() {
 		convertCacheDir = filepath.Join(baseDir, "image_cache")
-		if err := os.MkdirAll(convertCacheDir, 0o755); err != nil {
+		if err := os.MkdirAll(convertCacheDir, 0o750); err != nil {
 			// 目录创建失败不致命：后续转换会因写盘失败而降级并记日志
 			log.Printf("[WARN] 初始化图片转换缓存目录失败: dir=%s, err=%v", convertCacheDir, err)
 		}

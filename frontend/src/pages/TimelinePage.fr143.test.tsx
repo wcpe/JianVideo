@@ -57,7 +57,7 @@ describe('TimelinePage 筛选抽屉一键重置（FR-143）', () => {
   it('抽屉内「重置筛选」无筛选时禁用、选筛选后启用，点击清空并关抽屉', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByPlaceholderText(/搜索：文件名/);
+    await screen.findByRole('button', { name: '筛选' });
 
     await user.click(screen.getByRole('button', { name: '筛选' }));
     const dialog = await screen.findByRole('dialog');

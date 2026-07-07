@@ -94,7 +94,11 @@ func TestRealRunFFmpegThumbnail_CapturesStderr(t *testing.T) {
 		t.Fatalf("错误应携带 ffmpeg stderr 段，实际: %q", msg)
 	}
 	// stderr 段除「exit status」外应含具体原因文本（ffmpeg 对找不到文件的报错）
-	stderrPart := msg[strings.Index(msg, "ffmpeg stderr:"):]
+	idx := strings.Index(msg, "ffmpeg stderr:")
+	if idx < 0 {
+		t.Fatalf("错误应携带 ffmpeg stderr 段，实际: %q", msg)
+	}
+	stderrPart := msg[idx:]
 	if strings.TrimSpace(strings.TrimPrefix(stderrPart, "ffmpeg stderr:")) == "" {
 		t.Fatalf("ffmpeg stderr 段为空，未捕获到具体原因，实际: %q", msg)
 	}

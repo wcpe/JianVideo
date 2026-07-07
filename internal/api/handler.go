@@ -250,7 +250,7 @@ func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string)
 		return
 	}
 
-	dataDir := filepath.Join("data")
+	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Printf("[WARN] 创建数据目录失败: %v", err)
 		return
@@ -563,7 +563,7 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 		return
 	}
 
-	dataDir := filepath.Join("data")
+	dataDir := "data"
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "创建数据目录失败"})
 		return

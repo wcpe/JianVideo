@@ -133,7 +133,7 @@ func main() {
 
 	// 创建 HLS 切片存储目录
 	hlsDir := filepath.Join(filepath.Dir(cfg.DBPath), "hls")
-	if err := os.MkdirAll(hlsDir, 0o755); err != nil {
+	if err := os.MkdirAll(hlsDir, 0o750); err != nil {
 		log.Fatalf("创建 HLS 目录失败: %v", err)
 	}
 	hlsMgr := player.NewHLSManager(hlsDir)
@@ -263,10 +263,17 @@ func main() {
 	// 自更新重启时新进程可能早于旧进程释放端口启动，故监听带短重试等待端口释放（FR-46）。
 	ln, err := listenWithRetry(addr, 10*time.Second)
 	if err != nil {
-		log.Fatalf("监听端口失败: %v", err)
+		log.Printf("[ERROR] 监听端口失败: %v", err)
+		return
 	}
-	if err := http.Serve(ln, r); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("服务启动失败: %v", err)
+	server := &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Printf("[ERROR] 服务启动失败: %v", err)
+		return
 	}
 }
 

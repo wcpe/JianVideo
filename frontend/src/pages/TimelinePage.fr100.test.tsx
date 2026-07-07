@@ -6,7 +6,7 @@ import { http, HttpResponse } from 'msw';
 import TimelinePage from './TimelinePage';
 import { server } from '@/mocks/beforeAll';
 
-// 时间轴筛选分组（FR-100）：把搜索框之外的筛选控件按「内容筛选 | 视图」分组成带标签容器，
+// 时间轴筛选分组（FR-100）：把筛选控件按「内容筛选 | 视图」分组成带标签容器，
 // 既有受控控件（收藏/标签/类型/大小/日期/缩放）仍在各自分组内可达、请求参数不变。
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -41,7 +41,6 @@ describe('TimelinePage 筛选分组（FR-100）', () => {
 
   it('筛选区按「内容筛选 / 视图」两组带标签容器渲染', async () => {
     renderPage();
-    await screen.findByPlaceholderText(/搜索：文件名/);
 
     // 两个分组容器（role=group）均存在
     const contentGroup = await screen.findByRole('group', { name: '内容筛选' });

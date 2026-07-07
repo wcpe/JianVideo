@@ -160,7 +160,7 @@ func generateTestVideo(outputPath string) error {
 	}
 
 	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 
@@ -282,7 +282,7 @@ func detectContainerFormat(filePath string, probeFormatName string) string {
 
 // EnsureDir 确保目录存在。
 func EnsureDir(path string) error {
-	return os.MkdirAll(path, 0o755)
+	return os.MkdirAll(path, 0o750)
 }
 
 // Now 返回当前时间（可测试性包装）。

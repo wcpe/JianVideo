@@ -154,7 +154,7 @@ func (m *HLSManager) GetMasterM3U8(mediaID int64) (string, error) {
 // SaveMasterM3U8 保存指定媒体文件的 master.m3u8 内容。
 func (m *HLSManager) SaveMasterM3U8(mediaID int64, content string) error {
 	mediaDir := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID))
-	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+	if err := os.MkdirAll(mediaDir, 0o750); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 	masterPath := filepath.Join(mediaDir, "master.m3u8")

@@ -43,8 +43,12 @@ func downloadToTemp(ctx context.Context, client *http.Client, url, dir, name str
 	}
 	// 资源清理，关闭错误可忽略
 	defer func() { _ = resp.Body.Close() }()
-	dst := filepath.Join(dir, name)
-	f, err := os.Create(dst)
+	safeName := filepath.Base(name)
+	if safeName == "." || safeName == string(filepath.Separator) {
+		return "", fmt.Errorf("下载文件名无效")
+	}
+	dst := filepath.Join(dir, safeName)
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", err
 	}

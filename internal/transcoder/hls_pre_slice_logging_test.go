@@ -47,7 +47,11 @@ func TestProbeResolution_ErrorIncludesFFmpegOutput(t *testing.T) {
 	if !strings.Contains(err.Error(), "ffmpeg 输出:") {
 		t.Fatalf("错误应携带 ffmpeg 输出段，实际: %q", err.Error())
 	}
-	outPart := err.Error()[strings.Index(err.Error(), "ffmpeg 输出:"):]
+	idx := strings.Index(err.Error(), "ffmpeg 输出:")
+	if idx < 0 {
+		t.Fatalf("错误应携带 ffmpeg 输出段，实际: %q", err.Error())
+	}
+	outPart := err.Error()[idx:]
 	if strings.TrimSpace(strings.TrimPrefix(outPart, "ffmpeg 输出:")) == "" {
 		t.Fatalf("ffmpeg 输出段为空，未保留具体原因，实际: %q", err.Error())
 	}

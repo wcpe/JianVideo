@@ -131,7 +131,7 @@ func (mp *MultiPipeline) RunMultiToDir(ctx context.Context, inputPath string, qu
 	}
 
 	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		if err := os.MkdirAll(outputDir, 0o750); err != nil {
 			return fmt.Errorf("创建输出目录失败: %w", err)
 		}
 	}

@@ -112,8 +112,8 @@ func (s *Sampler) collect() models.MetricSample {
 	return models.MetricSample{
 		SampledAt:       time.Now().UTC(),
 		CPUPercent:      collectCPUPercent(),
-		MemUsedBytes:    int64(mem.Alloc),
-		MemSysBytes:     int64(mem.Sys),
+		MemUsedBytes:    uint64ToInt64(mem.Alloc),
+		MemSysBytes:     uint64ToInt64(mem.Sys),
 		DiskUsedBytes:   diskUsed,
 		DiskTotalBytes:  diskTotal,
 		TranscodeActive: s.transcodeActive(),
@@ -145,7 +145,15 @@ func (s *Sampler) collectDisk() (used int64, total int64) {
 	if err != nil || u == nil {
 		return 0, 0
 	}
-	return int64(u.Used), int64(u.Total)
+	return uint64ToInt64(u.Used), uint64ToInt64(u.Total)
+}
+
+// uint64ToInt64 对系统指标做饱和转换，避免极端平台数值溢出。
+func uint64ToInt64(v uint64) int64 {
+	if v > 1<<63-1 {
+		return 1<<63 - 1
+	}
+	return int64(v)
 }
 
 // prune 裁剪超出保留期的样本，保证表有界。失败仅记日志、不影响本次采样。
