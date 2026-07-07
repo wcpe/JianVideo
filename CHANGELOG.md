@@ -6,6 +6,9 @@
 
 ## 未发布
 
+### 新增
+- **FR2-006 API client 与多端基础**：`packages/media-client` 新增 Space 感知 API client、timeout/retry、统一 query key、媒体分页/详情查询、任务详情查询、旧任务状态 `completed/error` 兼容映射与端能力检测；`packages/mock` 新增最小 v2 mock fetch/handlers，覆盖媒体列表、详情、任务轮询与 Space 切换；`packages/theme` 消费端能力结果决定密度，`apps/wiki` 增加 client demo 展示列表、详情、分页、任务轮询和 Space 切换。
+
 ## 0.21.0（2026-07-08）
 
 ### 文档 / 工程

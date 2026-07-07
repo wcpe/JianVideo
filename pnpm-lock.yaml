@@ -182,6 +182,10 @@ importers:
         version: link:../typescript-config
 
   packages/theme:
+    dependencies:
+      '@jianvideo/media-client':
+        specifier: workspace:*
+        version: link:../media-client
     devDependencies:
       '@jianvideo/eslint-config':
         specifier: workspace:*

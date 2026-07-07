@@ -1,6 +1,6 @@
 # 功能规格：API client 与多端基础
 
-> 状态：草拟　·　关联 PRD：FR2-006　·　阶段：P1 `0.22.x`　·　分支：未指定
+> 状态：已实现待发布　·　关联 PRD：FR2-006　·　阶段：P1 `0.22.x`　·　分支：`feature/fr2-006-api-client-multiend`
 
 ## 1. 背景与目标
 
@@ -40,14 +40,15 @@ v2 是自托管、视频优先、多端复用的 AI 媒体中心。P0.5 已在 [
 
 ## 4. 任务拆分
 
-- [ ] 建立 `packages/media-client` client 核心：请求封装、错误规范化、超时/重试、鉴权与 Space 上下文承载。
-- [ ] 定义 query key 工厂与失效策略，统一分页与任务轮询模式。
-- [ ] 定义 media/task/space 领域类型与查询函数，task 对齐 ADR-0055、space 对齐 ADR-0056。
-- [ ] 实现端能力检测（端平台/触控/网络），与 `packages/theme` 约定协同接口。
-- [ ] 对 `packages/mock` MSW handlers 跑通媒体列表/详情/分页/任务轮询/Space 切换全链路。
-- [ ] 在 `apps/wiki` 增加 client 用法样例（列表、详情、分页、任务轮询、Space 切换）。
-- [ ] 接入 `tsc --noEmit` 与 ESLint strict-type-checked 门禁并全绿。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 建立 `packages/media-client` client 核心：请求封装、错误规范化、超时、鉴权与 Space 上下文承载。
+- [x] 补齐 `packages/media-client` 重试策略。
+- [x] 定义 query key 工厂与失效策略，统一分页与任务轮询模式。
+- [x] 定义 media/task/space 领域类型与查询函数，task 对齐 ADR-0055、space 对齐 ADR-0056。
+- [x] 实现端能力检测（端平台/触控/网络），与 `packages/theme` 约定协同接口。
+- [x] 对 `packages/mock` MSW handlers 跑通媒体列表/详情/分页/任务轮询/Space 切换全链路。
+- [x] 在 `apps/wiki` 增加 client 用法样例（列表、详情、分页、任务轮询、Space 切换）。
+- [x] 接入 `tsc --noEmit` 与 ESLint strict-type-checked 门禁并全绿。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

@@ -32,6 +32,50 @@
 
 ## 3. 端点 / 方法
 
+### v2 mock 先行 API client 契约（FR2-006）
+
+本节描述 `packages/media-client` 与 `packages/mock` 当前对齐的 mock 先行契约，仅用于 P1 多端 client / wiki / mock 测试；真实后端接入仍归属 P2。请求携带 `X-JianVideo-Space-Id: <space_id>` 表示当前 Space，client 同时支持 `Authorization: Bearer <token>` 承接既有单用户 JWT，并支持可配置 timeout / retry。
+
+- **方法 / 路径**：`GET /api/v2/media?page=1&page_size=20`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": "media-family-001",
+        "space_id": "space-default",
+        "title": "家庭素材 001",
+        "kind": "video",
+        "duration_seconds": 120,
+        "created_at": "2026-07-01T10:00:00Z"
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "total": 1
+  }
+  ```
+
+- **方法 / 路径**：`GET /api/v2/media/:id`
+- **响应**（200）：单个媒体对象，字段同列表项；若媒体不属于当前 Space，返回 `404 MEDIA_NOT_FOUND`。
+
+- **方法 / 路径**：`GET /api/v2/tasks/:id`
+- **响应**（200）：
+  ```json
+  {
+    "id": "task-transcode-default",
+    "space_id": "space-default",
+    "type": "transcode",
+    "status": "running",
+    "priority": 10,
+    "progress": 0.5,
+    "error": null,
+    "created_at": "2026-07-01T10:00:00Z",
+    "updated_at": "2026-07-01T10:00:02Z"
+  }
+  ```
+- **说明**：`status` 对齐 ADR-0055，取 `pending` / `running` / `succeeded` / `failed` / `canceled`；client 兼容 mock 或旧队列返回的 `completed` / `error`，分别映射为 `succeeded` / `failed`。
+
 ### 登录
 
 - **方法 / 路径**：`POST /api/auth/login`

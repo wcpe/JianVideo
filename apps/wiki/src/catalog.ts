@@ -16,6 +16,13 @@ export const wikiPreviewCatalog: readonly UiPreviewDescriptor[] = [
     states: ['default', 'loading', 'error'],
     snippet: createSnippet('TaskStatusPreview', '@jianvideo/ui'),
   },
+  {
+    id: 'api-client-demo',
+    title: 'API client 示例',
+    group: 'space',
+    states: ['default', 'loading', 'error'],
+    snippet: createSnippet('ClientDemoPanel', '@jianvideo/wiki'),
+  },
 ] as const;
 
 export function listWikiScenarioTitles(): readonly string[] {

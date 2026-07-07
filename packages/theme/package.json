@@ -16,6 +16,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+  "dependencies": {
+    "@jianvideo/media-client": "workspace:*"
+  },
   "devDependencies": {
     "@jianvideo/eslint-config": "workspace:*",
     "@jianvideo/typescript-config": "workspace:*"

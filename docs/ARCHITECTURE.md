@@ -116,6 +116,14 @@ jianvideo/
     └── image_cache/           图片缓存
 ```
 
+### 2.2 v2 API client 与 mock 先行基础（FR2-006）
+
+`packages/media-client` 是 ADR-0054 目标工作区中的多端数据访问层，当前已落地 mock 先行切片：统一 `createApiClient` 请求入口、可配置 timeout/retry、`ApiError` 错误规范化、`X-JianVideo-Space-Id` Space 上下文头、Bearer 鉴权头、媒体分页 / 详情查询、任务详情查询、任务轮询间隔和 TanStack Query key 工厂。任务状态按 ADR-0055 使用 `pending` / `running` / `succeeded` / `failed` / `canceled`，并兼容旧状态 `completed`→`succeeded`、`error`→`failed`。
+
+`packages/mock` 暴露纯 TypeScript `createMockFetch` 与 `handleMockApiRequest`，作为后续 MSW browser worker / 测试 server 的同源 handler 基础。当前 mock 覆盖 `/api/v2/media`、`/api/v2/media/:id`、`/api/v2/tasks/:id`，并按 `X-JianVideo-Space-Id` 过滤媒体与任务。该切片不接真实后端、不改 Go 单体运行时；真实后端接入仍归属 P2。
+
+端能力检测由 `media-client` 的纯函数输出 `platform`（Web/Desktop/Mobile/TV/车机）、`pointer`、`touch` 与 `network`，`packages/theme` 只消费该结果决定密度，不重复探测平台。`apps/wiki` 通过独立 client demo 展示媒体列表、详情、分页、任务轮询与 Space 切换。
+
 ## 3. 数据模型
 
 ### 核心实体

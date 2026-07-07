@@ -9,4 +9,8 @@ describe('wiki catalog', () => {
   it('展示共享 mock 场景', () => {
     expect(listWikiScenarioTitles()).toContain('百万素材压力场景');
   });
+
+  it('登记 API client 示例', () => {
+    expect(wikiPreviewCatalog.map((item) => item.id)).toContain('api-client-demo');
+  });
 });

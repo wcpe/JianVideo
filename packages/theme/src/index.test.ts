@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDensity, themeTokens } from './index';
+import { resolveDensity, resolveDensityFromCapabilities, themeTokens } from './index';
 
 describe('theme package', () => {
   it('触控设备使用舒适密度', () => {
@@ -12,5 +12,24 @@ describe('theme package', () => {
 
   it('暴露稳定的主题 token', () => {
     expect(themeTokens.radiusSm).toBe('6px');
+  });
+
+  it('消费 media-client 端能力结果决定密度', () => {
+    expect(
+      resolveDensityFromCapabilities({
+        network: 'fast',
+        platform: 'tv',
+        pointer: 'coarse',
+        touch: false,
+      }),
+    ).toBe('comfortable');
+    expect(
+      resolveDensityFromCapabilities({
+        network: 'standard',
+        platform: 'desktop',
+        pointer: 'fine',
+        touch: false,
+      }),
+    ).toBe('compact');
   });
 });
