@@ -1,3 +1,4 @@
+// Package main 提供 FR2-063 本机 SQLite 查询压测命令。
 package main
 
 import (
@@ -15,9 +16,9 @@ import (
 
 const (
 	maxRows       int64 = 10_000_000
-	pageSize            = 50
-	sampleCount         = 8
-	schemaVersion       = 6302
+	pageSize      int   = 50
+	sampleCount   int   = 8
+	schemaVersion int   = 6302
 )
 
 type querySpec struct {
@@ -45,7 +46,9 @@ func main() {
 	if err != nil {
 		exit(err)
 	}
-	defer db.Close()
+	defer func() {
+		_ = db.Close()
+	}()
 	db.SetMaxOpenConns(1)
 
 	if err := configure(db); err != nil {
@@ -218,7 +221,7 @@ func taskQueueSpec(dataset string, rows int64) querySpec {
 
 func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 	durations := make([]float64, 0, sampleCount)
-	for sample := 0; sample < sampleCount; sample += 1 {
+	for sample := 0; sample < sampleCount; sample++ {
 		duration, count, err := timeQuery(db, spec)
 		if err != nil {
 			return queryResult{}, err
@@ -236,7 +239,7 @@ func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 		P95:           p95(durations),
 		Query:         spec.Query,
 		Samples:       len(durations),
-		ScannedRows:   pageSize,
+		ScannedRows:   int64(pageSize),
 		SQL:           spec.SQL,
 	}, nil
 }
@@ -249,14 +252,16 @@ func timeQuery(db *sql.DB, spec querySpec) (float64, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 	count := 0
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return 0, 0, err
 		}
-		count += 1
+		count++
 	}
 	if err := rows.Err(); err != nil {
 		return 0, 0, err
