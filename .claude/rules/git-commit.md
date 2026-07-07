@@ -58,13 +58,13 @@ feat: 完成第一期核心转码功能
 
 ### 2.1 应当入库的耐久文档
 
-- 产品 / 需求：`README.md`、`CHANGELOG.md`、`docs/PRD.md`（活文档，随需求变更同 PR 更新）。
+- 产品 / 需求：`README.md`、`CHANGELOG.md`、`docs/PRD.md`、`docs/ROADMAP.md`（活文档，随需求变更同 PR 更新）。
 - 架构：`docs/ARCHITECTURE.md`、`docs/adr/*.md`、`docs/API.md`。
 - 协作治理：`docs/CONTRIBUTING.md`、`.claude/rules/*.md`。
 
 ### 2.2 严禁入库的易朽过程稿（已由 `.gitignore` 排除 `/.tmp/`）
 
-- 实施计划 / 里程碑 / 路线图：`实施计划.md`、`PLAN.md`、`roadmap.md` 等。
+- 实施计划 / 里程碑 / 临时路线图：`实施计划.md`、`PLAN.md`、临时 `roadmap.md` 等。正式产品路线图仅允许 `docs/ROADMAP.md`。
 - 过程性报告：`IMPLEMENTATION.md`、`执行报告.md`、`分析.md`、`audit-*.md` 等。
 - AI 助手过程性笔记、交流稿、思路记录。
 

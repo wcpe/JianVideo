@@ -62,6 +62,60 @@
 
 **依赖方向**：`web` → `api` → `library` / `playback` / `player` / `transcoder` → `db`，严格单向，禁止反向。`config` 和 `auth` 为横切关注点。
 
+### 2.1 代码目录结构
+
+> 当前 v0.20 单体真貌。apps/packages 目标结构见 [ADR-0054](adr/0054-apps-workspace-toolchain-quality-gates.md) 与 [`docs/specs/fr2-002-workspace-toolchain-quality.md`](specs/fr2-002-workspace-toolchain-quality.md)，代码迁移完成后再回写本节。
+
+```text
+jianvideo/
+├── main.go                    程序入口：装配各模块、启动 HTTP 服务
+├── VERSION                    版本号唯一真源
+├── go.mod / go.sum            Go 依赖清单
+├── Makefile                   构建 / 测试脚本入口
+├── config/
+│   └── config.go              配置加载（环境变量优先）
+├── internal/                  后端业务模块（禁被仓库外导入）
+│   ├── api/                   API 路由注册与请求处理器（轻量委托）
+│   ├── auth/                  单用户登录 / 会话（JWT + bcrypt）
+│   ├── config/               运行期配置辅助
+│   ├── db/                    SQLite 初始化与 GORM CRUD
+│   │   └── models/            GORM 数据模型
+│   ├── dblog/                 可运行时切级别的 GORM 日志器
+│   ├── library/              媒体库、扫描队列、缩略图、EXIF / 时间提取
+│   ├── metrics/              指标采样与持久化
+│   ├── netproxy/             出站 HTTP 全局可热更代理
+│   ├── playback/             播放进度、Range 请求、会话
+│   ├── player/               HLS 切片写入与 m3u8 管理
+│   ├── settings/             运行期键值设置真源
+│   ├── share/                分享链接 token 生命周期
+│   ├── smb/                  SMB(CIFS) 客户端
+│   ├── transcoder/          FFmpeg 转码、多码率、硬件加速、字幕、预生成队列
+│   ├── update/              自更新
+│   ├── watcher/             文件系统事件监听（fsnotify）
+│   └── web/                 HTTP 服务、静态资源服务、认证中间件
+├── frontend/                  React + TypeScript + Vite 前端
+│   ├── src/
+│   │   ├── api/               后端 API 客户端
+│   │   ├── components/        UI 组件
+│   │   ├── pages/             页面
+│   │   ├── hooks/             React hooks
+│   │   ├── stores/            前端状态
+│   │   ├── mocks/             MSW mock
+│   │   ├── utils/ types/ data/ assets/   工具 / 类型 / 静态数据 / 资源
+│   │   ├── theme.ts           主题
+│   │   └── *.test.ts          前端单元测试
+│   ├── public/               公共静态资源
+│   └── dist/                 构建产物（`go:embed` 内嵌后即运行时真源）
+├── e2e/                       端到端测试（Go 后端流程 + Playwright 浏览器）
+├── scripts/                   构建 / 版本 / changelog 脚本
+├── docs/                      PRD / ROADMAP / ARCHITECTURE / ADR / specs / API
+└── 运行期生成（可重建、不入库）
+    ├── jianvideo.db           SQLite 元数据库（WAL）
+    ├── hls/                   HLS 切片输出
+    ├── thumbnails/            缩略图缓存
+    └── image_cache/           图片缓存
+```
+
 ## 3. 数据模型
 
 ### 核心实体
