@@ -1,0 +1,59 @@
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: system-ui, sans-serif;
+}
+
+.wiki-shell {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.wiki-header {
+  margin-bottom: 24px;
+}
+
+.wiki-header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.wiki-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.wiki-card {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.wiki-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.wiki-card p {
+  margin: 0;
+  color: #334155;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.wiki-scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.wiki-scenarios span {
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 6px 10px;
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@jianvideo/ui",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jianvideo/theme": "workspace:*"
+  },
+  "devDependencies": {
+    "@jianvideo/eslint-config": "workspace:*",
+    "@jianvideo/typescript-config": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.6"
+  }
+}

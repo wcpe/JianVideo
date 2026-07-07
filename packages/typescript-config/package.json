@@ -1,0 +1,16 @@
+{
+  "name": "@jianvideo/typescript-config",
+  "private": true,
+  "version": "0.0.0",
+  "files": [
+    "base.json",
+    "react.json"
+  ],
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "coverage": "node -e \"process.exit(0)\"",
+    "lint": "node -e \"process.exit(0)\"",
+    "test": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\""
+  }
+}

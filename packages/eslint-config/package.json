@@ -1,0 +1,25 @@
+{
+  "name": "@jianvideo/eslint-config",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "coverage": "node -e \"process.exit(0)\"",
+    "lint": "eslint .",
+    "test": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\""
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.6.0",
+    "typescript-eslint": "^8.59.2"
+  },
+  "devDependencies": {
+    "eslint": "^10.3.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@jianvideo/wiki",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "coverage": "vitest run --coverage",
+    "dev": "vite --host 127.0.0.1",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jianvideo/media-client": "workspace:*",
+    "@jianvideo/mock": "workspace:*",
+    "@jianvideo/render-pixi": "workspace:*",
+    "@jianvideo/theme": "workspace:*",
+    "@jianvideo/ui": "workspace:*",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@jianvideo/eslint-config": "workspace:*",
+    "@jianvideo/typescript-config": "workspace:*"
+  }
+}
