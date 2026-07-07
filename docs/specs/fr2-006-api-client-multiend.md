@@ -1,6 +1,6 @@
 # 功能规格：API client 与多端基础
 
-> 状态：已实现待发布　·　关联 PRD：FR2-006　·　阶段：P1 `0.22.x`　·　分支：`feature/fr2-006-api-client-multiend`
+> 状态：已完成@0.22.0　·　关联 PRD：FR2-006　·　阶段：P1 `0.22.x`　·　分支：`feature/fr2-006-api-client-multiend`
 
 ## 1. 背景与目标
 
