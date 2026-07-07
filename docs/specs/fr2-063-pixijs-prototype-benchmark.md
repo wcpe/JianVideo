@@ -1,6 +1,6 @@
 # 功能规格：PixiJS 高密度渲染原型与前后端 Benchmark harness
 
-> 状态：已完成@0.22.0　·　关联 PRD：FR2-063　·　阶段：P1 `0.22.x`　·　分支：`feature/fr2-063-pixijs-prototype-benchmark`
+> 状态：已完成@v0.22.0　·　关联 PRD：FR2-063　·　阶段：P1 `0.22.x`　·　分支：`feature/fr2-063-pixijs-prototype-benchmark`
 
 ## 1. 背景与目标
 

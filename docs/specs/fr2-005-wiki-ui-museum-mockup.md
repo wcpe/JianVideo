@@ -1,6 +1,6 @@
 # 功能规格：Wiki UI 博物馆与 Mockup 先行
 
-> 状态：已完成@0.22.0　·　关联 PRD：FR2-005　·　阶段：P0.5 / P1 `0.22.x`　·　分支：`feature/fr2-005-wiki-ui-museum-mockup`
+> 状态：已完成@v0.22.0　·　关联 PRD：FR2-005　·　阶段：P0.5 / P1 `0.22.x`　·　分支：`feature/fr2-005-wiki-ui-museum-mockup`
 
 ## 1. 背景与目标
 
