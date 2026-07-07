@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDensity, resolveDensityFromCapabilities, themeTokens } from './index';
+import { resolveDensity, resolveDensityFromCapabilities, resolveMuseumTheme, themeProfiles, themeTokens } from './index';
 
 describe('theme package', () => {
   it('触控设备使用舒适密度', () => {
@@ -31,5 +31,20 @@ describe('theme package', () => {
         touch: false,
       }),
     ).toBe('compact');
+  });
+
+  it('暴露 wiki 可切换的亮暗主题与密度配置', () => {
+    expect(themeProfiles.map((profile) => profile.id)).toEqual(
+      expect.arrayContaining(['light-comfortable', 'dark-compact', 'mobile-comfortable']),
+    );
+    expect(resolveMuseumTheme('dark-compact').className).toBe('theme-dark density-compact');
+  });
+
+  it('移动主题会收敛为舒适密度', () => {
+    expect(resolveMuseumTheme('mobile-comfortable').density).toBe('comfortable');
+  });
+
+  it('未知主题抛出中文错误', () => {
+    expect(() => resolveMuseumTheme('missing')).toThrow('未知主题配置');
   });
 });

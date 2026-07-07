@@ -1,13 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { createMockFetch, findScenario, handleMockApiRequest } from './index';
+import {
+  createMockFetch,
+  findScenario,
+  handleMockApiRequest,
+  mockScenarios,
+  scanMockScenarioForSensitiveInfo,
+} from './index';
 
 describe('mock package', () => {
   it('能解析百万素材场景', () => {
     expect(findScenario('million-assets').dataset).toBe('target-1m');
   });
 
+  it('覆盖 wiki 必需的 mock 场景与状态面', () => {
+    const scenarioIds = mockScenarios.map((scenario) => scenario.id);
+    const surfaces = new Set(mockScenarios.flatMap((scenario) => scenario.surfaces));
+
+    expect(scenarioIds).toEqual(
+      expect.arrayContaining([
+        'empty-library',
+        'normal-library',
+        'million-assets',
+        'missing-thumbnail',
+        'hls-pending',
+        'transcode-failed',
+        'permission-denied',
+        'ai-review-pending',
+      ]),
+    );
+    expect(surfaces).toEqual(
+      new Set(['hls-preview', 'thumbnail', 'transcode-task', 'ai-task', 'space-permission', 'pixi-grid']),
+    );
+  });
+
+  it('mock 场景不包含敏感信息', () => {
+    expect(scanMockScenarioForSensitiveInfo()).toEqual([]);
+  });
+
   it('未知场景抛出中文错误', () => {
-    expect(() => findScenario('ai-review-pending')).toThrow('未知 mock 场景');
+    expect(() => findScenario('unknown-scenario' as never)).toThrow('未知 mock 场景');
   });
 
   it('按 Space 返回媒体分页', async () => {

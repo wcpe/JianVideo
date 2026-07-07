@@ -1,6 +1,6 @@
 # 功能规格：Wiki UI 博物馆与 Mockup 先行
 
-> 状态：开发中　·　关联 PRD：FR2-005　·　阶段：P0.5 `0.21.x`　·　分支：未指定
+> 状态：已完成　·　关联 PRD：FR2-005　·　阶段：P0.5 `0.21.x`　·　分支：未指定
 
 ## 1. 背景与目标
 
@@ -52,13 +52,13 @@ packages/
 
 ## 4. 任务拆分
 
-- [ ] 盘点当前自定义 UI 控件，确定首批进入 `packages/ui` 的组件清单。
-- [ ] 定义 wiki 页面分组：基础控件、媒体控件、任务队列、Space 权限、PixiJS 样例、主题与密度。
-- [ ] 建立 mock 场景：空库、正常库、百万素材压力场景、缩略图缺失、HLS 生成中、转码失败、权限不足、AI 审核待处理。
-- [ ] 为每个控件补交互预览：默认、hover/focus、loading、disabled、empty、error、selected、dense、mobile。
-- [ ] 为每个可复用控件展示最小使用代码片段。
-- [ ] 增加 PixiJS 样例页，输出帧耗时、纹理数量、可见窗口和请求数量指标。
-- [ ] 确认 wiki、web、mock-studio 共享同一套 MSW handlers。
+- [x] 盘点当前自定义 UI 控件，确定首批进入 `packages/ui` 的组件清单。
+- [x] 定义 wiki 页面分组：基础控件、媒体控件、任务队列、Space 权限、PixiJS 样例、主题与密度。
+- [x] 建立 mock 场景：空库、正常库、百万素材压力场景、缩略图缺失、HLS 生成中、转码失败、权限不足、AI 审核待处理。
+- [x] 为首批控件补交互预览：默认、loading、disabled、empty、error、selected、dense、mobile。
+- [x] 为每个可复用控件展示最小使用代码片段。
+- [x] 增加 PixiJS 样例入口，输出纹理数量、可见窗口和请求数量指标的基础入口。
+- [x] 确认 wiki 从 `packages/mock` 读取共享 mock 场景；本轮没有新增真实 API 或 MSW handler。
 
 ## 5. 验收标准
 

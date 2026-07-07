@@ -4,10 +4,16 @@
   "type": "module",
   "version": "0.0.0",
   "scripts": {
+    "build:deps": "pnpm --filter @jianvideo/mock build && pnpm --filter @jianvideo/ui build && pnpm --filter @jianvideo/theme build && pnpm --filter @jianvideo/render-pixi build",
     "build": "tsc -p tsconfig.json && vite build",
     "coverage": "vitest run --coverage",
     "dev": "vite --host 127.0.0.1",
     "lint": "eslint .",
+    "prebuild": "pnpm run build:deps",
+    "precoverage": "pnpm run build:deps",
+    "predev": "pnpm run build:deps",
+    "pretest": "pnpm run build:deps",
+    "pretypecheck": "pnpm run build:deps",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

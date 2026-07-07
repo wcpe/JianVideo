@@ -8,16 +8,88 @@ export type MockScenarioId =
   | 'permission-denied'
   | 'ai-review-pending';
 
+export type MockSurface =
+  | 'hls-preview'
+  | 'thumbnail'
+  | 'transcode-task'
+  | 'ai-task'
+  | 'space-permission'
+  | 'pixi-grid';
+
 export interface MockScenario {
   readonly id: MockScenarioId;
   readonly title: string;
   readonly dataset: 'smoke' | 'target-1m' | 'index-5m' | 'index-10m';
+  readonly summary: string;
+  readonly surfaces: readonly MockSurface[];
+  readonly sampleAssetPath: string;
 }
 
 export const mockScenarios: readonly MockScenario[] = [
-  { id: 'empty-library', title: '空媒体库', dataset: 'smoke' },
-  { id: 'normal-library', title: '正常媒体库', dataset: 'smoke' },
-  { id: 'million-assets', title: '百万素材压力场景', dataset: 'target-1m' },
+  {
+    id: 'empty-library',
+    title: '空媒体库',
+    dataset: 'smoke',
+    summary: '空态用于验证媒体库、任务队列和 Space 权限面板的无数据展示。',
+    surfaces: ['thumbnail', 'space-permission'],
+    sampleAssetPath: '/mock/media/empty',
+  },
+  {
+    id: 'normal-library',
+    title: '正常媒体库',
+    dataset: 'smoke',
+    summary: '正常库包含可播放 HLS 预览、可用缩略图和已完成任务。',
+    surfaces: ['hls-preview', 'thumbnail', 'transcode-task'],
+    sampleAssetPath: '/mock/media/normal-library/demo.mp4',
+  },
+  {
+    id: 'million-assets',
+    title: '百万素材压力场景',
+    dataset: 'target-1m',
+    summary: '百万素材压力场景用于展示 PixiJS 可见窗口与纹理指标入口。',
+    surfaces: ['pixi-grid', 'thumbnail'],
+    sampleAssetPath: '/mock/media/million-assets/asset-000001.mp4',
+  },
+  {
+    id: 'missing-thumbnail',
+    title: '缩略图缺失',
+    dataset: 'smoke',
+    summary: '缩略图缺失场景展示待生成、失败和降级占位状态。',
+    surfaces: ['thumbnail'],
+    sampleAssetPath: '/mock/media/missing-thumbnail/clip.mp4',
+  },
+  {
+    id: 'hls-pending',
+    title: 'HLS 生成中',
+    dataset: 'smoke',
+    summary: 'HLS 生成中场景展示预览卡等待切片、可重试与不可播放状态。',
+    surfaces: ['hls-preview', 'transcode-task'],
+    sampleAssetPath: '/mock/media/hls-pending/source.mov',
+  },
+  {
+    id: 'transcode-failed',
+    title: '转码失败',
+    dataset: 'smoke',
+    summary: '转码失败场景展示任务错误、失败原因摘要和重试入口。',
+    surfaces: ['transcode-task', 'hls-preview'],
+    sampleAssetPath: '/mock/media/transcode-failed/source.mkv',
+  },
+  {
+    id: 'permission-denied',
+    title: '权限不足',
+    dataset: 'smoke',
+    summary: 'Space 权限不足场景展示只读、不可删除和 AI 不可见状态。',
+    surfaces: ['space-permission'],
+    sampleAssetPath: '/mock/media/space-denied/private-demo.mp4',
+  },
+  {
+    id: 'ai-review-pending',
+    title: 'AI 审核待处理',
+    dataset: 'smoke',
+    summary: 'AI 审核待处理场景展示对象识别、OCR 和人工确认等待状态。',
+    surfaces: ['ai-task', 'space-permission'],
+    sampleAssetPath: '/mock/media/ai-review/clip.mp4',
+  },
 ] as const;
 
 export function findScenario(id: MockScenarioId): MockScenario {
@@ -198,4 +270,26 @@ function getRequestLike(input: RequestInfo | URL): Pick<Request, 'headers' | 'me
     return undefined;
   }
   return input;
+}
+
+export function scanMockScenarioForSensitiveInfo(): readonly string[] {
+  const values = mockScenarios.flatMap((scenario) => [
+    scenario.id,
+    scenario.title,
+    scenario.dataset,
+    scenario.summary,
+    scenario.sampleAssetPath,
+    ...scenario.surfaces,
+  ]);
+  return values.filter(hasSensitivePattern);
+}
+
+function hasSensitivePattern(value: string): boolean {
+  return [
+    /[A-Za-z]:[\\/]/,
+    /\/Users\/|\/home\//,
+    /\b(?:10|127|172\.(?:1[6-9]|2\d|3[0-1])|192\.168)\.\d{1,3}\.\d{1,3}\b/,
+    /\b(?:password|secret|token|apikey|api_key)\b/i,
+    /@[^/]+\.[^/]+/,
+  ].some((pattern) => pattern.test(value));
 }

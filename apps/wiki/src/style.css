@@ -19,6 +19,65 @@ body {
   font-size: 28px;
 }
 
+.wiki-toolbar,
+.wiki-controls,
+.wiki-inspector {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.wiki-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wiki-toolbar input,
+.wiki-controls select {
+  box-sizing: border-box;
+  min-height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #0f172a;
+  font: inherit;
+}
+
+.wiki-tabs,
+.wiki-state-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wiki-tabs button,
+.wiki-state-list button {
+  min-height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.wiki-tabs button[aria-pressed='true'] {
+  border-color: #2563eb;
+  background: #dbeafe;
+}
+
+.wiki-controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.wiki-controls label {
+  display: grid;
+  gap: 6px;
+}
+
 .wiki-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -37,7 +96,29 @@ body {
   font-size: 18px;
 }
 
-.wiki-card p {
+.wiki-card-meta {
+  margin: 0 0 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.wiki-card pre {
+  overflow: auto;
+  margin: 0;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.wiki-inspector {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.wiki-inspector code {
   margin: 0;
   color: #334155;
   font-family: ui-monospace, monospace;

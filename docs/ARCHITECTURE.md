@@ -66,6 +66,8 @@
 
 > 当前 v0.20 单体真貌。apps/packages 目标结构见 [ADR-0054](adr/0054-apps-workspace-toolchain-quality-gates.md) 与 [`docs/specs/fr2-002-workspace-toolchain-quality.md`](specs/fr2-002-workspace-toolchain-quality.md)，代码迁移完成后再回写本节。
 
+P0.5 工作区基线已落地首批前端应用与共享包：`apps/wiki` 是独立 Vite React UI 博物馆，不依赖真实后端；它只从 `packages/ui`、`packages/theme`、`packages/mock` 与 `packages/render-pixi` 读取 UI 描述、主题、mock 场景和 PixiJS 指标入口。`packages/ui` 暴露首批 UI 预览描述与 snippet，`packages/theme` 暴露 wiki 可切换主题 / 密度配置，`packages/mock` 暴露可 seed 重建的 mock 场景。`apps/web` 不得直接依赖 `apps/wiki`，未来主端只通过 `packages/*` 共享能力。
+
 ```text
 jianvideo/
 ├── main.go                    程序入口：装配各模块、启动 HTTP 服务
