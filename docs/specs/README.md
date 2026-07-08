@@ -36,6 +36,27 @@
 - [`fr2-006-api-client-multiend.md`](fr2-006-api-client-multiend.md)：统一媒体 API client、TanStack Query keys、Space 上下文、任务状态与端能力检测（mock 先行）。
 - [`fr2-063-pixijs-prototype-benchmark.md`](fr2-063-pixijs-prototype-benchmark.md)：PixiJS 100 万素材原型与前后端 Benchmark harness、mock 索引数据与 HLS 预览样例。
 
+## 当前 v2 P2 规格
+
+- [`fr2-007-storage-index-space.md`](fr2-007-storage-index-space.md)：存储库、Space 归属与数据库索引基线。
+- [`fr2-008-hls-transcode-queue.md`](fr2-008-hls-transcode-queue.md)：视频 HLS 预览与转码任务队列。
+- [`fr2-017-v020-v2-data-migration.md`](fr2-017-v020-v2-data-migration.md)：v0.20 到 v2 数据迁移与升级安全。
+- [`fr2-022-tool-download-proxy.md`](fr2-022-tool-download-proxy.md)：外部工具自动下载与代理。
+- [`fr2-024-config-layer-boundary.md`](fr2-024-config-layer-boundary.md)：配置分层边界。
+- [`fr2-025-media-types-extension-config.md`](fr2-025-media-types-extension-config.md)：媒体类型与扫描后缀可配置。
+- [`fr2-026-abr-transcode-playback.md`](fr2-026-abr-transcode-playback.md)：多码率自动转码与自适应播放。
+- [`fr2-027-scan-watch-incremental.md`](fr2-027-scan-watch-incremental.md)：定期扫描、增量更新与目录事件监听。
+- [`fr2-028-thumbnail-tiers.md`](fr2-028-thumbnail-tiers.md)：分档缩略图生成。
+- [`fr2-030-embedded-metadata.md`](fr2-030-embedded-metadata.md)：文件自带元数据解析。
+- [`fr2-031-offline-title-inference.md`](fr2-031-offline-title-inference.md)：本地离线影视信息推断。
+- [`fr2-037-task-queue-center.md`](fr2-037-task-queue-center.md)：通用异步任务队列中心。
+- [`fr2-040-audit-events.md`](fr2-040-audit-events.md)：全操作审计日志。
+- [`fr2-048-cache-management.md`](fr2-048-cache-management.md)：存储与缓存管理。
+- [`fr2-052-library-kinds.md`](fr2-052-library-kinds.md)：多媒体库分型。
+- [`fr2-056-hwaccel-management.md`](fr2-056-hwaccel-management.md)：硬件转码加速管理面板。
+- [`fr2-059-smart-cover-poster.md`](fr2-059-smart-cover-poster.md)：智能封面/海报。
+- [`fr2-061-file-hash-dedup.md`](fr2-061-file-hash-dedup.md)：文件级/哈希去重。
+
 ## 怎么用
 
 1. 复制 `_template.md` 到 `docs/specs/<feature>.md`。
