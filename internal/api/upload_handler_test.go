@@ -37,12 +37,22 @@ func waitFor(t *testing.T, cond func() bool) {
 // scanCalls 记录扫描 exec 被触发的次数，用于断言「上传后触发扫描」。
 func setupUploadRouter(t *testing.T) (*gin.Engine, *gorm.DB, string, *int64) {
 	t.Helper()
-	// 每个测试用独立命名的内存库（按测试名做 DSN），避免 cache=shared 跨测试串数据
-	dsn := "file:" + t.Name() + "?mode=memory&cache=shared&_busy_timeout=5000"
+	// 每个测试实例使用独立临时库，避免重复运行时共享内存库残留状态。
+	dsn := filepath.Join(t.TempDir(), "upload-test.db")
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("关闭测试数据库失败: %v", err)
+		}
+	})
 	if err := gdb.AutoMigrate(
 		&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{},
 		&models.Setting{}, &models.ScanTask{},
