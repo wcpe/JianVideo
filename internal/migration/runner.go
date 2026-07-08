@@ -281,13 +281,24 @@ func (r *Runner) ensureMetadataTables() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			scope TEXT NOT NULL,
 			space_id TEXT,
-			event_type TEXT NOT NULL,
+			actor_type TEXT NOT NULL DEFAULT 'system',
+			actor_id TEXT,
+			action TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			resource_type TEXT NOT NULL DEFAULT '',
+			resource_id TEXT,
 			migration_id TEXT,
 			message TEXT,
+			before_json TEXT,
+			after_json TEXT,
 			metadata_json TEXT,
+			request_id TEXT,
 			created_at DATETIME NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_created ON audit_events(scope, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_space_created ON audit_events(scope, space_id, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_action_created ON audit_events(action, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_resource_created ON audit_events(resource_type, resource_id, created_at, id);`,
 	}
 	for _, stmt := range statements {
 		if err := r.db.Exec(stmt).Error; err != nil {
@@ -360,9 +371,9 @@ func (r *Runner) recordAudit(eventType, migrationID, message string, backup Back
 	}
 	raw, _ := json.Marshal(metadata)
 	if err := r.db.Exec(
-		`INSERT INTO audit_events(scope, space_id, event_type, migration_id, message, metadata_json, created_at)
-		 VALUES ('system', NULL, ?, ?, ?, ?, ?)`,
-		eventType, migrationID, message, string(raw), r.options.Now(),
+		`INSERT INTO audit_events(scope, space_id, actor_type, action, event_type, resource_type, resource_id, migration_id, message, metadata_json, created_at)
+		 VALUES ('system', NULL, 'system', ?, ?, 'migration', ?, ?, ?, ?, ?)`,
+		eventType, eventType, migrationID, migrationID, message, string(raw), r.options.Now(),
 	).Error; err != nil {
 		return fmt.Errorf("写入迁移审计事件失败: %w", err)
 	}

@@ -72,6 +72,23 @@ func InitSchema(d *sql.DB) error {
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_extensions_library_extension ON media_extensions(library_id, extension);`,
+		`CREATE TABLE IF NOT EXISTS audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    space_id TEXT,
+    actor_type TEXT NOT NULL DEFAULT 'system',
+    actor_id TEXT,
+    action TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '',
+    resource_type TEXT NOT NULL DEFAULT '',
+    resource_id TEXT,
+    before_json TEXT,
+    after_json TEXT,
+    metadata_json TEXT,
+    request_id TEXT,
+    created_at DATETIME NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_space_created ON audit_events(scope, space_id, created_at, id);`,
 	}
 	for _, q := range queries {
 		if _, err := d.Exec(q); err != nil {

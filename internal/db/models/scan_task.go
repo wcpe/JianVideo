@@ -12,6 +12,8 @@ const (
 	ScanTaskStatusCompleted = "completed"
 	// ScanTaskStatusError 执行出错。
 	ScanTaskStatusError = "error"
+	// ScanTaskStatusCanceled 已取消、不会被 worker 执行。
+	ScanTaskStatusCanceled = "canceled"
 )
 
 // 扫描类型常量（FR-29）。full/incremental 字段先落库，

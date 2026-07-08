@@ -42,6 +42,13 @@ func (q *TaskQueue) takeTarget(taskID int64) (scanTarget, bool) {
 	return t, ok
 }
 
+// forgetTarget 丢弃某任务的过程态扫描目标。
+func (q *TaskQueue) forgetTarget(taskID int64) {
+	q.store.mu.Lock()
+	defer q.store.mu.Unlock()
+	delete(q.store.targets, taskID)
+}
+
 // lookupTarget 按 library_id 反查媒体库目录路径与类型（重启恢复时重建扫描目标）。
 func (q *TaskQueue) lookupTarget(libraryID int64) (path, dirType string, err error) {
 	var lp models.LibraryPath

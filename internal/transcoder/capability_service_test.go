@@ -12,6 +12,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -114,6 +115,24 @@ func TestCapabilityService_Capabilities_CacheHit(t *testing.T) {
 	assert.Equal(t, version, info.FFmpegVersion)
 	assert.NotEmpty(t, info.TestedAt, "命中缓存应有 RFC3339 实测时间")
 	assert.Equal(t, "h264_amf", info.Preferred, "应从缓存派生硬件 preferred")
+}
+
+func TestCapabilityService_CleanCacheRecordsAudit(t *testing.T) {
+	db := newCapabilityTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.AuditEvent{}))
+	writeCacheForCurrentVersion(t, db, "ffmpeg version audit", []EncoderProbeResult{
+		{Encoder: "libx264", Family: "software", Codec: "h264", Compiled: true, TestedOK: true},
+	})
+	svc := NewCapabilityService(db)
+
+	require.NoError(t, svc.CleanCache(context.Background(), audit.NewRecorder(db)))
+
+	var cacheCount int64
+	require.NoError(t, db.Model(&models.CodecProbeCache{}).Count(&cacheCount).Error)
+	assert.Equal(t, int64(0), cacheCount)
+	var auditCount int64
+	require.NoError(t, db.Model(&models.AuditEvent{}).Where("action = ?", "cache.cleaned").Count(&auditCount).Error)
+	assert.Equal(t, int64(1), auditCount)
 }
 
 // TestCapabilityService_ConcurrentNoDoubleWrite 并发调用单航道，不重复写入缓存。

@@ -12,6 +12,7 @@ import type {
   TranscodeTask,
   ShareResourceType,
   TranscodeCodec,
+  AuditEvent,
 } from '@/types';
 
 // 内存中的可变数据（支持增删）
@@ -28,6 +29,54 @@ const settingsStore: Record<string, string> = {
   ffmpeg_path: '',
   ffprobe_path: '',
 };
+
+const auditEvents: AuditEvent[] = [
+  {
+    id: 3,
+    scope: 'system',
+    space_id: null,
+    actor_type: 'system',
+    actor_id: 'system',
+    action: 'migration.succeeded',
+    resource_type: 'migration',
+    resource_id: '2026070801',
+    before_json: null,
+    after_json: { version: '2026070801' },
+    metadata_json: { summary: '迁移完成' },
+    request_id: 'req-migration-1',
+    created_at: '2026-07-08T09:00:00Z',
+  },
+  {
+    id: 2,
+    scope: 'space',
+    space_id: 'default',
+    actor_type: 'user',
+    actor_id: 'admin',
+    action: 'media.deleted',
+    resource_type: 'media',
+    resource_id: '42',
+    before_json: { file_name: 'example.mp4' },
+    after_json: null,
+    metadata_json: { summary: '移入回收站' },
+    request_id: 'req-media-1',
+    created_at: '2026-07-08T08:30:00Z',
+  },
+  {
+    id: 1,
+    scope: 'system',
+    space_id: null,
+    actor_type: 'user',
+    actor_id: 'admin',
+    action: 'settings.updated',
+    resource_type: 'settings',
+    resource_id: 'network_proxy',
+    before_json: { network_proxy: '***' },
+    after_json: { network_proxy: '***' },
+    metadata_json: { summary: '更新网络代理' },
+    request_id: 'req-settings-1',
+    created_at: '2026-07-08T08:00:00Z',
+  },
+];
 
 // 相册（FR-40）内存数据
 let albums: Album[] = [];
@@ -147,6 +196,19 @@ export const handlers = [
     };
     paths.push(newPath);
     return HttpResponse.json(newPath, { status: 201 });
+  }),
+
+  http.put('*/api/library/paths/:id', async ({ request, params }) => {
+    await delay(120);
+    const id = Number(params.id);
+    const path = paths.find((p) => p.id === id);
+    if (!path) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体库不存在' }, { status: 404 });
+    }
+    const body = (await request.json()) as { label?: string; enabled?: boolean };
+    if (body.label !== undefined) path.label = body.label.trim();
+    if (body.enabled !== undefined) path.enabled = body.enabled;
+    return HttpResponse.json(path);
   }),
 
   http.delete('*/api/library/paths/:id', async ({ params }) => {
@@ -852,6 +914,38 @@ export const handlers = [
       total: 12 * 1024 * 1024,
       percent: 50,
     });
+  }),
+
+  // ─── 审计事件（FR2-040）────────────────────────────────
+
+  http.get('*/api/audit/events', async ({ request }) => {
+    await delay(80);
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get('limit') || '20');
+    const cursor = Number(url.searchParams.get('cursor') || '0');
+    const action = url.searchParams.get('action') || '';
+    const resourceType = url.searchParams.get('resource_type') || '';
+    const resourceID = url.searchParams.get('resource_id') || '';
+    const spaceID = url.searchParams.get('space_id') || '';
+    const scope = url.searchParams.get('scope') === 'system' ? 'system' : 'space';
+    const from = url.searchParams.get('from') || '';
+    const to = url.searchParams.get('to') || '';
+
+    let items = auditEvents.filter((event) => {
+      if (event.scope !== scope) return false;
+      if (action && event.action !== action) return false;
+      if (resourceType && event.resource_type !== resourceType) return false;
+      if (resourceID && event.resource_id !== resourceID) return false;
+      if (spaceID && event.space_id !== spaceID) return false;
+      if (from && event.created_at < from) return false;
+      if (to && event.created_at > to) return false;
+      return true;
+    });
+    items = items.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+
+    const pageItems = items.slice(cursor, cursor + limit);
+    const nextCursor = cursor + limit < items.length ? String(cursor + limit) : null;
+    return HttpResponse.json({ items: pageItems, next_cursor: nextCursor });
   }),
 
   // ─── 运行期设置 ────────────────────────────────────────

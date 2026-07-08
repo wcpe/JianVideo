@@ -18,6 +18,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/smb"
 )
@@ -30,12 +31,17 @@ var (
 	ErrRenameTargetExists = errors.New("目标文件已存在")
 	// ErrRenameUnsupported 该媒体文件不支持重命名（如 SMB 远程文件）。
 	ErrRenameUnsupported = errors.New("该媒体文件暂不支持重命名")
+	// ErrMoveUnsupported 该媒体文件不支持移动（如 SMB 远程文件）。
+	ErrMoveUnsupported = errors.New("该媒体文件暂不支持移动")
+	// ErrInvalidMoveTarget 移动目标目录不合法。
+	ErrInvalidMoveTarget = errors.New("移动目标目录不合法")
 )
 
 // Service 媒体库业务逻辑。
 type Service struct {
 	db         *gorm.DB
 	mediaRepo  MediaQueryRepository
+	audit      audit.Recorder
 	smbCreds   *smb.CredentialStore
 	smbCredsMu sync.RWMutex
 }
@@ -97,6 +103,12 @@ var builtInMediaExtensions = map[string]string{
 // NewService 创建媒体库服务。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db, mediaRepo: newGormMediaRepository(db)}
+}
+
+// WithAudit 注入审计记录器，使媒体库关键变更与审计事件同事务提交。
+func (s *Service) WithAudit(rec audit.Recorder) *Service {
+	s.audit = rec
+	return s
 }
 
 // SpaceExists 判断 Space 是否存在。缺省 Space 兼容旧测试库，不强依赖 spaces 表。
@@ -162,7 +174,20 @@ func (s *Service) CreateLibraryPathInSpace(spaceID, path, dirType, label string)
 		Label:   label,
 		Enabled: 1,
 	}
-	if err := s.db.Create(lp).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(lp).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      lp.SpaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "library.created",
+			ResourceType: "library",
+			ResourceID:   fmt.Sprintf("%d", lp.ID),
+			After:        libraryAuditPayload(lp),
+		})
+	}); err != nil {
 		return nil, err
 	}
 	return lp, nil
@@ -235,6 +260,57 @@ func (s *Service) GetLibraryPathByIDInSpace(spaceID string, id int64) (*models.L
 	return s.mediaRepo.GetLibraryPathByID(spaceID, id)
 }
 
+// UpdateLibraryPathInSpace 更新指定 Space 的媒体库展示属性。
+func (s *Service) UpdateLibraryPathInSpace(spaceID string, id int64, label *string, enabled *bool) (*models.LibraryPath, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	var after models.LibraryPath
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var before models.LibraryPath
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, id).First(&before).Error; err != nil {
+			return err
+		}
+		updates := libraryPathUpdates(label, enabled)
+		if len(updates) == 0 {
+			after = before
+			return nil
+		}
+		if err := tx.Model(&models.LibraryPath{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, id).First(&after).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "library.updated",
+			ResourceType: "library",
+			ResourceID:   fmt.Sprintf("%d", before.ID),
+			Before:       libraryAuditPayload(&before),
+			After:        libraryAuditPayload(&after),
+		})
+	}); err != nil {
+		return nil, err
+	}
+	return &after, nil
+}
+
+func libraryPathUpdates(label *string, enabled *bool) map[string]any {
+	updates := map[string]any{}
+	if label != nil {
+		updates["label"] = strings.TrimSpace(*label)
+	}
+	if enabled != nil {
+		if *enabled {
+			updates["enabled"] = 1
+		} else {
+			updates["enabled"] = 0
+		}
+	}
+	return updates
+}
+
 func (s *Service) spaceIDForLibrary(libraryID int64) (string, error) {
 	if !s.db.Migrator().HasTable(&models.LibraryPath{}) {
 		return models.DefaultSpaceID, nil
@@ -258,6 +334,10 @@ func (s *Service) DeleteLibraryPath(id int64) error {
 func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
 	spaceID = normalizeSpaceID(spaceID)
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		var before models.LibraryPath
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, id).First(&before).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("space_id = ? AND library_id = ?", spaceID, id).Delete(&models.MediaFile{}).Error; err != nil {
 			return err
 		}
@@ -271,7 +351,15 @@ func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("目录不存在")
 		}
-		return nil
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "library.deleted",
+			ResourceType: "library",
+			ResourceID:   fmt.Sprintf("%d", before.ID),
+			Before:       libraryAuditPayload(&before),
+		})
 	})
 }
 
@@ -346,16 +434,27 @@ func (s *Service) DeleteMediaFile(id int64) error {
 // DeleteMediaFileInSpace 软删除指定 Space 的媒体文件记录（FR-25）。
 func (s *Service) DeleteMediaFileInSpace(spaceID string, id int64) error {
 	now := time.Now()
-	result := s.db.Model(&models.MediaFile{}).
-		Where("space_id = ? AND id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), id).
-		Update("deleted_at", now)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("媒体文件不存在")
-	}
-	return nil
+	spaceID = normalizeSpaceID(spaceID)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var before models.MediaFile
+		if err := tx.Where("space_id = ? AND id = ? AND deleted_at IS NULL", spaceID, id).First(&before).Error; err != nil {
+			return fmt.Errorf("媒体文件不存在")
+		}
+		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).
+			Update("deleted_at", now).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "media.deleted",
+			ResourceType: "media",
+			ResourceID:   fmt.Sprintf("%d", before.ID),
+			Before:       mediaAuditPayload(&before),
+			After:        map[string]any{"deleted_at": now},
+		})
+	})
 }
 
 // BatchDeleteMediaFiles 批量软删媒体文件（FR-69）。
@@ -432,16 +531,26 @@ func (s *Service) RestoreMediaFile(id int64) error {
 
 // RestoreMediaFileInSpace 从指定 Space 回收站还原媒体文件（FR-25）。
 func (s *Service) RestoreMediaFileInSpace(spaceID string, id int64) error {
-	result := s.db.Model(&models.MediaFile{}).
-		Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", normalizeSpaceID(spaceID), id).
-		Update("deleted_at", nil)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("回收站中不存在该媒体文件")
-	}
-	return nil
+	spaceID = normalizeSpaceID(spaceID)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var before models.MediaFile
+		if err := tx.Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", spaceID, id).First(&before).Error; err != nil {
+			return fmt.Errorf("回收站中不存在该媒体文件")
+		}
+		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Update("deleted_at", nil).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "media.restored",
+			ResourceType: "media",
+			ResourceID:   fmt.Sprintf("%d", before.ID),
+			Before:       mediaAuditPayload(&before),
+			After:        map[string]any{"deleted_at": nil},
+		})
+	})
 }
 
 // RenameMediaFile 重命名媒体文件：磁盘改名 + 更新数据库 + 失效旧缩略图。
@@ -499,7 +608,21 @@ func (s *Service) RenameMediaFileInSpace(spaceID string, id int64, newName strin
 		"format":      format,
 		"modified_at": time.Now(),
 	}
-	if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(updates).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(updates).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "media.renamed",
+			ResourceType: "media",
+			ResourceID:   fmt.Sprintf("%d", mf.ID),
+			Before:       mediaAuditPayload(mf),
+			After:        map[string]any{"file_path": newPathSlash, "file_name": newName, "format": format},
+		})
+	}); err != nil {
 		if rbErr := os.Rename(newDiskPath, oldDiskPath); rbErr != nil {
 			log.Printf("[ERROR] 重命名回滚磁盘文件失败: %s -> %s, err=%v", newDiskPath, oldDiskPath, rbErr)
 		}
@@ -516,6 +639,213 @@ func (s *Service) RenameMediaFileInSpace(spaceID string, id int64, newName strin
 	mf.FileName = newName
 	mf.Format = format
 	return mf, nil
+}
+
+// MoveMediaFile 移动媒体文件到同媒体库内的目标目录。
+func (s *Service) MoveMediaFile(id int64, targetDir string) (*models.MediaFile, error) {
+	return s.MoveMediaFileInSpace(models.DefaultSpaceID, id, targetDir)
+}
+
+// MoveMediaFileInSpace 移动指定 Space 的媒体文件到同媒体库内目录。
+func (s *Service) MoveMediaFileInSpace(spaceID string, id int64, targetDir string) (*models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	targetDir = strings.TrimSpace(targetDir)
+	if targetDir == "" {
+		return nil, ErrInvalidMoveTarget
+	}
+	mf, err := s.GetMediaFileByIDInSpace(spaceID, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		return nil, ErrMoveUnsupported
+	}
+	lp, err := s.GetLibraryPathByIDInSpace(spaceID, mf.LibraryID)
+	if err != nil {
+		return nil, err
+	}
+	targetDirAbs, err := filepath.Abs(targetDir)
+	if err != nil {
+		return nil, err
+	}
+	targetDirSlash := filepath.ToSlash(targetDirAbs)
+	libraryRoot := strings.TrimRight(filepath.ToSlash(lp.Path), "/") + "/"
+	if targetDirSlash != strings.TrimRight(filepath.ToSlash(lp.Path), "/") && !strings.HasPrefix(targetDirSlash+"/", libraryRoot) {
+		return nil, ErrInvalidMoveTarget
+	}
+	info, err := os.Stat(targetDirAbs)
+	if err != nil || !info.IsDir() {
+		return nil, ErrInvalidMoveTarget
+	}
+
+	oldDiskPath := filepath.FromSlash(mf.FilePath)
+	newDiskPath := filepath.Join(targetDirAbs, mf.FileName)
+	newPathSlash := filepath.ToSlash(newDiskPath)
+	if newPathSlash == mf.FilePath {
+		return mf, nil
+	}
+	if _, statErr := os.Stat(newDiskPath); statErr == nil {
+		return nil, ErrRenameTargetExists
+	}
+
+	if err := os.Rename(oldDiskPath, newDiskPath); err != nil {
+		return nil, fmt.Errorf("移动磁盘文件失败: %w", err)
+	}
+	updates := map[string]any{"file_path": newPathSlash, "modified_at": time.Now()}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(updates).Error; err != nil {
+			return err
+		}
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "media.moved",
+			ResourceType: "media",
+			ResourceID:   fmt.Sprintf("%d", mf.ID),
+			Before:       mediaAuditPayload(mf),
+			After:        map[string]any{"file_path": newPathSlash},
+		})
+	}); err != nil {
+		if rbErr := os.Rename(newDiskPath, oldDiskPath); rbErr != nil {
+			log.Printf("[ERROR] 移动回滚磁盘文件失败: %s -> %s, err=%v", newDiskPath, oldDiskPath, rbErr)
+		}
+		return nil, fmt.Errorf("更新媒体文件记录失败: %w", err)
+	}
+	if rmErr := os.Remove(FindThumbnailPath(mf.FilePath)); rmErr != nil && !os.IsNotExist(rmErr) {
+		log.Printf("[WARN] 删除旧缩略图失败: %v", rmErr)
+	}
+	go GenerateThumbnail(newDiskPath)
+
+	mf.FilePath = newPathSlash
+	return mf, nil
+}
+
+// WritebackMediaMetadata 重新提取媒体元数据并回写到库内记录。
+func (s *Service) WritebackMediaMetadata(id int64) (*models.MediaFile, error) {
+	return s.WritebackMediaMetadataInSpace(models.DefaultSpaceID, id)
+}
+
+// WritebackMediaMetadataInSpace 重新提取指定媒体的元数据并回写到库内记录。
+func (s *Service) WritebackMediaMetadataInSpace(spaceID string, id int64) (*models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	before, err := s.GetMediaFileByIDInSpace(spaceID, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMetadataWritebackSource(before.FilePath); err != nil {
+		if auditErr := s.recordMetadataWritebackFailure(spaceID, before, err); auditErr != nil {
+			return nil, auditErr
+		}
+		return nil, err
+	}
+
+	after := *before
+	enrichMediaMetadataFn(&after)
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.recordMetadataWritebackTx(tx, spaceID, before, "metadata.writeback.started", ""); err != nil {
+			return err
+		}
+		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(metadataWritebackUpdates(&after)).Error; err != nil {
+			return err
+		}
+		return s.recordMetadataWritebackTx(tx, spaceID, &after, "metadata.writeback.succeeded", "")
+	}); err != nil {
+		return nil, err
+	}
+	return s.GetMediaFileByIDInSpace(spaceID, id)
+}
+
+func (s *Service) recordAuditTx(tx *gorm.DB, input audit.EventInput) error {
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.RecordTx(context.Background(), tx, input)
+}
+
+func validateMetadataWritebackSource(filePath string) error {
+	if strings.HasPrefix(filePath, "smb://") {
+		return nil
+	}
+	if _, err := os.Stat(filepath.FromSlash(filePath)); err != nil {
+		return fmt.Errorf("源文件不可访问: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) recordMetadataWritebackFailure(spaceID string, mf *models.MediaFile, cause error) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.recordMetadataWritebackTx(tx, spaceID, mf, "metadata.writeback.started", ""); err != nil {
+			return err
+		}
+		return s.recordMetadataWritebackTx(tx, spaceID, mf, "metadata.writeback.failed", cause.Error())
+	})
+}
+
+func (s *Service) recordMetadataWritebackTx(tx *gorm.DB, spaceID string, mf *models.MediaFile, action, errText string) error {
+	metadata := map[string]any{"summary": "媒体元数据回写", "file_path": mf.FilePath}
+	if errText != "" {
+		metadata["error"] = errText
+	}
+	return s.recordAuditTx(tx, audit.EventInput{
+		Scope:        audit.ScopeSpace,
+		SpaceID:      spaceID,
+		ActorType:    audit.ActorSystem,
+		Action:       action,
+		ResourceType: "media",
+		ResourceID:   fmt.Sprintf("%d", mf.ID),
+		After:        mediaMetadataAuditPayload(mf),
+		Metadata:     metadata,
+	})
+}
+
+func libraryAuditPayload(lp *models.LibraryPath) map[string]any {
+	return map[string]any{
+		"id":       lp.ID,
+		"space_id": lp.SpaceID,
+		"path":     lp.Path,
+		"type":     lp.Type,
+		"label":    lp.Label,
+		"enabled":  lp.Enabled,
+	}
+}
+
+func mediaAuditPayload(mf *models.MediaFile) map[string]any {
+	return map[string]any{
+		"id":         mf.ID,
+		"space_id":   mf.SpaceID,
+		"library_id": mf.LibraryID,
+		"file_path":  mf.FilePath,
+		"file_name":  mf.FileName,
+		"deleted_at": mf.DeletedAt,
+	}
+}
+
+func mediaMetadataAuditPayload(mf *models.MediaFile) map[string]any {
+	return map[string]any{
+		"duration":          mf.Duration,
+		"video_codec":       mf.VideoCodec,
+		"audio_codec":       mf.AudioCodec,
+		"width":             mf.Width,
+		"height":            mf.Height,
+		"bitrate":           mf.Bitrate,
+		"media_time":        mf.MediaTime,
+		"media_time_source": mf.MediaTimeSource,
+		"camera":            mf.Camera,
+		"lens":              mf.Lens,
+		"aperture":          mf.Aperture,
+		"shutter":           mf.Shutter,
+		"iso":               mf.ISO,
+		"gps_lat":           mf.GPSLat,
+		"gps_lon":           mf.GPSLon,
+		"location":          mf.Location,
+	}
+}
+
+func metadataWritebackUpdates(mf *models.MediaFile) map[string]any {
+	payload := mediaMetadataAuditPayload(mf)
+	payload["modified_at"] = time.Now()
+	return payload
 }
 
 // UpdateDisplayName 设置或清除媒体的库内显示名（FR-30）。

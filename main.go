@@ -19,6 +19,7 @@ import (
 
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/api"
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/dblog"
 	"github.com/wcpe/JianVideo/internal/library"
@@ -91,7 +92,8 @@ func main() {
 	}
 
 	// 设置服务（FR-24）：先建好，供下方 ffmpeg 路径持久化设置覆盖与 API 注入复用。
-	settingsSvc := settings.NewService(gormDB)
+	auditSvc := audit.NewRecorder(gormDB)
+	settingsSvc := settings.NewService(gormDB).WithAudit(auditSvc)
 
 	// 调试日志初始级别（FR-110）：读取持久化的「调试日志」开关，决定本次启动初始安静/详细。
 	if settingsSvc.DebugLog() {
@@ -169,11 +171,11 @@ func main() {
 
 	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
 	// settingsSvc 已在 ffmpeg 路径注入处创建（FR-56），此处复用。
-	libSvc := library.NewService(gormDB)
+	libSvc := library.NewService(gormDB).WithAudit(auditSvc)
 	shareSvc := share.NewService(gormDB)
 
 	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。
-	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType)
+	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType).WithAudit(auditSvc)
 	if err := scanQueue.RecoverRunning(); err != nil {
 		log.Printf("[WARN] 扫描队列重启恢复失败: %v", err)
 	}
@@ -215,14 +217,14 @@ func main() {
 		}
 		_, err = transcoder.PreSliceWithCodec(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, hlsMgr, hlsDir)
 		return err
-	})
+	}).WithAudit(auditSvc)
 	if err := pregenQueue.RecoverRunning(); err != nil {
 		log.Printf("[WARN] 预生成队列重启恢复失败: %v", err)
 	}
 	pregenQueue.Start()
 	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

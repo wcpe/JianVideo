@@ -651,3 +651,46 @@ export interface LicensesData {
   /** 后端 go.mod 直接依赖 */
   backend: BackendLicense[];
 }
+
+export type AuditScope = 'space' | 'system';
+
+export type AuditActorType = 'user' | 'system' | string;
+
+export type AuditJsonValue =
+  string | number | boolean | null | AuditJsonValue[] | { [key: string]: AuditJsonValue };
+
+/** 审计事件（FR2-040）：接口已返回脱敏后的 JSON 字段，前端只负责展示 */
+export interface AuditEvent {
+  id: number;
+  scope: AuditScope;
+  space_id: string | null;
+  actor_type: AuditActorType;
+  actor_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  before_json: AuditJsonValue | null;
+  after_json: AuditJsonValue | null;
+  metadata_json: AuditJsonValue | null;
+  request_id: string;
+  created_at: string;
+}
+
+/** 审计事件查询参数（FR2-040）：与 GET /api/audit/events query 对齐 */
+export interface AuditEventQuery {
+  scope?: AuditScope;
+  space_id?: string;
+  action?: string;
+  resource_type?: string;
+  resource_id?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** 审计事件 cursor 分页响应 */
+export interface AuditEventPage {
+  items: AuditEvent[];
+  next_cursor: string | null;
+}

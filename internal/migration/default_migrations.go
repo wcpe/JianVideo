@@ -47,6 +47,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFR2007SpaceOwnerIndexes,
 			Validate:    validateFR2007SpaceOwnerIndexes,
 		},
+		{
+			ID:          "20260708_0005_fr2_040_audit_events",
+			Description: "补齐审计事件正式字段与查询索引",
+			SafeToRetry: true,
+			Estimate:    estimateAuditEvents,
+			Up:          migrateAuditEvents,
+			Validate:    validateAuditEvents,
+		},
 	}
 }
 
@@ -397,6 +405,86 @@ func fr2007IndexNames() []string {
 		"idx_scan_tasks_space_status_created",
 		"idx_transcode_tasks_space_status_created",
 	}
+}
+
+func estimateAuditEvents(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateAuditEvents(_ context.Context, tx *gorm.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS audit_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			scope TEXT NOT NULL,
+			space_id TEXT,
+			actor_type TEXT NOT NULL DEFAULT 'system',
+			actor_id TEXT,
+			action TEXT NOT NULL DEFAULT '',
+			event_type TEXT NOT NULL DEFAULT '',
+			resource_type TEXT NOT NULL DEFAULT '',
+			resource_id TEXT,
+			migration_id TEXT,
+			message TEXT,
+			before_json TEXT,
+			after_json TEXT,
+			metadata_json TEXT,
+			request_id TEXT,
+			created_at DATETIME NOT NULL
+		);`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	columns := map[string]string{
+		"actor_type":    "TEXT NOT NULL DEFAULT 'system'",
+		"actor_id":      "TEXT",
+		"action":        "TEXT NOT NULL DEFAULT ''",
+		"resource_type": "TEXT NOT NULL DEFAULT ''",
+		"resource_id":   "TEXT",
+		"before_json":   "TEXT",
+		"after_json":    "TEXT",
+		"request_id":    "TEXT",
+	}
+	for column, definition := range columns {
+		if err := addColumnIfMissing(tx, "audit_events", column, definition); err != nil {
+			return fmt.Errorf("迁移 audit_events.%s 失败: %w", column, err)
+		}
+	}
+	statements = []string{
+		`UPDATE audit_events SET action = event_type WHERE action = '' AND event_type != '';`,
+		`UPDATE audit_events SET resource_type = 'migration' WHERE resource_type = '' AND event_type LIKE 'migration.%';`,
+		`UPDATE audit_events SET resource_id = migration_id WHERE (resource_id IS NULL OR resource_id = '') AND migration_id IS NOT NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_created ON audit_events(scope, created_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_space_created ON audit_events(scope, space_id, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_action_created ON audit_events(action, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_resource_created ON audit_events(resource_type, resource_id, created_at, id);`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAuditEvents(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, column := range []string{"actor_type", "action", "resource_type", "before_json", "after_json", "request_id"} {
+		if !columnExists(db, "audit_events", column) {
+			return Validation{}, fmt.Errorf("audit_events 缺少 %s", column)
+		}
+	}
+	for _, indexName := range []string{
+		"idx_audit_events_scope_space_created",
+		"idx_audit_events_action_created",
+		"idx_audit_events_resource_created",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("审计索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "审计事件正式字段与索引已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

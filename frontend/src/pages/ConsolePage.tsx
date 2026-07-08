@@ -7,10 +7,12 @@ import {
   IconTestPipe,
   IconCloudDownload,
   IconAdjustments,
+  IconClipboardList,
 } from '@tabler/icons-react';
 import SystemPage from './SystemPage';
 import { type SystemSection, SECTION_TITLES } from './SystemPage.helpers';
 import SettingsPage from './SettingsPage';
+import AuditEventsPage from './AuditEventsPage';
 
 // 一级 tab 取值（FR-113）：运行环境 / 硬件加速 / 编解码 / 应用更新 / 设置。
 // 前四项渲染 SystemPage 对应区块，settings 渲染 SettingsPage。
@@ -19,7 +21,8 @@ const TAB_HWACCEL = 'hwaccel';
 const TAB_CODEC = 'codec';
 const TAB_UPDATE = 'update';
 const TAB_SETTINGS = 'settings';
-const ALL_TABS = [TAB_ENV, TAB_HWACCEL, TAB_CODEC, TAB_UPDATE, TAB_SETTINGS];
+const TAB_AUDIT = 'audit';
+const ALL_TABS = [TAB_ENV, TAB_HWACCEL, TAB_CODEC, TAB_UPDATE, TAB_SETTINGS, TAB_AUDIT];
 // 系统区块（除设置外四项），用于把一级 tab 值传给 SystemPage
 const SYSTEM_SECTIONS: SystemSection[] = [TAB_ENV, TAB_HWACCEL, TAB_CODEC, TAB_UPDATE];
 
@@ -75,6 +78,9 @@ export default function ConsolePage() {
         <Tabs.Tab value={TAB_SETTINGS} leftSection={<IconAdjustments size={16} />}>
           设置
         </Tabs.Tab>
+        <Tabs.Tab value={TAB_AUDIT} leftSection={<IconClipboardList size={16} />}>
+          审计
+        </Tabs.Tab>
       </Tabs.List>
 
       <Tabs.Panel value={TAB_ENV}>
@@ -91,6 +97,9 @@ export default function ConsolePage() {
       </Tabs.Panel>
       <Tabs.Panel value={TAB_SETTINGS}>
         <SettingsPage />
+      </Tabs.Panel>
+      <Tabs.Panel value={TAB_AUDIT}>
+        <AuditEventsPage />
       </Tabs.Panel>
     </Tabs>
   );

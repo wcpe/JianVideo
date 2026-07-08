@@ -3,6 +3,7 @@
 package settings
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -42,12 +44,19 @@ const (
 
 // Service 运行期设置业务逻辑。
 type Service struct {
-	db *gorm.DB
+	db    *gorm.DB
+	audit audit.Recorder
 }
 
 // NewService 创建设置服务。
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
+}
+
+// WithAudit 注入审计记录器，使设置变更与审计事件同事务提交。
+func (s *Service) WithAudit(rec audit.Recorder) *Service {
+	s.audit = rec
+	return s
 }
 
 // Get 按 key 读取单项设置；键不存在时返回空串且不报错。
@@ -116,8 +125,24 @@ func (s *Service) SetMany(values map[string]string) error {
 		return nil
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		before, err := s.getValuesTx(tx, values)
+		if err != nil {
+			return err
+		}
 		for key, value := range values {
 			if err := s.upsert(tx, key, value); err != nil {
+				return err
+			}
+		}
+		if s.audit != nil {
+			if err := s.audit.RecordTx(context.Background(), tx, audit.EventInput{
+				Scope:        audit.ScopeSystem,
+				ActorType:    audit.ActorSystem,
+				Action:       "settings.updated",
+				ResourceType: "settings",
+				Before:       before,
+				After:        values,
+			}); err != nil {
 				return err
 			}
 		}
@@ -132,4 +157,20 @@ func (s *Service) upsert(tx *gorm.DB, key, value string) error {
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
 	}).Create(&setting).Error
+}
+
+func (s *Service) getValuesTx(tx *gorm.DB, values map[string]string) (map[string]string, error) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	var items []models.Setting
+	if err := tx.Where("key IN ?", keys).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(items))
+	for _, item := range items {
+		result[item.Key] = item.Value
+	}
+	return result, nil
 }

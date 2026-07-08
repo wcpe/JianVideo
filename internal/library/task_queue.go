@@ -1,12 +1,15 @@
 package library
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -20,8 +23,9 @@ type ScanExecFunc func(libraryID int64, path, dirType, mode string) (int, error)
 // 职责单一：只负责「排队 + 串行调度 + 状态持久化」，扫描执行逻辑由注入的 exec 承担，
 // 不在此重写扫描（增量/全量对账是 FR-27）。
 type TaskQueue struct {
-	db   *gorm.DB
-	exec ScanExecFunc
+	db    *gorm.DB
+	exec  ScanExecFunc
+	audit audit.Recorder
 
 	store targetStore // 任务执行目标的过程态内存映射
 
@@ -30,6 +34,12 @@ type TaskQueue struct {
 	stopCh   chan struct{}
 	started  bool
 	stopOnce sync.Once
+}
+
+// WithAudit 注入审计记录器，使任务状态变更与审计事件同事务提交。
+func (q *TaskQueue) WithAudit(rec audit.Recorder) *TaskQueue {
+	q.audit = rec
+	return q
 }
 
 // NewTaskQueue 创建扫描任务队列。exec 为实际扫描执行函数（通常为 Service.ScanLibraryWithType）。
@@ -58,7 +68,12 @@ func (q *TaskQueue) EnqueueInSpace(spaceID string, libraryID int64, path, dirTyp
 		ScanType:  scanType,
 		Status:    models.ScanTaskStatusPending,
 	}
-	if err := q.db.Create(task).Error; err != nil {
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+		return q.recordAuditTx(tx, task, "task.created", "")
+	}); err != nil {
 		return 0, err
 	}
 	// 入队时把 path/dirType 暂存内存映射，供 worker 取用（path 不入库，避免冗余真源）
@@ -170,6 +185,69 @@ func (q *TaskQueue) ListTasksInSpace(spaceID string) ([]models.ScanTask, error) 
 	return tasks, nil
 }
 
+// CancelTaskInSpace 取消尚未执行的扫描任务，并写入同事务审计事件。
+func (q *TaskQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
+	spaceID = normalizeSpaceID(spaceID)
+	return q.db.Transaction(func(tx *gorm.DB) error {
+		var task models.ScanTask
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status != models.ScanTaskStatusPending {
+			return fmt.Errorf("仅 pending 扫描任务可取消")
+		}
+		now := time.Now()
+		if err := tx.Model(&models.ScanTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":       models.ScanTaskStatusCanceled,
+			"completed_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		task.Status = models.ScanTaskStatusCanceled
+		task.CompletedAt = &now
+		q.forgetTarget(taskID)
+		return q.recordAuditTx(tx, &task, "task.canceled", "")
+	})
+}
+
+// RetryTaskInSpace 将失败或已取消的扫描任务重新置为 pending，并写入同事务审计事件。
+func (q *TaskQueue) RetryTaskInSpace(spaceID string, taskID int64) error {
+	spaceID = normalizeSpaceID(spaceID)
+	var task models.ScanTask
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status != models.ScanTaskStatusError && task.Status != models.ScanTaskStatusCanceled {
+			return fmt.Errorf("仅 error 或 canceled 扫描任务可重试")
+		}
+		if err := tx.Model(&models.ScanTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":        models.ScanTaskStatusPending,
+			"error":         "",
+			"started_at":    nil,
+			"completed_at":  nil,
+			"scanned_files": 0,
+			"total_files":   0,
+		}).Error; err != nil {
+			return err
+		}
+		task.Status = models.ScanTaskStatusPending
+		task.Error = ""
+		task.StartedAt = nil
+		task.CompletedAt = nil
+		return q.recordAuditTx(tx, &task, "task.retried", "")
+	}); err != nil {
+		return err
+	}
+	path, dirType, err := q.lookupTarget(task.LibraryID)
+	if err != nil {
+		return err
+	}
+	q.rememberTarget(task.ID, scanTarget{path: path, dirType: dirType, libraryID: task.LibraryID})
+	q.wake()
+	return nil
+}
+
 // loop 单 worker 主循环：取最早 pending 执行，队列空时阻塞等待信号，不空转轮询。
 func (q *TaskQueue) loop() {
 	for {
@@ -225,21 +303,36 @@ func (q *TaskQueue) runTask(task models.ScanTask) {
 	count, err := q.exec(target.libraryID, target.path, target.dirType, task.ScanType)
 	now := time.Now()
 	if err != nil {
-		q.db.Model(&models.ScanTask{}).Where("id = ?", task.ID).
-			Updates(map[string]any{
-				"status":       models.ScanTaskStatusError,
-				"error":        err.Error(),
-				"completed_at": now,
-			})
+		if txErr := q.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&models.ScanTask{}).Where("id = ?", task.ID).
+				Updates(map[string]any{
+					"status":       models.ScanTaskStatusError,
+					"error":        err.Error(),
+					"completed_at": now,
+				}).Error; err != nil {
+				return err
+			}
+			return q.recordAuditTx(tx, &task, "task.failed", err.Error())
+		}); txErr != nil {
+			log.Printf("[ERROR] 标记扫描任务失败终态失败: taskID=%d, err=%v", task.ID, txErr)
+		}
 		log.Printf("[ERROR] 扫描任务执行失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
-	q.db.Model(&models.ScanTask{}).Where("id = ?", task.ID).
-		Updates(map[string]any{
-			"status":        models.ScanTaskStatusCompleted,
-			"scanned_files": count,
-			"completed_at":  now,
-		})
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.ScanTask{}).Where("id = ?", task.ID).
+			Updates(map[string]any{
+				"status":        models.ScanTaskStatusCompleted,
+				"scanned_files": count,
+				"completed_at":  now,
+			}).Error; err != nil {
+			return err
+		}
+		return q.recordAuditTx(tx, &task, "task.succeeded", "")
+	}); err != nil {
+		log.Printf("[ERROR] 标记扫描任务完成终态失败: taskID=%d, err=%v", task.ID, err)
+		return
+	}
 	log.Printf("[INFO] 扫描任务执行完成: taskID=%d, count=%d", task.ID, count)
 }
 
@@ -261,4 +354,27 @@ func (q *TaskQueue) wake() {
 	case q.signal <- struct{}{}:
 	default:
 	}
+}
+
+func (q *TaskQueue) recordAuditTx(tx *gorm.DB, task *models.ScanTask, action, errText string) error {
+	if q.audit == nil {
+		return nil
+	}
+	metadata := map[string]any{
+		"task_kind":  "scan",
+		"library_id": task.LibraryID,
+		"scan_type":  task.ScanType,
+	}
+	if errText != "" {
+		metadata["error"] = errText
+	}
+	return q.audit.RecordTx(context.Background(), tx, audit.EventInput{
+		Scope:        audit.ScopeSpace,
+		SpaceID:      task.SpaceID,
+		ActorType:    audit.ActorSystem,
+		Action:       action,
+		ResourceType: "task",
+		ResourceID:   fmt.Sprintf("%d", task.ID),
+		Metadata:     metadata,
+	})
 }

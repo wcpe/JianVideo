@@ -131,6 +131,20 @@ func (h *Handler) CodecTest(c *gin.Context) {
 	})
 }
 
+// CleanSystemCache POST /api/system/cache/clean
+// 清理系统级硬件加速能力缓存，并写入系统审计事件。
+func (h *Handler) CleanSystemCache(c *gin.Context) {
+	if h.capability == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "CAPABILITY_UNAVAILABLE", "message": "硬件加速能力服务未启用"})
+		return
+	}
+	if err := h.capability.CleanCache(c.Request.Context(), h.audit); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "CACHE_CLEAN_FAILED", "message": "缓存清理失败"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // codecTestedAtString 把实测时间格式化为 RFC3339；零值返回空串。
 func codecTestedAtString(t time.Time) string {
 	if t.IsZero() {

@@ -50,7 +50,7 @@ describe('ConsolePage（FR-113 一级 tab）', () => {
 
   it('渲染一级 tab：运行环境/硬件加速/编解码/应用更新/设置（含设置，无外层「系统信息」父级）', () => {
     renderPage();
-    for (const name of ['运行环境', '硬件加速', '编解码', '应用更新', '设置']) {
+    for (const name of ['运行环境', '硬件加速', '编解码', '应用更新', '设置', '审计']) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
     // 不再有外层「系统信息」父级 tab
@@ -106,5 +106,11 @@ describe('ConsolePage（FR-113 一级 tab）', () => {
   it('旧深链 ?tab=system（无 sys）定位到运行环境 tab', () => {
     renderPage('/system?tab=system');
     expect(screen.getByRole('tab', { name: '运行环境' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('新深链 ?tab=audit 定位到审计 tab 并展示审计事件页', async () => {
+    renderPage('/system?tab=audit');
+    expect(screen.getByRole('tab', { name: '审计' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: '审计事件' })).toBeVisible();
   });
 });

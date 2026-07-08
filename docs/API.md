@@ -176,11 +176,27 @@
 - **错误**：`400` 本地路径不可访问、不是目录或请求参数错误；`500` 保存失败
 - **说明**：`local` 路径必须在服务器本机存在且为目录；`smb` 路径支持 UNC 或 `smb://host/share/path` 输入，服务端统一存储为 `host/share/path`，凭据通过 `/api/smb/credentials` 保存。
 
+### 更新媒体库目录
+
+- **方法 / 路径**：`PUT /api/library/paths/:id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求**：
+  ```json
+  {
+    "label": "家庭视频",
+    "enabled": true
+  }
+  ```
+- **响应**（200）：更新后的目录记录对象
+- **说明**：当前仅更新展示标签与启用状态，不修改目录真实路径或类型。成功更新会在同一事务内写入 `library.updated` 审计事件。
+- **错误**：`400` ID 或请求体无效，`404` 目录不存在，`500` 更新失败
+
 ### 删除媒体库目录
 
 - **方法 / 路径**：`DELETE /api/library/paths/:id`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（204）：空
+- **说明**：成功删除会在同一事务内写入 `library.deleted` 审计事件。
 
 ### 浏览目录
 
@@ -1115,6 +1131,42 @@
 - **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。保存成功后触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），保存即生效（FR-80），非法 URL 仅记 WARN 跳过应用、不阻断保存（保留既有代理）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。
 - **已知键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，支持 http/https/socks5 协议）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）。
 - **错误**：`400` 请求参数错误或 `settings` 为空，`503` 设置服务未启用，`500` 保存失败
+
+### 查询审计事件（FR2-040）
+
+- **方法 / 路径**：`GET /api/audit/events`
+- **请求头**：Space scoped 查询可带 `X-JianVideo-Space-Id`；缺省为 `space-default`
+- **查询参数**：
+  - `scope`：可选，传 `system` 时查询系统级事件；缺省为 Space scoped 查询。
+  - `space_id`：可选，显式查询某 Space；仅 Space scoped 查询生效。
+  - `action` / `resource_type` / `resource_id`：可选，按动作与资源过滤。
+  - `from` / `to`：可选，支持 RFC3339 或 `YYYY-MM-DD`。
+  - `cursor` / `limit`：cursor 分页，按 `created_at desc, id desc` 排序。
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 1,
+        "scope": "space",
+        "space_id": "space-default",
+        "actor_type": "system",
+        "actor_id": "system",
+        "action": "media.deleted",
+        "resource_type": "media",
+        "resource_id": "42",
+        "before_json": {"file_name": "clip.mp4"},
+        "after_json": {"deleted_at": "2026-07-08T08:00:00Z"},
+        "metadata_json": null,
+        "request_id": "",
+        "created_at": "2026-07-08T08:00:00Z"
+      }
+    ],
+    "next_cursor": null
+  }
+  ```
+- **说明**：Space scoped 查询默认只返回 `scope=space` 且匹配当前 Space 的事件，不返回 `scope=system` 事件；系统级事件需显式 `scope=system`。响应中的 before/after/metadata 已复用后端审计脱敏策略，密码、令牌、代理凭据和含用户名路径不会明文回显。
+- **错误**：`400` 查询参数无效，`404` Space 不存在，`503` 审计服务未启用
 
 ## 分享链接（FR-43）
 

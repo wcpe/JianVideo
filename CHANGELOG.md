@@ -9,6 +9,7 @@
 ### 新增
 - **FR2-007 存储库、Space 归属与数据库索引基线**：新增最小 Space owner 元数据迁移、`library_paths`/`media_files`/`tags`/扫描任务/预生成任务的 `space_id` 字段与媒体查询组合索引；后端接入 `X-JianVideo-Space-Id`，媒体列表、详情、目录浏览、统计、扫描入口、标签、回收站、上传和任务状态按 Space 隔离，旧 `page/page_size` 响应同步返回 `next_cursor`。新增媒体查询 repository、cursor 编解码测试、跨 Space 集成测试与 FR2-007 SQLite benchmark harness，报告输出到 `.tmp/benchmark/fr2-007/`。
 - **FR2-017 v0.20 到 v2 数据迁移与升级安全**：新增 `internal/migration` 版本化 schema 迁移框架，启动期以 migration registry 替代无版本记录的全局 `InitSchema + AutoMigrate`；支持 dry-run 只读计划、迁移前 SQLite `VACUUM INTO` 备份与 `PRAGMA integrity_check` 校验、`schema_migrations` 状态记录、中断后安全重入、默认 Space 回填、关键 Space/媒体索引 smoke 校验，以及 `scope=system` 的迁移审计事件。新增 v0.20 最小旧库 fixture 集成测试，覆盖 dry-run 不写业务/schema/audit、备份可打开、中断重入、默认 Space 回填与索引存在。
+- **FR2-040 全操作审计日志**：新增 `internal/audit` 审计事件真源、脱敏工具、cursor 分页查询 API 与系统控制台审计 tab；配置、媒体库、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务、缓存清理和迁移事件写入 `audit_events`。关键业务变更与审计事件同 SQLite 事务提交，审计失败时回滚业务变更，Space scoped 查询默认不返回系统级事件。
 
 ## 0.22.0（2026-07-08）
 

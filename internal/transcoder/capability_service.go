@@ -3,6 +3,7 @@ package transcoder
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -98,6 +100,30 @@ func (s *CapabilityService) WarmCacheAsync() {
 			log.Printf("[INFO] 硬件加速能力预热完成（命中缓存）")
 		}
 	}()
+}
+
+// CleanCache 清理硬件加速能力缓存，并在同一数据库事务内写入系统级审计事件。
+func (s *CapabilityService) CleanCache(ctx context.Context, rec audit.Recorder) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.CodecProbeCache{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.CodecProbeCache{}).Error; err != nil {
+			return err
+		}
+		if rec == nil {
+			return nil
+		}
+		return rec.RecordTx(ctx, tx, audit.EventInput{
+			Scope:        audit.ScopeSystem,
+			ActorType:    audit.ActorSystem,
+			Action:       "cache.cleaned",
+			ResourceType: "cache",
+			ResourceID:   "codec_probe",
+			Metadata:     map[string]any{"cache": "codec_probe", "deleted": count, "summary": fmt.Sprintf("已清理 %d 条硬件加速缓存", count)},
+		})
+	})
 }
 
 // cacheEntry 解码后的缓存条目。

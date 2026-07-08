@@ -54,8 +54,9 @@
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
+| `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交 | → `db` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
-| `migration` | 版本化 SQLite schema 迁移、dry-run 计划、迁移前备份、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件（FR2-017） | → `db`, `models` |
+| `migration` | 版本化 SQLite schema 迁移、dry-run 计划、迁移前备份、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
@@ -79,6 +80,7 @@ jianvideo/
 │   └── config.go              配置加载（环境变量优先）
 ├── internal/                  后端业务模块（禁被仓库外导入）
 │   ├── api/                   API 路由注册与请求处理器（轻量委托）
+│   ├── audit/                 审计事件真源、脱敏与查询
 │   ├── auth/                  单用户登录 / 会话（JWT + bcrypt）
 │   ├── config/               运行期配置辅助
 │   ├── db/                    SQLite 初始化与 GORM CRUD
@@ -279,18 +281,25 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 
 FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`，把历史记录回填到默认 Space，并创建 `idx_library_paths_space_id`、`idx_media_files_space_id`、`idx_media_files_space_library_added`。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。
 
-**审计事件（audit_events）** — FR2-017 最小系统级事件切片
+**审计事件（audit_events）** — FR2-040
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
-| scope | TEXT | `system` 或 `space`；迁移事件使用 `system` |
-| space_id | TEXT NULL | `scope=system` 时为空 |
-| event_type | TEXT | 事件类型，如 `migration.started` |
-| migration_id | TEXT | 关联 migration ID；整轮事件可为空 |
-| message | TEXT | 中文事件摘要 |
-| metadata_json | TEXT | 备份路径、大小、校验结果等脱敏元数据 |
+| scope | TEXT | `space` 或 `system` |
+| space_id | TEXT NULL | Space 资源事件必填；`scope=system` 时为空 |
+| actor_type | TEXT | `system` / `user` 等操作者类型 |
+| actor_id | TEXT | 操作者标识；单用户阶段默认 `system` |
+| action | TEXT | 事件动作，如 `settings.updated`、`media.deleted`、`migration.succeeded` |
+| event_type | TEXT | 向后兼容字段，当前与 `action` 同步 |
+| resource_type | TEXT | 资源类型，如 `settings`、`library`、`media`、`task`、`cache`、`migration` |
+| resource_id | TEXT | 资源标识 |
+| before_json / after_json | TEXT | 脱敏后的变更前后必要字段 |
+| metadata_json | TEXT | 脱敏后的补充上下文 |
+| request_id | TEXT | 请求 ID；当前可为空 |
 | created_at | DATETIME | 事件时间 |
+
+FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：配置写入、媒体库创建/更新/删除、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务创建/成功/失败/取消/重试、缓存清理和迁移开始/成功/失败都会写事件。业务模块通过 `audit.Recorder` 接口注入审计服务；必须审计的业务变更在同一个 SQLite 事务内调用 `RecordTx`，审计写入失败时业务事务整体回滚。查询使用 `GET /api/audit/events`，Space scoped 查询默认只返回当前 Space 的 `scope=space` 事件，系统级事件需显式 `scope=system`。
 
 **相册（albums）** — FR-40
 

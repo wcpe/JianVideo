@@ -1,6 +1,8 @@
 package transcoder
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -8,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -22,14 +25,21 @@ type PregenExecFunc func(mediaID int64, codec string) error
 // 范式复用 FR-29 扫描任务队列（见 ADR-0039）。职责单一：只负责「排队 + 串行调度 + 状态持久化」，
 // 实际预转码切片由注入的 exec 承担（调 PreSliceWithCodec）。
 type PregenQueue struct {
-	db   *gorm.DB
-	exec PregenExecFunc
+	db    *gorm.DB
+	exec  PregenExecFunc
+	audit audit.Recorder
 
 	mu       sync.Mutex // 保护 worker 生命周期标志
 	signal   chan struct{}
 	stopCh   chan struct{}
 	started  bool
 	stopOnce sync.Once
+}
+
+// WithAudit 注入审计记录器，使任务状态变更与审计事件同事务提交。
+func (q *PregenQueue) WithAudit(rec audit.Recorder) *PregenQueue {
+	q.audit = rec
+	return q
 }
 
 // NewPregenQueue 创建预生成队列。exec 为实际预转码执行函数。
@@ -59,7 +69,12 @@ func (q *PregenQueue) EnqueueInSpace(spaceID string, mediaID, presetID int64, co
 		Height:   height,
 		Status:   models.TranscodeTaskStatusPending,
 	}
-	if err := q.db.Create(task).Error; err != nil {
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+		return q.recordAuditTx(tx, task, "task.created", "")
+	}); err != nil {
 		return 0, err
 	}
 	q.wake()
@@ -171,20 +186,35 @@ func (q *PregenQueue) runTask(task models.TranscodeTask) {
 	err := q.exec(task.MediaID, task.Codec)
 	now := time.Now()
 	if err != nil {
-		q.db.Model(&models.TranscodeTask{}).Where("id = ?", task.ID).
-			Updates(map[string]any{
-				"status":       models.TranscodeTaskStatusError,
-				"error":        err.Error(),
-				"completed_at": now,
-			})
+		if txErr := q.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&models.TranscodeTask{}).Where("id = ?", task.ID).
+				Updates(map[string]any{
+					"status":       models.TranscodeTaskStatusError,
+					"error":        err.Error(),
+					"completed_at": now,
+				}).Error; err != nil {
+				return err
+			}
+			return q.recordAuditTx(tx, &task, "task.failed", err.Error())
+		}); txErr != nil {
+			log.Printf("[ERROR] 标记预生成任务失败终态失败: taskID=%d, err=%v", task.ID, txErr)
+		}
 		log.Printf("[ERROR] 预生成任务执行失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
-	q.db.Model(&models.TranscodeTask{}).Where("id = ?", task.ID).
-		Updates(map[string]any{
-			"status":       models.TranscodeTaskStatusCompleted,
-			"completed_at": now,
-		})
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.TranscodeTask{}).Where("id = ?", task.ID).
+			Updates(map[string]any{
+				"status":       models.TranscodeTaskStatusCompleted,
+				"completed_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		return q.recordAuditTx(tx, &task, "task.succeeded", "")
+	}); err != nil {
+		log.Printf("[ERROR] 标记预生成任务完成终态失败: taskID=%d, err=%v", task.ID, err)
+		return
+	}
 	log.Printf("[INFO] 预生成任务执行完成: taskID=%d", task.ID)
 }
 
@@ -202,4 +232,28 @@ func normalizeTaskSpaceID(spaceID string) string {
 		return models.DefaultSpaceID
 	}
 	return spaceID
+}
+
+func (q *PregenQueue) recordAuditTx(tx *gorm.DB, task *models.TranscodeTask, action, errText string) error {
+	if q.audit == nil {
+		return nil
+	}
+	metadata := map[string]any{
+		"task_kind": "transcode",
+		"media_id":  task.MediaID,
+		"preset_id": task.PresetID,
+		"codec":     task.Codec,
+	}
+	if errText != "" {
+		metadata["error"] = errText
+	}
+	return q.audit.RecordTx(context.Background(), tx, audit.EventInput{
+		Scope:        audit.ScopeSpace,
+		SpaceID:      task.SpaceID,
+		ActorType:    audit.ActorSystem,
+		Action:       action,
+		ResourceType: "task",
+		ResourceID:   fmt.Sprintf("%d", task.ID),
+		Metadata:     metadata,
+	})
 }

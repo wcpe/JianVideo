@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/metrics"
@@ -75,6 +76,9 @@ type Handler struct {
 
 	// 系统指标采样器（FR-119）：未注入时 /api/system/metrics 返回 503。
 	metrics *metrics.Sampler
+
+	// 审计事件服务（FR2-040）：未注入时审计查询端点返回 503，业务接入保持可测试。
+	audit audit.Recorder
 }
 
 // NewHandler 创建处理器。
@@ -125,6 +129,12 @@ func (h *Handler) WithTranscodePresets(store *transcoder.PresetStore, queue *tra
 // 未注入时该端点返回 503，保持无采样器环境可用。
 func (h *Handler) WithMetrics(sampler *metrics.Sampler) *Handler {
 	h.metrics = sampler
+	return h
+}
+
+// WithAudit 注入审计服务，启用审计查询端点。
+func (h *Handler) WithAudit(rec audit.Recorder) *Handler {
+	h.audit = rec
 	return h
 }
 
@@ -299,6 +309,37 @@ func (h *Handler) DeleteLibraryPath(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// UpdateLibraryPath PUT /api/library/paths/:id
+func (h *Handler) UpdateLibraryPath(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	var req struct {
+		Label   *string `json:"label"`
+		Enabled *bool   `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
+		return
+	}
+	lp, err := h.library.UpdateLibraryPathInSpace(spaceID, id, req.Label, req.Enabled)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"code": "UPDATE_FAILED", "message": "更新失败"})
+		return
+	}
+	c.JSON(http.StatusOK, lp)
 }
 
 // ListMediaFiles GET /api/library/media
@@ -518,6 +559,66 @@ func (h *Handler) RenameMediaFile(c *gin.Context) {
 	c.JSON(http.StatusOK, mf)
 }
 
+// MoveMediaFile PUT /api/library/media/:id/move
+// 请求体：{"target_dir": "D:/Media/目标目录"}，同媒体库内移动文件并更新数据库记录。
+func (h *Handler) MoveMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	var req struct {
+		TargetDir string `json:"target_dir"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
+		return
+	}
+	mf, err := h.library.MoveMediaFileInSpace(spaceID, id, req.TargetDir)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		case errors.Is(err, library.ErrRenameTargetExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "TARGET_EXISTS", "message": err.Error()})
+		case errors.Is(err, library.ErrInvalidMoveTarget), errors.Is(err, library.ErrMoveUnsupported):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "MOVE_REJECTED", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "MOVE_FAILED", "message": "移动失败"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, mf)
+}
+
+// WritebackMediaMetadata POST /api/library/media/:id/metadata/writeback
+// 重新提取媒体文件元数据并回写库内记录。
+func (h *Handler) WritebackMediaMetadata(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	mf, err := h.library.WritebackMediaMetadataInSpace(spaceID, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "METADATA_WRITEBACK_FAILED", "message": "元数据回写失败"})
+		return
+	}
+	c.JSON(http.StatusOK, mf)
+}
+
 // UpdateDisplayName PUT /api/library/media/:id/display-name
 // 请求体：{"display_name": "..."}，仅更新库内显示名，不动磁盘文件名。空串表示清除显示名。
 func (h *Handler) UpdateDisplayName(c *gin.Context) {
@@ -729,6 +830,52 @@ func (h *Handler) ListScanTasks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"tasks": tasks, "current": current})
+}
+
+// CancelScanTask POST /api/library/scan/tasks/:id/cancel
+// 取消尚未执行的扫描任务。
+func (h *Handler) CancelScanTask(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if h.scanQueue == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "QUEUE_UNAVAILABLE", "message": "扫描队列未启用"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	if err := h.scanQueue.CancelTaskInSpace(spaceID, id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "CANCEL_FAILED", "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// RetryScanTask POST /api/library/scan/tasks/:id/retry
+// 重试失败或已取消的扫描任务。
+func (h *Handler) RetryScanTask(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if h.scanQueue == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "QUEUE_UNAVAILABLE", "message": "扫描队列未启用"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return
+	}
+	if err := h.scanQueue.RetryTaskInSpace(spaceID, id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "RETRY_FAILED", "message": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // ScanProgressSSE GET /api/library/scan/progress

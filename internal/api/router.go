@@ -32,6 +32,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		lib.GET("/paths", h.ListLibraryPaths)
 		lib.POST("/paths", h.CreateLibraryPath)
+		lib.PUT("/paths/:id", h.UpdateLibraryPath)
 		lib.DELETE("/paths/:id", h.DeleteLibraryPath)
 
 		lib.GET("/media", h.ListMediaFiles)
@@ -39,6 +40,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/media/:id/raw", h.GetRawImage)
 		lib.GET("/media/:id/download", h.DownloadMediaFile)
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
+		lib.PUT("/media/:id/move", h.MoveMediaFile)
+		lib.POST("/media/:id/metadata/writeback", h.WritebackMediaMetadata)
 		lib.PUT("/media/:id/display-name", h.UpdateDisplayName)
 		lib.PUT("/media/:id/notes", h.UpdateMediaNotes)
 		lib.DELETE("/media/:id", h.DeleteMediaFile)
@@ -102,6 +105,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/scan/progress", h.ScanProgressSSE)
 		// 扫描任务队列（FR-29）：列任务与当前进行中任务
 		lib.GET("/scan/tasks", h.ListScanTasks)
+		lib.POST("/scan/tasks/:id/cancel", h.CancelScanTask)
+		lib.POST("/scan/tasks/:id/retry", h.RetryScanTask)
 
 		// 媒体健康巡检（FR-73）：触发后台巡检、查进度、列问题清单
 		lib.POST("/health/scan", h.StartHealthScan)
@@ -171,6 +176,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 系统指标时序与当前快照（FR-119）：下采样 points + current，供监控页折线与当前值卡
 		sys.GET("/metrics", h.SystemMetrics)
 		sys.POST("/codec-test", h.CodecTest)
+		sys.POST("/cache/clean", h.CleanSystemCache)
 		// 环境变量查看（FR-56，只读，敏感脱敏）
 		sys.GET("/env", h.SystemEnv)
 		// FFmpeg 路径检测（FR-56）：保存前先验路径是否可用
@@ -190,6 +196,12 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		settingsGroup.GET("", h.GetSettings)
 		settingsGroup.PUT("", h.UpdateSettings)
+	}
+
+	// 审计事件查询（FR2-040）：Space scoped 默认隔离，scope=system 查询系统级事件。
+	auditGroup := r.Group("/api/audit")
+	{
+		auditGroup.GET("/events", h.ListAuditEvents)
 	}
 
 	// 播放路由（可选）
