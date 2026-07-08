@@ -2,7 +2,9 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -46,6 +48,40 @@ func TestSetMany_RecordsAuditEventInSameTransaction(t *testing.T) {
 	}
 	if event.Scope != audit.ScopeSystem || event.SpaceID != nil {
 		t.Fatalf("设置变更应记录为系统级事件, scope=%q space=%v", event.Scope, event.SpaceID)
+	}
+}
+
+func TestSetMany_RedactsSensitiveAuditPayload(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试库失败: %v", err)
+	}
+	if err := db.AutoMigrate(&models.Setting{}, &models.AuditEvent{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	svc := NewService(db).WithAudit(audit.NewRecorder(db))
+
+	secretProxy := "http://user:secret@example.com:8080"
+	if err := svc.SetMany(map[string]string{KeyNetworkProxy: secretProxy}); err != nil {
+		t.Fatalf("保存代理失败: %v", err)
+	}
+
+	var event models.AuditEvent
+	if err := db.First(&event, "action = ?", "settings.updated").Error; err != nil {
+		t.Fatalf("应写入 settings.updated 审计事件: %v", err)
+	}
+	payload, err := json.Marshal(map[string]string{
+		"before": event.BeforeJSON,
+		"after":  event.AfterJSON,
+	})
+	if err != nil {
+		t.Fatalf("序列化审计载荷失败: %v", err)
+	}
+	if strings.Contains(string(payload), "secret") || strings.Contains(string(payload), "user:") {
+		t.Fatalf("审计载荷不应包含代理凭据: %s", payload)
+	}
+	if !strings.Contains(string(payload), sensitiveDisplayValue) {
+		t.Fatalf("审计载荷应只记录敏感值存在性: %s", payload)
 	}
 }
 

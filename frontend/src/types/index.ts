@@ -527,6 +527,32 @@ export interface UpdateProgress {
 /** 运行期设置键值映射（key → value，值统一为字符串） */
 export type SettingsMap = Record<string, string>;
 
+/** 配置分层（FR2-024）：启动固定、运行期可改、派生只读 */
+export type SettingLayer = 'startup' | 'runtime' | 'readonly';
+
+/** 配置值类型（FR2-024）：用于前端选择合适控件与提示 */
+export type SettingValueType = 'string' | 'int' | 'bool' | 'json' | 'url' | 'path' | 'enum';
+
+/** 枚举型配置的可选项 */
+export interface SettingOption {
+  value: string;
+  label: string;
+}
+
+/** 单个配置定义（FR2-024）：由后端 registry 暴露，前端按此渲染分组和说明 */
+export interface SettingDefinition {
+  key: string;
+  label: string;
+  description: string;
+  layer: SettingLayer;
+  value_type: SettingValueType;
+  default_value: string;
+  sensitive: boolean;
+  hot_apply: boolean;
+  consumer: string;
+  options?: SettingOption[];
+}
+
 /** 单个环境变量（FR-56）：只读查看，敏感项 value 为掩码、不含明文 */
 export interface EnvVar {
   /** 环境变量名 */

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +27,16 @@ func (h *Handler) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"settings": all})
 }
 
+// GetSettingDefinitions GET /api/settings/definitions
+// 返回配置注册表，供前端按类型、分层、敏感性和热应用能力渲染设置页。
+func (h *Handler) GetSettingDefinitions(c *gin.Context) {
+	if h.settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"definitions": settings.Definitions()})
+}
+
 // UpdateSettings PUT /api/settings
 // 批量写入设置，请求体形如 {"settings": {"scan_interval": "3600", ...}}。
 func (h *Handler) UpdateSettings(c *gin.Context) {
@@ -49,6 +58,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	}
 
 	if err := h.settings.SetMany(req.Settings); err != nil {
+		if settings.IsValidationError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SETTING", "message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "UPDATE_FAILED", "message": "保存设置失败"})
 		return
 	}
@@ -60,7 +73,10 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 	applyMagickPathSettings(req.Settings)
 
 	// 落库成功后，把网络代理设置应用到后端出站 HTTP 运行期，保存即生效（FR-80）。
-	applyNetworkProxySettings(req.Settings)
+	if err := applyNetworkProxySettings(req.Settings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "APPLY_FAILED", "message": "应用网络代理设置失败"})
+		return
+	}
 
 	// 落库成功后，把调试日志开关应用到 GORM 日志运行期，保存即生效（FR-110）。
 	h.applyDebugLogSetting(req.Settings)
@@ -112,12 +128,12 @@ func (h *Handler) applyDebugLogSetting(values map[string]string) {
 
 // applyNetworkProxySettings 把本次保存的网络代理设置应用到后端出站 HTTP 运行期（FR-80）。
 // 仅当 network_proxy 键出现时处理：空串清空走直连、非空设置代理；
-// 非法 URL 仅记 WARN、不阻断整体保存（落库已成功），与 SetProxy 的「非法不覆盖」语义配合，
-// 保留既有运行期代理不被坏值打乱。SetProxy 自身做 URL 校验与原子更新（并发安全）。
-func applyNetworkProxySettings(values map[string]string) {
+// settings registry 已在写入前拦截非法 URL，这里返回错误作为运行期兜底。
+func applyNetworkProxySettings(values map[string]string) error {
 	if p, ok := values[settings.KeyNetworkProxy]; ok {
 		if err := netproxy.SetProxy(p); err != nil {
-			log.Printf("[WARN] 网络代理设置无效，保留既有出站代理: %v", err)
+			return err
 		}
 	}
+	return nil
 }

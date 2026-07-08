@@ -53,7 +53,7 @@
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
-| `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
+| `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
 | `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交 | → `db` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
 | `migration` | 版本化 SQLite schema 迁移、dry-run 计划、迁移前备份、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models` |
@@ -431,7 +431,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD 与预生成队列入队/列任务（FR-77） |
 | 配置 | `/api/config` | 系统配置读取 |
-| 设置 | `/api/settings` | 运行期键值设置读取与批量写入 |
+| 设置 | `/api/settings` | 运行期设置读取、definitions 元数据与已登记 key 批量写入 |
 | 分享管理 | `/api/shares` | 创建/列出/撤销分享链接（鉴权后，FR-43） |
 | 公开分享 | `/api/share/:token` | 免登只读访问被分享媒体/相册：元信息、图片 raw、缩略图、原文件下载、视频渐进式播放（APIGuard 豁免，经 shareAuth + 范围校验，FR-43） |
 
@@ -593,12 +593,12 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 ### 5.8 运行期设置（FR-24）
 
-- 设置以 SQLite `settings` 表为唯一真源，由 `settings.Service` 封装读写：`Get`/`GetAll`/`Set`/`SetMany`，写入走主键冲突 upsert，批量写在单事务内原子完成（详见 ADR-0029）。
-- `GET /api/settings` 返回全部键值（map 形式），`PUT /api/settings` 批量 upsert 并回读返回；前端在 `/system` 控制台页的「设置」tab（`?tab=settings`，FR-55）读写「每盘符回收站路径」「扫描周期」「工具路径（ffmpeg/ffprobe/magick）」等键值，旧 `/settings` 路由重定向至此。
-- 已知键以常量集中定义（`recycle_bin_paths`/`scan_interval`/`update_channel`/`transcode_codec_priority`/`ffmpeg_path`/`ffprobe_path`/`magick_path`/`network_proxy`），结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
+- 设置以 SQLite `settings` 表为运行期真源，由 `settings.Service` 封装读写：`Get` 供内部消费者读取原始值，`GetAll` 只返回已登记运行期 key 与默认值，`Set`/`SetMany` 写入前经 registry 校验并走主键冲突 upsert，批量写在单事务内原子完成。ADR-0061 取代 ADR-0029 中“任意 key upsert”的部分，未知 key 直接拒绝。
+- `GET /api/settings` 保持 map 形态，返回已登记运行期设置；敏感项非空时只返回 `已设置`，不回显明文。`GET /api/settings/definitions` 返回 key、中文名称、分层、值类型、默认值、敏感性、热应用能力与消费模块，供前端设置页渲染。`PUT /api/settings` 只允许 `layer=runtime` 的 key，任一未知 key、启动固定项或非法类型都会返回 `400 INVALID_SETTING` 且整体不写入。
+- 已登记运行期键包含 `recycle_bin_paths`、`scan_interval`、`update_channel`、`transcode_codec_priority`、`ffmpeg_path`、`ffprobe_path`、`magick_path`、`network_proxy`、`debug_log`、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`。
 - **FFmpeg 路径持久化设置（FR-56）**：`ffmpeg_path`/`ffprobe_path` 让 ffmpeg/ffprobe 路径运行期可配置。`main.go` 启动时先 `resolveTool` 注入（环境变量→同目录捆绑版→PATH），随后若设置非空则覆盖（**持久化设置优先于自动发现**）；`PUT /api/settings` 含这两键时落库后即时调 `transcoder.SetFFmpegPath`/`SetFFprobePath`（ffprobe 同步给 `library`）应用到运行期，保存即生效、无需重启（api→transcoder 依赖方向允许）。
 - **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
-- **后端出站网络代理（FR-80）**：`network_proxy` 让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决直连 GitHub 下载 CDN 不可达。新增独立无业务依赖的 `netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h}（均为标准库 `net/http` Transport 原生支持，**无新依赖**）后原子更新、空串清空、非法不覆盖；`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 走直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各设 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，各自 Timeout 语义不变（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则 `SetProxy` 注入；`PUT /api/settings` 含 `network_proxy` 时落库后即时 `netproxy.SetProxy`，非法 URL 仅记 WARN 不阻断保存（与工具路径空值守卫风格一致）。依赖方向单向（`api`/`update`/`main` → `netproxy`，`netproxy` 不依赖任何业务模块）。
+- **后端出站网络代理（FR-80）**：`network_proxy` 让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决直连 GitHub 下载 CDN 不可达。新增独立无业务依赖的 `netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h}（均为标准库 `net/http` Transport 原生支持，**无新依赖**）后原子更新、空串清空、非法不覆盖；`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 走直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各设 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，各自 Timeout 语义不变（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则 `SetProxy` 注入；`PUT /api/settings` 含 `network_proxy` 时先由 registry 校验协议和格式，落库后即时 `netproxy.SetProxy`。API 回读和审计事件只暴露存在性，不返回带凭据代理 URL。依赖方向单向（`api`/`update`/`main` → `netproxy`，`netproxy` 不依赖任何业务模块）。
 - **自更新下载进度与失败重试（FR-90，扩 FR-46）**：给 FR-46 原本无反馈的下载链路加进度可观测性与失败可恢复性，**不动 `replaceAndRestart`**（Windows 覆盖运行中 exe / spawn 失败回退）正常逻辑。`downloadToTemp` 用计数 `io.Writer`（`countingWriter`）包装 `io.Copy`，每次写入后回调上报累计已下载字节（总字节取 `resp.ContentLength`，≤0 视为未知报 0）。`update.Service` 新增互斥量保护的进程内进度单例 `progressTracker`（状态机 `idle/downloading/verifying/done/failed`），**与 FR-46 检测结果的 TTL 缓存单例同构、不落库**（自更新本就用户显式触发、单次互斥，无需持久化），`Apply` 把回调接到 `setProgressDownloading` 并在进入校验 / 失败 / 完成时切状态。新增轮询端点 `GET /api/system/update/progress`（见 [docs/API.md](API.md)）读快照返回 `{state, downloaded, total, percent}`（`percent` 在 `total>0` 时即时算出、否则 0），鉴权随 `/api/*` 的 APIGuard、无外部依赖恒可用。前端「应用更新」子 tab 更新进行中每 ~800ms 轮询、以 Mantine `<Progress>` 展示百分比（总字节未知退化为展示已下载字节），失败后展示显式「重试」按钮直接重触发 apply。**只用 Go 标准库 + 内存状态轮询，不引 SSE/WebSocket/消息队列**（守架构不变量禁重型中间件），无新依赖、无新架构决策、无新 ADR（机制见 [docs/specs/update-progress.md](specs/update-progress.md)）。
 - **运行时调试日志开关（FR-110）**：`debug_log` 让 GORM 日志在运行期可切换详细 / 安静。新增独立无业务依赖的 `dblog` 包以 `atomic.Bool` 持有开关：默认安静（Error 级 + 忽略 record-not-found，不刷普通 SQL 与「查无记录」噪音），开启切 Info 级（输出 SQL 与慢查询）。`dblog.Logger` 实现 `gorm/logger.Interface` 并预建「安静 / 详细」两委托 logger，按原子开关选择实际输出者；`LogMode` 以自身开关为唯一真源、忽略 GORM 启动期重设。`main.go` 在 `gorm.Open` 时把该 logger 注入 `gorm.Config.Logger`，启动后读 `settings.DebugLog()` 决定初始级别（重启保持）；`PUT /api/settings` 含 `debug_log` 时落库后即时调注入的 `dbLogger.SetEnabled`（经 `WithDebugLogApply` 回调）切级别，保存即生效、无需重启。区别于启动期只读的 `JIANVIDEO_DEBUG`（gin 模式，运行期不可切，保持原样）。依赖方向单向（`main`/`api` → `dblog`，`dblog` 仅依赖 gorm logger）。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。

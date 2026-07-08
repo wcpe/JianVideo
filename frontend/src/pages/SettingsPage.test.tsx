@@ -41,6 +41,41 @@ describe('SettingsPage', () => {
     expect(screen.getByLabelText('回收站路径 1')).toHaveValue('D:/.recycle');
   });
 
+  it('已保存敏感代理不回显，保存其他设置时不提交 network_proxy', async () => {
+    const user = userEvent.setup();
+    let putBody: { settings: Record<string, string> } | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            scan_interval: '3600',
+            recycle_bin_paths: '{"D":"D:/.recycle"}',
+            network_proxy: '已设置',
+          },
+        }),
+      ),
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = (await request.json()) as { settings: Record<string, string> };
+        return HttpResponse.json({ settings: { ...putBody.settings, network_proxy: '已设置' } });
+      }),
+    );
+
+    renderPage();
+    const proxyInput = await screen.findByLabelText('网络代理');
+    expect(proxyInput).toHaveValue('');
+    expect(screen.getByText(/已保存代理已隐藏/)).toBeVisible();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      );
+    });
+    expect(putBody).not.toBeNull();
+    expect(putBody!.settings.network_proxy).toBeUndefined();
+  });
+
   it('设置项按「扫描 / 网络 / 工具路径 / 回收站」分区且字段归位', async () => {
     renderPage();
     await screen.findByLabelText('扫描周期（秒）');
@@ -181,6 +216,28 @@ describe('SettingsPage', () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText('查询设置失败')).toBeVisible();
+    });
+  });
+
+  it('保存失败时展示服务端配置校验错误', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.put('*/api/settings', () =>
+        HttpResponse.json(
+          { code: 'INVALID_SETTING', message: 'typo_key: 未知设置项' },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderPage();
+
+    await screen.findByLabelText('扫描周期（秒）');
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '保存失败', message: 'typo_key: 未知设置项', color: 'red' }),
+      );
     });
   });
 

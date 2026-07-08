@@ -72,7 +72,7 @@ func TestSetTranscodeCodecPriority_RejectDuplicate(t *testing.T) {
 // TestTranscodeCodecPriority_CorruptValueFallback 库内值损坏时回落默认 [h264]。
 func TestTranscodeCodecPriority_CorruptValueFallback(t *testing.T) {
 	svc := NewService(setupTestDB(t))
-	if err := svc.Set(KeyTranscodeCodecPriority, "not-json"); err != nil {
+	if err := svc.upsert(svc.db, KeyTranscodeCodecPriority, "not-json"); err != nil {
 		t.Fatalf("写入损坏值失败: %v", err)
 	}
 	got := svc.TranscodeCodecPriority()

@@ -1112,7 +1112,31 @@
     }
   }
   ```
-- **说明**：返回全部运行期设置（key → value，值统一为字符串；结构化值如每盘符回收站路径以 JSON 字符串存于单 key）。设置以 SQLite `settings` 表为真源，为回收站清理、定时扫描等能力提供配置真源（FR-24）。
+- **说明**：返回全部已登记的运行期设置（key → value，值统一为字符串；结构化值如每盘符回收站路径以 JSON 字符串存于单 key）。未落库 key 返回 registry 默认值；敏感 key 非空时只返回 `已设置`，不回显明文。旧库中未登记 key 不会通过该接口暴露。
+- **错误**：`503` 设置服务未启用
+
+### 读取设置定义
+
+- **方法 / 路径**：`GET /api/settings/definitions`
+- **响应**（200）：
+  ```json
+  {
+    "definitions": [
+      {
+        "key": "network_proxy",
+        "label": "网络代理",
+        "description": "后端出站网络代理；支持 http、https、socks5、socks5h，凭据不回显。",
+        "layer": "runtime",
+        "value_type": "url",
+        "default_value": "",
+        "sensitive": true,
+        "hot_apply": true,
+        "consumer": "netproxy"
+      }
+    ]
+  }
+  ```
+- **说明**：返回配置 registry，供前端按分层、类型、默认值、敏感性和热应用能力渲染设置页。`layer=startup` 的启动固定项只读展示，不能经 `PUT /api/settings` 修改。
 - **错误**：`503` 设置服务未启用
 
 ### 写入运行期设置
@@ -1128,9 +1152,9 @@
   }
   ```
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
-- **说明**：批量 upsert 键值，同一 key 覆盖旧值；写入在单事务内原子完成，提交成功后回读返回。保存成功后触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），保存即生效（FR-80），非法 URL 仅记 WARN 跳过应用、不阻断保存（保留既有代理）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。
-- **已知键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，支持 http/https/socks5 协议）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）。
-- **错误**：`400` 请求参数错误或 `settings` 为空，`503` 设置服务未启用，`500` 保存失败
+- **说明**：批量 upsert 键值，同一 key 覆盖旧值；所有 key 必须先登记为 `runtime`，并通过 registry 类型校验。任一 key 未知、不可运行期修改或值类型非法时整体返回 `400`，不写入任何设置。提交成功后回读返回，并触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时写入前校验协议和格式，落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），支持 http/https/socks5/socks5h，保存即生效（FR-80）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。
+- **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
+- **错误**：`400` 请求参数错误、`settings` 为空或配置校验失败（`INVALID_SETTING`），`503` 设置服务未启用，`500` 保存失败
 
 ### 查询审计事件（FR2-040）
 

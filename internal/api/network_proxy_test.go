@@ -19,7 +19,7 @@ func TestUpdateSettings_AppliesNetworkProxyToRuntime(t *testing.T) {
 
 	r := setupSettingsRouter(t)
 
-	const proxy = "socks5://127.0.0.1:1080"
+	const proxy = "socks5h://127.0.0.1:1080"
 	body := `{"settings":{"` + settings.KeyNetworkProxy + `":"` + proxy + `"}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -64,8 +64,8 @@ func TestUpdateSettings_EmptyNetworkProxyMeansDirect(t *testing.T) {
 	}
 }
 
-// TestUpdateSettings_InvalidNetworkProxyKeepsExisting 非法 network_proxy 不应覆盖既有出站代理（FR-80）。
-// 非法值仅记 WARN、不阻断保存（返回 200），既有运行期代理保持不变。
+// TestUpdateSettings_InvalidNetworkProxyRejected 非法 network_proxy 保存前被拒绝（FR2-024）。
+// 既有运行期代理保持不变。
 func TestUpdateSettings_InvalidNetworkProxyKeepsExisting(t *testing.T) {
 	t.Cleanup(func() { _ = netproxy.SetProxy("") })
 
@@ -81,11 +81,20 @@ func TestUpdateSettings_InvalidNetworkProxyKeepsExisting(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("非法代理不阻断保存，应返回 200，实际 %d，body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法代理应返回 400，实际 %d，body=%s", w.Code, w.Body.String())
 	}
 	u, _ := netproxy.ProxyFunc(&http.Request{})
 	if u == nil || u.Host != "127.0.0.1:7890" {
 		t.Errorf("非法 network_proxy 不应覆盖既有代理，期望 %q，实际 %v", existing, u)
+	}
+}
+
+func TestApplyNetworkProxySettings_ReturnsRuntimeError(t *testing.T) {
+	t.Cleanup(func() { _ = netproxy.SetProxy("") })
+
+	err := applyNetworkProxySettings(map[string]string{settings.KeyNetworkProxy: "ftp://bad-scheme:21"})
+	if err == nil {
+		t.Fatalf("运行期应用非法代理应返回错误")
 	}
 }

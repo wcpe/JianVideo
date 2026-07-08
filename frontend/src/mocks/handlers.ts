@@ -13,6 +13,7 @@ import type {
   ShareResourceType,
   TranscodeCodec,
   AuditEvent,
+  SettingDefinition,
 } from '@/types';
 
 // 内存中的可变数据（支持增删）
@@ -28,7 +29,201 @@ const settingsStore: Record<string, string> = {
   recycle_bin_paths: '{"D":"D:/.recycle"}',
   ffmpeg_path: '',
   ffprobe_path: '',
+  magick_path: '',
+  network_proxy: '',
+  debug_log: '0',
+  upload_target_dir: '',
+  upload_naming_rule: 'original',
+  update_channel: 'stable',
+  transcode_codec_priority: '["h264"]',
 };
+
+const settingDefinitions: SettingDefinition[] = [
+  {
+    key: 'scan_interval',
+    label: '扫描周期',
+    description: '定时扫描的间隔秒数，0 或留空表示关闭定时扫描。',
+    layer: 'runtime',
+    value_type: 'int',
+    default_value: '0',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.scheduler',
+  },
+  {
+    key: 'recycle_bin_paths',
+    label: '回收站路径',
+    description: '各盘符对应的回收站目录，保存为 JSON 对象。',
+    layer: 'runtime',
+    value_type: 'json',
+    default_value: '{}',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: 'network_proxy',
+    label: '网络代理',
+    description: '后端出站网络代理；支持 http、https、socks5、socks5h，凭据不回显。',
+    layer: 'runtime',
+    value_type: 'url',
+    default_value: '',
+    sensitive: true,
+    hot_apply: true,
+    consumer: 'netproxy',
+  },
+  {
+    key: 'ffmpeg_path',
+    label: 'FFmpeg 路径',
+    description: 'ffmpeg 可执行文件路径；留空时按自动发现结果使用。',
+    layer: 'runtime',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+  },
+  {
+    key: 'ffprobe_path',
+    label: 'FFprobe 路径',
+    description: 'ffprobe 可执行文件路径；留空时按自动发现结果使用。',
+    layer: 'runtime',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.transcoder',
+  },
+  {
+    key: 'magick_path',
+    label: 'Magick 路径',
+    description: 'ImageMagick magick 可执行文件路径；留空时按自动发现结果使用。',
+    layer: 'runtime',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.imageconvert',
+  },
+  {
+    key: 'debug_log',
+    label: '调试日志',
+    description: '运行时详细日志开关。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '0',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'dblog',
+  },
+  {
+    key: 'upload_target_dir',
+    label: '默认上传位置',
+    description: 'Web 上传缺省落盘目录，留空表示上传时必须指定。',
+    layer: 'runtime',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.upload',
+  },
+  {
+    key: 'upload_naming_rule',
+    label: '上传命名规则',
+    description: 'Web 上传文件的默认归档规则。',
+    layer: 'runtime',
+    value_type: 'enum',
+    default_value: 'original',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.upload',
+    options: [
+      { value: 'original', label: '保留原样' },
+      { value: 'date', label: '按日期归档' },
+    ],
+  },
+  {
+    key: 'update_channel',
+    label: '更新频道',
+    description: '自更新检查使用的发布频道。',
+    layer: 'runtime',
+    value_type: 'enum',
+    default_value: 'stable',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'update',
+  },
+  {
+    key: 'transcode_codec_priority',
+    label: '转码编码优先级',
+    description: '按优先顺序排列的目标编码 JSON 数组。',
+    layer: 'runtime',
+    value_type: 'json',
+    default_value: '["h264"]',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+  },
+  {
+    key: 'open_tabs',
+    label: '目录标签',
+    description: '目录浏览打开标签的持久化快照。',
+    layer: 'runtime',
+    value_type: 'json',
+    default_value: '[]',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'browse-tabs',
+  },
+  {
+    key: 'last_opened_path',
+    label: '上次浏览位置',
+    description: '目录浏览最后打开的位置。',
+    layer: 'runtime',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'browse-tabs',
+  },
+  {
+    key: 'server_port',
+    label: '监听端口',
+    description: '服务启动时确定的 HTTP 监听端口，运行期不可修改。',
+    layer: 'startup',
+    value_type: 'int',
+    default_value: '',
+    sensitive: false,
+    hot_apply: false,
+    consumer: 'config',
+  },
+  {
+    key: 'db_path',
+    label: '数据库路径',
+    description: 'SQLite 数据库文件路径，运行期不可通过设置接口修改。',
+    layer: 'startup',
+    value_type: 'path',
+    default_value: '',
+    sensitive: false,
+    hot_apply: false,
+    consumer: 'config',
+  },
+  {
+    key: 'jwt_secret',
+    label: '会话密钥',
+    description: 'JWT 签名密钥，只能通过启动环境配置。',
+    layer: 'startup',
+    value_type: 'string',
+    default_value: '',
+    sensitive: true,
+    hot_apply: false,
+    consumer: 'auth',
+  },
+];
+
+const writableSettingKeys = new Set(
+  settingDefinitions.filter((definition) => definition.layer === 'runtime').map((definition) => definition.key),
+);
 
 const auditEvents: AuditEvent[] = [
   {
@@ -955,12 +1150,24 @@ export const handlers = [
     return HttpResponse.json({ settings: { ...settingsStore } });
   }),
 
+  http.get('*/api/settings/definitions', async () => {
+    await delay(80);
+    return HttpResponse.json({ definitions: settingDefinitions });
+  }),
+
   http.put('*/api/settings', async ({ request }) => {
     await delay(100);
     const body = (await request.json()) as { settings: Record<string, string> };
     if (!body.settings || Object.keys(body.settings).length === 0) {
       return HttpResponse.json(
         { code: 'EMPTY_SETTINGS', message: 'settings 不能为空' },
+        { status: 400 },
+      );
+    }
+    const badKey = Object.keys(body.settings).find((key) => !writableSettingKeys.has(key));
+    if (badKey) {
+      return HttpResponse.json(
+        { code: 'INVALID_SETTING', message: `${badKey}: 未知设置项` },
         { status: 400 },
       );
     }

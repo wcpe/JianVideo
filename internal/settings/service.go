@@ -40,6 +40,10 @@ const (
 	KeyUploadTargetDir = "upload_target_dir"
 	// KeyUploadNamingRule Web 上传命名规则（FR-149）：original=保留原样、date=按日期 YYYY/MM 整齐归档；空/非法回退 original。
 	KeyUploadNamingRule = "upload_naming_rule"
+	// KeyOpenTabs 目录浏览打开标签持久化快照（FR-151），值为 JSON 数组。
+	KeyOpenTabs = "open_tabs"
+	// KeyLastOpenedPath 目录浏览上次打开位置（FR-151），值为路径字符串。
+	KeyLastOpenedPath = "last_opened_path"
 )
 
 // Service 运行期设置业务逻辑。
@@ -101,21 +105,36 @@ func ParseDebugLog(raw string) bool {
 	return v == "1" || v == "true"
 }
 
-// GetAll 读取全部设置，返回 key → value 映射。
+// GetAll 读取已登记运行期设置，返回 key → 公开展示值映射。
 func (s *Service) GetAll() (map[string]string, error) {
 	var items []models.Setting
 	if err := s.db.Find(&items).Error; err != nil {
 		return nil, err
 	}
-	result := make(map[string]string, len(items))
+	raw := make(map[string]string, len(items))
 	for _, item := range items {
-		result[item.Key] = item.Value
+		raw[item.Key] = item.Value
+	}
+	defs := Definitions()
+	result := make(map[string]string, len(defs))
+	for _, def := range defs {
+		if def.Layer != LayerRuntime {
+			continue
+		}
+		value, ok := raw[def.Key]
+		if !ok {
+			value = def.DefaultValue
+		}
+		result[def.Key] = publicValue(def, value)
 	}
 	return result, nil
 }
 
 // Set 写入单项设置（upsert：存在则覆盖 value 与 updated_at）。
 func (s *Service) Set(key, value string) error {
+	if err := validateWritable(key, value); err != nil {
+		return err
+	}
 	return s.upsert(s.db, key, value)
 }
 
@@ -123,6 +142,11 @@ func (s *Service) Set(key, value string) error {
 func (s *Service) SetMany(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	for key, value := range values {
+		if err := validateWritable(key, value); err != nil {
+			return err
+		}
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		before, err := s.getValuesTx(tx, values)
@@ -140,8 +164,8 @@ func (s *Service) SetMany(values map[string]string) error {
 				ActorType:    audit.ActorSystem,
 				Action:       "settings.updated",
 				ResourceType: "settings",
-				Before:       before,
-				After:        values,
+				Before:       redactedValues(before),
+				After:        redactedValues(values),
 			}); err != nil {
 				return err
 			}
@@ -173,4 +197,17 @@ func (s *Service) getValuesTx(tx *gorm.DB, values map[string]string) (map[string
 		result[item.Key] = item.Value
 	}
 	return result, nil
+}
+
+func redactedValues(values map[string]string) map[string]string {
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		def, ok := definitionFor(key)
+		if ok && def.Sensitive {
+			result[key] = publicValue(def, value)
+			continue
+		}
+		result[key] = value
+	}
+	return result
 }

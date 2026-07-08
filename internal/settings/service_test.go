@@ -89,7 +89,7 @@ func TestScanInterval(t *testing.T) {
 		{"", 0},                      // 空关闭
 	}
 	for _, c := range cases {
-		if err := svc.Set(KeyScanInterval, c.raw); err != nil {
+		if err := svc.upsert(svc.db, KeyScanInterval, c.raw); err != nil {
 			t.Fatalf("写入 %q 失败: %v", c.raw, err)
 		}
 		if got := svc.ScanInterval(); got != c.want {
@@ -135,6 +135,79 @@ func TestSetManyAtomicAndPersist(t *testing.T) {
 	}
 	if all[KeyRecycleBinPaths] != `{"E":"E:/trash"}` {
 		t.Fatalf("回收站路径未持久化, 实际 %q", all[KeyRecycleBinPaths])
+	}
+}
+
+func TestSetManyRejectsUnknownKeyAtomically(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewService(db)
+
+	err := svc.SetMany(map[string]string{
+		KeyScanInterval: "900",
+		"typo_key":      "bad",
+	})
+	if err == nil || !IsValidationError(err) {
+		t.Fatalf("未知 key 应返回校验错误, 实际 %v", err)
+	}
+
+	all, err := svc.GetAll()
+	if err != nil {
+		t.Fatalf("读取全部设置失败: %v", err)
+	}
+	if all[KeyScanInterval] == "900" {
+		t.Fatalf("批量校验失败时不应写入任何设置")
+	}
+	var count int64
+	if err := db.Model(&models.Setting{}).Where("key = ?", "typo_key").Count(&count).Error; err != nil {
+		t.Fatalf("查询脏 key 失败: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("未知 key 不应落库, count=%d", count)
+	}
+}
+
+func TestSetManyRejectsInvalidType(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+
+	if err := svc.SetMany(map[string]string{KeyScanInterval: "not-int"}); err == nil || !IsValidationError(err) {
+		t.Fatalf("非法扫描周期应返回校验错误, 实际 %v", err)
+	}
+}
+
+func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
+	defs := Definitions()
+	seen := map[string]Definition{}
+	for _, def := range defs {
+		seen[def.Key] = def
+	}
+	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath} {
+		if _, ok := seen[key]; !ok {
+			t.Fatalf("definitions 缺少 key=%s", key)
+		}
+	}
+	if def := seen[KeyNetworkProxy]; !def.Sensitive || def.Layer != LayerRuntime {
+		t.Fatalf("network_proxy 应登记为运行期敏感项: %+v", def)
+	}
+	if def := seen["jwt_secret"]; !def.Sensitive || def.Layer != LayerStartup {
+		t.Fatalf("jwt_secret 应登记为启动期敏感项: %+v", def)
+	}
+}
+
+func TestGetAllRedactsSensitiveSettings(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+	if err := svc.Set(KeyNetworkProxy, "http://user:secret@example.com:8080"); err != nil {
+		t.Fatalf("写入代理失败: %v", err)
+	}
+
+	all, err := svc.GetAll()
+	if err != nil {
+		t.Fatalf("读取全部设置失败: %v", err)
+	}
+	if all[KeyNetworkProxy] != sensitiveDisplayValue {
+		t.Fatalf("敏感代理不应明文回显, 实际 %q", all[KeyNetworkProxy])
+	}
+	if raw, err := svc.Get(KeyNetworkProxy); err != nil || raw != "http://user:secret@example.com:8080" {
+		t.Fatalf("内部读取应保留原始值, raw=%q err=%v", raw, err)
 	}
 }
 

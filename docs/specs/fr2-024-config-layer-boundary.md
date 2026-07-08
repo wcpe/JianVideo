@@ -1,6 +1,6 @@
 # 功能规格：配置分层边界
 
-> 状态：已审核接受　·　关联 PRD：FR2-024　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已交付@v0.23.0　·　关联 PRD：FR2-024　·　阶段：P2 `0.23.x`　·　分支：`codex/fr2-024-config-boundary`
 
 ## 1. 背景与目标
 
@@ -60,16 +60,16 @@ API 增强：
 
 ## 4. 任务拆分
 
-- [ ] 梳理现有设置 key，并建立配置边界表。
-- [ ] 在 `internal/settings` 增加 registry、类型校验与未知 key 拒绝。
-- [ ] 保持 `GET/PUT /api/settings` 兼容，同时新增 definitions 接口。
-- [ ] 为现有 apply hook 补全错误返回与事务后应用顺序。
-- [ ] 前端设置页改为基于 definitions 渲染与校验。
-- [ ] 接入配置变更审计 `Recorder` 接口，FR2-040 合入后追加真实审计查询集成验收。
-- [ ] 补单元测试：未知 key、类型错误、敏感脱敏、批量原子失败、默认值。
-- [ ] 补集成测试：保存扫描周期/代理/工具路径后热应用，启动固定项不可写。
-- [ ] 补 E2E：设置页展示分组、保存合法项、非法项有错误提示。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 梳理现有设置 key，并建立配置边界表。
+- [x] 在 `internal/settings` 增加 registry、类型校验与未知 key 拒绝。
+- [x] 保持 `GET/PUT /api/settings` 兼容，同时新增 definitions 接口。
+- [x] 为现有 apply hook 补全写前校验与事务后应用顺序。
+- [x] 前端设置页改为基于 definitions 渲染与校验。
+- [x] 接入配置变更审计 `Recorder` 接口，FR2-040 合入后追加真实审计查询集成验收。
+- [x] 补单元测试：未知 key、类型错误、敏感脱敏、批量原子失败、默认值。
+- [x] 补集成测试：保存扫描周期/代理/工具路径后热应用，启动固定项不可写。
+- [x] 补 E2E：设置页展示分组、保存合法项、非法项有错误提示。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

@@ -67,6 +67,81 @@ func TestSettings_PutThenGet(t *testing.T) {
 	}
 }
 
+func TestSettings_Definitions(t *testing.T) {
+	router := setupSettingsRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/settings/definitions", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("definitions 期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Definitions []settings.Definition `json:"definitions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应解析失败: %v", err)
+	}
+	seen := map[string]settings.Definition{}
+	for _, def := range resp.Definitions {
+		seen[def.Key] = def
+	}
+	if seen[settings.KeyNetworkProxy].Sensitive != true {
+		t.Fatalf("network_proxy definitions 应标记敏感: %+v", seen[settings.KeyNetworkProxy])
+	}
+	if seen[settings.KeyScanInterval].ValueType != settings.ValueInt {
+		t.Fatalf("scan_interval 应标记 int 类型: %+v", seen[settings.KeyScanInterval])
+	}
+}
+
+func TestSettings_PutUnknownKeyRejected(t *testing.T) {
+	router := setupSettingsRouter(t)
+
+	req := httptest.NewRequest("PUT", "/api/settings", bytes.NewBufferString(`{"settings":{"typo_key":"x","scan_interval":"60"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("未知 key 期望 400, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/settings", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	var resp struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("响应解析失败: %v", err)
+	}
+	if resp.Settings[settings.KeyScanInterval] == "60" {
+		t.Fatalf("未知 key 导致批量失败时不应写入合法 key")
+	}
+}
+
+func TestSettings_GetRedactsSensitiveValues(t *testing.T) {
+	router := setupSettingsRouter(t)
+
+	body := `{"settings":{"` + settings.KeyNetworkProxy + `":"http://user:secret@example.com:8080"}}`
+	req := httptest.NewRequest("PUT", "/api/settings", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT 期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("secret")) || bytes.Contains(w.Body.Bytes(), []byte("user:")) {
+		t.Fatalf("PUT 响应不应包含代理凭据: %s", w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/settings", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if bytes.Contains(w.Body.Bytes(), []byte("secret")) || bytes.Contains(w.Body.Bytes(), []byte("user:")) {
+		t.Fatalf("GET 响应不应包含代理凭据: %s", w.Body.String())
+	}
+}
+
 // TestSettings_PutUpsert 同一 key 重复 PUT 覆盖旧值。
 func TestSettings_PutUpsert(t *testing.T) {
 	router := setupSettingsRouter(t)

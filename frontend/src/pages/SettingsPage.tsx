@@ -20,8 +20,10 @@ import {
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconTrash, IconPlus } from '@tabler/icons-react';
 import {
+  getSettingDefinitions,
   getSettings,
   updateSettings,
+  SETTING_SENSITIVE_DISPLAY_VALUE,
   SETTING_KEY_RECYCLE_BIN_PATHS,
   SETTING_KEY_SCAN_INTERVAL,
   SETTING_KEY_FFMPEG_PATH,
@@ -43,7 +45,7 @@ import {
   serializeRecycleBinRows,
   type RecycleBinRow,
 } from '@/utils/recycle-bin';
-import type { EnvVar, LibraryPath } from '@/types';
+import type { EnvVar, LibraryPath, SettingDefinition, SettingsMap } from '@/types';
 
 // 设置页左侧锚点（FR-113）：各分区标题挂同名 id，点击滚动定位、滚动高亮
 const SETTINGS_ANCHORS = [
@@ -66,6 +68,7 @@ export default function SettingsPage() {
   const [ffprobePath, setFfprobePath] = useState('');
   const [magickPath, setMagickPath] = useState('');
   const [networkProxy, setNetworkProxy] = useState('');
+  const [networkProxyMasked, setNetworkProxyMasked] = useState(false);
   // 调试日志开关（FR-110）：开启输出 GORM 详细 SQL/慢查询日志，关闭恢复安静；保存即生效
   const [debugLog, setDebugLog] = useState(false);
   // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
@@ -76,6 +79,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [definitions, setDefinitions] = useState<Record<string, SettingDefinition>>({});
 
   // 修改密码（FR-108）：独立于设置读写，不被设置加载阻塞
   const [currentPassword, setCurrentPassword] = useState('');
@@ -107,15 +111,18 @@ export default function SettingsPage() {
     let active = true;
     setLoading(true);
     setLoadError(null);
-    getSettings()
-      .then((data) => {
+    Promise.all([getSettings(), getSettingDefinitions()])
+      .then(([data, defs]) => {
         if (!active) return;
+        setDefinitions(Object.fromEntries(defs.map((def) => [def.key, def])));
         setScanInterval(data[SETTING_KEY_SCAN_INTERVAL] ?? '');
         setRecycleBinRows(parseRecycleBinRows(data[SETTING_KEY_RECYCLE_BIN_PATHS] ?? ''));
         setFfmpegPath(data[SETTING_KEY_FFMPEG_PATH] ?? '');
         setFfprobePath(data[SETTING_KEY_FFPROBE_PATH] ?? '');
         setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '');
-        setNetworkProxy(data[SETTING_KEY_NETWORK_PROXY] ?? '');
+        const proxy = data[SETTING_KEY_NETWORK_PROXY] ?? '';
+        setNetworkProxy(proxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : proxy);
+        setNetworkProxyMasked(proxy === SETTING_SENSITIVE_DISPLAY_VALUE);
         setDebugLog((data[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
         setUploadTargetDir(data[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
         setUploadNamingRule(data[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
@@ -180,6 +187,15 @@ export default function SettingsPage() {
   // 回收站行校验结果，驱动行内错误展示与提交拦截
   const recycleValidation = validateRecycleBinRows(recycleBinRows);
 
+  const settingLabel = useCallback(
+    (key: string, fallback: string) => definitions[key]?.label ?? fallback,
+    [definitions],
+  );
+  const settingDescription = useCallback(
+    (key: string, fallback: string) => definitions[key]?.description ?? fallback,
+    [definitions],
+  );
+
   const handleSave = useCallback(async () => {
     // 回收站行非法（空盘符/重复盘符）时行内提示并阻止提交
     const validation = validateRecycleBinRows(recycleBinRows);
@@ -194,24 +210,29 @@ export default function SettingsPage() {
     }
     setSaving(true);
     try {
-      const updated = await updateSettings({
+      const payload: SettingsMap = {
         [SETTING_KEY_SCAN_INTERVAL]: scanInterval,
         [SETTING_KEY_RECYCLE_BIN_PATHS]: serializeRecycleBinRows(recycleBinRows),
         [SETTING_KEY_FFMPEG_PATH]: ffmpegPath,
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
         [SETTING_KEY_MAGICK_PATH]: magickPath,
-        [SETTING_KEY_NETWORK_PROXY]: networkProxy,
         [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
         [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
         [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
-      });
+      };
+      if (!networkProxyMasked || networkProxy.trim() !== '') {
+        payload[SETTING_KEY_NETWORK_PROXY] = networkProxy;
+      }
+      const updated = await updateSettings(payload);
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '');
       setRecycleBinRows(parseRecycleBinRows(updated[SETTING_KEY_RECYCLE_BIN_PATHS] ?? ''));
       setFfmpegPath(updated[SETTING_KEY_FFMPEG_PATH] ?? '');
       setFfprobePath(updated[SETTING_KEY_FFPROBE_PATH] ?? '');
       setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '');
-      setNetworkProxy(updated[SETTING_KEY_NETWORK_PROXY] ?? '');
+      const nextProxy = updated[SETTING_KEY_NETWORK_PROXY] ?? '';
+      setNetworkProxy(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : nextProxy);
+      setNetworkProxyMasked(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE);
       setDebugLog((updated[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
       setUploadTargetDir(updated[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
       setUploadNamingRule(updated[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
@@ -241,6 +262,7 @@ export default function SettingsPage() {
     debugLog,
     uploadTargetDir,
     uploadNamingRule,
+    networkProxyMasked,
   ]);
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
@@ -390,8 +412,11 @@ export default function SettingsPage() {
             </Title>
             <Card withBorder padding="md" radius="md">
               <TextInput
-                label="扫描周期（秒）"
-                description="定时扫描的间隔周期，供后续定时扫描能力消费"
+                label={`${settingLabel(SETTING_KEY_SCAN_INTERVAL, '扫描周期')}（秒）`}
+                description={settingDescription(
+                  SETTING_KEY_SCAN_INTERVAL,
+                  '定时扫描的间隔周期，供后续定时扫描能力消费',
+                )}
                 value={scanInterval}
                 onChange={(e) => setScanInterval(e.currentTarget.value)}
               />
@@ -404,8 +429,11 @@ export default function SettingsPage() {
             <Card withBorder padding="md" radius="md">
               <Stack gap="sm">
                 <Select
-                  label="默认上传位置"
-                  description="Web 上传缺省落盘目录，须为已注册的本地媒体库目录；上传时仍可临时选择其他位置"
+                  label={settingLabel(SETTING_KEY_UPLOAD_TARGET_DIR, '默认上传位置')}
+                  description={settingDescription(
+                    SETTING_KEY_UPLOAD_TARGET_DIR,
+                    'Web 上传缺省落盘目录，须为已注册的本地媒体库目录；上传时仍可临时选择其他位置',
+                  )}
                   placeholder={
                     localLibraryPaths.length > 0 ? '选择一个本地库目录' : '暂无本地库目录'
                   }
@@ -419,8 +447,11 @@ export default function SettingsPage() {
                   searchable
                 />
                 <Select
-                  label="命名规则"
-                  description="保留原样：直接落目标目录；按日期整齐归档：分 年/月 子目录存放"
+                  label={settingLabel(SETTING_KEY_UPLOAD_NAMING_RULE, '命名规则')}
+                  description={settingDescription(
+                    SETTING_KEY_UPLOAD_NAMING_RULE,
+                    '保留原样：直接落目标目录；按日期整齐归档：分 年/月 子目录存放',
+                  )}
                   data={[
                     { value: 'original', label: '保留原样' },
                     { value: 'date', label: '按日期整齐归档（年/月）' },
@@ -440,12 +471,22 @@ export default function SettingsPage() {
             <Card withBorder padding="md" radius="md">
               <Stack gap="md">
                 <TextInput
-                  label="网络代理"
-                  description="用于自更新等后端外部网络访问；留空则直连。支持 http/https/socks5"
-                  placeholder="如 http://host:port 或 socks5://host:port"
+                  label={settingLabel(SETTING_KEY_NETWORK_PROXY, '网络代理')}
+                  description={
+                    networkProxyMasked
+                      ? '已保存代理已隐藏；留空不修改，输入新代理将覆盖。'
+                      : settingDescription(
+                          SETTING_KEY_NETWORK_PROXY,
+                          '用于自更新等后端外部网络访问；留空则直连。支持 http/https/socks5/socks5h',
+                        )
+                  }
+                  placeholder={
+                    networkProxyMasked ? '已设置，凭据不回显' : '如 http://host:port 或 socks5h://host:port'
+                  }
                   value={networkProxy}
                   onChange={(e) => {
                     setNetworkProxy(e.currentTarget.value);
+                    setNetworkProxyMasked(false);
                     setProxyTestResult(null);
                   }}
                 />
@@ -453,6 +494,18 @@ export default function SettingsPage() {
                   <Button variant="default" onClick={handleTestProxy} loading={testingProxy}>
                     测试
                   </Button>
+                  {networkProxyMasked && (
+                    <Button
+                      variant="subtle"
+                      color="red"
+                      onClick={() => {
+                        setNetworkProxy('');
+                        setNetworkProxyMasked(false);
+                      }}
+                    >
+                      清除已保存代理
+                    </Button>
+                  )}
                   {proxyTestResult &&
                     (proxyTestResult.reachable ? (
                       <Badge color="green">可达：{proxyTestResult.detail}</Badge>
@@ -473,8 +526,11 @@ export default function SettingsPage() {
             <Card withBorder padding="md" radius="md">
               <Stack gap="md">
                 <TextInput
-                  label="FFmpeg 路径"
-                  description="ffmpeg 可执行文件路径；留空则按环境变量→同目录捆绑版→PATH 自动发现"
+                  label={settingLabel(SETTING_KEY_FFMPEG_PATH, 'FFmpeg 路径')}
+                  description={settingDescription(
+                    SETTING_KEY_FFMPEG_PATH,
+                    'ffmpeg 可执行文件路径；留空则按环境变量→同目录捆绑版→PATH 自动发现',
+                  )}
                   placeholder="如 D:/tools/ffmpeg.exe"
                   value={ffmpegPath}
                   onChange={(e) => {
@@ -483,16 +539,22 @@ export default function SettingsPage() {
                   }}
                 />
                 <TextInput
-                  label="FFprobe 路径"
-                  description="ffprobe 可执行文件路径；留空则自动发现"
+                  label={settingLabel(SETTING_KEY_FFPROBE_PATH, 'FFprobe 路径')}
+                  description={settingDescription(
+                    SETTING_KEY_FFPROBE_PATH,
+                    'ffprobe 可执行文件路径；留空则自动发现',
+                  )}
                   placeholder="如 D:/tools/ffprobe.exe"
                   value={ffprobePath}
                   onChange={(e) => setFfprobePath(e.currentTarget.value)}
                 />
                 {/* Magick 路径（FR-63）：HEIC/RAW 转 JPEG 用 */}
                 <TextInput
-                  label="Magick 路径"
-                  description="ImageMagick magick 可执行文件路径，用于 HEIC/RAW 转 JPEG；留空则按环境变量→同目录捆绑版→PATH 自动发现"
+                  label={settingLabel(SETTING_KEY_MAGICK_PATH, 'Magick 路径')}
+                  description={settingDescription(
+                    SETTING_KEY_MAGICK_PATH,
+                    'ImageMagick magick 可执行文件路径，用于 HEIC/RAW 转 JPEG；留空则按环境变量→同目录捆绑版→PATH 自动发现',
+                  )}
                   placeholder="如 D:/tools/magick.exe"
                   value={magickPath}
                   onChange={(e) => setMagickPath(e.currentTarget.value)}
@@ -571,7 +633,10 @@ export default function SettingsPage() {
                 <Switch
                   label="调试日志"
                   aria-label="调试日志"
-                  description="开启后输出数据库 SQL 与慢查询详细日志，便于排查问题；默认关闭以保持日志安静。保存后即时生效、重启保留。"
+                  description={settingDescription(
+                    SETTING_KEY_DEBUG_LOG,
+                    '开启后输出数据库 SQL 与慢查询详细日志，便于排查问题；默认关闭以保持日志安静。保存后即时生效、重启保留。',
+                  )}
                   checked={debugLog}
                   onChange={(e) => setDebugLog(e.currentTarget.checked)}
                 />

@@ -194,6 +194,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	// 运行期设置（FR-24）：键值读写
 	settingsGroup := r.Group("/api/settings")
 	{
+		settingsGroup.GET("/definitions", h.GetSettingDefinitions)
 		settingsGroup.GET("", h.GetSettings)
 		settingsGroup.PUT("", h.UpdateSettings)
 	}
