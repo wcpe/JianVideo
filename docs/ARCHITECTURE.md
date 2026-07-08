@@ -55,6 +55,7 @@
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期键值设置读写（按 key 读/写、批量 upsert），为回收站、定时扫描提供配置真源 | → `db` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
+| `migration` | 版本化 SQLite schema 迁移、dry-run 计划、迁移前备份、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件（FR2-017） | → `db`, `models` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
@@ -84,6 +85,7 @@ jianvideo/
 │   │   └── models/            GORM 数据模型
 │   ├── dblog/                 可运行时切级别的 GORM 日志器
 │   ├── library/              媒体库、扫描队列、缩略图、EXIF / 时间提取
+│   ├── migration/            版本化 schema 迁移、备份、dry-run 与校验
 │   ├── metrics/              指标采样与持久化
 │   ├── netproxy/             出站 HTTP 全局可热更代理
 │   ├── playback/             播放进度、Range 请求、会话
@@ -236,6 +238,43 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 | key | TEXT PK | 设置键（如 `scan_interval`、`recycle_bin_paths`） |
 | value | TEXT | 设置值，统一字符串存储；结构化值（如每盘符回收站路径）以 JSON 字符串存于单 key |
 | updated_at | DATETIME | 最后更新时间 |
+
+**Schema 迁移状态（schema_migrations）** — FR2-017
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | 稳定递增 migration ID |
+| description | TEXT | 迁移说明 |
+| status | TEXT | `pending` / `running` / `succeeded` / `failed` |
+| safe_to_retry | INTEGER | 是否允许失败后安全重试 |
+| started_at / completed_at | DATETIME | 开始 / 完成时间 |
+| error_summary | TEXT | 失败摘要 |
+| validation_summary | TEXT | 校验摘要 |
+| backup_path | TEXT | 本轮迁移前 SQLite 备份路径 |
+| created_at / updated_at | DATETIME | 记录创建 / 更新时间 |
+
+**Space（spaces）** — FR2-017 最小归属切片
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | Space ID；历史数据迁入 `space-default` |
+| name | TEXT | Space 名称 |
+| created_at | DATETIME | 创建时间 |
+
+FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`，把历史记录回填到默认 Space，并创建 `idx_library_paths_space_id`、`idx_media_files_space_id`、`idx_media_files_space_library_added`。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。
+
+**审计事件（audit_events）** — FR2-017 最小系统级事件切片
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| scope | TEXT | `system` 或 `space`；迁移事件使用 `system` |
+| space_id | TEXT NULL | `scope=system` 时为空 |
+| event_type | TEXT | 事件类型，如 `migration.started` |
+| migration_id | TEXT | 关联 migration ID；整轮事件可为空 |
+| message | TEXT | 中文事件摘要 |
+| metadata_json | TEXT | 备份路径、大小、校验结果等脱敏元数据 |
+| created_at | DATETIME | 事件时间 |
 
 **相册（albums）** — FR-40
 
@@ -562,6 +601,15 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 - **采集**：引入 `gopsutil/v4` 取系统 CPU% 与数据盘用量；进程内存/goroutine 用标准库 `runtime`；转码并发取播放服务 `ActiveSessions()`（只读 `len(sessions)`，经 `func() int` provider 注入，`metrics → playback` 不反向依赖）。
 - **采样与持久化**：`internal/metrics` 采样器后台 `time.Ticker` 每 15s 采一行写入 SQLite `metric_samples` 表；按 7 天保留期裁剪防膨胀；随服务 `Start`/`Stop`（main 装配，注入 db + dataDir + 转码计数 provider），不泄漏 goroutine。采样逻辑在 metrics 服务层、`db` 仅 `metric_samples` 读写，依赖方向 `metrics → db` 单向。只落 SQLite，不引时序库 / Redis。
 - **查询**：`GET /api/system/metrics?range=` 按 range 选窗口与桶大小下采样（`unixepoch(sampled_at) / 桶秒` GROUP BY + AVG/MAX），点数有界；`current` 为最新一条原始样本（按 `id DESC` 取，回避 mattn/go-sqlite3 的 time 文本序列化比较不可靠）。
+
+### 5.13 版本化 schema 迁移（FR2-017，[ADR-0062](adr/0062-versioned-schema-migrations.md)）
+
+- `internal/migration` 是启动期 schema 演进入口：生产启动不再直接执行无版本记录的全局 `InitSchema + AutoMigrate`，而是经 migration registry 顺序执行。
+- 每个 migration 提供 ID、说明、`SafeToRetry`、`Up` 与 `Validate`；dry-run 只读返回步骤和影响预估，不写业务表、`schema_migrations` 或审计表。
+- 真实迁移只在存在待执行步骤时运行；执行前使用 SQLite `VACUUM INTO` 在数据目录 `backups/` 下创建备份，并打开备份执行 `PRAGMA integrity_check`，校验失败即停止。
+- `schema_migrations` 记录每步 `running/succeeded/failed`、错误摘要、校验摘要与备份路径；中断后重启会跳过已成功且校验通过的步骤，失败且 `SafeToRetry=true` 的步骤可重试。
+- 当前 FR2-017 切片包含既有基础 schema 收敛、默认 Space 回填、关键索引创建与 FR2-007 查询 smoke；不实现 FR2-007/FR2-037/FR2-040 的完整业务 schema。
+- 迁移开始、成功、失败写 `scope=system` 的 `audit_events`，`space_id` 为空，符合 ADR-0063 的系统级作用域语义。
 
 ## 6. 部署
 

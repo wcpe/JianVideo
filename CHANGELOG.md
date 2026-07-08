@@ -6,6 +6,9 @@
 
 ## 未发布
 
+### 新增
+- **FR2-017 v0.20 到 v2 数据迁移与升级安全**：新增 `internal/migration` 版本化 schema 迁移框架，启动期以 migration registry 替代无版本记录的全局 `InitSchema + AutoMigrate`；支持 dry-run 只读计划、迁移前 SQLite `VACUUM INTO` 备份与 `PRAGMA integrity_check` 校验、`schema_migrations` 状态记录、中断后安全重入、默认 Space 回填、关键 Space/媒体索引 smoke 校验，以及 `scope=system` 的迁移审计事件。新增 v0.20 最小旧库 fixture 集成测试，覆盖 dry-run 不写业务/schema/audit、备份可打开、中断重入、默认 Space 回填与索引存在。
+
 ## 0.22.0（2026-07-08）
 
 ### 新增

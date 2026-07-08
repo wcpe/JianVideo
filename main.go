@@ -19,11 +19,11 @@ import (
 
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/api"
-	"github.com/wcpe/JianVideo/internal/db"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/dblog"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/metrics"
+	"github.com/wcpe/JianVideo/internal/migration"
 	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
@@ -74,29 +74,20 @@ func main() {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
 
-	// 使用底层 sql.DB 进行 schema 初始化
-	sqlDB, _ := gormDB.DB()
-	if err := db.InitSchema(sqlDB); err != nil {
-		log.Fatalf("数据库建表失败: %v", err)
+	registry, err := migration.NewRegistry(migration.DefaultMigrations()...)
+	if err != nil {
+		log.Fatalf("数据库迁移注册失败: %v", err)
 	}
-	// 统一迁移：媒体后缀、媒体文件新增列（软删/显示名/EXIF/收藏/观看状态），及相册/标签/设置新表
-	if err := gormDB.AutoMigrate(
-		&models.MediaExtension{},
-		&models.MediaFile{},
-		&models.Album{},
-		&models.AlbumItem{},
-		&models.Tag{},
-		&models.TagMapping{},
-		&models.Setting{},
-		&models.ScanTask{},
-		&models.Share{},
-		&models.CodecProbeCache{},
-		&models.MediaHealthIssue{},
-		&models.TranscodePreset{},
-		&models.TranscodeTask{},
-		&models.MetricSample{},
-	); err != nil {
+	migrationResult, err := migration.NewRunner(gormDB, migration.RunnerOptions{
+		DBPath:    cfg.DBPath,
+		BackupDir: filepath.Join(filepath.Dir(cfg.DBPath), "backups"),
+		Registry:  registry,
+	}).Run(context.Background())
+	if err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
+	}
+	if migrationResult.Backup.Path != "" {
+		log.Printf("[INFO] 数据库迁移备份已创建: path=%s, size=%d", migrationResult.Backup.Path, migrationResult.Backup.Size)
 	}
 
 	// 设置服务（FR-24）：先建好，供下方 ffmpeg 路径持久化设置覆盖与 API 注入复用。

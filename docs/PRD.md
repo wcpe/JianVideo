@@ -122,7 +122,7 @@ JianVideo v2 从“轻量单用户家庭媒体库”升级为“自托管优先�
 | FR2-014 | 运维与质量门：初始化向导、设置、诊断、队列监控、Benchmark、E2E、发布包和 1.0 RC 质量门 | P7 | 计划 |
 | FR2-015 | 前端技术栈冻结：pnpm、Turborepo、Vite、React Router、TanStack Query、Zustand、react-i18next、MSW、PixiJS 的职责边界和迁移顺序确认 | P0.5 | 已交付@v0.21.0 |
 | FR2-016 | 最严静态检查门：Go 严格 lint/style/security，TypeScript strict-type-checked，Rust clippy pedantic，Kotlin detekt 全规则，SwiftLint strict + 11 个配置模板 | P0.5 | 已交付@v0.21.0 |
-| FR2-017 | v0.20 到 v2 数据迁移与升级安全：SQLite schema、配置、媒体库路径、用户、Space 归属和索引重建必须有可验证迁移路径 | P2 | 计划 |
+| FR2-017 | v0.20 到 v2 数据迁移与升级安全：SQLite schema、配置、媒体库路径、用户、Space 归属和索引重建必须有可验证迁移路径 | P2 | 开发中 |
 | FR2-018 | 备份、导出与灾难恢复：可信元数据、sidecar、事件日志、配置和数据库可导出、备份、恢复，原媒体不被隐式搬迁 | P7 | 计划 |
 | FR2-019 | 国际化与无障碍质量门：多端文本资源命名空间、语言切换、键盘可达、焦点可见、对比度和触控目标验收 | P7 | 计划 |
 | FR2-020 | Docker Compose 部署与首次安装引导：compose 编排、首启初始化向导（数据目录/端口/管理员/媒体库路径），纯净容器可复现 | P7 | 计划 |
