@@ -44,6 +44,7 @@ import {
   IconLayoutDashboard,
   IconActivity,
   IconUpload,
+  IconListCheck,
 } from '@tabler/icons-react';
 import { useAuthStore } from '@/stores/auth';
 import { useNavCollapsed } from '@/hooks/useNavCollapsed';
@@ -171,6 +172,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/stats', label: '统计', icon: IconChartBar },
     // 转码预设与预生成队列（FR-77）：自定义编码/分辨率预设、预热首播
     { path: '/transcode', label: '转码', icon: IconMovie },
+    // 通用任务队列中心（FR2-037）：扫描、转码、缩略图等异步任务统一监控与操作
+    { path: '/tasks', label: '任务', icon: IconListCheck },
     // 系统监控（FR-119）：CPU/内存/磁盘/转码并发当前值与时序折线
     { path: '/monitor', label: '监控', icon: IconActivity },
     // 系统信息与设置合并为单页两 tab（FR-55），导航合并为一个「系统」入口
@@ -201,6 +204,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         '/inspect',
         '/duplicates',
         '/transcode',
+        '/tasks',
         '/system',
       ].map(navItemByPath),
     },

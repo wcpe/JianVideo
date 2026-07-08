@@ -231,3 +231,34 @@ func TestPregenQueue_ListTasksFilter(t *testing.T) {
 		t.Fatalf("completed 过滤应为 0 条, 实际 %d", len(completed))
 	}
 }
+
+func TestPregenQueue_CancelAndRetry(t *testing.T) {
+	db := newPregenTestDB(t)
+	q := NewPregenQueue(db, func(int64, string) error { return nil })
+
+	id, err := q.EnqueueInSpace(models.DefaultSpaceID, 1, 2, "h264", 0, 0)
+	if err != nil {
+		t.Fatalf("入队失败: %v", err)
+	}
+	if err := q.CancelTaskInSpace(models.DefaultSpaceID, id); err != nil {
+		t.Fatalf("取消任务失败: %v", err)
+	}
+	var canceled models.TranscodeTask
+	if err := db.First(&canceled, id).Error; err != nil {
+		t.Fatalf("读取取消任务失败: %v", err)
+	}
+	if canceled.Status != models.TranscodeTaskStatusCanceled || canceled.CompletedAt == nil {
+		t.Fatalf("取消后状态异常: %+v", canceled)
+	}
+
+	if err := q.RetryTaskInSpace(models.DefaultSpaceID, id); err != nil {
+		t.Fatalf("重试任务失败: %v", err)
+	}
+	var retried models.TranscodeTask
+	if err := db.First(&retried, id).Error; err != nil {
+		t.Fatalf("读取重试任务失败: %v", err)
+	}
+	if retried.Status != models.TranscodeTaskStatusPending || retried.CompletedAt != nil || retried.Error != "" {
+		t.Fatalf("重试后状态异常: %+v", retried)
+	}
+}

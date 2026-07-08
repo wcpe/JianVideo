@@ -35,16 +35,33 @@ export interface PageResult<T> {
   readonly total: number;
 }
 
+export type TaskType = string;
+
 export interface TaskItem {
   readonly id: string;
-  readonly type: 'scan' | 'transcode' | 'thumbnail' | 'preview' | 'metadata' | 'export' | 'ai';
+  readonly type: TaskType;
   readonly status: TaskState;
   readonly priority: number;
   readonly progress: number;
-  readonly spaceId: string;
+  readonly spaceId: string | null;
   readonly error: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface TaskListParams {
+  readonly page?: number;
+  readonly pageSize?: number;
+  readonly resourceId?: string;
+  readonly resourceType?: string;
+  readonly status?: TaskState;
+  readonly type?: TaskType;
+}
+
+export interface TaskStats {
+  readonly byStatus: Partial<Record<TaskState, number>>;
+  readonly byType: Record<string, number>;
+  readonly total: number;
 }
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -212,8 +229,35 @@ export async function getMedia(client: ApiClient, id: string): Promise<MediaItem
   return toMediaItem(await client.request<RawMediaItem>(`/api/v2/media/${encodeURIComponent(id)}`));
 }
 
+export async function listTasks(client: ApiClient, params: TaskListParams = {}): Promise<PageResult<TaskItem>> {
+  const response = await client.request<RawTaskPage>(buildPath('/api/tasks', taskSearchParams(params)));
+  return {
+    items: response.items.map(toTaskItem),
+    page: response.page,
+    pageSize: response.page_size,
+    total: response.total,
+  };
+}
+
 export async function getTask(client: ApiClient, id: string): Promise<TaskItem> {
-  return toTaskItem(await client.request<RawTaskItem>(`/api/v2/tasks/${encodeURIComponent(id)}`));
+  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}`));
+}
+
+export async function getTaskStats(client: ApiClient, params: Pick<TaskListParams, 'status' | 'type'> = {}): Promise<TaskStats> {
+  const response = await client.request<RawTaskStats>(buildPath('/api/tasks/stats', taskSearchParams(params)));
+  return {
+    byStatus: normalizeTaskStatusCounts(response.by_status),
+    byType: response.by_type,
+    total: response.total,
+  };
+}
+
+export async function cancelTask(client: ApiClient, id: string): Promise<TaskItem> {
+  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }));
+}
+
+export async function retryTask(client: ApiClient, id: string): Promise<TaskItem> {
+  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST' }));
 }
 
 export function taskPollInterval(task: TaskItem): 2000 | false {
@@ -242,10 +286,23 @@ interface RawTaskItem {
   readonly id: string;
   readonly priority: number;
   readonly progress: number;
-  readonly space_id: string;
+  readonly space_id: string | null;
   readonly status: string;
   readonly type: TaskItem['type'];
   readonly updated_at: string;
+}
+
+interface RawTaskPage {
+  readonly items: readonly RawTaskItem[];
+  readonly page: number;
+  readonly page_size: number;
+  readonly total: number;
+}
+
+interface RawTaskStats {
+  readonly by_status: Record<string, number>;
+  readonly by_type: Record<string, number>;
+  readonly total: number;
 }
 
 function toMediaItem(item: RawMediaItem): MediaItem {
@@ -271,6 +328,43 @@ function toTaskItem(item: RawTaskItem): TaskItem {
     type: item.type,
     updatedAt: item.updated_at,
   };
+}
+
+function buildPath(path: string, params: URLSearchParams): string {
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function taskSearchParams(params: Pick<TaskListParams, 'page' | 'pageSize' | 'resourceId' | 'resourceType' | 'status' | 'type'>): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params.page !== undefined) {
+    searchParams.set('page', String(params.page));
+  }
+  if (params.pageSize !== undefined) {
+    searchParams.set('page_size', String(params.pageSize));
+  }
+  if (params.type !== undefined) {
+    searchParams.set('type', params.type);
+  }
+  if (params.status !== undefined) {
+    searchParams.set('status', params.status);
+  }
+  if (params.resourceType !== undefined) {
+    searchParams.set('resource_type', params.resourceType);
+  }
+  if (params.resourceId !== undefined) {
+    searchParams.set('resource_id', params.resourceId);
+  }
+  return searchParams;
+}
+
+function normalizeTaskStatusCounts(counts: Record<string, number>): Partial<Record<TaskState, number>> {
+  const result: Partial<Record<TaskState, number>> = {};
+  for (const [status, count] of Object.entries(counts)) {
+    const normalized = normalizeLegacyTaskState(status);
+    result[normalized] = (result[normalized] ?? 0) + count;
+  }
+  return result;
 }
 
 async function requestJson<T>(

@@ -29,6 +29,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/update"
 )
@@ -79,6 +80,9 @@ type Handler struct {
 
 	// 审计事件服务（FR2-040）：未注入时审计查询端点返回 503，业务接入保持可测试。
 	audit audit.Recorder
+
+	// 通用异步任务队列中心（FR2-037）：未注入时新任务端点返回 503，旧队列端点保持原兼容行为。
+	tasks *tasksvc.Service
 }
 
 // NewHandler 创建处理器。
@@ -135,6 +139,12 @@ func (h *Handler) WithMetrics(sampler *metrics.Sampler) *Handler {
 // WithAudit 注入审计服务，启用审计查询端点。
 func (h *Handler) WithAudit(rec audit.Recorder) *Handler {
 	h.audit = rec
+	return h
+}
+
+// WithTasks 注入通用任务服务，启用 /api/tasks 端点。
+func (h *Handler) WithTasks(svc *tasksvc.Service) *Handler {
+	h.tasks = svc
 	return h
 }
 

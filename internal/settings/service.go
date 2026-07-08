@@ -44,6 +44,14 @@ const (
 	KeyOpenTabs = "open_tabs"
 	// KeyLastOpenedPath 目录浏览上次打开位置（FR-151），值为路径字符串。
 	KeyLastOpenedPath = "last_opened_path"
+	// KeyTaskWorkerScanConcurrency 扫描任务 worker 并发上限（FR2-037），默认 1。
+	KeyTaskWorkerScanConcurrency = "task_worker_scan_concurrency"
+	// KeyTaskWorkerTranscodeConcurrency 转码任务 worker 并发上限（FR2-037），默认 1。
+	KeyTaskWorkerTranscodeConcurrency = "task_worker_transcode_concurrency"
+	// KeyTaskWorkerThumbnailConcurrency 缩略图任务 worker 并发上限（FR2-037），默认 4。
+	KeyTaskWorkerThumbnailConcurrency = "task_worker_thumbnail_concurrency"
+	// KeyTaskWorkerLightConcurrency 轻量后台任务 worker 并发上限（FR2-037），默认 2。
+	KeyTaskWorkerLightConcurrency = "task_worker_light_concurrency"
 )
 
 // Service 运行期设置业务逻辑。

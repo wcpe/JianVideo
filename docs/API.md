@@ -11,7 +11,7 @@
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
 - **静态资源**：前端文件通过 `go:embed` 内嵌，由 `/` 路径提供服务
 - **数据库迁移（FR2-017）**：当前切片不新增对外 HTTP 迁移端点。v0.20 到 v2 schema 升级在服务启动期由 `internal/migration` 执行；dry-run、备份校验、重入和校验能力先作为 Go 内部契约提供，供后续 CLI 或管理端点复用。
-- **Space 头（FR2-007）**：`GET/POST /api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及 `/api/transcode/tasks` 任务入口支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`。当前仅实现最小 owner 归属，不暴露成员/角色矩阵。
+- **Space 头（FR2-007）**：`GET/POST /api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及 `/api/transcode/tasks`、`/api/tasks` 任务入口支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`。当前仅实现最小 owner 归属，不暴露成员/角色矩阵。
 
 ## 2. 错误约定
 
@@ -666,6 +666,52 @@
   }
   ```
 - **说明**：返回全部扫描任务（按入队时间倒序）与当前进行中任务 `current`（无则 `null`）。`status` 取值 `pending` / `running` / `completed` / `error`，`scan_type` 取值 `full` / `incremental`（当前 worker 统一按全量执行，full/incremental 差异留 FR-27 对接）。队列以 SQLite `scan_tasks` 表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 任务重置为 `pending` 重新入队。当前 `running` 任务的 `scanned_files`/`total_files` 用实时全局扫描状态覆盖，已完成任务返回其持久化进度。前端页眉据此常驻展示进行中任务并可点开看任务列表与各自进度。
+
+### 通用任务中心（FR2-037）
+
+- **方法 / 路径**：`GET /api/tasks`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **查询参数**：`status`、`type`、`resource_type`、`resource_id`、`page`、`page_size` 可选；Space scoped 查询默认不返回 `scope=system` 任务。
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 12,
+        "scope": "space",
+        "space_id": "space-default",
+        "type": "library.scan",
+        "status": "running",
+        "priority": 0,
+        "attempts": 1,
+        "max_attempts": 3,
+        "progress": 0.42,
+        "checkpoint": "D:/Videos/a.mp4",
+        "resource_type": "library",
+        "resource_id": "1",
+        "error": "",
+        "created_at": "2026-07-09T03:00:00Z",
+        "updated_at": "2026-07-09T03:00:05Z",
+        "started_at": "2026-07-09T03:00:01Z",
+        "finished_at": null,
+        "next_run_at": null
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "total": 1
+  }
+  ```
+- **方法 / 路径**：`GET /api/tasks/stats`
+- **查询参数**：同列表过滤项。
+- **响应**（200）：`{ "total": 3, "by_status": { "pending": 1, "running": 1, "succeeded": 1, "failed": 0, "canceled": 0 }, "by_type": { "library.scan": 2, "transcode.hls": 1 } }`
+- **方法 / 路径**：`GET /api/tasks/:id`
+- **响应**（200）：单个任务对象，字段同列表项；跨 Space 或不存在返回 `404`。
+- **方法 / 路径**：`POST /api/tasks/:id/cancel`
+- **响应**（200）：取消后的任务对象。仅 `pending` / `running` 可取消；命中旧扫描 / 转码镜像任务时，先取消旧队列真源再同步通用任务镜像。
+- **方法 / 路径**：`POST /api/tasks/:id/retry`
+- **响应**（200）：重试后的任务对象。仅 `failed` / `canceled` 可重试；命中旧扫描 / 转码镜像任务时，先重试旧队列真源再同步通用任务镜像。
+- **说明**：通用状态只使用 `pending` / `running` / `succeeded` / `failed` / `canceled`。旧扫描 / 转码 API 仍可返回 `completed` / `error`，但统一任务 API 与 `packages/media-client` 均映射为 `succeeded` / `failed`。
 
 ### 触发媒体健康巡检（FR-73）
 

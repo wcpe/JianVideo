@@ -205,6 +205,16 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		auditGroup.GET("/events", h.ListAuditEvents)
 	}
 
+	// 通用异步任务中心（FR2-037）：新状态为 pending/running/succeeded/failed/canceled。
+	tasks := r.Group("/api/tasks")
+	{
+		tasks.GET("", h.ListTasks)
+		tasks.GET("/stats", h.TaskStats)
+		tasks.GET("/:id", h.GetTask)
+		tasks.POST("/:id/cancel", h.CancelTask)
+		tasks.POST("/:id/retry", h.RetryTask)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		RegisterPlaybackRoutes(r, pbSvc[0])

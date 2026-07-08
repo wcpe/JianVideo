@@ -72,6 +72,13 @@ Object.defineProperty(globalThis, 'getComputedStyle', {
   configurable: true,
 });
 
+// Mantine Select 高亮选项时会调用 scrollIntoView，jsdom 不实现该方法。
+Object.defineProperty(globalThis.HTMLElement.prototype, 'scrollIntoView', {
+  value: () => {},
+  writable: true,
+  configurable: true,
+});
+
 // Mantine ScrollArea 需要 ResizeObserver（jsdom 不提供，给个空实现）
 Object.defineProperty(globalThis, 'ResizeObserver', {
   value: class {

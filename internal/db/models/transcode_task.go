@@ -12,6 +12,8 @@ const (
 	TranscodeTaskStatusCompleted = "completed"
 	// TranscodeTaskStatusError 预转码出错。
 	TranscodeTaskStatusError = "error"
+	// TranscodeTaskStatusCanceled 任务已取消。
+	TranscodeTaskStatusCanceled = "canceled"
 )
 
 // TranscodeTask 转码预生成任务（FR-77）：把「某媒体 + 某预设」入队，单 worker 串行预转码。

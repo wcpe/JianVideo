@@ -11,6 +11,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
 // ScanExecFunc 扫描执行函数签名，与 Service.ScanLibraryWithType 一致。
@@ -26,6 +27,7 @@ type TaskQueue struct {
 	db    *gorm.DB
 	exec  ScanExecFunc
 	audit audit.Recorder
+	tasks *tasksvc.Service
 
 	store targetStore // 任务执行目标的过程态内存映射
 
@@ -39,6 +41,12 @@ type TaskQueue struct {
 // WithAudit 注入审计记录器，使任务状态变更与审计事件同事务提交。
 func (q *TaskQueue) WithAudit(rec audit.Recorder) *TaskQueue {
 	q.audit = rec
+	return q
+}
+
+// WithTasks 注入通用任务中心，使旧扫描队列生命周期同步到 tasks 真源。
+func (q *TaskQueue) WithTasks(svc *tasksvc.Service) *TaskQueue {
+	q.tasks = svc
 	return q
 }
 
@@ -76,6 +84,7 @@ func (q *TaskQueue) EnqueueInSpace(spaceID string, libraryID int64, path, dirTyp
 	}); err != nil {
 		return 0, err
 	}
+	q.syncTask(task)
 	// 入队时把 path/dirType 暂存内存映射，供 worker 取用（path 不入库，避免冗余真源）
 	q.rememberTarget(task.ID, scanTarget{path: path, dirType: dirType, libraryID: libraryID})
 	q.wake()
@@ -146,6 +155,9 @@ func (q *TaskQueue) RecoverRunning() error {
 			continue
 		}
 		q.rememberTarget(t.ID, scanTarget{path: path, dirType: dirType, libraryID: t.LibraryID})
+		t.Status = models.ScanTaskStatusPending
+		t.StartedAt = nil
+		q.syncTask(&t)
 	}
 	log.Printf("[INFO] 重启恢复扫描队列：%d 个残留 running 任务已重置为 pending", len(stale))
 	return nil
@@ -188,8 +200,8 @@ func (q *TaskQueue) ListTasksInSpace(spaceID string) ([]models.ScanTask, error) 
 // CancelTaskInSpace 取消尚未执行的扫描任务，并写入同事务审计事件。
 func (q *TaskQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
 	spaceID = normalizeSpaceID(spaceID)
-	return q.db.Transaction(func(tx *gorm.DB) error {
-		var task models.ScanTask
+	var task models.ScanTask
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
 			return err
 		}
@@ -206,8 +218,15 @@ func (q *TaskQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
 		task.Status = models.ScanTaskStatusCanceled
 		task.CompletedAt = &now
 		q.forgetTarget(taskID)
-		return q.recordAuditTx(tx, &task, "task.canceled", "")
-	})
+		if err := q.recordAuditTx(tx, &task, "task.canceled", ""); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	q.syncTask(&task)
+	return nil
 }
 
 // RetryTaskInSpace 将失败或已取消的扫描任务重新置为 pending，并写入同事务审计事件。
@@ -235,10 +254,14 @@ func (q *TaskQueue) RetryTaskInSpace(spaceID string, taskID int64) error {
 		task.Error = ""
 		task.StartedAt = nil
 		task.CompletedAt = nil
-		return q.recordAuditTx(tx, &task, "task.retried", "")
+		if err := q.recordAuditTx(tx, &task, "task.retried", ""); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
+	q.syncTask(&task)
 	path, dirType, err := q.lookupTarget(task.LibraryID)
 	if err != nil {
 		return err
@@ -288,6 +311,7 @@ func (q *TaskQueue) nextPending() (models.ScanTask, bool) {
 	}
 	task.Status = models.ScanTaskStatusRunning
 	task.StartedAt = &now
+	q.syncTask(&task)
 	return task, true
 }
 
@@ -316,6 +340,10 @@ func (q *TaskQueue) runTask(task models.ScanTask) {
 		}); txErr != nil {
 			log.Printf("[ERROR] 标记扫描任务失败终态失败: taskID=%d, err=%v", task.ID, txErr)
 		}
+		task.Status = models.ScanTaskStatusError
+		task.Error = err.Error()
+		task.CompletedAt = &now
+		q.syncTask(&task)
 		log.Printf("[ERROR] 扫描任务执行失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
@@ -333,6 +361,10 @@ func (q *TaskQueue) runTask(task models.ScanTask) {
 		log.Printf("[ERROR] 标记扫描任务完成终态失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
+	task.Status = models.ScanTaskStatusCompleted
+	task.ScannedFiles = count
+	task.CompletedAt = &now
+	q.syncTask(&task)
 	log.Printf("[INFO] 扫描任务执行完成: taskID=%d, count=%d", task.ID, count)
 }
 
@@ -345,6 +377,10 @@ func (q *TaskQueue) markError(taskID int64, reason string) {
 			"error":        reason,
 			"completed_at": now,
 		})
+	var task models.ScanTask
+	if err := q.db.First(&task, taskID).Error; err == nil {
+		q.syncTask(&task)
+	}
 	log.Printf("[WARN] 扫描任务标记为错误: taskID=%d, reason=%s", taskID, reason)
 }
 
@@ -353,6 +389,35 @@ func (q *TaskQueue) wake() {
 	select {
 	case q.signal <- struct{}{}:
 	default:
+	}
+}
+
+func (q *TaskQueue) syncTask(task *models.ScanTask) {
+	if q.tasks == nil || task == nil {
+		return
+	}
+	progress := 0
+	if task.Status == models.ScanTaskStatusCompleted {
+		progress = 100
+	} else if task.TotalFiles > 0 {
+		progress = task.ScannedFiles * 100 / task.TotalFiles
+	}
+	if err := q.tasks.SyncLegacy(context.Background(), tasksvc.LegacySyncInput{
+		Scope:          models.TaskScopeSpace,
+		SpaceID:        task.SpaceID,
+		Type:           "library.scan",
+		Status:         task.Status,
+		Progress:       progress,
+		IdempotencyKey: fmt.Sprintf("scan:%d", task.ID),
+		PayloadJSON:    fmt.Sprintf(`{"legacy_table":"scan_tasks","legacy_id":%d,"library_id":%d,"scan_type":%q}`, task.ID, task.LibraryID, task.ScanType),
+		ResourceType:   "library",
+		ResourceID:     fmt.Sprintf("%d", task.LibraryID),
+		Error:          task.Error,
+		CreatedAt:      task.CreatedAt,
+		StartedAt:      task.StartedAt,
+		FinishedAt:     task.CompletedAt,
+	}); err != nil {
+		log.Printf("[WARN] 同步扫描任务到通用任务中心失败: taskID=%d, err=%v", task.ID, err)
 	}
 }
 

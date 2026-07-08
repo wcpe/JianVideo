@@ -40,6 +40,7 @@ const TASK_STATUS_META: Record<string, { color: string; label: string }> = {
   running: { color: 'blue', label: '进行中' },
   completed: { color: 'green', label: '已完成' },
   error: { color: 'red', label: '失败' },
+  canceled: { color: 'yellow', label: '已取消' },
 };
 
 // 任务列表轮询周期（毫秒）

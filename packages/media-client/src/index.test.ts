@@ -3,11 +3,15 @@ import {
   ApiError,
   createApiClient,
   createQueryKeys,
+  cancelTask,
   getMedia,
   getTask,
+  getTaskStats,
   detectDeviceCapabilities,
+  listTasks,
   listMedia,
   normalizeLegacyTaskState,
+  retryTask,
   taskPollInterval,
   type FetchLike,
 } from './index';
@@ -101,6 +105,139 @@ describe('media-client package', () => {
     expect(finishedTask.status).toBe('succeeded');
     expect(taskPollInterval(runningTask)).toBe(2_000);
     expect(taskPollInterval(finishedTask)).toBe(false);
+  });
+
+  it('通过 /api/tasks 查询列表、详情、统计并执行取消和重试', async () => {
+    const requests: Request[] = [];
+    const client = createApiClient({
+      baseUrl: 'https://mock.local',
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.method === 'GET' && request.url.endsWith('/api/tasks?page=2&page_size=5&type=transcode&status=failed')) {
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  created_at: '2026-07-01T10:00:00Z',
+                  error: '编码器不可用',
+                  id: 'task-failed',
+                  priority: 10,
+                  progress: 0.4,
+                  space_id: 'space-default',
+                  status: 'error',
+                  type: 'transcode',
+                  updated_at: '2026-07-01T10:01:00Z',
+                },
+              ],
+              page: 2,
+              page_size: 5,
+              total: 1,
+            }),
+          );
+        }
+        if (request.method === 'GET' && request.url.endsWith('/api/tasks/task-failed')) {
+          return Promise.resolve(
+            Response.json({
+              created_at: '2026-07-01T10:00:00Z',
+              error: '编码器不可用',
+              id: 'task-failed',
+              priority: 10,
+              progress: 0.4,
+              space_id: 'space-default',
+              status: 'error',
+              type: 'transcode',
+              updated_at: '2026-07-01T10:01:00Z',
+            }),
+          );
+        }
+        if (request.method === 'GET' && request.url.endsWith('/api/tasks/task-system')) {
+          return Promise.resolve(
+            Response.json({
+              created_at: '2026-07-01T10:00:00Z',
+              error: null,
+              id: 'task-system',
+              priority: 1,
+              progress: 0,
+              space_id: null,
+              status: 'pending',
+              type: 'cache.cleanup',
+              updated_at: '2026-07-01T10:01:00Z',
+            }),
+          );
+        }
+        if (request.method === 'GET' && request.url.endsWith('/api/tasks/stats?type=transcode')) {
+          return Promise.resolve(
+            Response.json({
+              by_status: { completed: 2, error: 1, running: 1 },
+              by_type: { transcode: 4 },
+              total: 4,
+            }),
+          );
+        }
+        if (request.method === 'POST' && request.url.endsWith('/api/tasks/task-running/cancel')) {
+          return Promise.resolve(
+            Response.json({
+              created_at: '2026-07-01T10:00:00Z',
+              error: null,
+              id: 'task-running',
+              priority: 10,
+              progress: 0.5,
+              space_id: 'space-default',
+              status: 'canceled',
+              type: 'transcode',
+              updated_at: '2026-07-01T10:02:00Z',
+            }),
+          );
+        }
+        if (request.method === 'POST' && request.url.endsWith('/api/tasks/task-failed/retry')) {
+          return Promise.resolve(
+            Response.json({
+              created_at: '2026-07-01T10:00:00Z',
+              error: null,
+              id: 'task-failed',
+              priority: 10,
+              progress: 0,
+              space_id: 'space-default',
+              status: 'pending',
+              type: 'transcode',
+              updated_at: '2026-07-01T10:02:00Z',
+            }),
+          );
+        }
+        return Promise.resolve(Response.json({ code: 'NOT_FOUND', message: '未命中测试接口' }, { status: 404 }));
+      },
+      space: { spaceId: 'space-default' },
+    });
+
+    const page = await listTasks(client, { page: 2, pageSize: 5, status: 'failed', type: 'transcode' });
+    const detail = await getTask(client, 'task-failed');
+    const systemTask = await getTask(client, 'task-system');
+    const stats = await getTaskStats(client, { type: 'transcode' });
+    const canceled = await cancelTask(client, 'task-running');
+    const retried = await retryTask(client, 'task-failed');
+
+    expect(page).toMatchObject({
+      page: 2,
+      pageSize: 5,
+      total: 1,
+      items: [{ id: 'task-failed', status: 'failed' }],
+    });
+    expect(detail.status).toBe('failed');
+    expect(systemTask.type).toBe('cache.cleanup');
+    expect(systemTask.spaceId).toBeNull();
+    expect(stats.byStatus).toMatchObject({ failed: 1, running: 1, succeeded: 2 });
+    expect(stats.byType).toEqual({ transcode: 4 });
+    expect(canceled.status).toBe('canceled');
+    expect(retried.status).toBe('pending');
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual([
+      'GET /api/tasks',
+      'GET /api/tasks/task-failed',
+      'GET /api/tasks/task-system',
+      'GET /api/tasks/stats',
+      'POST /api/tasks/task-running/cancel',
+      'POST /api/tasks/task-failed/retry',
+    ]);
   });
 
   it('切换 Space 后读取不同媒体列表', async () => {

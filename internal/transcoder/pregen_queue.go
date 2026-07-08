@@ -12,6 +12,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
 // PregenExecFunc 预生成执行函数签名（FR-77）。
@@ -28,6 +29,7 @@ type PregenQueue struct {
 	db    *gorm.DB
 	exec  PregenExecFunc
 	audit audit.Recorder
+	tasks *tasksvc.Service
 
 	mu       sync.Mutex // 保护 worker 生命周期标志
 	signal   chan struct{}
@@ -39,6 +41,12 @@ type PregenQueue struct {
 // WithAudit 注入审计记录器，使任务状态变更与审计事件同事务提交。
 func (q *PregenQueue) WithAudit(rec audit.Recorder) *PregenQueue {
 	q.audit = rec
+	return q
+}
+
+// WithTasks 注入通用任务中心，使旧预生成队列生命周期同步到 tasks 真源。
+func (q *PregenQueue) WithTasks(svc *tasksvc.Service) *PregenQueue {
+	q.tasks = svc
 	return q
 }
 
@@ -77,6 +85,7 @@ func (q *PregenQueue) EnqueueInSpace(spaceID string, mediaID, presetID int64, co
 	}); err != nil {
 		return 0, err
 	}
+	q.syncTask(task)
 	q.wake()
 	log.Printf("[INFO] 预生成任务已入队: taskID=%d, mediaID=%d, presetID=%d, codec=%s", task.ID, mediaID, presetID, codec)
 	return task.ID, nil
@@ -97,6 +106,12 @@ func (q *PregenQueue) RecoverRunning() error {
 		Where("status = ?", models.TranscodeTaskStatusRunning).
 		Updates(map[string]any{"status": models.TranscodeTaskStatusPending, "started_at": nil}).Error; err != nil {
 		return err
+	}
+	var recovered []models.TranscodeTask
+	if err := q.db.Where("status = ?", models.TranscodeTaskStatusPending).Find(&recovered).Error; err == nil {
+		for i := range recovered {
+			q.syncTask(&recovered[i])
+		}
 	}
 	log.Printf("[INFO] 重启恢复预生成队列：%d 个残留 running 任务已重置为 pending", cnt)
 	return nil
@@ -140,6 +155,66 @@ func (q *PregenQueue) ListTasksInSpace(spaceID, statusFilter string) ([]models.T
 	return tasks, nil
 }
 
+// CancelTaskInSpace 取消尚未执行的预生成任务。
+func (q *PregenQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
+	spaceID = normalizeTaskSpaceID(spaceID)
+	var task models.TranscodeTask
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status != models.TranscodeTaskStatusPending {
+			return fmt.Errorf("仅 pending 预生成任务可取消")
+		}
+		now := time.Now()
+		if err := tx.Model(&models.TranscodeTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":       models.TranscodeTaskStatusCanceled,
+			"completed_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		task.Status = models.TranscodeTaskStatusCanceled
+		task.CompletedAt = &now
+		return q.recordAuditTx(tx, &task, "task.canceled", "")
+	}); err != nil {
+		return err
+	}
+	q.syncTask(&task)
+	return nil
+}
+
+// RetryTaskInSpace 将失败或已取消的预生成任务重新置为 pending。
+func (q *PregenQueue) RetryTaskInSpace(spaceID string, taskID int64) error {
+	spaceID = normalizeTaskSpaceID(spaceID)
+	var task models.TranscodeTask
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
+			return err
+		}
+		if task.Status != models.TranscodeTaskStatusError && task.Status != models.TranscodeTaskStatusCanceled {
+			return fmt.Errorf("仅 error 或 canceled 预生成任务可重试")
+		}
+		if err := tx.Model(&models.TranscodeTask{}).Where("id = ?", taskID).Updates(map[string]any{
+			"status":       models.TranscodeTaskStatusPending,
+			"error":        "",
+			"started_at":   nil,
+			"completed_at": nil,
+		}).Error; err != nil {
+			return err
+		}
+		task.Status = models.TranscodeTaskStatusPending
+		task.Error = ""
+		task.StartedAt = nil
+		task.CompletedAt = nil
+		return q.recordAuditTx(tx, &task, "task.retried", "")
+	}); err != nil {
+		return err
+	}
+	q.syncTask(&task)
+	q.wake()
+	return nil
+}
+
 // loop 单 worker 主循环：取最早 pending 执行，队列空时阻塞等待信号，不空转轮询。
 func (q *PregenQueue) loop() {
 	for {
@@ -177,6 +252,7 @@ func (q *PregenQueue) nextPending() (models.TranscodeTask, bool) {
 	}
 	task.Status = models.TranscodeTaskStatusRunning
 	task.StartedAt = &now
+	q.syncTask(&task)
 	return task, true
 }
 
@@ -199,6 +275,10 @@ func (q *PregenQueue) runTask(task models.TranscodeTask) {
 		}); txErr != nil {
 			log.Printf("[ERROR] 标记预生成任务失败终态失败: taskID=%d, err=%v", task.ID, txErr)
 		}
+		task.Status = models.TranscodeTaskStatusError
+		task.Error = err.Error()
+		task.CompletedAt = &now
+		q.syncTask(&task)
 		log.Printf("[ERROR] 预生成任务执行失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
@@ -215,6 +295,9 @@ func (q *PregenQueue) runTask(task models.TranscodeTask) {
 		log.Printf("[ERROR] 标记预生成任务完成终态失败: taskID=%d, err=%v", task.ID, err)
 		return
 	}
+	task.Status = models.TranscodeTaskStatusCompleted
+	task.CompletedAt = &now
+	q.syncTask(&task)
 	log.Printf("[INFO] 预生成任务执行完成: taskID=%d", task.ID)
 }
 
@@ -223,6 +306,33 @@ func (q *PregenQueue) wake() {
 	select {
 	case q.signal <- struct{}{}:
 	default:
+	}
+}
+
+func (q *PregenQueue) syncTask(task *models.TranscodeTask) {
+	if q.tasks == nil || task == nil {
+		return
+	}
+	progress := 0
+	if task.Status == models.TranscodeTaskStatusCompleted {
+		progress = 100
+	}
+	if err := q.tasks.SyncLegacy(context.Background(), tasksvc.LegacySyncInput{
+		Scope:          models.TaskScopeSpace,
+		SpaceID:        task.SpaceID,
+		Type:           "transcode.hls",
+		Status:         task.Status,
+		Progress:       progress,
+		IdempotencyKey: fmt.Sprintf("transcode:%d", task.ID),
+		PayloadJSON:    fmt.Sprintf(`{"legacy_table":"transcode_tasks","legacy_id":%d,"media_id":%d,"preset_id":%d,"codec":%q,"width":%d,"height":%d}`, task.ID, task.MediaID, task.PresetID, task.Codec, task.Width, task.Height),
+		ResourceType:   "media",
+		ResourceID:     fmt.Sprintf("%d", task.MediaID),
+		Error:          task.Error,
+		CreatedAt:      task.CreatedAt,
+		StartedAt:      task.StartedAt,
+		FinishedAt:     task.CompletedAt,
+	}); err != nil {
+		log.Printf("[WARN] 同步预生成任务到通用任务中心失败: taskID=%d, err=%v", task.ID, err)
 	}
 }
 

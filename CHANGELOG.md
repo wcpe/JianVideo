@@ -10,6 +10,7 @@
 - **FR2-007 存储库、Space 归属与数据库索引基线**：新增最小 Space owner 元数据迁移、`library_paths`/`media_files`/`tags`/扫描任务/预生成任务的 `space_id` 字段与媒体查询组合索引；后端接入 `X-JianVideo-Space-Id`，媒体列表、详情、目录浏览、统计、扫描入口、标签、回收站、上传和任务状态按 Space 隔离，旧 `page/page_size` 响应同步返回 `next_cursor`。新增媒体查询 repository、cursor 编解码测试、跨 Space 集成测试与 FR2-007 SQLite benchmark harness，报告输出到 `.tmp/benchmark/fr2-007/`。
 - **FR2-017 v0.20 到 v2 数据迁移与升级安全**：新增 `internal/migration` 版本化 schema 迁移框架，启动期以 migration registry 替代无版本记录的全局 `InitSchema + AutoMigrate`；支持 dry-run 只读计划、迁移前 SQLite `VACUUM INTO` 备份与 `PRAGMA integrity_check` 校验、`schema_migrations` 状态记录、中断后安全重入、默认 Space 回填、关键 Space/媒体索引 smoke 校验，以及 `scope=system` 的迁移审计事件。新增 v0.20 最小旧库 fixture 集成测试，覆盖 dry-run 不写业务/schema/audit、备份可打开、中断重入、默认 Space 回填与索引存在。
 - **FR2-024 配置分层边界**：新增 `internal/settings` 类型化 registry 与 `GET /api/settings/definitions`，`PUT /api/settings` 只允许已登记运行期 key 并在写入前做类型校验；`GET /api/settings` 回读已登记运行期设置和默认值，敏感项只返回存在性，不回显代理凭据。设置页改用 definitions 渲染标签和说明，保存其他设置时不会回写隐藏代理；配置变更审计事件仅记录脱敏前后值。
+- **FR2-037 通用异步任务队列中心**：新增 `tasks` 通用任务真源、状态机、重试退避、优先级公平领取、worker registry、Space/System scope、审计事件和 `/api/tasks` 列表/统计/详情/取消/重试 API；旧扫描队列与预生成转码队列同步到通用任务表，旧状态 `completed/error` 在边界层映射为 `succeeded/failed`。前端新增「任务」页，支持状态/类型/资源过滤、统计卡、取消和重试；`packages/media-client` 与 MSW mock 对齐通用任务状态。新增 FR2-037 SQLite benchmark harness，报告输出到 `.tmp/benchmark/fr2-037/`。
 - **FR2-040 全操作审计日志**：新增 `internal/audit` 审计事件真源、脱敏工具、cursor 分页查询 API 与系统控制台审计 tab；配置、媒体库、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务、缓存清理和迁移事件写入 `audit_events`。关键业务变更与审计事件同 SQLite 事务提交，审计失败时回滚业务变更，Space scoped 查询默认不返回系统级事件。
 
 ## 0.22.0（2026-07-08）

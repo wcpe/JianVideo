@@ -180,7 +180,7 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	for _, def := range defs {
 		seen[def.Key] = def
 	}
-	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath} {
+	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency} {
 		if _, ok := seen[key]; !ok {
 			t.Fatalf("definitions 缺少 key=%s", key)
 		}
@@ -190,6 +190,20 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	}
 	if def := seen["jwt_secret"]; !def.Sensitive || def.Layer != LayerStartup {
 		t.Fatalf("jwt_secret 应登记为启动期敏感项: %+v", def)
+	}
+	if def := seen[KeyTaskWorkerThumbnailConcurrency]; def.DefaultValue != "4" || def.Consumer != "tasks.worker" {
+		t.Fatalf("缩略图 worker 并发配置异常: %+v", def)
+	}
+}
+
+func TestTaskWorkerConcurrencySettings(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+
+	if err := svc.Set(KeyTaskWorkerThumbnailConcurrency, "4"); err != nil {
+		t.Fatalf("写入合法任务并发配置失败: %v", err)
+	}
+	if err := svc.Set(KeyTaskWorkerThumbnailConcurrency, "0"); err == nil || !IsValidationError(err) {
+		t.Fatalf("任务并发配置必须拒绝非正整数, 实际 %v", err)
 	}
 }
 

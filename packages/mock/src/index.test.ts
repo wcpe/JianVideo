@@ -93,6 +93,74 @@ describe('mock package', () => {
     expect(body.status).toBe('completed');
   });
 
+  it('通用任务列表支持 Space、类型和状态过滤', async () => {
+    const response = await createMockFetch()('https://mock.local/api/tasks?type=transcode&status=failed', {
+      headers: { 'X-JianVideo-Space-Id': 'space-default' },
+    });
+    const body = (await response.json()) as {
+      readonly items: readonly { readonly id: string; readonly space_id: string; readonly status: string; readonly type: string }[];
+      readonly total: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(1);
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        id: 'task-transcode-failed',
+        space_id: 'space-default',
+        status: 'failed',
+        type: 'transcode',
+      }),
+    ]);
+  });
+
+  it('通用任务详情遵守 Space 隔离', async () => {
+    const response = handleMockApiRequest(
+      new Request('https://mock.local/api/tasks/task-transcode-default', {
+        headers: { 'X-JianVideo-Space-Id': 'space-studio' },
+      }),
+    );
+    const body = (await response.json()) as { readonly code: string };
+
+    expect(response.status).toBe(404);
+    expect(body.code).toBe('TASK_NOT_FOUND');
+  });
+
+  it('通用任务统计按 Space 聚合并映射状态桶', async () => {
+    const response = await createMockFetch()('https://mock.local/api/tasks/stats', {
+      headers: { 'X-JianVideo-Space-Id': 'space-default' },
+    });
+    const body = (await response.json()) as {
+      readonly by_status: Record<string, number>;
+      readonly by_type: Record<string, number>;
+      readonly total: number;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(5);
+    expect(body.by_status).toMatchObject({ failed: 1, pending: 1, running: 1, succeeded: 2 });
+    expect(body.by_type).toMatchObject({ scan: 1, thumbnail: 1, transcode: 3 });
+  });
+
+  it('通用任务支持取消和重试', async () => {
+    const fetch = createMockFetch();
+    const canceled = await fetch('https://mock.local/api/tasks/task-transcode-default/cancel', {
+      method: 'POST',
+      headers: { 'X-JianVideo-Space-Id': 'space-default' },
+    });
+    const retried = await fetch('https://mock.local/api/tasks/task-transcode-failed/retry', {
+      method: 'POST',
+      headers: { 'X-JianVideo-Space-Id': 'space-default' },
+    });
+    const canceledBody = (await canceled.json()) as { readonly status: string };
+    const retriedBody = (await retried.json()) as { readonly error: string | null; readonly progress: number; readonly status: string };
+
+    expect(canceled.status).toBe(200);
+    expect(canceledBody.status).toBe('canceled');
+    expect(retried.status).toBe(200);
+    expect(retriedBody).toMatchObject({ error: null, progress: 0, status: 'pending' });
+  });
+
   it('默认分页参数可回退', async () => {
     const response = await createMockFetch()(new URL('https://mock.local/api/v2/media'), {
       headers: { 'X-JianVideo-Space-Id': 'space-default' },

@@ -55,6 +55,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateAuditEvents,
 			Validate:    validateAuditEvents,
 		},
+		{
+			ID:          "20260708_0006_fr2_037_tasks_center",
+			Description: "建立通用任务队列中心并回填旧扫描转码任务",
+			SafeToRetry: true,
+			Estimate:    estimateTasksCenter,
+			Up:          migrateTasksCenter,
+			Validate:    validateTasksCenter,
+		},
 	}
 }
 
@@ -74,6 +82,7 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		&models.TagMapping{},
 		&models.Setting{},
 		&models.ScanTask{},
+		&models.Task{},
 		&models.Share{},
 		&models.CodecProbeCache{},
 		&models.MediaHealthIssue{},
@@ -177,7 +186,7 @@ func migrateCoreSchema(tx *gorm.DB) error {
 func validateBaselineSchema(_ context.Context, db *gorm.DB) (Validation, error) {
 	requiredTables := []string{
 		"library_paths", "media_files", "media_extensions", "settings",
-		"scan_tasks", "transcode_tasks", "shares", "metric_samples",
+		"scan_tasks", "transcode_tasks", "tasks", "shares", "metric_samples",
 	}
 	for _, table := range requiredTables {
 		if !tableExists(db, table) {
@@ -485,6 +494,148 @@ func validateAuditEvents(_ context.Context, db *gorm.DB) (Validation, error) {
 		}
 	}
 	return Validation{Summary: "审计事件正式字段与索引已就绪"}, nil
+}
+
+func estimateTasksCenter(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var scanCount, transcodeCount int64
+	if tableExists(db, "scan_tasks") {
+		_ = db.Table("scan_tasks").Count(&scanCount).Error
+	}
+	if tableExists(db, "transcode_tasks") {
+		_ = db.Table("transcode_tasks").Count(&transcodeCount).Error
+	}
+	return StepPlan{EstimatedRows: scanCount + transcodeCount}, nil
+}
+
+func migrateTasksCenter(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.Task{}); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_tasks_space_status_priority_created ON tasks(space_id, status, priority, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_type_status_priority_created ON tasks(type, status, priority, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_space_type_status_updated ON tasks(space_id, type, status, updated_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_scope_space_type_status_id ON tasks(scope, space_id, type, status, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_status_next_run_priority_created ON tasks(status, next_run_at, priority, created_at, id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_active ON tasks(idempotency_key) WHERE idempotency_key <> '' AND status IN ('pending', 'running');`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	if tableExists(tx, "scan_tasks") {
+		if err := backfillScanTasks(tx); err != nil {
+			return err
+		}
+	}
+	if tableExists(tx, "transcode_tasks") {
+		return backfillTranscodeTasks(tx)
+	}
+	return nil
+}
+
+func backfillScanTasks(tx *gorm.DB) error {
+	return tx.Exec(`
+		INSERT INTO tasks(
+			scope, space_id, type, status, priority, attempts, max_attempts, progress,
+			checkpoint, idempotency_key, payload_json, resource_type, resource_id, error,
+			created_at, updated_at, started_at, finished_at
+		)
+		SELECT
+			'space',
+			COALESCE(NULLIF(space_id, ''), ?),
+			'library.scan',
+			CASE status
+				WHEN 'completed' THEN 'succeeded'
+				WHEN 'error' THEN 'failed'
+				ELSE status
+			END,
+			0,
+			CASE WHEN status = 'error' THEN 1 ELSE 0 END,
+			1,
+			CASE
+				WHEN status = 'completed' THEN 100
+				WHEN total_files > 0 THEN CAST((scanned_files * 100) / total_files AS INTEGER)
+				ELSE 0
+			END,
+			'',
+			'scan:' || id,
+			json_object('legacy_table', 'scan_tasks', 'legacy_id', id, 'library_id', library_id, 'scan_type', scan_type),
+			'library',
+			CAST(library_id AS TEXT),
+			COALESCE(error, ''),
+			COALESCE(created_at, datetime('now')),
+			COALESCE(completed_at, started_at, created_at, datetime('now')),
+			started_at,
+			completed_at
+		FROM scan_tasks
+		WHERE NOT EXISTS (
+			SELECT 1 FROM tasks WHERE idempotency_key = 'scan:' || scan_tasks.id
+		)
+	`, DefaultSpaceID).Error
+}
+
+func backfillTranscodeTasks(tx *gorm.DB) error {
+	return tx.Exec(`
+		INSERT INTO tasks(
+			scope, space_id, type, status, priority, attempts, max_attempts, progress,
+			checkpoint, idempotency_key, payload_json, resource_type, resource_id, error,
+			created_at, updated_at, started_at, finished_at
+		)
+		SELECT
+			'space',
+			COALESCE(NULLIF(space_id, ''), ?),
+			'transcode.hls',
+			CASE status
+				WHEN 'completed' THEN 'succeeded'
+				WHEN 'error' THEN 'failed'
+				ELSE status
+			END,
+			0,
+			CASE WHEN status = 'error' THEN 1 ELSE 0 END,
+			1,
+			CASE WHEN status = 'completed' THEN 100 ELSE 0 END,
+			'',
+			'transcode:' || id,
+			json_object('legacy_table', 'transcode_tasks', 'legacy_id', id, 'media_id', media_id, 'preset_id', preset_id, 'codec', codec, 'width', width, 'height', height),
+			'media',
+			CAST(media_id AS TEXT),
+			COALESCE(error, ''),
+			COALESCE(created_at, datetime('now')),
+			COALESCE(completed_at, started_at, created_at, datetime('now')),
+			started_at,
+			completed_at
+		FROM transcode_tasks
+		WHERE NOT EXISTS (
+			SELECT 1 FROM tasks WHERE idempotency_key = 'transcode:' || transcode_tasks.id
+		)
+	`, DefaultSpaceID).Error
+}
+
+func validateTasksCenter(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "tasks") {
+		return Validation{}, fmt.Errorf("tasks 表不存在")
+	}
+	for _, indexName := range []string{
+		"idx_tasks_space_status_priority_created",
+		"idx_tasks_type_status_priority_created",
+		"idx_tasks_space_type_status_updated",
+		"idx_tasks_scope_space_type_status_id",
+		"idx_tasks_status_next_run_priority_created",
+		"idx_tasks_idempotency_active",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("任务索引不存在: %s", indexName)
+		}
+	}
+	if count := countTableWhere(db, "tasks", "status IN ('completed', 'error')"); count != 0 {
+		return Validation{}, fmt.Errorf("tasks 存在旧状态记录: %d", count)
+	}
+	if count := countTableWhere(db, "tasks", "scope = 'space' AND (space_id IS NULL OR space_id = '')"); count != 0 {
+		return Validation{}, fmt.Errorf("space 任务缺少 space_id: %d", count)
+	}
+	return Validation{Summary: "通用任务队列中心已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

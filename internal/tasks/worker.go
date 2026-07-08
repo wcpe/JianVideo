@@ -1,0 +1,153 @@
+package tasks
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/wcpe/JianVideo/internal/db/models"
+)
+
+// Handler 是通用任务 worker 的业务执行函数。
+type Handler func(context.Context, models.Task) error
+
+type workerSpec struct {
+	taskType    string
+	concurrency int
+	handler     Handler
+}
+
+// WorkerRegistry 按任务类型注册处理器，并按各类型并发上限领取执行 pending 任务。
+type WorkerRegistry struct {
+	service *Service
+	mu      sync.Mutex
+	specs   map[string]workerSpec
+}
+
+// NewWorkerRegistry 创建通用任务 worker 注册表。
+func NewWorkerRegistry(service *Service) *WorkerRegistry {
+	return &WorkerRegistry{
+		service: service,
+		specs:   map[string]workerSpec{},
+	}
+}
+
+// Register 注册指定任务类型的处理器和并发上限。
+func (r *WorkerRegistry) Register(taskType string, concurrency int, handler Handler) error {
+	taskType = strings.TrimSpace(taskType)
+	if taskType == "" {
+		return errors.New("任务类型不能为空")
+	}
+	if concurrency <= 0 {
+		return errors.New("worker 并发上限必须大于 0")
+	}
+	if handler == nil {
+		return errors.New("worker 处理器不能为空")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.specs[taskType] = workerSpec{taskType: taskType, concurrency: concurrency, handler: handler}
+	return nil
+}
+
+// RunPending 领取并执行当前所有已到期的 pending 任务。
+func (r *WorkerRegistry) RunPending(ctx context.Context) error {
+	specs := r.snapshot()
+	errs := make(chan error, len(specs))
+	var wg sync.WaitGroup
+	for _, spec := range specs {
+		wg.Add(1)
+		go func(spec workerSpec) {
+			defer wg.Done()
+			errs <- r.runType(ctx, spec)
+		}(spec)
+	}
+	wg.Wait()
+	close(errs)
+	return firstWorkerError(errs)
+}
+
+// DefaultConcurrency 返回首批任务类型的默认并发上限。
+func DefaultConcurrency(taskType string) int {
+	taskType = strings.TrimSpace(taskType)
+	switch {
+	case taskType == "library.scan":
+		return 1
+	case strings.HasPrefix(taskType, "transcode."):
+		return 1
+	case strings.HasPrefix(taskType, "thumbnail."):
+		return 4
+	default:
+		return 2
+	}
+}
+
+func (r *WorkerRegistry) snapshot() []workerSpec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0, len(r.specs))
+	for key := range r.specs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	specs := make([]workerSpec, 0, len(keys))
+	for _, key := range keys {
+		specs = append(specs, r.specs[key])
+	}
+	return specs
+}
+
+func (r *WorkerRegistry) runType(ctx context.Context, spec workerSpec) error {
+	errs := make(chan error, spec.concurrency)
+	var wg sync.WaitGroup
+	for i := 0; i < spec.concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- r.workerLoop(ctx, spec)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	return firstWorkerError(errs)
+}
+
+func (r *WorkerRegistry) workerLoop(ctx context.Context, spec workerSpec) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		task, err := r.service.ClaimNext(ctx, ClaimQuery{Type: spec.taskType})
+		if errors.Is(err, ErrNoPendingTask) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := r.finishTask(ctx, spec, task); err != nil {
+			return err
+		}
+	}
+}
+
+func (r *WorkerRegistry) finishTask(ctx context.Context, spec workerSpec, task *models.Task) error {
+	if err := spec.handler(ctx, *task); err != nil {
+		if markErr := r.service.MarkFailed(ctx, task.ID, err.Error()); markErr != nil {
+			return markErr
+		}
+		return nil
+	}
+	return r.service.MarkSucceeded(ctx, task.ID)
+}
+
+func firstWorkerError(errs <-chan error) error {
+	for err := range errs {
+		if err != nil {
+			return fmt.Errorf("worker 执行失败: %w", err)
+		}
+	}
+	return nil
+}

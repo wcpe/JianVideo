@@ -223,7 +223,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
     expect(navbar.getAllByText('管理').length).toBeGreaterThan(0);
   });
 
-  it('展开态：13 个导航项全部仍在桌面 navbar 中渲染（库管理重命名为「库管理」避免与组标题歧义）', () => {
+  it('展开态：14 个导航项全部仍在桌面 navbar 中渲染（库管理重命名为「库管理」避免与组标题歧义）', () => {
     renderLayout();
 
     const navbar = within(getNavbar());
@@ -240,6 +240,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       '巡检',
       '重复项',
       '转码',
+      '任务',
       '系统',
     ];
     labels.forEach((label) => {
@@ -275,7 +276,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       expect(i).toBeLessThan(idxManage);
     });
     // 管理组成员（含系统并入）落在「管理」组标题之后
-    ['库管理', '回收站', '巡检', '重复项', '转码', '系统'].forEach((label) => {
+    ['库管理', '回收站', '巡检', '重复项', '转码', '任务', '系统'].forEach((label) => {
       const i = text.indexOf(label);
       expect(i).toBeGreaterThan(idxManage);
     });
@@ -293,7 +294,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
     expect(within(navbar).queryByText('浏览')).toBeNull();
     expect(within(navbar).queryByText('洞察')).toBeNull();
     expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
-    // 13 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
+    // 14 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
     const paths = [
       '/',
       '/timeline',
@@ -307,6 +308,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       '/inspect',
       '/duplicates',
       '/transcode',
+      '/tasks',
       '/system',
     ];
     paths.forEach((p) => {
@@ -333,6 +335,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       '巡检',
       '重复项',
       '转码',
+      '任务',
       '系统',
     ];
     names.forEach((name) => {
@@ -828,8 +831,8 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     renderLayoutAt('/browse');
 
     const navbar = getNavbar();
-    // 13 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）
-    expect(navbar.querySelectorAll('.nav-link').length).toBe(13);
+    // 14 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）、任务（FR2-037）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(14);
     // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1);
   });

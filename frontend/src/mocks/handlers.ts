@@ -14,6 +14,8 @@ import type {
   TranscodeCodec,
   AuditEvent,
   SettingDefinition,
+  TaskItem,
+  TaskStatus,
 } from '@/types';
 
 // 内存中的可变数据（支持增删）
@@ -289,6 +291,56 @@ const deletedMediaIds = new Set<number>();
 // 扫描任务队列（FR-29）内存数据
 const scanTasks: ScanTask[] = [];
 let nextScanTaskId = 1;
+const unifiedTasks: TaskItem[] = [
+  {
+    id: 'task-mock-scan-running',
+    scope: 'space',
+    space_id: 'space-default',
+    type: 'library.scan',
+    status: 'running',
+    priority: 10,
+    attempts: 0,
+    max_attempts: 1,
+    progress: 0.45,
+    resource_type: 'library',
+    resource_id: '1',
+    error: null,
+    created_at: '2026-07-08T08:00:00Z',
+    updated_at: '2026-07-08T08:01:00Z',
+  },
+  {
+    id: 'task-mock-transcode-failed',
+    scope: 'space',
+    space_id: 'space-default',
+    type: 'transcode.hls',
+    status: 'failed',
+    priority: 5,
+    attempts: 1,
+    max_attempts: 3,
+    progress: 0.32,
+    resource_type: 'media',
+    resource_id: '42',
+    error: '编码器不可用',
+    created_at: '2026-07-08T08:10:00Z',
+    updated_at: '2026-07-08T08:11:00Z',
+  },
+  {
+    id: 'task-mock-system-cleanup',
+    scope: 'system',
+    space_id: null,
+    type: 'cache.cleanup',
+    status: 'pending',
+    priority: 1,
+    attempts: 0,
+    max_attempts: 1,
+    progress: 0,
+    resource_type: 'cache',
+    resource_id: 'hls',
+    error: null,
+    created_at: '2026-07-08T08:20:00Z',
+    updated_at: '2026-07-08T08:20:00Z',
+  },
+];
 
 // 公开分享（FR-43/FR-78）内存数据
 let shares: Share[] = [];
@@ -301,6 +353,59 @@ let nextPresetId = 1;
 let nextTranscodeTaskId = 1;
 // 支持的目标编码（与 api 层 KNOWN_CODECS 对齐）
 const KNOWN_TRANSCODE_CODECS: TranscodeCodec[] = ['h264', 'h265', 'av1', 'vp9'];
+
+function addUnifiedTask(task: TaskItem) {
+  unifiedTasks.unshift(task);
+}
+
+function currentSpaceID(request: Request): string {
+  const url = new URL(request.url);
+  return url.searchParams.get('space_id') || request.headers.get('X-JianVideo-Space-Id') || 'space-default';
+}
+
+function visibleUnifiedTasks(request: Request): TaskItem[] {
+  const url = new URL(request.url);
+  const scope = (url.searchParams.get('scope') || 'space') as 'space' | 'system';
+  const type = url.searchParams.get('type') || '';
+  const status = (url.searchParams.get('status') || '') as TaskStatus | '';
+  const resourceType = url.searchParams.get('resource_type') || '';
+  const resourceID = url.searchParams.get('resource_id') || '';
+  const spaceID = currentSpaceID(request);
+  return unifiedTasks.filter((task) => {
+    if (task.scope !== scope) return false;
+    if (scope === 'space' && task.space_id !== spaceID) return false;
+    if (type && task.type !== type) return false;
+    if (status && task.status !== status) return false;
+    if (resourceType && task.resource_type !== resourceType) return false;
+    if (resourceID && task.resource_id !== resourceID) return false;
+    return true;
+  });
+}
+
+function countTasksBy<T extends string>(items: TaskItem[], keyOf: (item: TaskItem) => T): Record<T, number> {
+  return items.reduce<Record<T, number>>(
+    (result, item) => {
+      const key = keyOf(item);
+      result[key] = (result[key] ?? 0) + 1;
+      return result;
+    },
+    {} as Record<T, number>,
+  );
+}
+
+function countTaskStatuses(items: TaskItem[]): Record<TaskStatus, number> {
+  const counts: Record<TaskStatus, number> = {
+    pending: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    canceled: 0,
+  };
+  for (const item of items) {
+    counts[item.status] += 1;
+  }
+  return counts;
+}
 
 export const handlers = [
   // ─── 认证 ───────────────────────────────────────────
@@ -1175,6 +1280,85 @@ export const handlers = [
     return HttpResponse.json({ settings: { ...settingsStore } });
   }),
 
+  // ─── 通用任务中心（FR2-037）─────────────────────────────
+
+  http.get('*/api/tasks', async ({ request }) => {
+    await delay(80);
+    const url = new URL(request.url);
+    const page = Number(url.searchParams.get('page') || '1');
+    const pageSize = Number(url.searchParams.get('page_size') || '20');
+    const items = visibleUnifiedTasks(request);
+    const start = (page - 1) * pageSize;
+    return HttpResponse.json({
+      items: items.slice(start, start + pageSize),
+      page,
+      page_size: pageSize,
+      total: items.length,
+    });
+  }),
+
+  http.get('*/api/tasks/stats', async ({ request }) => {
+    await delay(80);
+    const items = visibleUnifiedTasks(request);
+    return HttpResponse.json({
+      total: items.length,
+      by_status: countTaskStatuses(items),
+      by_type: countTasksBy(items, (task) => task.type),
+    });
+  }),
+
+  http.get('*/api/tasks/:id', async ({ request, params }) => {
+    await delay(80);
+    const id = String(params.id);
+    const item = visibleUnifiedTasks(request).find((task) => task.id === id);
+    if (!item) {
+      return HttpResponse.json({ code: 'TASK_NOT_FOUND', message: '任务不存在' }, { status: 404 });
+    }
+    return HttpResponse.json(item);
+  }),
+
+  http.post('*/api/tasks/:id/cancel', async ({ request, params }) => {
+    await delay(80);
+    const id = String(params.id);
+    const item = visibleUnifiedTasks(request).find((task) => task.id === id);
+    if (!item) {
+      return HttpResponse.json({ code: 'TASK_NOT_FOUND', message: '任务不存在' }, { status: 404 });
+    }
+    if (item.status !== 'pending' && item.status !== 'running') {
+      return HttpResponse.json(
+        { code: 'TASK_OPERATION_FAILED', message: '仅 pending 或 running 任务可取消' },
+        { status: 400 },
+      );
+    }
+    item.status = 'canceled';
+    item.updated_at = new Date().toISOString();
+    item.finished_at = item.updated_at;
+    return HttpResponse.json(item);
+  }),
+
+  http.post('*/api/tasks/:id/retry', async ({ request, params }) => {
+    await delay(80);
+    const id = String(params.id);
+    const item = visibleUnifiedTasks(request).find((task) => task.id === id);
+    if (!item) {
+      return HttpResponse.json({ code: 'TASK_NOT_FOUND', message: '任务不存在' }, { status: 404 });
+    }
+    if (item.status !== 'failed' && item.status !== 'canceled') {
+      return HttpResponse.json(
+        { code: 'TASK_OPERATION_FAILED', message: '仅 failed 或 canceled 任务可重试' },
+        { status: 400 },
+      );
+    }
+    item.status = 'pending';
+    item.progress = 0;
+    item.error = null;
+    item.attempts = 0;
+    item.updated_at = new Date().toISOString();
+    item.started_at = null;
+    item.finished_at = null;
+    return HttpResponse.json(item);
+  }),
+
   // ─── 扫描 ──────────────────────────────────────────────
 
   http.post('*/api/library/scan/:id', async ({ params }) => {
@@ -1219,6 +1403,24 @@ export const handlers = [
       created_at: now,
       started_at: now,
       completed_at: now,
+    });
+    addUnifiedTask({
+      id: `scan-${nextScanTaskId - 1}`,
+      scope: 'space',
+      space_id: 'space-default',
+      type: 'library.scan',
+      status: 'succeeded',
+      priority: 0,
+      attempts: 0,
+      max_attempts: 1,
+      progress: 1,
+      resource_type: 'library',
+      resource_id: String(id),
+      error: null,
+      created_at: now,
+      updated_at: now,
+      started_at: now,
+      finished_at: now,
     });
     return HttpResponse.json({ status: 'queued', task_id: nextScanTaskId - 1 });
   }),
@@ -1649,6 +1851,24 @@ export const handlers = [
       completed_at: now,
     };
     transcodeTasks.unshift(task);
+    addUnifiedTask({
+      id: `transcode-${task.id}`,
+      scope: 'space',
+      space_id: 'space-default',
+      type: 'transcode.hls',
+      status: 'succeeded',
+      priority: 0,
+      attempts: 0,
+      max_attempts: 1,
+      progress: 1,
+      resource_type: 'media',
+      resource_id: String(body.media_id),
+      error: null,
+      created_at: now,
+      updated_at: now,
+      started_at: now,
+      finished_at: now,
+    });
     return HttpResponse.json({ status: 'queued', task_id: task.id }, { status: 202 });
   }),
 

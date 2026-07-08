@@ -143,6 +143,26 @@ var registry = []Definition{
 		Validate: validateAny,
 	},
 	{
+		Key: KeyTaskWorkerScanConcurrency, Label: "扫描 worker 并发", Description: "通用任务中心扫描类任务并发上限。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "1", HotApply: true, Consumer: "tasks.worker",
+		Validate: validatePositiveInt,
+	},
+	{
+		Key: KeyTaskWorkerTranscodeConcurrency, Label: "转码 worker 并发", Description: "通用任务中心转码类任务并发上限。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "1", HotApply: true, Consumer: "tasks.worker",
+		Validate: validatePositiveInt,
+	},
+	{
+		Key: KeyTaskWorkerThumbnailConcurrency, Label: "缩略图 worker 并发", Description: "通用任务中心缩略图类任务并发上限。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "4", HotApply: true, Consumer: "tasks.worker",
+		Validate: validatePositiveInt,
+	},
+	{
+		Key: KeyTaskWorkerLightConcurrency, Label: "轻任务 worker 并发", Description: "通用任务中心轻量任务并发上限。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "2", HotApply: true, Consumer: "tasks.worker",
+		Validate: validatePositiveInt,
+	},
+	{
 		Key: "server_port", Label: "监听端口", Description: "服务启动时确定的 HTTP 监听端口，运行期不可修改。",
 		Layer: LayerStartup, ValueType: ValueInt, DefaultValue: "", HotApply: false, Consumer: "config",
 	},
@@ -216,6 +236,14 @@ func validateNonNegativeInt(value string) error {
 	n, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || n < 0 {
 		return fmt.Errorf("必须是非负整数")
+	}
+	return nil
+}
+
+func validatePositiveInt(value string) error {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return fmt.Errorf("必须是正整数")
 	}
 	return nil
 }

@@ -161,7 +161,7 @@ export interface ScanTask {
   id: number;
   library_id: number;
   scan_type: string; // "full" / "incremental"
-  status: string; // "pending" / "running" / "completed" / "error"
+  status: string; // "pending" / "running" / "completed" / "error" / "canceled"
   scanned_files: number;
   total_files: number;
   error: string;
@@ -719,4 +719,49 @@ export interface AuditEventQuery {
 export interface AuditEventPage {
   items: AuditEvent[];
   next_cursor: string | null;
+}
+
+export type TaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled';
+
+export interface TaskItem {
+  id: string;
+  scope: AuditScope;
+  space_id: string | null;
+  type: string;
+  status: TaskStatus;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  progress: number;
+  checkpoint?: string;
+  resource_type?: string;
+  resource_id?: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface TaskListQuery {
+  scope?: AuditScope;
+  type?: string;
+  status?: TaskStatus | '';
+  resource_type?: string;
+  resource_id?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface TaskListPage {
+  items: TaskItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface TaskStats {
+  total: number;
+  by_status: Record<TaskStatus, number>;
+  by_type: Record<string, number>;
 }

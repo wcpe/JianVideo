@@ -270,6 +270,45 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	}
 }
 
+func TestTasksCenterMigrationBackfillsLegacyQueues(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tasks-migration.db")
+	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试库失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("读取底层数据库失败: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := createLegacyTaskTables(gdb); err != nil {
+		t.Fatalf("创建旧任务表失败: %v", err)
+	}
+
+	if err := migrateTasksCenter(context.Background(), gdb); err != nil {
+		t.Fatalf("任务中心迁移失败: %v", err)
+	}
+	if _, err := validateTasksCenter(context.Background(), gdb); err != nil {
+		t.Fatalf("任务中心迁移校验失败: %v", err)
+	}
+
+	if !columnExists(gdb, "tasks", "next_run_at") {
+		t.Fatal("tasks 应包含 next_run_at 退避领取列")
+	}
+	if got := countWhere(t, gdb, "tasks", "type = ? AND status = ? AND progress = 100", "library.scan", "succeeded"); got != 1 {
+		t.Fatalf("旧 completed 扫描任务应回填为 succeeded: %d", got)
+	}
+	if got := countWhere(t, gdb, "tasks", "type = ? AND status = ? AND attempts = 1", "transcode.hls", "failed"); got != 1 {
+		t.Fatalf("旧 error 转码任务应回填为 failed: %d", got)
+	}
+	if err := gdb.Exec(`
+		INSERT INTO tasks(scope, space_id, type, status, priority, attempts, max_attempts, progress, idempotency_key, created_at, updated_at)
+		VALUES ('space', ?, 'library.scan', 'pending', 0, 0, 1, 0, 'scan:3', datetime('now'), datetime('now'))
+	`, DefaultSpaceID).Error; err == nil {
+		t.Fatal("活动幂等键唯一索引应拒绝重复 pending 任务")
+	}
+}
+
 func newDefaultRunner(t *testing.T, gdb *gorm.DB, dbPath string) *Runner {
 	t.Helper()
 	registry, err := NewRegistry(DefaultMigrations()...)
@@ -312,6 +351,50 @@ func openLegacyDB(t *testing.T) (*gorm.DB, string) {
 		}
 	}
 	return gdb, dbPath
+}
+
+func createLegacyTaskTables(gdb *gorm.DB) error {
+	statements := []string{
+		`CREATE TABLE scan_tasks (
+			id INTEGER PRIMARY KEY,
+			space_id TEXT,
+			library_id INTEGER,
+			scan_type TEXT,
+			status TEXT,
+			scanned_files INTEGER,
+			total_files INTEGER,
+			error TEXT,
+			created_at DATETIME,
+			started_at DATETIME,
+			completed_at DATETIME
+		);`,
+		`CREATE TABLE transcode_tasks (
+			id INTEGER PRIMARY KEY,
+			space_id TEXT,
+			media_id INTEGER,
+			preset_id INTEGER,
+			codec TEXT,
+			width INTEGER,
+			height INTEGER,
+			status TEXT,
+			error TEXT,
+			created_at DATETIME,
+			started_at DATETIME,
+			completed_at DATETIME
+		);`,
+		`INSERT INTO scan_tasks(id, space_id, library_id, scan_type, status, scanned_files, total_files, error, created_at, completed_at)
+		 VALUES (1, '', 7, 'full', 'completed', 10, 10, '', datetime('now'), datetime('now'));`,
+		`INSERT INTO transcode_tasks(id, space_id, media_id, preset_id, codec, width, height, status, error, created_at, completed_at)
+		 VALUES (2, '', 42, 3, 'h264', 0, 0, 'error', '编码器不可用', datetime('now'), datetime('now'));`,
+		`INSERT INTO scan_tasks(id, space_id, library_id, scan_type, status, scanned_files, total_files, error, created_at)
+		 VALUES (3, '', 8, 'incremental', 'pending', 0, 0, '', datetime('now'));`,
+	}
+	for _, stmt := range statements {
+		if err := gdb.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func fixedNow() time.Time {

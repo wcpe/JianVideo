@@ -342,6 +342,29 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 媒体与标签为多对多关系，`(tag_id, media_id)` 唯一索引保证去重。按标签筛选媒体走 `tag_mappings` 子查询，并由 `tags.space_id` 与媒体 Space 校验共同保证跨 Space 不串标。
 
+**通用任务（tasks）（FR2-037）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| scope | TEXT, INDEX | `space` / `system`；Space 任务必须有 `space_id`，系统任务 `space_id` 为空 |
+| space_id | TEXT NULL, INDEX | 所属 Space，系统级任务为空 |
+| type | TEXT, INDEX | 任务类型，如 `library.scan`、`transcode.hls`、`thumbnail.generate` |
+| status | TEXT, INDEX | `pending` / `running` / `succeeded` / `failed` / `canceled` |
+| priority | INTEGER | 优先级，领取时按高优先级优先并带公平策略 |
+| attempts / max_attempts | INTEGER | 已尝试次数 / 最大尝试次数 |
+| progress | INTEGER | 0–100 进度 |
+| checkpoint | TEXT | 断点或轻量进度标记 |
+| idempotency_key | TEXT, INDEX | 未完成任务幂等键；非空且未完成时唯一 |
+| payload_json | TEXT | 任务 payload JSON |
+| resource_type / resource_id | TEXT, INDEX | 关联资源类型与 ID |
+| error | TEXT | 失败摘要 |
+| created_at / updated_at | DATETIME | 创建 / 更新时间 |
+| next_run_at | DATETIME NULL, INDEX | 重试退避后下一次可领取时间 |
+| started_at / finished_at | DATETIME NULL | 开始 / 结束时间 |
+
+通用任务表是 FR2-037 后续异步能力的统一监控与调度真源。核心索引包括 `(space_id,status,priority,created_at,id)`、`(type,status,priority,created_at,id)`、`(scope,space_id,type,status,id)`、`(status,next_run_at,priority,created_at,id)` 与未完成幂等键唯一索引；扫描与转码旧表继续保留兼容 API，但会同步镜像到 `tasks`。
+
 **扫描任务（scan_tasks）（FR-29）**
 
 | 字段 | 类型 | 说明 |
@@ -427,6 +450,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
 | 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118） |
+| 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
 | 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD 与预生成队列入队/列任务（FR-77） |
@@ -463,6 +487,14 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数（path/dirType）为过程态，存内存映射不入库（path 真源仍是 `library_paths`）。
 - 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`（按 `library_id` 反查目录重建执行目标）后再启动 worker 重新执行；目录已失效的任务标记为 `error` 而非永久卡 `pending`。
 - 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 只返回当前 Space 任务，并在实时 `ScanStatus.space_id` 匹配时把 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
+
+### 5.1.2.1 通用异步任务队列中心（FR2-037）
+
+- `internal/tasks.Service` 负责通用任务入队、幂等键查重、领取、取消、重试、进度更新、成功 / 失败终态和 `running` 恢复。状态真源只使用 `pending` / `running` / `succeeded` / `failed` / `canceled`；旧 `completed` / `error` 仅在扫描 / 转码适配层映射。
+- `ClaimNext` 按类型、状态、`next_run_at`、优先级与创建时间领取任务；连续高优先级领取达到上限后会让较低优先级任务获得机会，避免饥饿。失败且仍有剩余次数时按退避写入 `next_run_at` 并回到 `pending`。
+- `WorkerRegistry` 按任务类型注册处理器和并发上限，默认扫描 1、转码 1、缩略图 4、轻任务 2；这些默认值也登记到 FR2-024 设置 registry（`task_worker_*_concurrency`），供运行期配置层暴露。
+- 旧 `scan_tasks` 与 `transcode_tasks` 仍服务既有页面；入队、状态变化、取消和重试会同步到通用 `tasks` 表。统一 `/api/tasks/:id/cancel|retry` 命中旧队列镜像时，会先调用旧队列动作，再刷新通用镜像，避免只改监控表不改执行真源。
+- 任务创建、取消、重试、失败终态写入 FR2-040 审计事件；Space scoped 查询默认只返回当前 Space 任务，系统级任务使用 `scope=system + space_id NULL`。
 
 ### 5.1.3 定时扫描调度（FR-28）
 

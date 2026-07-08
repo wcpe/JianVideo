@@ -177,6 +177,10 @@ interface MockTaskItem {
   readonly updated_at: string;
 }
 
+type MockTaskStatus = MockTaskItem['status'];
+
+type MockTaskType = MockTaskItem['type'];
+
 const mediaFixtures: readonly MockMediaItem[] = [
   {
     created_at: '2026-07-01T10:00:00Z',
@@ -215,23 +219,50 @@ const taskSequences = new Map<string, readonly MockTaskItem[]>([
   ['task-legacy-completed', [createTask('task-legacy-completed', 'space-default', 'completed', 1)]],
 ]);
 
+const taskFixtures: readonly MockTaskItem[] = [
+  createTask('task-transcode-default', 'space-default', 'running', 0.5),
+  createTask('task-legacy-completed', 'space-default', 'completed', 1),
+  createTask('task-transcode-failed', 'space-default', 'failed', 0.4, 'transcode', '编码器不可用'),
+  createTask('task-scan-pending', 'space-default', 'pending', 0, 'scan'),
+  createTask('task-thumbnail-done', 'space-default', 'succeeded', 1, 'thumbnail'),
+  createTask('task-studio-transcode', 'space-studio', 'running', 0.2),
+] as const;
+
 export function createMockFetch(): FetchLike {
   const taskReads = new Map<string, number>();
-  return (input, init) => Promise.resolve(handleMockApiRequest(toMockRequest(input, init), taskReads));
+  const taskOverrides = new Map<string, MockTaskItem>();
+  return (input, init) => Promise.resolve(handleMockApiRequest(toMockRequest(input, init), taskReads, taskOverrides));
 }
 
-export function handleMockApiRequest(request: MockRequestLike, taskReads = new Map<string, number>()): Response {
+export function handleMockApiRequest(
+  request: MockRequestLike,
+  taskReads = new Map<string, number>(),
+  taskOverrides = new Map<string, MockTaskItem>(),
+): Response {
   const url = new URL(request.url);
-  const spaceId = request.headers.get('X-JianVideo-Space-Id') ?? 'space-default';
+  const method = request.method.toUpperCase();
+  const spaceId = url.searchParams.get('space_id') ?? request.headers.get('X-JianVideo-Space-Id') ?? 'space-default';
 
-  if (request.method === 'GET' && url.pathname === '/api/v2/media') {
+  if (method === 'GET' && url.pathname === '/api/v2/media') {
     return mediaListResponse(url, spaceId);
   }
-  if (request.method === 'GET' && url.pathname.startsWith('/api/v2/media/')) {
+  if (method === 'GET' && url.pathname.startsWith('/api/v2/media/')) {
     return mediaDetailResponse(url.pathname.slice('/api/v2/media/'.length), spaceId);
   }
-  if (request.method === 'GET' && url.pathname.startsWith('/api/v2/tasks/')) {
-    return taskDetailResponse(url.pathname.slice('/api/v2/tasks/'.length), spaceId, taskReads);
+  if (method === 'GET' && url.pathname === '/api/tasks') {
+    return taskListResponse(url, spaceId, taskOverrides);
+  }
+  if (method === 'GET' && url.pathname === '/api/tasks/stats') {
+    return taskStatsResponse(url, spaceId, taskOverrides);
+  }
+  if (method === 'GET' && url.pathname.startsWith('/api/tasks/')) {
+    return taskDetailResponse(url.pathname.slice('/api/tasks/'.length), spaceId, taskReads, taskOverrides);
+  }
+  if (method === 'POST' && url.pathname.startsWith('/api/tasks/')) {
+    return taskActionResponse(url.pathname.slice('/api/tasks/'.length), spaceId, taskReads, taskOverrides);
+  }
+  if (method === 'GET' && url.pathname.startsWith('/api/v2/tasks/')) {
+    return taskDetailResponse(url.pathname.slice('/api/v2/tasks/'.length), spaceId, taskReads, taskOverrides);
   }
   return errorResponse(404, 'MOCK_NOT_FOUND', 'mock 接口不存在');
 }
@@ -257,26 +288,163 @@ function mediaDetailResponse(id: string, spaceId: string): Response {
   return Response.json(item);
 }
 
-function taskDetailResponse(id: string, spaceId: string, taskReads: Map<string, number>): Response {
-  const sequence = taskSequences.get(id);
-  if (sequence === undefined || sequence[0]?.space_id !== spaceId) {
+function taskListResponse(
+  url: URL,
+  spaceId: string,
+  taskOverrides: Map<string, MockTaskItem>,
+): Response {
+  const page = toPositiveInt(url.searchParams.get('page'), 1);
+  const pageSize = toPositiveInt(url.searchParams.get('page_size'), 20);
+  const type = url.searchParams.get('type');
+  const status = url.searchParams.get('status');
+  const items = visibleTasks(taskOverrides).filter((task) => {
+    if (task.space_id !== spaceId) {
+      return false;
+    }
+    if (type !== null && task.type !== type) {
+      return false;
+    }
+    if (status !== null && normalizeMockTaskStatus(task.status) !== status) {
+      return false;
+    }
+    return true;
+  });
+  const start = (page - 1) * pageSize;
+  return Response.json({
+    items: items.slice(start, start + pageSize),
+    page,
+    page_size: pageSize,
+    total: items.length,
+  });
+}
+
+function taskDetailResponse(
+  id: string,
+  spaceId: string,
+  taskReads: Map<string, number>,
+  taskOverrides: Map<string, MockTaskItem>,
+): Response {
+  const task = currentTask(id, taskReads, taskOverrides);
+  if (task === undefined || task.space_id !== spaceId) {
     return errorResponse(404, 'TASK_NOT_FOUND', '任务不存在');
+  }
+  return Response.json(task);
+}
+
+function taskStatsResponse(
+  url: URL,
+  spaceId: string,
+  taskOverrides: Map<string, MockTaskItem>,
+): Response {
+  const type = url.searchParams.get('type');
+  const status = url.searchParams.get('status');
+  const items = visibleTasks(taskOverrides).filter((task) => {
+    if (task.space_id !== spaceId) {
+      return false;
+    }
+    if (type !== null && task.type !== type) {
+      return false;
+    }
+    if (status !== null && normalizeMockTaskStatus(task.status) !== status) {
+      return false;
+    }
+    return true;
+  });
+  return Response.json({
+    by_status: countBy(items, (task) => normalizeMockTaskStatus(task.status)),
+    by_type: countBy(items, (task) => task.type),
+    total: items.length,
+  });
+}
+
+function taskActionResponse(
+  path: string,
+  spaceId: string,
+  taskReads: Map<string, number>,
+  taskOverrides: Map<string, MockTaskItem>,
+): Response {
+  const [id, action] = path.split('/');
+  if (id === undefined || action === undefined) {
+    return errorResponse(404, 'TASK_NOT_FOUND', '任务不存在');
+  }
+  const task = currentTask(id, taskReads, taskOverrides);
+  if (task === undefined || task.space_id !== spaceId) {
+    return errorResponse(404, 'TASK_NOT_FOUND', '任务不存在');
+  }
+  if (action === 'cancel') {
+    const canceled = updateTask(task, { status: 'canceled' });
+    taskOverrides.set(id, canceled);
+    return Response.json(canceled);
+  }
+  if (action === 'retry') {
+    const retried = updateTask(task, { error: null, progress: 0, status: 'pending' });
+    taskOverrides.set(id, retried);
+    return Response.json(retried);
+  }
+  return errorResponse(404, 'TASK_NOT_FOUND', '任务不存在');
+}
+
+function currentTask(
+  id: string,
+  taskReads: Map<string, number>,
+  taskOverrides: Map<string, MockTaskItem>,
+): MockTaskItem | undefined {
+  const override = taskOverrides.get(id);
+  if (override !== undefined) {
+    return override;
+  }
+  const sequence = taskSequences.get(id);
+  if (sequence === undefined) {
+    return taskFixtures.find((task) => task.id === id);
   }
   const readCount = taskReads.get(id) ?? 0;
   taskReads.set(id, readCount + 1);
-  return Response.json(sequence[Math.min(readCount, sequence.length - 1)]);
+  return sequence[Math.min(readCount, sequence.length - 1)];
 }
 
-function createTask(id: string, spaceId: string, status: MockTaskItem['status'], progress: number): MockTaskItem {
+function visibleTasks(taskOverrides: Map<string, MockTaskItem>): readonly MockTaskItem[] {
+  return taskFixtures.map((task) => taskOverrides.get(task.id) ?? task);
+}
+
+function updateTask(task: MockTaskItem, patch: Partial<MockTaskItem>): MockTaskItem {
+  return { ...task, ...patch, updated_at: '2026-07-01T10:02:00Z' };
+}
+
+function normalizeMockTaskStatus(status: MockTaskStatus): Exclude<MockTaskStatus, 'completed' | 'error'> {
+  if (status === 'completed') {
+    return 'succeeded';
+  }
+  if (status === 'error') {
+    return 'failed';
+  }
+  return status;
+}
+
+function countBy<T, K extends string>(items: readonly T[], keyOf: (item: T) => K): Partial<Record<K, number>> {
+  return items.reduce<Partial<Record<K, number>>>((result, item) => {
+    const key = keyOf(item);
+    result[key] = (result[key] ?? 0) + 1;
+    return result;
+  }, {});
+}
+
+function createTask(
+  id: string,
+  spaceId: string,
+  status: MockTaskItem['status'],
+  progress: number,
+  type: MockTaskType = 'transcode',
+  error: string | null = null,
+): MockTaskItem {
   return {
     created_at: '2026-07-01T10:00:00Z',
-    error: null,
+    error,
     id,
     priority: 10,
     progress,
     space_id: spaceId,
     status,
-    type: 'transcode',
+    type,
     updated_at: '2026-07-01T10:00:02Z',
   };
 }
