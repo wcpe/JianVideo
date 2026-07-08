@@ -30,6 +30,10 @@ type negotiateRequest struct {
 //
 // 返回播放描述符（编码 + 路径 + 清单 URL + MIME + H.264 回退源），并把实际编码与路径记到会话。
 func (h *Handler) Negotiate(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
@@ -44,7 +48,7 @@ func (h *Handler) Negotiate(c *gin.Context) {
 		"vp9":  req.ClientCaps.VP9,
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return

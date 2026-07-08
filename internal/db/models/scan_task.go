@@ -27,13 +27,14 @@ const (
 // 队列以本表为持久化真源，服务重启时把残留 running 重置为 pending 重新入队。
 type ScanTask struct {
 	ID           int64      `gorm:"primaryKey" json:"id"`
+	SpaceID      string     `gorm:"not null;default:space-default;index:idx_scan_tasks_space_status_created" json:"space_id"`
 	LibraryID    int64      `gorm:"index;not null" json:"library_id"`
 	ScanType     string     `gorm:"not null;default:'full'" json:"scan_type"` // full / incremental
-	Status       string     `gorm:"index;not null;default:'pending'" json:"status"`
+	Status       string     `gorm:"index;not null;default:'pending';index:idx_scan_tasks_space_status_created" json:"status"`
 	ScannedFiles int        `gorm:"default:0" json:"scanned_files"`
 	TotalFiles   int        `gorm:"default:0" json:"total_files"`
 	Error        string     `json:"error"`
-	CreatedAt    time.Time  `json:"created_at"`
+	CreatedAt    time.Time  `gorm:"index:idx_scan_tasks_space_status_created" json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }

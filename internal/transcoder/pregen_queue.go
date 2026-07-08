@@ -2,6 +2,7 @@ package transcoder
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +45,13 @@ func NewPregenQueue(db *gorm.DB, exec PregenExecFunc) *PregenQueue {
 // Enqueue 入队一个预生成任务，落库为 pending 并唤醒 worker，返回任务 ID。
 // codec/width/height 为入队时刻预设的快照，使任务执行不强依赖预设此后是否被改/删。
 func (q *PregenQueue) Enqueue(mediaID, presetID int64, codec string, width, height int) (int64, error) {
+	return q.EnqueueInSpace(models.DefaultSpaceID, mediaID, presetID, codec, width, height)
+}
+
+// EnqueueInSpace 入队指定 Space 的预生成任务。
+func (q *PregenQueue) EnqueueInSpace(spaceID string, mediaID, presetID int64, codec string, width, height int) (int64, error) {
 	task := &models.TranscodeTask{
+		SpaceID:  normalizeTaskSpaceID(spaceID),
 		MediaID:  mediaID,
 		PresetID: presetID,
 		Codec:    codec,
@@ -102,8 +109,13 @@ func (q *PregenQueue) Stop() {
 
 // ListTasks 返回预生成任务，按创建时间倒序（最近在前）。statusFilter 非空时仅返回该状态。
 func (q *PregenQueue) ListTasks(statusFilter string) ([]models.TranscodeTask, error) {
+	return q.ListTasksInSpace(models.DefaultSpaceID, statusFilter)
+}
+
+// ListTasksInSpace 返回指定 Space 的预生成任务。
+func (q *PregenQueue) ListTasksInSpace(spaceID, statusFilter string) ([]models.TranscodeTask, error) {
 	var tasks []models.TranscodeTask
-	query := q.db.Order("created_at DESC, id DESC")
+	query := q.db.Where("space_id = ?", normalizeTaskSpaceID(spaceID)).Order("created_at DESC, id DESC")
 	if statusFilter != "" {
 		query = query.Where("status = ?", statusFilter)
 	}
@@ -182,4 +194,12 @@ func (q *PregenQueue) wake() {
 	case q.signal <- struct{}{}:
 	default:
 	}
+}
+
+func normalizeTaskSpaceID(spaceID string) string {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		return models.DefaultSpaceID
+	}
+	return spaceID
 }

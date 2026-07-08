@@ -193,6 +193,35 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	if got := countWhere(t, gdb, "spaces", "id = ?", DefaultSpaceID); got != 1 {
 		t.Fatalf("默认 Space 不存在: %d", got)
 	}
+	if !testColumnExists(t, gdb, "spaces", "owner_user_id") {
+		t.Fatal("spaces 缺少 owner_user_id 字段")
+	}
+	if !testColumnExists(t, gdb, "spaces", "updated_at") {
+		t.Fatal("spaces 缺少 updated_at 字段")
+	}
+	if !testColumnExists(t, gdb, "tags", "space_id") {
+		t.Fatal("tags 缺少 space_id 字段")
+	}
+	if !testColumnExists(t, gdb, "scan_tasks", "space_id") {
+		t.Fatal("scan_tasks 缺少 space_id 字段")
+	}
+	if !testColumnExists(t, gdb, "transcode_tasks", "space_id") {
+		t.Fatal("transcode_tasks 缺少 space_id 字段")
+	}
+	var ownerUserID int64
+	if err := gdb.Raw("SELECT owner_user_id FROM spaces WHERE id = ?", DefaultSpaceID).Scan(&ownerUserID).Error; err != nil {
+		t.Fatalf("读取默认 Space owner 失败: %v", err)
+	}
+	if ownerUserID != 1 {
+		t.Fatalf("默认 Space owner_user_id 不正确: got=%d want=1", ownerUserID)
+	}
+	var updatedAt string
+	if err := gdb.Raw("SELECT updated_at FROM spaces WHERE id = ?", DefaultSpaceID).Scan(&updatedAt).Error; err != nil {
+		t.Fatalf("读取默认 Space updated_at 失败: %v", err)
+	}
+	if strings.TrimSpace(updatedAt) == "" {
+		t.Fatal("默认 Space updated_at 不应为空")
+	}
 	if got := countWhere(t, gdb, "library_paths", "space_id = '' OR space_id IS NULL"); got != 0 {
 		t.Fatalf("library_paths 存在未回填 space_id 的记录: %d", got)
 	}
@@ -203,8 +232,20 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	for _, indexName := range []string{
 		"idx_media_files_library_id",
 		"idx_library_paths_space_id",
+		"idx_library_paths_space_path",
+		"idx_library_paths_space_path_id",
 		"idx_media_files_space_id",
 		"idx_media_files_space_library_added",
+		"idx_library_paths_space_enabled_id",
+		"idx_media_files_space_added_id",
+		"idx_media_files_space_media_time_id",
+		"idx_media_files_space_library_path_id",
+		"idx_media_files_space_deleted_id",
+		"idx_media_files_space_format_added_id",
+		"idx_tags_space_id",
+		"idx_tags_space_name",
+		"idx_scan_tasks_space_status_created",
+		"idx_transcode_tasks_space_status_created",
 	} {
 		if !testIndexExists(t, gdb, indexName) {
 			t.Fatalf("关键索引不存在: %s", indexName)

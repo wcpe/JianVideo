@@ -44,7 +44,12 @@ type CleanupResult struct {
 // 校验先行：只要存在任一软删项所在盘符在 drivePaths 无非空配置（含 SMB/无盘符项），
 // 整体拒绝、不移动任何文件、不删任何记录，返回 *MissingDrivesError（errors.Is ErrRecycleBinPathUnset）。
 func (s *Service) CleanupRecycle(drivePaths map[string]string) (CleanupResult, error) {
-	deleted, err := s.ListDeletedMediaFiles()
+	return s.CleanupRecycleInSpace(models.DefaultSpaceID, drivePaths)
+}
+
+// CleanupRecycleInSpace 清理指定 Space 的回收站（FR-26）。
+func (s *Service) CleanupRecycleInSpace(spaceID string, drivePaths map[string]string) (CleanupResult, error) {
+	deleted, err := s.ListDeletedMediaFilesInSpace(spaceID)
 	if err != nil {
 		return CleanupResult{}, err
 	}
@@ -105,7 +110,7 @@ func (s *Service) CleanupRecycle(drivePaths map[string]string) (CleanupResult, e
 		}
 
 		// 文件已移出库，删除数据库记录（先移动成功、后删记录，保证一致性）
-		if delErr := s.db.Delete(&models.MediaFile{}, mf.ID).Error; delErr != nil {
+		if delErr := s.db.Where("space_id = ?", normalizeSpaceID(spaceID)).Delete(&models.MediaFile{}, mf.ID).Error; delErr != nil {
 			log.Printf("[ERROR] 回收站清理：源文件已移动但删除记录失败: id=%d, err=%v", mf.ID, delErr)
 			result.Failed++
 			continue

@@ -35,6 +35,7 @@ var (
 // Service 媒体库业务逻辑。
 type Service struct {
 	db         *gorm.DB
+	mediaRepo  MediaQueryRepository
 	smbCreds   *smb.CredentialStore
 	smbCredsMu sync.RWMutex
 }
@@ -95,7 +96,20 @@ var builtInMediaExtensions = map[string]string{
 
 // NewService 创建媒体库服务。
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+	return &Service{db: db, mediaRepo: newGormMediaRepository(db)}
+}
+
+// SpaceExists 判断 Space 是否存在。缺省 Space 兼容旧测试库，不强依赖 spaces 表。
+func (s *Service) SpaceExists(spaceID string) (bool, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	if !s.db.Migrator().HasTable(&models.Space{}) {
+		return false, nil
+	}
+	var count int64
+	if err := s.db.Model(&models.Space{}).Where("id = ?", spaceID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count == 1, nil
 }
 
 // SetSMBCredentialStore 设置 SMB 凭据存储器。
@@ -107,6 +121,11 @@ func (s *Service) SetSMBCredentialStore(store *smb.CredentialStore) {
 
 // CreateLibraryPath 添加媒体库目录。
 func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.LibraryPath, error) {
+	return s.CreateLibraryPathInSpace(models.DefaultSpaceID, path, dirType, label)
+}
+
+// CreateLibraryPathInSpace 添加指定 Space 的媒体库目录。
+func (s *Service) CreateLibraryPathInSpace(spaceID, path, dirType, label string) (*models.LibraryPath, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("路径不能为空")
 	}
@@ -137,6 +156,7 @@ func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.Librar
 	}
 
 	lp := &models.LibraryPath{
+		SpaceID: normalizeSpaceID(spaceID),
 		Path:    storedPath,
 		Type:    dirType,
 		Label:   label,
@@ -150,11 +170,12 @@ func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.Librar
 
 // ListLibraryPaths 查询所有媒体库目录。
 func (s *Service) ListLibraryPaths() ([]models.LibraryPath, error) {
-	var items []models.LibraryPath
-	if err := s.db.Order("id").Find(&items).Error; err != nil {
-		return nil, err
-	}
-	return items, nil
+	return s.ListLibraryPathsInSpace(models.DefaultSpaceID)
+}
+
+// ListLibraryPathsInSpace 查询指定 Space 的媒体库目录。
+func (s *Service) ListLibraryPathsInSpace(spaceID string) ([]models.LibraryPath, error) {
+	return s.mediaRepo.ListLibraryPaths(spaceID)
 }
 
 // PathView 媒体库目录视图：在目录记录基础上附带已索引媒体数量。
@@ -169,7 +190,12 @@ type PathView struct {
 // 媒体数量按 library_id 分组一次查询统计，排除已软删（deleted_at 非空）记录，
 // 与回收站（FR-25）口径一致，避免按库 N+1 计数。
 func (s *Service) ListLibraryPathViews() ([]PathView, error) {
-	paths, err := s.ListLibraryPaths()
+	return s.ListLibraryPathViewsInSpace(models.DefaultSpaceID)
+}
+
+// ListLibraryPathViewsInSpace 查询指定 Space 的媒体库目录并附带各库的已索引媒体数量。
+func (s *Service) ListLibraryPathViewsInSpace(spaceID string) ([]PathView, error) {
+	paths, err := s.ListLibraryPathsInSpace(spaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +208,7 @@ func (s *Service) ListLibraryPathViews() ([]PathView, error) {
 	var rows []countRow
 	if err := s.db.Model(&models.MediaFile{}).
 		Select("library_id, COUNT(*) AS count").
-		Where("deleted_at IS NULL").
+		Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID)).
 		Group("library_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -201,23 +227,44 @@ func (s *Service) ListLibraryPathViews() ([]PathView, error) {
 
 // GetLibraryPathByID 根据 ID 获取媒体库目录。
 func (s *Service) GetLibraryPathByID(id int64) (*models.LibraryPath, error) {
-	var lp models.LibraryPath
-	if err := s.db.First(&lp, id).Error; err != nil {
-		return nil, err
+	return s.GetLibraryPathByIDInSpace(models.DefaultSpaceID, id)
+}
+
+// GetLibraryPathByIDInSpace 根据 Space 与 ID 获取媒体库目录。
+func (s *Service) GetLibraryPathByIDInSpace(spaceID string, id int64) (*models.LibraryPath, error) {
+	return s.mediaRepo.GetLibraryPathByID(spaceID, id)
+}
+
+func (s *Service) spaceIDForLibrary(libraryID int64) (string, error) {
+	if !s.db.Migrator().HasTable(&models.LibraryPath{}) {
+		return models.DefaultSpaceID, nil
 	}
-	return &lp, nil
+	var lp models.LibraryPath
+	if err := s.db.Select("space_id").First(&lp, libraryID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.DefaultSpaceID, nil
+		}
+		return "", err
+	}
+	return normalizeSpaceID(lp.SpaceID), nil
 }
 
 // DeleteLibraryPath 删除媒体库目录及其关联的媒体文件记录。
 func (s *Service) DeleteLibraryPath(id int64) error {
+	return s.DeleteLibraryPathInSpace(models.DefaultSpaceID, id)
+}
+
+// DeleteLibraryPathInSpace 删除指定 Space 的媒体库目录及其关联媒体记录。
+func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
+	spaceID = normalizeSpaceID(spaceID)
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("library_id = ?", id).Delete(&models.MediaFile{}).Error; err != nil {
+		if err := tx.Where("space_id = ? AND library_id = ?", spaceID, id).Delete(&models.MediaFile{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("library_id = ?", id).Delete(&models.MediaExtension{}).Error; err != nil {
 			return err
 		}
-		result := tx.Delete(&models.LibraryPath{}, id)
+		result := tx.Where("space_id = ? AND id = ?", spaceID, id).Delete(&models.LibraryPath{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -230,6 +277,15 @@ func (s *Service) DeleteLibraryPath(id int64) error {
 
 // CreateMediaFile 添加媒体文件记录。
 func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int64) (*models.MediaFile, error) {
+	spaceID, err := s.spaceIDForLibrary(libraryID)
+	if err != nil {
+		return nil, err
+	}
+	return s.CreateMediaFileInSpace(spaceID, libraryID, filePath, fileSize)
+}
+
+// CreateMediaFileInSpace 添加指定 Space 的媒体文件记录。
+func (s *Service) CreateMediaFileInSpace(spaceID string, libraryID int64, filePath string, fileSize int64) (*models.MediaFile, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, fmt.Errorf("文件路径不能为空")
 	}
@@ -240,6 +296,7 @@ func (s *Service) CreateMediaFile(libraryID int64, filePath string, fileSize int
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 
 	mf := &models.MediaFile{
+		SpaceID:    normalizeSpaceID(spaceID),
 		LibraryID:  libraryID,
 		FilePath:   filePath,
 		FileName:   filepath.Base(filePath),
@@ -263,23 +320,34 @@ func (s *Service) ListMediaFiles(libraryID int64, sort, search string, page, pag
 	return s.ListMediaFilesFiltered(MediaFilter{LibraryID: libraryID, Sort: sort, Search: search}, page, pageSize)
 }
 
+// ListMediaFilesPage 按筛选条件返回带 cursor 的媒体分页结果。
+func (s *Service) ListMediaFilesPage(filter MediaFilter, page MediaPageRequest) (MediaPageResult, error) {
+	return s.mediaRepo.ListMediaFiles(filter, page)
+}
+
 // GetMediaFileByID 根据 ID 获取媒体文件。
 // 排除已软删项（deleted_at 非空），使详情/播放/raw/缩略图等正常访问路径对回收站中的媒体视为不存在（FR-25 访问隔离）。
 // 还原需读取软删记录，由 RestoreMediaFile 自身的查询完成，不经此方法。
 func (s *Service) GetMediaFileByID(id int64) (*models.MediaFile, error) {
-	var mf models.MediaFile
-	if err := s.db.Where("id = ? AND deleted_at IS NULL", id).First(&mf).Error; err != nil {
-		return nil, err
-	}
-	return &mf, nil
+	return s.GetMediaFileByIDInSpace(models.DefaultSpaceID, id)
+}
+
+// GetMediaFileByIDInSpace 根据 Space 与 ID 获取媒体文件。
+func (s *Service) GetMediaFileByIDInSpace(spaceID string, id int64) (*models.MediaFile, error) {
+	return s.mediaRepo.GetMediaFileByID(spaceID, id)
 }
 
 // DeleteMediaFile 软删除单条媒体文件记录（FR-25）。
 // 仅置 deleted_at 标记进回收站，不物理删除数据库记录、不动磁盘源文件。
 func (s *Service) DeleteMediaFile(id int64) error {
+	return s.DeleteMediaFileInSpace(models.DefaultSpaceID, id)
+}
+
+// DeleteMediaFileInSpace 软删除指定 Space 的媒体文件记录（FR-25）。
+func (s *Service) DeleteMediaFileInSpace(spaceID string, id int64) error {
 	now := time.Now()
 	result := s.db.Model(&models.MediaFile{}).
-		Where("id = ? AND deleted_at IS NULL", id).
+		Where("space_id = ? AND id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), id).
 		Update("deleted_at", now)
 	if result.Error != nil {
 		return result.Error
@@ -294,14 +362,20 @@ func (s *Service) DeleteMediaFile(id int64) error {
 // 复用 FR-25 软删语义：在单事务内对所有有效 id 一次 UPDATE 置 deleted_at，不动磁盘源文件。
 // 跳过不存在 / 已软删的 id（不计入返回值、不报错）；空列表为 no-op 返回 0。返回实际软删条数。
 func (s *Service) BatchDeleteMediaFiles(ids []int64) (int64, error) {
+	return s.BatchDeleteMediaFilesInSpace(models.DefaultSpaceID, ids)
+}
+
+// BatchDeleteMediaFilesInSpace 批量软删指定 Space 的媒体文件（FR-69）。
+func (s *Service) BatchDeleteMediaFilesInSpace(spaceID string, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	spaceID = normalizeSpaceID(spaceID)
 	now := time.Now()
 	var affected int64
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&models.MediaFile{}).
-			Where("id IN ? AND deleted_at IS NULL", ids).
+			Where("space_id = ? AND id IN ? AND deleted_at IS NULL", spaceID, ids).
 			Update("deleted_at", now)
 		if result.Error != nil {
 			return result.Error
@@ -320,11 +394,16 @@ func (s *Service) BatchDeleteMediaFiles(ids []int64) (int64, error) {
 // 不存在 / 已软删的 id 自然不在结果中；空列表为 no-op 返回空切片。
 // 返回顺序不保证与入参一致，调用方如需保序自行处理。
 func (s *Service) GetMediaFilesByIDs(ids []int64) ([]models.MediaFile, error) {
+	return s.GetMediaFilesByIDsInSpace(models.DefaultSpaceID, ids)
+}
+
+// GetMediaFilesByIDsInSpace 批量获取指定 Space 的媒体文件（FR-91 批量打包下载）。
+func (s *Service) GetMediaFilesByIDsInSpace(spaceID string, ids []int64) ([]models.MediaFile, error) {
 	if len(ids) == 0 {
 		return []models.MediaFile{}, nil
 	}
 	var items []models.MediaFile
-	if err := s.db.Where("id IN ? AND deleted_at IS NULL", ids).Find(&items).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND id IN ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), ids).Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil
@@ -332,8 +411,13 @@ func (s *Service) GetMediaFilesByIDs(ids []int64) ([]models.MediaFile, error) {
 
 // ListDeletedMediaFiles 列出全部已软删的媒体文件（回收站，FR-25），按软删时间倒序。
 func (s *Service) ListDeletedMediaFiles() ([]models.MediaFile, error) {
+	return s.ListDeletedMediaFilesInSpace(models.DefaultSpaceID)
+}
+
+// ListDeletedMediaFilesInSpace 列出指定 Space 已软删的媒体文件（回收站，FR-25）。
+func (s *Service) ListDeletedMediaFilesInSpace(spaceID string) ([]models.MediaFile, error) {
 	var items []models.MediaFile
-	if err := s.db.Where("deleted_at IS NOT NULL").
+	if err := s.db.Where("space_id = ? AND deleted_at IS NOT NULL", normalizeSpaceID(spaceID)).
 		Order("deleted_at DESC").
 		Find(&items).Error; err != nil {
 		return nil, err
@@ -343,8 +427,13 @@ func (s *Service) ListDeletedMediaFiles() ([]models.MediaFile, error) {
 
 // RestoreMediaFile 从回收站还原媒体文件（FR-25）：清空 deleted_at 回到常规列表。
 func (s *Service) RestoreMediaFile(id int64) error {
+	return s.RestoreMediaFileInSpace(models.DefaultSpaceID, id)
+}
+
+// RestoreMediaFileInSpace 从指定 Space 回收站还原媒体文件（FR-25）。
+func (s *Service) RestoreMediaFileInSpace(spaceID string, id int64) error {
 	result := s.db.Model(&models.MediaFile{}).
-		Where("id = ? AND deleted_at IS NOT NULL", id).
+		Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", normalizeSpaceID(spaceID), id).
 		Update("deleted_at", nil)
 	if result.Error != nil {
 		return result.Error
@@ -359,12 +448,18 @@ func (s *Service) RestoreMediaFile(id int64) error {
 // newName 仅允许单层文件名（不含路径分隔符），目标已存在时拒绝。
 // 先磁盘原子改名，再更新数据库；数据库更新失败时尽力回滚磁盘改名。
 func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, error) {
+	return s.RenameMediaFileInSpace(models.DefaultSpaceID, id, newName)
+}
+
+// RenameMediaFileInSpace 重命名指定 Space 的媒体文件。
+func (s *Service) RenameMediaFileInSpace(spaceID string, id int64, newName string) (*models.MediaFile, error) {
 	newName = strings.TrimSpace(newName)
 	if newName == "" || newName == "." || newName == ".." || strings.ContainsAny(newName, "/\\") {
 		return nil, ErrInvalidNewName
 	}
 
-	mf, err := s.GetMediaFileByID(id)
+	spaceID = normalizeSpaceID(spaceID)
+	mf, err := s.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +482,7 @@ func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, 
 	if _, statErr := os.Stat(newDiskPath); statErr == nil {
 		return nil, ErrRenameTargetExists
 	}
-	if _, dupErr := s.GetMediaFileByLibraryAndPath(mf.LibraryID, newPathSlash); dupErr == nil {
+	if _, dupErr := s.GetMediaFileByLibraryAndPathInSpace(spaceID, mf.LibraryID, newPathSlash); dupErr == nil {
 		return nil, ErrRenameTargetExists
 	}
 
@@ -404,7 +499,7 @@ func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, 
 		"format":      format,
 		"modified_at": time.Now(),
 	}
-	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Updates(updates).Error; err != nil {
 		if rbErr := os.Rename(newDiskPath, oldDiskPath); rbErr != nil {
 			log.Printf("[ERROR] 重命名回滚磁盘文件失败: %s -> %s, err=%v", newDiskPath, oldDiskPath, rbErr)
 		}
@@ -427,44 +522,56 @@ func (s *Service) RenameMediaFile(id int64, newName string) (*models.MediaFile, 
 // 仅更新数据库 display_name 列，不动磁盘文件名与路径；去首尾空白后落库，空串表示清除。
 // 记录不存在时返回 gorm.ErrRecordNotFound。
 func (s *Service) UpdateDisplayName(id int64, displayName string) (*models.MediaFile, error) {
+	return s.UpdateDisplayNameInSpace(models.DefaultSpaceID, id, displayName)
+}
+
+// UpdateDisplayNameInSpace 设置或清除指定 Space 媒体的库内显示名（FR-30）。
+func (s *Service) UpdateDisplayNameInSpace(spaceID string, id int64, displayName string) (*models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
 	displayName = strings.TrimSpace(displayName)
-	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Update("display_name", displayName)
+	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Update("display_name", displayName)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
 		// 区分「媒体不存在」与「值未变化」：再查一次确认存在性
 		var count int64
-		if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count == 0 {
 			return nil, gorm.ErrRecordNotFound
 		}
 	}
-	return s.GetMediaFileByID(id)
+	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
 
 // UpdateMediaNotes 设置或清除媒体的库内备注（FR-137）。
 // 仅更新数据库 notes 列；去首尾空白后落库，空串表示清除备注。
 // 记录不存在时返回 gorm.ErrRecordNotFound。
 func (s *Service) UpdateMediaNotes(id int64, notes string) (*models.MediaFile, error) {
+	return s.UpdateMediaNotesInSpace(models.DefaultSpaceID, id, notes)
+}
+
+// UpdateMediaNotesInSpace 设置或清除指定 Space 媒体的库内备注（FR-137）。
+func (s *Service) UpdateMediaNotesInSpace(spaceID string, id int64, notes string) (*models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
 	notes = strings.TrimSpace(notes)
-	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Update("notes", notes)
+	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Update("notes", notes)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
 		// 区分「媒体不存在」与「值未变化」：再查一次确认存在性
 		var count int64
-		if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count == 0 {
 			return nil, gorm.ErrRecordNotFound
 		}
 	}
-	return s.GetMediaFileByID(id)
+	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
 
 // GetMediaFileByPath 根据文件路径查询媒体文件。
@@ -480,9 +587,14 @@ func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error)
 
 // GetMediaFileByLibraryAndPath 根据媒体库和文件路径查询媒体文件。
 func (s *Service) GetMediaFileByLibraryAndPath(libraryID int64, filePath string) (*models.MediaFile, error) {
+	return s.GetMediaFileByLibraryAndPathInSpace(models.DefaultSpaceID, libraryID, filePath)
+}
+
+// GetMediaFileByLibraryAndPathInSpace 根据 Space、媒体库和文件路径查询媒体文件。
+func (s *Service) GetMediaFileByLibraryAndPathInSpace(spaceID string, libraryID int64, filePath string) (*models.MediaFile, error) {
 	filePath = filepath.ToSlash(filePath)
 	var mf models.MediaFile
-	if err := s.db.Where("library_id = ? AND file_path = ?", libraryID, filePath).First(&mf).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND library_id = ? AND file_path = ?", normalizeSpaceID(spaceID), libraryID, filePath).First(&mf).Error; err != nil {
 		return nil, err
 	}
 	return &mf, nil
@@ -505,9 +617,14 @@ func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath stri
 // 其余按真实路径 P 跨所有库前缀聚合：子目录 = P 下一级目录去重、文件 = 目录恰为 P 的项。
 // sortKey 控制文件排序（name/size/type/time，缺省 name）；目录恒在文件前、按名排序。
 func (s *Service) BrowseDirectory(parentPath, sortKey string) (*models.BrowseResponse, error) {
+	return s.BrowseDirectoryInSpace(models.DefaultSpaceID, parentPath, sortKey)
+}
+
+// BrowseDirectoryInSpace 按 Space 浏览真实磁盘路径。
+func (s *Service) BrowseDirectoryInSpace(spaceID, parentPath, sortKey string) (*models.BrowseResponse, error) {
 	// 顶层根分支：列出各盘符/共享根，子目录不带 library_id
 	if parentPath == BrowseRootMarker {
-		return s.browseVolumeRoots()
+		return s.browseVolumeRootsInSpace(spaceID)
 	}
 
 	// 统一路径分隔符为 /，防止 Windows filepath.Clean 把 / 转成 \
@@ -522,9 +639,8 @@ func (s *Service) BrowseDirectory(parentPath, sortKey string) (*models.BrowseRes
 	prefix := trimmedPath + "/"
 
 	// 一次 SQL 查询：跨所有库取 file_path 以 prefix 开头、未软删的媒体文件（不按 library_id 收窄）
-	var allFiles []models.MediaFile
-	if err := s.db.Where("file_path LIKE ? AND deleted_at IS NULL", prefix+"%").
-		Order("file_path ASC").Find(&allFiles).Error; err != nil {
+	allFiles, err := s.mediaRepo.ListMediaByPathPrefix(spaceID, prefix)
+	if err != nil {
 		return nil, err
 	}
 
@@ -568,11 +684,9 @@ func (s *Service) BrowseDirectory(parentPath, sortKey string) (*models.BrowseRes
 	}, nil
 }
 
-// browseVolumeRoots 构建顶层根响应（FR-121）：取所有启用库 path 推导卷根/共享根，
-// 去重排序作为顶层目录项（不带 library_id，子目录跨库），面包屑单段 {全部, __root__}，顶层无文件。
-func (s *Service) browseVolumeRoots() (*models.BrowseResponse, error) {
-	var paths []models.LibraryPath
-	if err := s.db.Where("enabled = ?", 1).Order("id").Find(&paths).Error; err != nil {
+func (s *Service) browseVolumeRootsInSpace(spaceID string) (*models.BrowseResponse, error) {
+	paths, err := s.mediaRepo.ListLibraryPaths(spaceID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -580,6 +694,9 @@ func (s *Service) browseVolumeRoots() (*models.BrowseResponse, error) {
 	seen := make(map[string]bool, len(paths))
 	roots := make([]string, 0, len(paths))
 	for _, lp := range paths {
+		if lp.Enabled != 1 {
+			continue
+		}
 		root := volumeRoot(lp.Path)
 		if root == "" || seen[root] {
 			continue
@@ -732,21 +849,41 @@ func (s *Service) ScanLibrary(libraryID int64, dirPath string) {
 // mode 为增量（ScanModeIncremental）或全量（ScanModeFull）：全量模式在本地扫描后对账，
 // 库内未软删但源文件已不存在的记录标记软删进回收站（FR-27）。供 watcher 轮询等内部同步调用使用。
 func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType, mode string) (int, error) {
+	spaceID, err := s.spaceIDForLibrary(libraryID)
+	if err != nil {
+		return 0, err
+	}
+	return s.ScanLibraryWithTypeInSpace(spaceID, libraryID, dirPath, dirType, mode)
+}
+
+// ScanLibraryWithTypeInSpace 按 Space 同步扫描指定目录。
+func (s *Service) ScanLibraryWithTypeInSpace(spaceID string, libraryID int64, dirPath, dirType, mode string) (int, error) {
 	switch dirType {
 	case "smb":
 		// SMB 远程列举不保证完整，不做对账以免误删（FR-27 设计）
-		return s.scanSMBLibrary(libraryID, dirPath)
+		return s.scanSMBLibrary(spaceID, libraryID, dirPath)
 	default:
-		return s.scanLocalLibrary(libraryID, dirPath, mode)
+		return s.scanLocalLibrary(spaceID, libraryID, dirPath, mode)
 	}
 }
 
 // StartAsyncScan 按类型启动异步扫描，立即返回。
 // 实际扫描在后台 goroutine 中执行，进度通过 GetScanStatus 查询。
 func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType, mode string) {
+	spaceID, err := s.spaceIDForLibrary(libraryID)
+	if err != nil {
+		log.Printf("[ERROR] 异步扫描启动失败：媒体库 Space 不存在: libraryID=%d, err=%v", libraryID, err)
+		return
+	}
+	s.StartAsyncScanInSpace(spaceID, libraryID, dirPath, dirType, mode)
+}
+
+// StartAsyncScanInSpace 按 Space 启动异步扫描，立即返回。
+func (s *Service) StartAsyncScanInSpace(spaceID string, libraryID int64, dirPath, dirType, mode string) {
 	updateScanStatus(func(ss *ScanStatus) {
 		*ss = ScanStatus{
 			Status:       "scanning",
+			SpaceID:      normalizeSpaceID(spaceID),
 			LibraryID:    libraryID,
 			CurrentPath:  "",
 			TotalFiles:   0,
@@ -756,7 +893,7 @@ func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType, mode string)
 	})
 
 	go func() {
-		count, err := s.ScanLibraryWithType(libraryID, dirPath, dirType, mode)
+		count, err := s.ScanLibraryWithTypeInSpace(spaceID, libraryID, dirPath, dirType, mode)
 
 		if err != nil {
 			updateScanStatus(func(ss *ScanStatus) {
@@ -779,7 +916,7 @@ func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType, mode string)
 
 // scanLocalLibrary 扫描本地目录。
 // mode 为全量（ScanModeFull）时在入库后对账：库内未软删但本次未遍历到的记录标记软删（FR-27）。
-func (s *Service) scanLocalLibrary(libraryID int64, dirPath, mode string) (int, error) {
+func (s *Service) scanLocalLibrary(spaceID string, libraryID int64, dirPath, mode string) (int, error) {
 	policy, err := s.mediaExtensionPolicy(libraryID)
 	if err != nil {
 		return 0, err
@@ -811,7 +948,7 @@ func (s *Service) scanLocalLibrary(libraryID int64, dirPath, mode string) (int, 
 		updateScanStatus(func(ss *ScanStatus) {
 			ss.TotalFiles = len(paths)
 		})
-		count, err = s.indexMediaFiles(libraryID, paths)
+		count, err = s.indexMediaFiles(spaceID, libraryID, paths)
 		if err != nil {
 			return count, err
 		}
@@ -820,7 +957,7 @@ func (s *Service) scanLocalLibrary(libraryID int64, dirPath, mode string) (int, 
 	// 全量模式对账：以本次遍历到的现存路径集合为基准，软删缺失记录。
 	// paths 为空（空库/全删空目录）也需对账，故不依赖 len(paths) > 0。
 	if mode == ScanModeFull {
-		if err := s.reconcileDeleted(libraryID, paths); err != nil {
+		if err := s.reconcileDeletedInSpace(spaceID, libraryID, paths); err != nil {
 			return count, err
 		}
 	}
@@ -828,13 +965,10 @@ func (s *Service) scanLocalLibrary(libraryID int64, dirPath, mode string) (int, 
 	return count, nil
 }
 
-// reconcileDeleted 对账已删文件（FR-27）：库内未软删、且 file_path 不在 existingPaths 中的记录标记软删。
-// existingPaths 为本次遍历到的现存文件路径（任意分隔符，内部统一为正斜杠）；不物理删除、不动磁盘。
-// 已软删记录（deleted_at 非空）跳过，不改写其 deleted_at。
-func (s *Service) reconcileDeleted(libraryID int64, existingPaths []string) error {
+func (s *Service) reconcileDeletedInSpace(spaceID string, libraryID int64, existingPaths []string) error {
 	now := time.Now()
 	query := s.db.Model(&models.MediaFile{}).
-		Where("library_id = ? AND deleted_at IS NULL", libraryID)
+		Where("space_id = ? AND library_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), libraryID)
 	if len(existingPaths) > 0 {
 		normalized := make([]string, len(existingPaths))
 		for i, p := range existingPaths {
@@ -853,7 +987,7 @@ func (s *Service) reconcileDeleted(libraryID int64, existingPaths []string) erro
 }
 
 // scanSMBLibrary 扫描 SMB 共享目录。
-func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
+func (s *Service) scanSMBLibrary(spaceID string, libraryID int64, smbPath string) (int, error) {
 	// smbPath 格式: host/share/path
 	parts := strings.SplitN(smbPath, "/", 3)
 	if len(parts) < 2 {
@@ -923,7 +1057,7 @@ func (s *Service) scanSMBLibrary(libraryID int64, smbPath string) (int, error) {
 		return 0, nil
 	}
 
-	return s.indexSMBMediaFiles(libraryID, paths, smbFS)
+	return s.indexSMBMediaFiles(spaceID, libraryID, paths, smbFS)
 }
 
 // scanEnrichMaxConcurrency 扫描期单文件富化（含 ffprobe）并发上限硬顶，
@@ -943,7 +1077,7 @@ func scanEnrichConcurrency() int {
 }
 
 // indexMediaFiles 将本地媒体文件路径批量入库。
-func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) {
+func (s *Service) indexMediaFiles(spaceID string, libraryID int64, paths []string) (int, error) {
 	// 统一所有路径为正斜杠，保证跨平台查询和去重一致
 	normalizedPaths := make([]string, len(paths))
 	for i, p := range paths {
@@ -952,7 +1086,7 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 
 	// 批量查询已有记录，避免 N+1 查询
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("library_id = ? AND file_path IN ?", libraryID, normalizedPaths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND library_id = ? AND file_path IN ?", normalizeSpaceID(spaceID), libraryID, normalizedPaths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -990,7 +1124,7 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 			if err != nil {
 				return
 			}
-			if _, err := s.CreateMediaFile(libraryID, pf.normalized, info.Size()); err != nil {
+			if _, err := s.CreateMediaFileInSpace(spaceID, libraryID, pf.normalized, info.Size()); err != nil {
 				log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", pf.normalized, err)
 				return
 			}
@@ -1020,9 +1154,9 @@ func (s *Service) indexMediaFiles(libraryID int64, paths []string) (int, error) 
 }
 
 // indexSMBMediaFiles 将 SMB 媒体文件路径批量入库。
-func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb.FS) (int, error) {
+func (s *Service) indexSMBMediaFiles(spaceID string, libraryID int64, paths []string, smbFS *smb.FS) (int, error) {
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("library_id = ? AND file_path IN ?", libraryID, paths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND library_id = ? AND file_path IN ?", normalizeSpaceID(spaceID), libraryID, paths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -1050,7 +1184,7 @@ func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb
 			continue
 		}
 
-		if _, err := s.CreateMediaFile(libraryID, smbPath, info.Size()); err != nil {
+		if _, err := s.CreateMediaFileInSpace(spaceID, libraryID, smbPath, info.Size()); err != nil {
 			log.Printf("[WARN] SMB 媒体文件入库失败: %s, err=%v", smbPath, err)
 			continue
 		}
@@ -1061,6 +1195,14 @@ func (s *Service) indexSMBMediaFiles(libraryID int64, paths []string, smbFS *smb
 
 // ListMediaExtensions 查询指定媒体库的媒体后缀。
 func (s *Service) ListMediaExtensions(libraryID int64) ([]models.MediaExtension, error) {
+	return s.ListMediaExtensionsInSpace(models.DefaultSpaceID, libraryID)
+}
+
+// ListMediaExtensionsInSpace 查询指定 Space 媒体库的媒体后缀。
+func (s *Service) ListMediaExtensionsInSpace(spaceID string, libraryID int64) ([]models.MediaExtension, error) {
+	if _, err := s.GetLibraryPathByIDInSpace(spaceID, libraryID); err != nil {
+		return nil, err
+	}
 	custom, err := s.listCustomMediaExtensions(libraryID)
 	if err != nil {
 		return nil, err
@@ -1082,6 +1224,11 @@ func (s *Service) ListMediaExtensions(libraryID int64) ([]models.MediaExtension,
 
 // AddMediaExtension 添加媒体库自定义后缀。
 func (s *Service) AddMediaExtension(libraryID int64, extension, mediaType string) error {
+	return s.AddMediaExtensionInSpace(models.DefaultSpaceID, libraryID, extension, mediaType)
+}
+
+// AddMediaExtensionInSpace 添加指定 Space 媒体库的自定义后缀。
+func (s *Service) AddMediaExtensionInSpace(spaceID string, libraryID int64, extension, mediaType string) error {
 	ext := normalizeExtension(extension)
 	if libraryID <= 0 {
 		return fmt.Errorf("媒体库 ID 无效")
@@ -1092,7 +1239,7 @@ func (s *Service) AddMediaExtension(libraryID int64, extension, mediaType string
 	if mediaType != MediaTypeVideo && mediaType != MediaTypeImage {
 		return fmt.Errorf("媒体类型不支持")
 	}
-	if err := s.ensureLibraryPathExists(libraryID); err != nil {
+	if _, err := s.GetLibraryPathByIDInSpace(spaceID, libraryID); err != nil {
 		return err
 	}
 	if _, ok := builtInMediaExtensions[ext]; ok {
@@ -1106,6 +1253,11 @@ func (s *Service) AddMediaExtension(libraryID int64, extension, mediaType string
 // DeleteMediaExtension 删除媒体库自定义后缀（FR-64）：仅删自定义后缀，内置后缀不可删，
 // 删除不存在的自定义后缀返回错误。
 func (s *Service) DeleteMediaExtension(libraryID int64, extension string) error {
+	return s.DeleteMediaExtensionInSpace(models.DefaultSpaceID, libraryID, extension)
+}
+
+// DeleteMediaExtensionInSpace 删除指定 Space 媒体库的自定义后缀。
+func (s *Service) DeleteMediaExtensionInSpace(spaceID string, libraryID int64, extension string) error {
 	ext := normalizeExtension(extension)
 	if libraryID <= 0 {
 		return fmt.Errorf("媒体库 ID 无效")
@@ -1115,6 +1267,9 @@ func (s *Service) DeleteMediaExtension(libraryID int64, extension string) error 
 	}
 	if _, ok := builtInMediaExtensions[ext]; ok {
 		return fmt.Errorf("内置后缀不可删除")
+	}
+	if _, err := s.GetLibraryPathByIDInSpace(spaceID, libraryID); err != nil {
+		return err
 	}
 
 	result := s.db.Where("library_id = ? AND extension = ?", libraryID, ext).Delete(&models.MediaExtension{})
@@ -1206,17 +1361,6 @@ func (s *Service) listCustomMediaExtensions(libraryID int64) ([]models.MediaExte
 		return nil, err
 	}
 	return custom, nil
-}
-
-func (s *Service) ensureLibraryPathExists(libraryID int64) error {
-	var count int64
-	if err := s.db.Model(&models.LibraryPath{}).Where("id = ?", libraryID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return fmt.Errorf("媒体库目录不存在")
-	}
-	return nil
 }
 
 func normalizeExtension(extension string) string {

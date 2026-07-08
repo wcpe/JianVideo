@@ -5,7 +5,8 @@ import "time"
 // Tag 标签（FR-41）。
 type Tag struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"not null;uniqueIndex" json:"name"`
+	SpaceID   string    `gorm:"not null;default:space-default;index:idx_tags_space_id;uniqueIndex:idx_tags_space_name,priority:1" json:"space_id"`
+	Name      string    `gorm:"not null;uniqueIndex:idx_tags_space_name,priority:2" json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

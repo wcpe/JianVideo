@@ -13,6 +13,7 @@ import (
 // MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
 // Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
 type MediaFilter struct {
+	SpaceID   string
 	LibraryID int64
 	Sort      string
 	Search    string
@@ -60,136 +61,51 @@ func applyMultiColumnLike(query *gorm.DB, columns []string, term string) *gorm.D
 // ListMediaFilesFiltered 按筛选条件分页查询媒体文件列表（FR-41）。
 // 在原有 library_id/search/排序之上，新增收藏与标签过滤。
 func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int) ([]models.MediaFile, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-
-	// 常规列表排除已软删项（FR-25），与回收站口径互补
-	query := s.db.Model(&models.MediaFile{}).Where("deleted_at IS NULL")
-	if filter.LibraryID > 0 {
-		query = query.Where("library_id = ?", filter.LibraryID)
-	}
-	if filter.Search != "" {
-		// FR-136：跨文件名/显示名/相机/镜头/备注列匹配
-		query = applyMultiColumnLike(query, searchableColumns, filter.Search)
-	}
-	if filter.Favorite != nil {
-		query = query.Where("favorite = ?", *filter.Favorite)
-	}
-	if filter.TagID > 0 {
-		// 子查询限定打了该标签的媒体，避免联表导致的重复行
-		query = query.Where("id IN (?)",
-			s.db.Model(&models.TagMapping{}).Select("media_id").Where("tag_id = ?", filter.TagID))
-	}
-
-	// FR-35 结构化筛选（全部参数化）
-	// 类型：按内置图片扩展名集合区分 image / video（自定义图片后缀不计入此粗筛）
-	switch filter.MediaType {
-	case MediaTypeImage:
-		query = query.Where("LOWER(format) IN ?", builtInImageExtensionList())
-	case MediaTypeVideo:
-		query = query.Where("LOWER(format) NOT IN ?", builtInImageExtensionList())
-	}
-	if len(filter.Formats) > 0 {
-		query = query.Where("LOWER(format) IN ?", lowerAll(filter.Formats))
-	}
-	if filter.SizeMin > 0 {
-		query = query.Where("file_size >= ?", filter.SizeMin)
-	}
-	if filter.SizeMax > 0 {
-		query = query.Where("file_size <= ?", filter.SizeMax)
-	}
-	if filter.TimeFrom != nil {
-		query = query.Where("COALESCE(media_time, added_at) >= ?", *filter.TimeFrom)
-	}
-	if filter.TimeTo != nil {
-		query = query.Where("COALESCE(media_time, added_at) <= ?", *filter.TimeTo)
-	}
-	if filter.PathPrefix != "" {
-		query = query.Where("file_path LIKE ?", escapeLike(filter.PathPrefix)+"%")
-	}
-	if filter.HasGPS {
-		// 仅带 GPS 坐标的媒体（FR-39 照片地图）
-		query = query.Where("gps_lat != 0 OR gps_lon != 0")
-	}
-	// 表达式 bare 关键词：多词 AND，每词跨文件名/显示名/相机/镜头/备注列（FR-136/FR-137）
-	for _, term := range filter.Terms {
-		if term == "" {
-			continue
-		}
-		query = applyMultiColumnLike(query, searchableColumns, term)
-	}
-	// camera:/lens: 专项关键词：仅约束对应 EXIF 列（FR-136）
-	for _, term := range filter.CameraTerms {
-		if term == "" {
-			continue
-		}
-		query = query.Where("camera LIKE ?", "%"+escapeLike(term)+"%")
-	}
-	for _, term := range filter.LensTerms {
-		if term == "" {
-			continue
-		}
-		query = query.Where("lens LIKE ?", "%"+escapeLike(term)+"%")
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	result, err := s.ListMediaFilesPage(filter, MediaPageRequest{Page: page, PageSize: pageSize})
+	if err != nil {
 		return nil, 0, err
 	}
-
-	switch filter.Sort {
-	case "time_asc":
-		query = query.Order("added_at ASC")
-	case "name":
-		query = query.Order("file_name ASC")
-	case "media_time":
-		// 时间轴（FR-31）：按媒体时间降序，缺失回退入库时间
-		query = query.Order("COALESCE(media_time, added_at) DESC")
-	case "media_time_asc":
-		// 按媒体时间升序，缺失回退入库时间
-		query = query.Order("COALESCE(media_time, added_at) ASC")
-	default:
-		query = query.Order("added_at DESC")
-	}
-
-	var items []models.MediaFile
-	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
-		return nil, 0, err
-	}
-	return items, total, nil
+	return result.Items, result.Total, nil
 }
 
 // SetMediaFavorite 设置或取消媒体收藏标记（FR-41）。重复设同值幂等。
 func (s *Service) SetMediaFavorite(id int64, favorite bool) (*models.MediaFile, error) {
-	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Update("favorite", favorite)
+	return s.SetMediaFavoriteInSpace(models.DefaultSpaceID, id, favorite)
+}
+
+// SetMediaFavoriteInSpace 设置指定 Space 媒体的收藏标记（FR-41）。
+func (s *Service) SetMediaFavoriteInSpace(spaceID string, id int64, favorite bool) (*models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Update("favorite", favorite)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
 		// 区分「媒体不存在」与「值未变化」：再查一次确认存在性
 		var count int64
-		if err := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count == 0 {
 			return nil, gorm.ErrRecordNotFound
 		}
 	}
-	return s.GetMediaFileByID(id)
+	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
 
 // CreateTag 创建标签（FR-41）。名按去首尾空白规整，非空即可；同名复用已有标签。
 func (s *Service) CreateTag(name string) (*models.Tag, error) {
+	return s.CreateTagInSpace(models.DefaultSpaceID, name)
+}
+
+// CreateTagInSpace 创建指定 Space 的标签（FR-41）。
+func (s *Service) CreateTagInSpace(spaceID, name string) (*models.Tag, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("标签名不能为空")
 	}
-	tag := models.Tag{Name: name}
-	if err := s.db.Where(models.Tag{Name: name}).FirstOrCreate(&tag).Error; err != nil {
+	tag := models.Tag{SpaceID: normalizeSpaceID(spaceID), Name: name}
+	if err := s.db.Where(models.Tag{SpaceID: tag.SpaceID, Name: name}).FirstOrCreate(&tag).Error; err != nil {
 		return nil, err
 	}
 	return &tag, nil
@@ -197,8 +113,13 @@ func (s *Service) CreateTag(name string) (*models.Tag, error) {
 
 // ListTags 列出全部标签，按名升序（FR-41）。
 func (s *Service) ListTags() ([]models.Tag, error) {
+	return s.ListTagsInSpace(models.DefaultSpaceID)
+}
+
+// ListTagsInSpace 列出指定 Space 的全部标签，按名升序（FR-41）。
+func (s *Service) ListTagsInSpace(spaceID string) ([]models.Tag, error) {
 	var tags []models.Tag
-	if err := s.db.Order("name ASC").Find(&tags).Error; err != nil {
+	if err := s.db.Where("space_id = ?", normalizeSpaceID(spaceID)).Order("name ASC").Find(&tags).Error; err != nil {
 		return nil, err
 	}
 	return tags, nil
@@ -206,6 +127,14 @@ func (s *Service) ListTags() ([]models.Tag, error) {
 
 // ListMediaTags 列出指定媒体的标签，按名升序（FR-41）。
 func (s *Service) ListMediaTags(mediaID int64) ([]models.Tag, error) {
+	return s.ListMediaTagsInSpace(models.DefaultSpaceID, mediaID)
+}
+
+// ListMediaTagsInSpace 列出指定 Space 媒体的标签，按名升序（FR-41）。
+func (s *Service) ListMediaTagsInSpace(spaceID string, mediaID int64) ([]models.Tag, error) {
+	if _, err := s.GetMediaFileByIDInSpace(spaceID, mediaID); err != nil {
+		return nil, err
+	}
 	var tags []models.Tag
 	if err := s.db.
 		Joins("JOIN tag_mappings ON tag_mappings.tag_id = tags.id").
@@ -219,7 +148,12 @@ func (s *Service) ListMediaTags(mediaID int64) ([]models.Tag, error) {
 
 // AddMediaTag 给媒体打标签（FR-41）。媒体或标签不存在则报错；重复打同标签幂等。
 func (s *Service) AddMediaTag(mediaID, tagID int64) error {
-	if err := s.ensureMediaExists(mediaID); err != nil {
+	return s.AddMediaTagInSpace(models.DefaultSpaceID, mediaID, tagID)
+}
+
+// AddMediaTagInSpace 给指定 Space 的媒体打标签（FR-41）。
+func (s *Service) AddMediaTagInSpace(spaceID string, mediaID, tagID int64) error {
+	if err := s.ensureMediaExistsInSpace(spaceID, mediaID); err != nil {
 		return err
 	}
 	if err := s.ensureTagExists(tagID); err != nil {
@@ -233,18 +167,25 @@ func (s *Service) AddMediaTag(mediaID, tagID int64) error {
 
 // RemoveMediaTag 解除媒体与标签的绑定（FR-41）。绑定不存在视为幂等成功。
 func (s *Service) RemoveMediaTag(mediaID, tagID int64) error {
+	return s.RemoveMediaTagInSpace(models.DefaultSpaceID, mediaID, tagID)
+}
+
+// RemoveMediaTagInSpace 解除指定 Space 媒体与标签的绑定（FR-41）。
+func (s *Service) RemoveMediaTagInSpace(spaceID string, mediaID, tagID int64) error {
+	if err := s.ensureMediaExistsInSpace(spaceID, mediaID); err != nil {
+		return err
+	}
 	return s.db.Where("media_id = ? AND tag_id = ?", mediaID, tagID).
 		Delete(&models.TagMapping{}).Error
 }
 
-// ensureMediaExists 校验媒体记录存在。
-func (s *Service) ensureMediaExists(mediaID int64) error {
+func (s *Service) ensureMediaExistsInSpace(spaceID string, mediaID int64) error {
 	var count int64
-	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", mediaID).Count(&count).Error; err != nil {
+	if err := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), mediaID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
-		return fmt.Errorf("媒体文件不存在")
+		return gorm.ErrRecordNotFound
 	}
 	return nil
 }

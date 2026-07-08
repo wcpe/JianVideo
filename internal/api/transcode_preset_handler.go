@@ -115,6 +115,10 @@ func (h *Handler) DeleteTranscodePreset(c *gin.Context) {
 // CreateTranscodeTask POST /api/transcode/tasks
 // 请求体 {media_id, preset_id}：按预设快照编码/分辨率入预生成队列，返回 {"status":"queued","task_id":N}。
 func (h *Handler) CreateTranscodeTask(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	if h.presets == nil || h.pregenQueue == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "PREGEN_UNAVAILABLE", "message": "转码预生成服务未启用"})
 		return
@@ -133,7 +137,7 @@ func (h *Handler) CreateTranscodeTask(c *gin.Context) {
 	}
 
 	// 校验媒体存在
-	if _, err := h.library.GetMediaFileByID(req.MediaID); err != nil {
+	if _, err := h.library.GetMediaFileByIDInSpace(spaceID, req.MediaID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "MEDIA_NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
@@ -144,7 +148,7 @@ func (h *Handler) CreateTranscodeTask(c *gin.Context) {
 		return
 	}
 
-	taskID, err := h.pregenQueue.Enqueue(req.MediaID, preset.ID, preset.Codec, preset.Width, preset.Height)
+	taskID, err := h.pregenQueue.EnqueueInSpace(spaceID, req.MediaID, preset.ID, preset.Codec, preset.Width, preset.Height)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "ENQUEUE_FAILED", "message": "预生成入队失败"})
 		return
@@ -155,11 +159,15 @@ func (h *Handler) CreateTranscodeTask(c *gin.Context) {
 // ListTranscodeTasks GET /api/transcode/tasks?status=
 // 返回预生成任务列表（按入队倒序），status 非空时仅返回该状态的任务。
 func (h *Handler) ListTranscodeTasks(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	if h.pregenQueue == nil {
 		c.JSON(http.StatusOK, gin.H{"tasks": []models.TranscodeTask{}})
 		return
 	}
-	tasks, err := h.pregenQueue.ListTasks(c.Query("status"))
+	tasks, err := h.pregenQueue.ListTasksInSpace(spaceID, c.Query("status"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询任务失败"})
 		return

@@ -48,6 +48,15 @@ type FormatWatchCount struct {
 // GetWatchStats 聚合观看统计（FR-75）：纯查询现有列、全程带 deleted_at IS NULL，无副作用。
 // 复用 FR-44 观看状态列（watched / last_position / last_watched_at）与 FR-75 view_count。
 func (s *Service) GetWatchStats() (*WatchStats, error) {
+	return s.GetWatchStatsInSpace(models.DefaultSpaceID)
+}
+
+// GetWatchStatsInSpace 聚合指定 Space 的观看统计。
+func (s *Service) GetWatchStatsInSpace(spaceID string) (*WatchStats, error) {
+	return s.mediaRepo.WatchStats(spaceID)
+}
+
+func (r *gormMediaRepository) WatchStats(spaceID string) (*WatchStats, error) {
 	stats := &WatchStats{
 		PositionHeatmap: make([]int, positionHeatmapBuckets),
 		RecentTimeline:  []TimelineBucket{},
@@ -57,31 +66,31 @@ func (s *Service) GetWatchStats() (*WatchStats, error) {
 	}
 
 	var total int64
-	if err := s.db.Model(&models.MediaFile{}).Where("deleted_at IS NULL").Count(&total).Error; err != nil {
+	if err := r.spaceMediaQuery(spaceID).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	stats.Total = int(total)
 
 	var watched int64
-	if err := s.db.Model(&models.MediaFile{}).Where("deleted_at IS NULL AND watched = ?", true).Count(&watched).Error; err != nil {
+	if err := r.spaceMediaQuery(spaceID).Where("watched = ?", true).Count(&watched).Error; err != nil {
 		return nil, err
 	}
 	stats.Watched = int(watched)
 	stats.Unwatched = stats.Total - stats.Watched
 
-	if err := s.fillRecentTimeline(stats); err != nil {
+	if err := r.fillRecentTimeline(spaceID, stats); err != nil {
 		return nil, err
 	}
-	if err := s.fillPositionHeatmap(stats); err != nil {
+	if err := r.fillPositionHeatmap(spaceID, stats); err != nil {
 		return nil, err
 	}
-	if err := s.fillByLibrary(stats); err != nil {
+	if err := r.fillByLibrary(spaceID, stats); err != nil {
 		return nil, err
 	}
-	if err := s.fillByFormat(stats); err != nil {
+	if err := r.fillByFormat(spaceID, stats); err != nil {
 		return nil, err
 	}
-	if err := s.fillTopViewed(stats); err != nil {
+	if err := r.fillTopViewed(spaceID, stats); err != nil {
 		return nil, err
 	}
 	// 兜底：各 fill 用 `var rows []T` 承接查询，零行时 rows 为 nil，会覆盖上面的非空初始化、
@@ -104,11 +113,11 @@ func (s *Service) GetWatchStats() (*WatchStats, error) {
 
 // fillRecentTimeline 按本地时区天分桶最近观看记录（last_watched_at 非空），取最近 N 天。
 // 用 strftime(..., 'localtime') 与 watch_state.go 的本地时区口径一致。
-func (s *Service) fillRecentTimeline(stats *WatchStats) error {
+func (r *gormMediaRepository) fillRecentTimeline(spaceID string, stats *WatchStats) error {
 	var rows []TimelineBucket
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select("strftime('%Y-%m-%d', last_watched_at, 'localtime') AS date, COUNT(*) AS count").
-		Where("deleted_at IS NULL AND last_watched_at IS NOT NULL").
+		Where("space_id = ? AND deleted_at IS NULL AND last_watched_at IS NOT NULL", normalizeSpaceID(spaceID)).
 		Group("date").
 		Order("date DESC").
 		Limit(recentTimelineDays).
@@ -121,14 +130,14 @@ func (s *Service) fillRecentTimeline(stats *WatchStats) error {
 
 // fillPositionHeatmap 按 last_position/duration 比例把媒体分入 10 档（duration>0 且 last_position>0）。
 // 比例收敛到 [0,1]，恰为 1（看到结尾）归入最后一档。
-func (s *Service) fillPositionHeatmap(stats *WatchStats) error {
+func (r *gormMediaRepository) fillPositionHeatmap(spaceID string, stats *WatchStats) error {
 	type ratioRow struct {
 		Ratio float64
 	}
 	var rows []ratioRow
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select("last_position / duration AS ratio").
-		Where("deleted_at IS NULL AND duration > 0 AND last_position > 0").
+		Where("space_id = ? AND deleted_at IS NULL AND duration > 0 AND last_position > 0", normalizeSpaceID(spaceID)).
 		Scan(&rows).Error; err != nil {
 		return err
 	}
@@ -152,12 +161,12 @@ func ratioToBucket(ratio float64) int {
 }
 
 // fillByLibrary 按 library_id 统计已看媒体数，并带上库 label。
-func (s *Service) fillByLibrary(stats *WatchStats) error {
+func (r *gormMediaRepository) fillByLibrary(spaceID string, stats *WatchStats) error {
 	var rows []WatchCount
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select("media_files.library_id AS library_id, library_paths.label AS label, COUNT(*) AS watched").
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
-		Where("media_files.deleted_at IS NULL AND media_files.watched = ?", true).
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL AND media_files.watched = ?", normalizeSpaceID(spaceID), true).
 		Group("media_files.library_id").
 		Order("watched DESC").
 		Scan(&rows).Error; err != nil {
@@ -168,11 +177,11 @@ func (s *Service) fillByLibrary(stats *WatchStats) error {
 }
 
 // fillByFormat 按容器格式统计已看媒体数（空格式归为「未知」由前端处理，这里保留原值）。
-func (s *Service) fillByFormat(stats *WatchStats) error {
+func (r *gormMediaRepository) fillByFormat(spaceID string, stats *WatchStats) error {
 	var rows []FormatWatchCount
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select("format AS format, COUNT(*) AS watched").
-		Where("deleted_at IS NULL AND watched = ?", true).
+		Where("space_id = ? AND deleted_at IS NULL AND watched = ?", normalizeSpaceID(spaceID), true).
 		Group("format").
 		Order("watched DESC").
 		Scan(&rows).Error; err != nil {
@@ -183,10 +192,10 @@ func (s *Service) fillByFormat(stats *WatchStats) error {
 }
 
 // fillTopViewed 取观看次数 Top N（view_count>0、未软删，按次数倒序）。
-func (s *Service) fillTopViewed(stats *WatchStats) error {
+func (r *gormMediaRepository) fillTopViewed(spaceID string, stats *WatchStats) error {
 	var items []models.MediaFile
-	if err := s.db.
-		Where("deleted_at IS NULL AND view_count > 0").
+	if err := r.db.
+		Where("space_id = ? AND deleted_at IS NULL AND view_count > 0", normalizeSpaceID(spaceID)).
 		Order("view_count DESC").
 		Limit(topViewedLimit).
 		Find(&items).Error; err != nil {

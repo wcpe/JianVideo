@@ -28,6 +28,10 @@ const uploadMaxBytes = 2 << 30
 // 落盘目标须在某个已注册启用的本地库目录内（防越权写库外）；仅接受图片 / 视频；处理重名冲突。
 // 落盘成功后入队该库增量扫描，由扫描填充 media_files（保持磁盘文件为入库真源）。
 func (h *Handler) UploadMedia(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	if h.settings == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
 		return
@@ -65,7 +69,7 @@ func (h *Handler) UploadMedia(c *gin.Context) {
 	}
 
 	// 解析目标目录归属的本地库（防越权写库外）
-	paths, err := h.library.ListLibraryPaths()
+	paths, err := h.library.ListLibraryPathsInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询媒体库失败"})
 		return
@@ -110,7 +114,7 @@ func (h *Handler) UploadMedia(c *gin.Context) {
 	log.Printf("[INFO] 上传文件已落盘: library=%d, dest=%s", lp.ID, destPath)
 
 	// 落盘成功后触发该库增量扫描入库（磁盘为真源，由扫描填充 media_files）
-	taskID := h.triggerLibraryScan(lp)
+	taskID := h.triggerLibraryScan(spaceID, lp)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":     "uploaded",
@@ -122,16 +126,16 @@ func (h *Handler) UploadMedia(c *gin.Context) {
 
 // triggerLibraryScan 上传落盘后触发目标库增量扫描（FR-149）。
 // 注入扫描队列时入队、返回 task_id；未注入时回退直接异步扫描、返回 0。
-func (h *Handler) triggerLibraryScan(lp *models.LibraryPath) int64 {
+func (h *Handler) triggerLibraryScan(spaceID string, lp *models.LibraryPath) int64 {
 	if h.scanQueue != nil {
-		taskID, err := h.scanQueue.Enqueue(lp.ID, lp.Path, lp.Type, library.ScanModeIncremental)
+		taskID, err := h.scanQueue.EnqueueInSpace(spaceID, lp.ID, lp.Path, lp.Type, library.ScanModeIncremental)
 		if err != nil {
 			log.Printf("[WARN] 上传后扫描入队失败: library=%d, err=%v", lp.ID, err)
 			return 0
 		}
 		return taskID
 	}
-	h.library.StartAsyncScan(lp.ID, lp.Path, lp.Type, library.ScanModeIncremental)
+	h.library.StartAsyncScanInSpace(spaceID, lp.ID, lp.Path, lp.Type, library.ScanModeIncremental)
 	return 0
 }
 

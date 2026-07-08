@@ -10,7 +10,7 @@ import (
 )
 
 // DefaultSpaceID 是 v0.20 历史资源迁入 v2 时使用的默认 Space。
-const DefaultSpaceID = "space-default"
+const DefaultSpaceID = models.DefaultSpaceID
 
 // DefaultMigrations 返回 FR2-017 的最小版本化迁移集合。
 func DefaultMigrations() []Migration {
@@ -38,6 +38,14 @@ func DefaultMigrations() []Migration {
 			Estimate:    estimateKeyIndexes,
 			Up:          migrateKeyIndexes,
 			Validate:    validateKeyIndexes,
+		},
+		{
+			ID:          "20260708_0004_fr2_007_space_owner_indexes",
+			Description: "补齐 Space owner 元数据与媒体查询组合索引",
+			SafeToRetry: true,
+			Estimate:    estimateFR2007Indexes,
+			Up:          migrateFR2007SpaceOwnerIndexes,
+			Validate:    validateFR2007SpaceOwnerIndexes,
 		},
 	}
 }
@@ -187,15 +195,27 @@ func migrateDefaultSpaceBackfill(_ context.Context, tx *gorm.DB) error {
 		`CREATE TABLE IF NOT EXISTS spaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
-			created_at DATETIME NOT NULL
+			owner_user_id INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
 		);`,
-		`INSERT OR IGNORE INTO spaces(id, name, created_at)
-		 VALUES ('` + DefaultSpaceID + `', '默认 Space', datetime('now'));`,
 	}
 	for _, stmt := range statements {
 		if err := tx.Exec(stmt).Error; err != nil {
 			return err
 		}
+	}
+	if err := addColumnIfMissing(tx, "spaces", "owner_user_id", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "spaces", "updated_at", "DATETIME"); err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		INSERT OR IGNORE INTO spaces(id, name, owner_user_id, created_at, updated_at)
+		VALUES (?, '默认 Space', COALESCE((SELECT id FROM users ORDER BY id LIMIT 1), 1), datetime('now'), datetime('now'))
+	`, DefaultSpaceID).Error; err != nil {
+		return err
 	}
 	if err := addColumnIfMissing(tx, "library_paths", "space_id", "TEXT NOT NULL DEFAULT '"+DefaultSpaceID+"'"); err != nil {
 		return err
@@ -267,6 +287,116 @@ func validateKeyIndexes(_ context.Context, db *gorm.DB) (Validation, error) {
 		_ = rows.Close()
 	}()
 	return Validation{Summary: "关键索引已就绪"}, nil
+}
+
+func estimateFR2007Indexes(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateFR2007SpaceOwnerIndexes(_ context.Context, tx *gorm.DB) error {
+	if err := addColumnIfMissing(tx, "spaces", "owner_user_id", "INTEGER"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "spaces", "updated_at", "DATETIME"); err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		UPDATE spaces
+		SET owner_user_id = COALESCE((SELECT id FROM users ORDER BY id LIMIT 1), 1)
+		WHERE owner_user_id IS NULL OR owner_user_id = 0
+	`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		UPDATE spaces
+		SET updated_at = COALESCE(created_at, datetime('now'))
+		WHERE updated_at IS NULL OR updated_at = ''
+	`).Error; err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "tags", "space_id", "TEXT NOT NULL DEFAULT '"+DefaultSpaceID+"'"); err != nil {
+		return err
+	}
+	if err := tx.Exec("UPDATE tags SET space_id = ? WHERE space_id IS NULL OR space_id = ''", DefaultSpaceID).Error; err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "scan_tasks", "space_id", "TEXT NOT NULL DEFAULT '"+DefaultSpaceID+"'"); err != nil {
+		return err
+	}
+	if err := tx.Exec("UPDATE scan_tasks SET space_id = ? WHERE space_id IS NULL OR space_id = ''", DefaultSpaceID).Error; err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "transcode_tasks", "space_id", "TEXT NOT NULL DEFAULT '"+DefaultSpaceID+"'"); err != nil {
+		return err
+	}
+	if err := tx.Exec("UPDATE transcode_tasks SET space_id = ? WHERE space_id IS NULL OR space_id = ''", DefaultSpaceID).Error; err != nil {
+		return err
+	}
+	statements := []string{
+		`DROP INDEX IF EXISTS idx_library_paths_path;`,
+		`DROP INDEX IF EXISTS idx_tags_name;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_library_paths_space_path ON library_paths(space_id, path);`,
+		`CREATE INDEX IF NOT EXISTS idx_library_paths_space_path_id ON library_paths(space_id, path, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_library_paths_space_enabled_id ON library_paths(space_id, enabled, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_added_id ON media_files(space_id, added_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_media_time_id ON media_files(space_id, media_time DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_library_path_id ON media_files(space_id, library_id, file_path, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_deleted_id ON media_files(space_id, deleted_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_format_added_id ON media_files(space_id, format, added_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_tags_space_id ON tags(space_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_space_name ON tags(space_id, name);`,
+		`CREATE INDEX IF NOT EXISTS idx_scan_tasks_space_status_created ON scan_tasks(space_id, status, created_at, id);`,
+		`CREATE INDEX IF NOT EXISTS idx_transcode_tasks_space_status_created ON transcode_tasks(space_id, status, created_at, id);`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFR2007SpaceOwnerIndexes(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, column := range []string{"owner_user_id", "updated_at"} {
+		if !columnExists(db, "spaces", column) {
+			return Validation{}, fmt.Errorf("spaces 缺少 %s", column)
+		}
+	}
+	if !columnExists(db, "tags", "space_id") {
+		return Validation{}, fmt.Errorf("tags 缺少 space_id")
+	}
+	if !columnExists(db, "scan_tasks", "space_id") {
+		return Validation{}, fmt.Errorf("scan_tasks 缺少 space_id")
+	}
+	if !columnExists(db, "transcode_tasks", "space_id") {
+		return Validation{}, fmt.Errorf("transcode_tasks 缺少 space_id")
+	}
+	if count := countTableWhere(db, "spaces", "id = ? AND owner_user_id IS NOT NULL AND owner_user_id > 0", DefaultSpaceID); count != 1 {
+		return Validation{}, fmt.Errorf("默认 Space owner 缺失")
+	}
+	for _, indexName := range fr2007IndexNames() {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("FR2-007 组合索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "FR2-007 Space owner 与组合索引已就绪"}, nil
+}
+
+func fr2007IndexNames() []string {
+	return []string{
+		"idx_library_paths_space_path_id",
+		"idx_library_paths_space_path",
+		"idx_library_paths_space_enabled_id",
+		"idx_media_files_space_added_id",
+		"idx_media_files_space_media_time_id",
+		"idx_media_files_space_library_path_id",
+		"idx_media_files_space_deleted_id",
+		"idx_media_files_space_format_added_id",
+		"idx_tags_space_id",
+		"idx_tags_space_name",
+		"idx_scan_tasks_space_status_created",
+		"idx_transcode_tasks_space_status_created",
+	}
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

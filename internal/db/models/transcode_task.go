@@ -21,14 +21,15 @@ const (
 // （与 ScanTask 把 scan_type 落到任务一致）。
 type TranscodeTask struct {
 	ID          int64      `gorm:"primaryKey" json:"id"`
+	SpaceID     string     `gorm:"not null;default:space-default;index:idx_transcode_tasks_space_status_created" json:"space_id"`
 	MediaID     int64      `gorm:"index;not null" json:"media_id"`
 	PresetID    int64      `gorm:"index;not null" json:"preset_id"`
 	Codec       string     `gorm:"not null" json:"codec"` // 入队时快照的目标编码
 	Width       int        `gorm:"default:0" json:"width"`
 	Height      int        `gorm:"default:0" json:"height"`
-	Status      string     `gorm:"index;not null;default:'pending'" json:"status"`
+	Status      string     `gorm:"index;not null;default:'pending';index:idx_transcode_tasks_space_status_created" json:"status"`
 	Error       string     `json:"error"`
-	CreatedAt   time.Time  `json:"created_at"`
+	CreatedAt   time.Time  `gorm:"index:idx_transcode_tasks_space_status_created" json:"created_at"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }

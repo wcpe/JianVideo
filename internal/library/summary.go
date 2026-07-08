@@ -31,17 +31,26 @@ type SummaryRow struct {
 // 视频/图片拆分复用全站一致谓词（builtInImageExtensionList）：图片=LOWER(format) IN 集合，视频=NOT IN。
 // by_library 用单次 GROUP BY library_id（LEFT JOIN library_paths 取 label）一次取齐，避免逐库查询（N+1）。
 func (s *Service) GetLibrarySummary() (*Summary, error) {
+	return s.GetLibrarySummaryInSpace(models.DefaultSpaceID)
+}
+
+// GetLibrarySummaryInSpace 聚合指定 Space 的媒体库总量。
+func (s *Service) GetLibrarySummaryInSpace(spaceID string) (*Summary, error) {
+	return s.mediaRepo.LibrarySummary(spaceID)
+}
+
+func (r *gormMediaRepository) LibrarySummary(spaceID string) (*Summary, error) {
 	summary := &Summary{
 		ByLibrary: []SummaryRow{},
 	}
 
-	if err := s.fillSummaryTotals(summary); err != nil {
+	if err := r.fillSummaryTotals(spaceID, summary); err != nil {
 		return nil, err
 	}
-	if err := s.fillSummaryLibraryCount(summary); err != nil {
+	if err := r.fillSummaryLibraryCount(spaceID, summary); err != nil {
 		return nil, err
 	}
-	if err := s.fillSummaryByLibrary(summary); err != nil {
+	if err := r.fillSummaryByLibrary(spaceID, summary); err != nil {
 		return nil, err
 	}
 	return summary, nil
@@ -49,7 +58,7 @@ func (s *Service) GetLibrarySummary() (*Summary, error) {
 
 // fillSummaryTotals 单次扫描 media_files 取总数、视频/图片拆分、SUM(file_size)、SUM(duration)。
 // 视频/图片用 SUM(CASE WHEN ...) 在同一聚合内完成，避免多趟查询。
-func (s *Service) fillSummaryTotals(summary *Summary) error {
+func (r *gormMediaRepository) fillSummaryTotals(spaceID string, summary *Summary) error {
 	imageExts := builtInImageExtensionList()
 	type totalsRow struct {
 		Total         int
@@ -59,7 +68,7 @@ func (s *Service) fillSummaryTotals(summary *Summary) error {
 		TotalDuration float64
 	}
 	var row totalsRow
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select(
 			"COUNT(*) AS total, "+
 				"SUM(CASE WHEN LOWER(format) IN (?) THEN 0 ELSE 1 END) AS video_count, "+
@@ -67,7 +76,7 @@ func (s *Service) fillSummaryTotals(summary *Summary) error {
 				"COALESCE(SUM(file_size), 0) AS total_size, "+
 				"COALESCE(SUM(duration), 0) AS total_duration",
 			imageExts, imageExts).
-		Where("deleted_at IS NULL").
+		Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID)).
 		Scan(&row).Error; err != nil {
 		return err
 	}
@@ -80,9 +89,9 @@ func (s *Service) fillSummaryTotals(summary *Summary) error {
 }
 
 // fillSummaryLibraryCount 统计启用的媒体库数（enabled=1），与 /paths 口径一致。
-func (s *Service) fillSummaryLibraryCount(summary *Summary) error {
+func (r *gormMediaRepository) fillSummaryLibraryCount(spaceID string, summary *Summary) error {
 	var count int64
-	if err := s.db.Model(&models.LibraryPath{}).Where("enabled = ?", 1).Count(&count).Error; err != nil {
+	if err := r.db.Model(&models.LibraryPath{}).Where("space_id = ? AND enabled = ?", normalizeSpaceID(spaceID), 1).Count(&count).Error; err != nil {
 		return err
 	}
 	summary.LibraryCount = int(count)
@@ -91,10 +100,10 @@ func (s *Service) fillSummaryLibraryCount(summary *Summary) error {
 
 // fillSummaryByLibrary 单次 GROUP BY library_id 取各库聚合，LEFT JOIN library_paths 取 label。
 // 视频/图片拆分同样用 SUM(CASE WHEN ...) 在同一聚合内完成，避免逐库查询（N+1）。
-func (s *Service) fillSummaryByLibrary(summary *Summary) error {
+func (r *gormMediaRepository) fillSummaryByLibrary(spaceID string, summary *Summary) error {
 	imageExts := builtInImageExtensionList()
 	var rows []SummaryRow
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select(
 			"media_files.library_id AS library_id, "+
 				"library_paths.label AS label, "+
@@ -105,7 +114,7 @@ func (s *Service) fillSummaryByLibrary(summary *Summary) error {
 				"COALESCE(SUM(media_files.duration), 0) AS total_duration",
 			imageExts, imageExts).
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
-		Where("media_files.deleted_at IS NULL").
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL", normalizeSpaceID(spaceID)).
 		Group("media_files.library_id").
 		Order("media_count DESC").
 		Scan(&rows).Error; err != nil {

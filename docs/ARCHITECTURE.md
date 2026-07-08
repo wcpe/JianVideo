@@ -143,12 +143,25 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 
 ### 核心实体
 
+**Space（spaces）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | Space 标识；单用户兼容模式固定默认值 `space-default` |
+| name | TEXT | Space 名称 |
+| owner_user_id | INTEGER | 默认 owner 线索，当前指向单用户 `users.id` |
+| created_at | DATETIME | 创建时间 |
+| updated_at | DATETIME | 更新时间 |
+
+FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非空 `space_id`，缺失 `X-JianVideo-Space-Id` 时使用默认 Space；完整成员/角色矩阵留后续迭代。媒体列表、详情、目录浏览、统计和扫描入口均在 API 层解析 Space，再由 repository/service 查询强制带 `space_id`。
+
 **媒体库目录（library_paths）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
-| path | TEXT UNIQUE | 目录绝对路径（本地或 SMB UNC 路径） |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
+| path | TEXT | 目录绝对路径（本地或 SMB UNC 路径）；同一 Space 内唯一 |
 | type | TEXT | 目录类型：`local` 或 `smb` |
 | label | TEXT | 用户自定义标签 |
 | enabled | INTEGER | 是否启用（0/1） |
@@ -159,6 +172,7 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
 | library_id | INTEGER FK | 所属媒体库目录 |
 | file_path | TEXT, INDEX | 文件完整路径（file_path 索引加速目录浏览前缀查询） |
 | file_name | TEXT | 真实文件名（与磁盘一致） |
@@ -190,6 +204,8 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 | gps_lat / gps_lon | REAL | EXIF GPS 坐标（FR-31） |
 
 > 注：本表列出 `media_files` 与当前已实现能力相关的字段。
+>
+> FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、cursor 分页与组合索引使用边界。关键索引包括 `idx_media_files_space_added_id`、`idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_deleted_id`、`idx_media_files_space_format_added_id`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 >
@@ -303,7 +319,8 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
-| name | TEXT, UNIQUE | 标签名（去首尾空白后唯一） |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
+| name | TEXT | 标签名（去首尾空白后同一 Space 内唯一） |
 | created_at | DATETIME | 创建时间 |
 
 **标签映射（tag_mappings）（FR-41）**
@@ -314,13 +331,14 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 | tag_id | INTEGER FK | 关联标签 |
 | media_id | INTEGER FK | 关联媒体文件 |
 
-媒体与标签为多对多关系，`(tag_id, media_id)` 唯一索引保证去重。按标签筛选媒体走 `tag_mappings` 子查询。
+媒体与标签为多对多关系，`(tag_id, media_id)` 唯一索引保证去重。按标签筛选媒体走 `tag_mappings` 子查询，并由 `tags.space_id` 与媒体 Space 校验共同保证跨 Space 不串标。
 
 **扫描任务（scan_tasks）（FR-29）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
 | library_id | INTEGER, INDEX | 待扫描媒体库目录 |
 | scan_type | TEXT | 扫描类型：`full` / `incremental`（当前 worker 统一按全量执行，差异留 FR-27） |
 | status | TEXT, INDEX | 任务状态：`pending` / `running` / `completed` / `error` |
@@ -331,7 +349,7 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 | started_at | DATETIME NULL | 开始执行时间 |
 | completed_at | DATETIME NULL | 结束时间 |
 
-扫描任务队列以本表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+扫描任务队列以本表为持久化真源，由单 worker 串行执行；任务列表按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
 
 **分享链接（shares）（FR-43；密码/限次列见 FR-78）**
 
@@ -378,6 +396,7 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
 | media_id | INTEGER, INDEX | 待预生成的媒体文件 ID |
 | preset_id | INTEGER, INDEX | 来源预设 ID |
 | codec / width / height | TEXT / INTEGER | 入队时刻预设的快照（任务执行不强依赖预设此后是否被改/删） |
@@ -387,7 +406,7 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 | started_at | DATETIME NULL | 开始执行时间 |
 | completed_at | DATETIME NULL | 结束时间 |
 
-预生成队列以本表为持久化真源、单 worker 串行执行；服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+预生成队列以本表为持久化真源、单 worker 串行执行；任务列表与入队媒体校验按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
 
 ## 4. 接口
 
@@ -409,13 +428,13 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 
 ### 5.0 目录浏览
 
-- `GET /api/library/browse`：按 `parent_path`（+ 可选 `sort`）浏览**真实路径树**，跨所有库按 `file_path` 前缀聚合（`library_id` 已弃用、仍接受但被忽略）
-- 一次 SQL 查询（`file_path LIKE 'P/%'`，跨库）+ Go 层去重聚合下一级子目录
+- `GET /api/library/browse`：按 `parent_path`（+ 可选 `sort`）浏览当前 Space 内的**真实路径树**，跨当前 Space 的所有库按 `file_path` 前缀聚合（`library_id` 已弃用、仍接受但被忽略）
+- 一次 Space scoped SQL 查询（`space_id = ? AND file_path LIKE 'P/%'`，跨库）+ Go 层去重聚合下一级子目录
 - 面包屑由后端按路径分隔符拆分构建；Windows 盘符路径保持 `D:/...` 形式，不额外加 `/D:`
 - `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
 - 前端 `/browse` 为资源管理器布局（FR-121）：左导航树（懒展开、自动展开当前路径祖先链）+ 可点地址栏（路径段）+ 工具栏（批量动作 + 视图模式 + 排序）+ 名称/修改日期/类型/大小详情列 + 状态栏；已移除全局页级面包屑 `PageBreadcrumbs`
-- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携起始 `path` 跳转 `/browse` 定位到该库根目录（导航按真实路径，FR-121）。`GET /api/library/paths` 每项附带 `media_count`（按 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
-- **真实路径树（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 [ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时返回各**盘符/共享根**（由各启用库 `path` 推导卷根：本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`，去重排序）；其余 `parent_path` 按真实路径**跨所有库**前缀聚合（子目录 = `file_path LIKE 'P/%'` 的下一级去重、文件 = 目录恰为 P 的项，均排除软删，不再按 `library_id` 收窄）。有路径包含关系的库在公共上级自然合并为单一树（`D:\1` 与 `D:\1\2` → `D:→1→2`；库 `D:\` 则整盘可浏览）。`DirInfo.library_id` 对子目录不再填，文件保留各自 `library_id` 供删除/下载等操作；`sort`（name/size/type/time）服务端排序。库注册真源 `library_paths`、媒体真源 `media_files` 不变
+- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携起始 `path` 跳转 `/browse` 定位到该库根目录（导航按真实路径，FR-121）。`GET /api/library/paths` 每项附带 `media_count`（按当前 Space 的 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
+- **真实路径树（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 [ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时返回当前 Space 各**盘符/共享根**（由各启用库 `path` 推导卷根：本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`，去重排序）；其余 `parent_path` 按真实路径**跨当前 Space 所有库**前缀聚合（子目录 = `space_id = ? AND file_path LIKE 'P/%'` 的下一级去重、文件 = 目录恰为 P 的项，均排除软删，不再按 `library_id` 收窄）。有路径包含关系的库在公共上级自然合并为单一树（`D:\1` 与 `D:\1\2` → `D:→1→2`；库 `D:\` 则整盘可浏览）。`DirInfo.library_id` 对子目录不再填，文件保留各自 `library_id` 供删除/下载等操作；`sort`（name/size/type/time）服务端排序。库注册真源 `library_paths`、媒体真源 `media_files` 不变
 
 ## 5. 关键机制
 
@@ -425,16 +444,16 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 - `ScanLibraryWithType(libraryID, dirPath, dirType, mode)` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
 - 扫描模式（FR-27）：`mode=incremental`（增量更新，缺省）只索引新增文件；`mode=full`（全量扫描）在入库后追加对账——以本次遍历到的现存路径集合为基准，库内未软删（`deleted_at IS NULL`）且不在集合中的记录经一条 `UPDATE` 标记软删进回收站（复用 FR-25），不物理删除、不动磁盘。遍历整体出错时放弃对账以免误删；对账仅本地扫描启用，SMB 轮询为增量语义（远程列举不保证完整）。
 - 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
-- 扫描入库按 `library_id + file_path` 去重，重复扫描不会重复写入。
+- 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入。
 - 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR-0030）。
-- 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScan` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送，`completed`/`error` 后关闭连接。`ScanLibraryWithType` 仍保留同步签名供 watcher 与扫描队列调用。
+- 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScanInSpace` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（含 `space_id`，`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送当前 Space 视图，`completed`/`error` 后关闭连接。`ScanLibraryWithTypeInSpace` 仍保留同步签名供 watcher 与扫描队列调用。
 
 ### 5.1.2 扫描任务队列（FR-29）
 
-- `library.TaskQueue`（`task_queue.go`）以 SQLite `scan_tasks` 表为持久化真源，单 worker goroutine 串行执行入队任务。触发扫描（`POST /api/library/scan/:id`）改为 `Enqueue` 建 `pending` 任务，立即返回任务 ID；worker 取最早 `pending` 置 `running`、调注入的执行函数（`Service.ScanLibraryWithType`，函数注入便于测试替身、不在队列重写扫描逻辑），按结果置 `completed`（记 `scanned_files`）或 `error`（记错误）。
+- `library.TaskQueue`（`task_queue.go`）以 SQLite `scan_tasks` 表为持久化真源，单 worker goroutine 串行执行入队任务。触发扫描（`POST /api/library/scan/:id`）改为 `EnqueueInSpace` 建 `pending` 任务，立即返回任务 ID；worker 取最早 `pending` 置 `running`、调注入的执行函数（`Service.ScanLibraryWithTypeInSpace`，函数注入便于测试替身、不在队列重写扫描逻辑），按结果置 `completed`（记 `scanned_files`）或 `error`（记错误）。
 - 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数（path/dirType）为过程态，存内存映射不入库（path 真源仍是 `library_paths`）。
 - 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`（按 `library_id` 反查目录重建执行目标）后再启动 worker 重新执行；目录已失效的任务标记为 `error` 而非永久卡 `pending`。
-- 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 把实时 `ScanStatus` 的 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
+- 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 只返回当前 Space 任务，并在实时 `ScanStatus.space_id` 匹配时把 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
 
 ### 5.1.3 定时扫描调度（FR-28）
 
@@ -542,10 +561,10 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 把「按需首播切片」前移为「手动预热」：用户定义可复用预设（编码 + 分辨率），把媒体加入预生成队列后台串行预转码，产出切片缓存到 `hlsDir/{mediaID}/`，消除首播冷启动等待。决策见 [ADR-0039](adr/0039-transcode-pregeneration-queue.md)。
 
 - **预设存储**（`transcoder.PresetStore`，`preset_store.go`）：`transcode_presets` 表的 CRUD + 校验。编码白名单复用 §5.3 `CodecOutputParams`（h264/h265/av1/vp9，`hevc` 归一化为 `h265`）；空名 / 不支持编码 / 负分辨率整体拒绝不落库。职责单一，不承载队列/转码。
-- **预生成队列**（`transcoder.PregenQueue`，`pregen_queue.go`）：**完整复用 FR-29 任务队列范式**——以 `transcode_tasks` 表为持久化真源、单 worker goroutine 串行执行、条件信号唤醒不空转、`RecoverRunning()` 重启把残留 `running` 重置为 `pending` 重新入队。落 transcoder 包以保持依赖单向（exec 直接调本包 `PreSliceWithCodec`，无需反向依赖 library）。任务入队时快照预设 `codec/width/height`，使执行不强依赖预设此后是否被改/删。
+- **预生成队列**（`transcoder.PregenQueue`，`pregen_queue.go`）：**完整复用 FR-29 任务队列范式**——以 `transcode_tasks` 表为持久化真源、单 worker goroutine 串行执行、条件信号唤醒不空转、`RecoverRunning()` 重启把残留 `running` 重置为 `pending` 重新入队。落 transcoder 包以保持依赖单向（exec 直接调本包 `PreSliceWithCodec`，无需反向依赖 library）。任务入队时记录 `space_id` 并快照预设 `codec/width/height`，使执行不强依赖预设此后是否被改/删。
 - **执行**：exec 函数经注入（便于单测替身）。`main.go` 生产实现为闭包：按 `media_id` 经 `library.GetMediaFileByID` 反查媒体路径，再调 §5.4.1 `PreSliceWithCodec(ctx, mediaID, path, w, h, codec, hlsMgr, hlsDir)` 同步切片（已存在切片则复用）。
 - **`width/height` 局限**：现有 `PreSliceWithCodec` 不支持任意分辨率缩放（TS 路径按源分辨率选码率档位、fMP4 路径不缩放），故本期预设 `width/height` 仅落库为元数据、不进 ffmpeg 缩放参数。真正缩放需扩 `PreSliceWithCodec`，另立 FR（见 ADR-0039 后果）。
-- **接线**：预设 CRUD `GET/POST/PUT/DELETE /api/transcode/presets`、入队 `POST /api/transcode/tasks{media_id,preset_id}`、列任务 `GET /api/transcode/tasks?status=`（见 §4）。前端转码预设页 `/transcode`（列/建/改/删 + 轮询任务列表）+ 播放页「加入预生成」入口（`PregenDialog` 选预设入队）。
+- **接线**：预设 CRUD `GET/POST/PUT/DELETE /api/transcode/presets`、入队 `POST /api/transcode/tasks{media_id,preset_id}`、列任务 `GET /api/transcode/tasks?status=`（见 §4）。任务端点读取 `X-JianVideo-Space-Id`，跨 Space 媒体不能入队，列表仅返回当前 Space。前端转码预设页 `/transcode`（列/建/改/删 + 轮询任务列表）+ 播放页「加入预生成」入口（`PregenDialog` 选预设入队）。
 
 ### 5.6 硬件加速管理
 
@@ -608,7 +627,7 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 - 每个 migration 提供 ID、说明、`SafeToRetry`、`Up` 与 `Validate`；dry-run 只读返回步骤和影响预估，不写业务表、`schema_migrations` 或审计表。
 - 真实迁移只在存在待执行步骤时运行；执行前使用 SQLite `VACUUM INTO` 在数据目录 `backups/` 下创建备份，并打开备份执行 `PRAGMA integrity_check`，校验失败即停止。
 - `schema_migrations` 记录每步 `running/succeeded/failed`、错误摘要、校验摘要与备份路径；中断后重启会跳过已成功且校验通过的步骤，失败且 `SafeToRetry=true` 的步骤可重试。
-- 当前 FR2-017 切片包含既有基础 schema 收敛、默认 Space 回填、关键索引创建与 FR2-007 查询 smoke；不实现 FR2-007/FR2-037/FR2-040 的完整业务 schema。
+- FR2-007 在版本化迁移中追加 `spaces.owner_user_id`、`spaces.updated_at`、`library_paths.space_id`、`media_files.space_id`、`tags.space_id`、`scan_tasks.space_id`、`transcode_tasks.space_id` 与媒体/任务查询组合索引；历史资源回填到 `space-default`，默认 owner 取现有单用户 `users.id`。
 - 迁移开始、成功、失败写 `scope=system` 的 `audit_events`，`space_id` 为空，符合 ADR-0063 的系统级作用域语义。
 
 ## 6. 部署

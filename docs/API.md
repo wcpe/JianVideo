@@ -11,6 +11,7 @@
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
 - **静态资源**：前端文件通过 `go:embed` 内嵌，由 `/` 路径提供服务
 - **数据库迁移（FR2-017）**：当前切片不新增对外 HTTP 迁移端点。v0.20 到 v2 schema 升级在服务启动期由 `internal/migration` 执行；dry-run、备份校验、重入和校验能力先作为 Go 内部契约提供，供后续 CLI 或管理端点复用。
+- **Space 头（FR2-007）**：`GET/POST /api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及 `/api/transcode/tasks` 任务入口支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`。当前仅实现最小 owner 归属，不暴露成员/角色矩阵。
 
 ## 2. 错误约定
 
@@ -35,7 +36,7 @@
 
 ### v2 mock 先行 API client 契约（FR2-006）
 
-本节描述 `packages/media-client` 与 `packages/mock` 当前对齐的 mock 先行契约，仅用于 P1 多端 client / wiki / mock 测试；真实后端接入仍归属 P2。请求携带 `X-JianVideo-Space-Id: <space_id>` 表示当前 Space，client 同时支持 `Authorization: Bearer <token>` 承接既有单用户 JWT，并支持可配置 timeout / retry。
+本节描述 `packages/media-client` 与 `packages/mock` 当前对齐的 mock 先行契约，仅用于多端 client / wiki / mock 测试。请求携带 `X-JianVideo-Space-Id: <space_id>` 表示当前 Space，client 同时支持 `Authorization: Bearer <token>` 承接既有单用户 JWT，并支持可配置 timeout / retry。
 
 - **方法 / 路径**：`GET /api/v2/media?page=1&page_size=20`
 - **响应**（200）：
@@ -140,6 +141,7 @@
 ### 获取媒体库目录列表
 
 - **方法 / 路径**：`GET /api/library/paths`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（200）：每项含 `media_count`，即该库已索引（未软删）的媒体文件数量，供存储库卡片展示。
   ```json
   {
@@ -159,6 +161,7 @@
 ### 添加媒体库目录
 
 - **方法 / 路径**：`POST /api/library/paths`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **请求**：
   ```json
   {
@@ -176,16 +179,18 @@
 ### 删除媒体库目录
 
 - **方法 / 路径**：`DELETE /api/library/paths/:id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（204）：空
 
 ### 浏览目录
 
 - **方法 / 路径**：`GET /api/library/browse`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：
   - `parent_path`：父目录的**真实磁盘路径**（必填）。取哨兵值 `__root__` 时返回**各盘符 / 共享根**（FR-121）作为顶层目录项
   - `sort`：文件排序（可选）：`name` / `size` / `type` / `time`（修改时间），缺省 `name`；目录恒在文件前、按名排序
   - `library_id`：可选、已弃用——目录导航按真实路径**跨库聚合**，不再按库收窄（仍接受以向后兼容，被忽略）
-- **真实路径树聚合（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 ADR-0037）**：按真实磁盘路径跨所有启用库合并成单一目录树。浏览路径 P 时，子目录 = `media_files` 中 `file_path LIKE 'P/%'`（跨库、未软删）的下一级目录去重，文件 = 目录恰为 P 的项；有路径包含关系的库在公共上级自然合并（加 `D:\1` 与 `D:\1\2` → `D: → 1 → 2`；加 `D:\` 库则整盘可浏览）。
+- **真实路径树聚合（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 ADR-0037）**：按真实磁盘路径跨当前 Space 的所有启用库合并成单一目录树。浏览路径 P 时，子目录 = `media_files` 中 `space_id = ? AND file_path LIKE 'P/%'`（跨库、未软删）的下一级目录去重，文件 = 目录恰为 P 的项；有路径包含关系的库在公共上级自然合并（加 `D:\1` 与 `D:\1\2` → `D: → 1 → 2`；加 `D:\` 库则整盘可浏览）。
 - **根响应**（200，`parent_path=__root__`）：`directories` 为各盘符 / 共享根，面包屑单段 `{"name":"全部","path":"__root__"}`，`files` 为空：
   ```json
   {
@@ -212,16 +217,18 @@
     ]
   }
   ```
-- **说明**：`file_path` 前缀匹配一次查询（大小写不敏感，复用 `file_path` 索引满足 NFR-08），Go 层按下一级目录去重分组。Windows 盘符路径正斜杠规范化、面包屑不加前导 `/`（如 `D:/1`）。顶层盘符 / 共享根由各启用库 `path` 推导（本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`）去重。
+- **说明**：`file_path` 前缀匹配一次 Space scoped 查询，Go 层按下一级目录去重分组。Windows 盘符路径正斜杠规范化、面包屑不加前导 `/`（如 `D:/1`）。顶层盘符 / 共享根由当前 Space 各启用库 `path` 推导（本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`）去重。
 
 ### 获取媒体文件列表
 
 - **方法 / 路径**：`GET /api/library/media`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：
   - `library_id`：按媒体库过滤（可选）
   - `sort`：排序方式，`time_desc`（默认，按入库时间降序）/ `time_asc` / `name` / `media_time`（按媒体时间降序，缺失回退入库时间，FR-31）/ `media_time_asc`（按媒体时间升序）
   - `page`：页码
   - `page_size`：每页条数
+  - `cursor`：游标分页 token（可选）；用于时间倒序列表，旧 `page/page_size` 仍可用
   - `search`：搜索（可选）。走 everything 式表达式解析（FR-35）：裸词→文件名包含（多词 AND）；`ext:jpg` 或 `ext:jpg,png`→按扩展名；`type:image`/`type:video`→按类型；`size:>10mb`/`size:<=2gb`/`size:>=500kb`（单位 b/kb/mb/gb/tb）→按大小。无法识别的 `key:val` 退化为文件名关键词。纯文本与旧行为一致（向后兼容）。
   - `favorite`：传 `true`/`1` 时仅返回已收藏媒体（可选，FR-41）
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
@@ -257,15 +264,18 @@
     ],
     "total": 100,
     "page": 1,
-    "page_size": 20
+    "page_size": 20,
+    "next_cursor": "eyJzb3J0X3RpbWUiOiIyMDI2LTA3LTA4VDAwOjAwOjAwWiIsImlkIjoxfQ"
   }
   ```
-- **说明**：仅返回未软删的媒体（`deleted_at IS NULL`）；已软删项见回收站接口（FR-25）。
+- **说明**：仅返回当前 Space 未软删的媒体（`space_id = ? AND deleted_at IS NULL`）；已软删项见回收站接口（FR-25）。旧 `page/page_size` 响应同步携带 `next_cursor`，旧前端可忽略该字段。
 
 ### 获取媒体文件详情
 
 - **方法 / 路径**：`GET /api/library/media/:id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（200）：媒体文件详情对象（含字幕轨道信息，以及 FR-44 的 `last_position`、`watched`、`last_watched_at`）
+- **说明**：跨 Space 请求返回 `404 NOT_FOUND`，不回退默认 Space。
 
 ### 继续观看列表（FR-44）
 
@@ -313,6 +323,7 @@
 ### 观看统计（FR-75）
 
 - **方法 / 路径**：`GET /api/library/stats`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：无
 - **响应**（200）：
   ```json
@@ -327,11 +338,12 @@
     "top_viewed": [{"id": 11, "file_name": "热门片.mp4", "view_count": 5}]
   }
   ```
-- **说明**：聚合观看统计，各维度均仅统计未软删媒体。`watched`/`unwatched` 为看完/未看完计数；`recent_timeline` 按 `last_watched_at` 本地时区天分桶（倒序、最近 30 天有观看的天）；`position_heatmap` 为续播进度（`last_position/duration`，`duration>0`）落入 10 档（下标 0=0-10%…9=90-100%）的媒体数；`by_library`/`by_format` 为各库/各格式已看媒体数；`top_viewed` 为观看次数（`view_count`，看完一次 +1）Top 10。供观看统计页（`/stats`）展示。
+- **说明**：聚合当前 Space 的观看统计，各维度均仅统计未软删媒体。`watched`/`unwatched` 为看完/未看完计数；`recent_timeline` 按 `last_watched_at` 本地时区天分桶（倒序、最近 30 天有观看的天）；`position_heatmap` 为续播进度（`last_position/duration`，`duration>0`）落入 10 档（下标 0=0-10%…9=90-100%）的媒体数；`by_library`/`by_format` 为各库/各格式已看媒体数；`top_viewed` 为观看次数（`view_count`，看完一次 +1）Top 10。供观看统计页（`/stats`）展示。
 
 ### 媒体库概览汇总（FR-117）
 
 - **方法 / 路径**：`GET /api/library/summary`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：无
 - **响应**（200）：
   ```json
@@ -347,11 +359,12 @@
     ]
   }
   ```
-- **说明**：媒体库总量聚合，供首页概览看板（`/`）展示。全部维度 `WHERE deleted_at IS NULL`；视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致）；`total_size`=`SUM(file_size)`（字节）、`total_duration`=`SUM(duration)`（秒）；`library_count` 取启用库数；`by_library` 按 `library_id` 分组（`label` 取自 `library_paths`）。空库返回各项为零、`by_library` 为空数组，HTTP 200。一次聚合查询完成，避免 N+1。
+- **说明**：当前 Space 的媒体库总量聚合，供首页概览看板（`/`）展示。全部维度 `WHERE space_id = ? AND deleted_at IS NULL`；视频/图片按内置图片扩展名集合区分（`LOWER(format) IN 内置图片集` 为图片，否则视频，与媒体筛选口径一致）；`total_size`=`SUM(file_size)`（字节）、`total_duration`=`SUM(duration)`（秒）；`library_count` 取当前 Space 启用库数；`by_library` 按 `library_id` 分组（`label` 取自 `library_paths`）。空库返回各项为零、`by_library` 为空数组，HTTP 200。一次聚合查询完成，避免 N+1。
 
 ### 媒体增长趋势（FR-118）
 
 - **方法 / 路径**：`GET /api/library/trends`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：无
 - **响应**（200）：
   ```json
@@ -362,7 +375,7 @@
     ]
   }
   ```
-- **说明**：按 `added_at` 本地时区天分桶的「按天新增媒体」全时段序列，供统计页「媒体」tab 算累计增长曲线（媒体数 / 容量 / 时长）。仅含有新增的天、升序；`count`=当天新增数、`size`=`SUM(file_size)`、`duration`=`SUM(duration)`；全程 `deleted_at IS NULL`。空库返回 `{"media_added": []}`。观看活跃趋势复用 `GET /api/library/stats` 的 `recent_timeline`（不另设端点）。
+- **说明**：按当前 Space 的 `added_at` 本地时区天分桶的「按天新增媒体」全时段序列，供统计页「媒体」tab 算累计增长曲线（媒体数 / 容量 / 时长）。仅含有新增的天、升序；`count`=当天新增数、`size`=`SUM(file_size)`、`duration`=`SUM(duration)`；全程 `space_id = ? AND deleted_at IS NULL`。空库返回 `{"media_added": []}`。观看活跃趋势复用 `GET /api/library/stats` 的 `recent_timeline`（不另设端点）。
 
 ### 重命名媒体文件
 
@@ -492,26 +505,31 @@
 ### 列出标签（FR-41）
 
 - **方法 / 路径**：`GET /api/library/tags`
-- **响应**（200）：`{"items": [{"id": 1, "name": "旅行", "created_at": "..."}]}`，按名升序
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：`{"items": [{"id": 1, "space_id": "space-default", "name": "旅行", "created_at": "..."}]}`，当前 Space 内按名升序
 
 ### 创建标签（FR-41）
 
 - **方法 / 路径**：`POST /api/library/tags`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **请求**：
   ```json
   {"name": "旅行"}
   ```
-- **响应**（201）：标签对象。名按去首尾空白规整，同名复用已有标签。
+- **响应**（201）：标签对象。名按去首尾空白规整，同一 Space 内同名复用已有标签。
 - **错误**：`400` 标签名为空
 
 ### 列出媒体的标签（FR-41）
 
 - **方法 / 路径**：`GET /api/library/media/:id/tags`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（200）：`{"items": [...]}`，该媒体绑定的标签，按名升序
+- **错误**：跨 Space 媒体 ID 返回 `404 NOT_FOUND`
 
 ### 给媒体打标签（FR-41）
 
 - **方法 / 路径**：`POST /api/library/media/:id/tags`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **请求**：`{"tag_id": 1}` 或 `{"name": "旅行"}`（按名时先建/取标签再绑定）
 - **响应**（201）：绑定的标签对象。重复打同标签幂等。
 - **错误**：`400` 缺少 `tag_id`/`name`、标签名为空，或媒体/标签不存在
@@ -519,6 +537,7 @@
 ### 解除媒体标签（FR-41）
 
 - **方法 / 路径**：`DELETE /api/library/media/:id/tags/:tag_id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（204）：无内容。绑定不存在视为幂等成功。
 
 ### 查询媒体库后缀
@@ -578,12 +597,13 @@
 ### 扫描媒体库目录
 
 - **方法 / 路径**：`POST /api/library/scan/:id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：`mode`（可选）——`full` 全量扫描（遍历后对账已删文件），`incremental` 或缺省/非法值为增量更新（只索引新增）。
 - **响应**（200）：
   ```json
   {"status": "queued", "task_id": 12}
   ```
-- **说明**：触发扫描会建一个 `pending` 扫描任务入队（FR-29），由单 worker 串行执行，接口立即返回任务 ID（未启用队列时回退直接异步扫描，返回 `{"status":"scanning"}`）。多次触发按入队顺序排队、不并发抢资源。worker 按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描不会重复入库，入库的媒体文件会异步生成缩略图。可选查询参数 `mode`（`full`/`incremental`，缺省增量，向后兼容，FR-27）：`full` 在入库后对账——库内未软删但源文件已不存在的记录标记软删进回收站（复用 FR-25 软删，不物理删除、不动磁盘），对账仅本地扫描启用。当前进行中任务的实时进度通过「扫描进度」SSE 端点获取，任务列表通过「扫描任务列表」端点获取。
+- **说明**：触发扫描会先按当前 Space 查找媒体库目录；跨 Space 的目录 ID 返回 404，不入队、不回退默认 Space。成功后建一个 `pending` 扫描任务入队（FR-29），由单 worker 串行执行，接口立即返回任务 ID（未启用队列时回退直接异步扫描，返回 `{"status":"scanning"}`）。多次触发按入队顺序排队、不并发抢资源。worker 按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描按 `space_id + library_id + file_path` 去重，不会重复入库，入库的媒体文件会异步生成缩略图。可选查询参数 `mode`（`full`/`incremental`，缺省增量，向后兼容，FR-27）：`full` 在入库后对账——当前 Space 库内未软删但源文件已不存在的记录标记软删进回收站（复用 FR-25 软删，不物理删除、不动磁盘），对账仅本地扫描启用。当前进行中任务的实时进度通过「扫描进度」SSE 端点获取，任务列表通过「扫描任务列表」端点获取。
 - **错误**：`400` ID 无效，`404` 目录不存在，`500` 入队失败
 
 ### 扫描进度（SSE）
@@ -602,17 +622,19 @@
     "completed_at": "0001-01-01T00:00:00Z"
   }
   ```
-- **说明**：`status` 取值 `idle` / `scanning` / `completed` / `error`，全局共享单一扫描状态（同一时刻仅跟踪一个扫描任务）。前端据此渲染进度条，`completed` 后自动刷新媒体列表。
+- **说明**：`status` 取值 `idle` / `scanning` / `completed` / `error`；服务端仍单 worker 扫描，但响应只暴露当前 Space 的进度视图，其他 Space 的扫描返回 `idle` 视图。前端据此渲染进度条，`completed` 后自动刷新媒体列表。
 
 ### 扫描任务列表（FR-29）
 
 - **方法 / 路径**：`GET /api/library/scan/tasks`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（200）：
   ```json
   {
     "tasks": [
       {
         "id": 12,
+        "space_id": "space-default",
         "library_id": 1,
         "scan_type": "full",
         "status": "running",
@@ -890,14 +912,16 @@
 ### 加入预生成队列（FR-77）
 
 - **方法 / 路径**：`POST /api/transcode/tasks`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **请求体**：`{ "media_id": 42, "preset_id": 1 }`。
-- **响应**（200）：`{ "status": "queued", "task_id": 7 }`。按预设快照编码入预生成队列、单 worker 串行预转码切片预热首播。媒体或预设不存在返回 `404`；未注入预生成服务返回 `503`。
+- **响应**（200）：`{ "status": "queued", "task_id": 7 }`。按预设快照编码入当前 Space 的预生成队列、单 worker 串行预转码切片预热首播。媒体或预设不存在返回 `404`；未注入预生成服务返回 `503`。
 
 ### 列出预生成任务（FR-77）
 
 - **方法 / 路径**：`GET /api/transcode/tasks?status=`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：`status`（可选）取 `pending`/`running`/`completed`/`error`，非空时仅返回该状态任务。
-- **响应**（200）：`{ "tasks": [ { "id", "media_id", "preset_id", "codec", "width", "height", "status", "error", "created_at", "started_at", "completed_at" } ] }`，按入队时间倒序。
+- **响应**（200）：`{ "tasks": [ { "id", "space_id", "media_id", "preset_id", "codec", "width", "height", "status", "error", "created_at", "started_at", "completed_at" } ] }`，当前 Space 内按入队时间倒序。
 
 ### 系统信息
 

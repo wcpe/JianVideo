@@ -5,6 +5,7 @@ import "time"
 // MediaFile 媒体文件记录。
 type MediaFile struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
+	SpaceID        string    `gorm:"not null;default:space-default;index:idx_media_files_space_id" json:"space_id"`
 	LibraryID      int64     `gorm:"index;not null" json:"library_id"`
 	FilePath       string    `gorm:"not null;index:idx_media_files_file_path" json:"file_path"`
 	FileName       string    `gorm:"index;not null" json:"file_name"`

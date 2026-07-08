@@ -8,6 +8,7 @@ import (
 // ScanStatus 描述当前扫描进度。
 type ScanStatus struct {
 	Status       string    `json:"status"`        // "idle", "scanning", "completed", "error"
+	SpaceID      string    `json:"space_id"`      // 正在扫描的 Space ID
 	LibraryID    int64     `json:"library_id"`    // 正在扫描的媒体库 ID
 	CurrentPath  string    `json:"current_path"`  // 当前正在扫描的文件路径
 	TotalFiles   int       `json:"total_files"`   // 待扫描的文件总数

@@ -22,18 +22,27 @@ type MediaTrendPoint struct {
 // 一次 GROUP BY 按本地时区天分桶，时区口径与 stats.go 的 recent_timeline 一致（strftime(..., 'localtime')）。
 // 仅含有新增的天、按日期升序；空库返回非 nil 空切片以契约一致。
 func (s *Service) GetMediaTrends() (*MediaTrends, error) {
+	return s.GetMediaTrendsInSpace(models.DefaultSpaceID)
+}
+
+// GetMediaTrendsInSpace 聚合指定 Space 的媒体增长趋势。
+func (s *Service) GetMediaTrendsInSpace(spaceID string) (*MediaTrends, error) {
+	return s.mediaRepo.MediaTrends(spaceID)
+}
+
+func (r *gormMediaRepository) MediaTrends(spaceID string) (*MediaTrends, error) {
 	trends := &MediaTrends{
 		MediaAdded: []MediaTrendPoint{},
 	}
 
 	var rows []MediaTrendPoint
-	if err := s.db.Model(&models.MediaFile{}).
+	if err := r.db.Model(&models.MediaFile{}).
 		Select(
-			"strftime('%Y-%m-%d', added_at, 'localtime') AS date, " +
-				"COUNT(*) AS count, " +
-				"COALESCE(SUM(file_size), 0) AS size, " +
+			"strftime('%Y-%m-%d', added_at, 'localtime') AS date, "+
+				"COUNT(*) AS count, "+
+				"COALESCE(SUM(file_size), 0) AS size, "+
 				"COALESCE(SUM(duration), 0) AS duration").
-		Where("deleted_at IS NULL").
+		Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID)).
 		Group("date").
 		Order("date ASC").
 		Scan(&rows).Error; err != nil {

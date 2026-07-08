@@ -15,11 +15,16 @@ const continueWatchingMaxLimit = 50
 // position 为负时归零；媒体不存在返回 gorm.ErrRecordNotFound。
 // 仅更新续播位置，不改动 watched 标记。
 func (s *Service) UpdateWatchPosition(id int64, position float64) (*models.MediaFile, error) {
+	return s.UpdateWatchPositionInSpace(models.DefaultSpaceID, id, position)
+}
+
+// UpdateWatchPositionInSpace 持久化指定 Space 媒体的上次播放位置。
+func (s *Service) UpdateWatchPositionInSpace(spaceID string, id int64, position float64) (*models.MediaFile, error) {
 	if position < 0 {
 		position = 0
 	}
 	now := time.Now()
-	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Updates(map[string]any{
+	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), id).Updates(map[string]any{
 		"last_position":   position,
 		"last_watched_at": now,
 	})
@@ -29,15 +34,20 @@ func (s *Service) UpdateWatchPosition(id int64, position float64) (*models.Media
 	if result.RowsAffected == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return s.GetMediaFileByID(id)
+	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
 
 // MarkWatched 标记媒体已看完（FR-44）：置 watched=true 并清零续播位置（已看完不再续播），
 // 同时刷新最近观看时间、观看次数 +1（FR-75，看完计一次）。媒体不存在返回 gorm.ErrRecordNotFound。
 // 计数与状态更新在同一次 UPDATE 内原子完成；位置上报（UpdateWatchPosition）不计数，避免重复累加。
 func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
+	return s.MarkWatchedInSpace(models.DefaultSpaceID, id)
+}
+
+// MarkWatchedInSpace 标记指定 Space 媒体已看完。
+func (s *Service) MarkWatchedInSpace(spaceID string, id int64) (*models.MediaFile, error) {
 	now := time.Now()
-	result := s.db.Model(&models.MediaFile{}).Where("id = ?", id).Updates(map[string]any{
+	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), id).Updates(map[string]any{
 		"watched":         true,
 		"last_position":   0,
 		"last_watched_at": now,
@@ -49,7 +59,7 @@ func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
 	if result.RowsAffected == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return s.GetMediaFileByID(id)
+	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
 
 // ListOnThisDay 查询「往年同一天」拍摄的媒体（FR-72「那年今日」），供首页回忆区块展示。
@@ -57,6 +67,11 @@ func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
 // 「今天」按服务器本地时间算，避免时区/客户端分歧；不回退 added_at（避免混入入库时间噪声）。
 // 结果按 media_time 倒序（最近年份在前），limit 小于 1 时回退默认值、超上限收敛到上限。
 func (s *Service) ListOnThisDay(limit int) ([]models.MediaFile, error) {
+	return s.ListOnThisDayInSpace(models.DefaultSpaceID, limit)
+}
+
+// ListOnThisDayInSpace 查询指定 Space 的「往年同一天」媒体。
+func (s *Service) ListOnThisDayInSpace(spaceID string, limit int) ([]models.MediaFile, error) {
 	if limit < 1 {
 		limit = 12
 	}
@@ -70,7 +85,7 @@ func (s *Service) ListOnThisDay(limit int) ([]models.MediaFile, error) {
 	// media_time 以 UTC 存储、strftime 默认按 UTC 取值；加 'localtime' 修饰符转本地时区后再取月-日/年，
 	// 与按本地 time.Now() 算出的「今天」口径一致（否则本地午夜后 UTC 仍是前一天，结果整体偏一天）。
 	if err := s.db.
-		Where("media_time IS NOT NULL AND deleted_at IS NULL AND strftime('%m-%d', media_time, 'localtime') = ? AND strftime('%Y', media_time, 'localtime') != ?", monthDay, year).
+		Where("space_id = ? AND media_time IS NOT NULL AND deleted_at IS NULL AND strftime('%m-%d', media_time, 'localtime') = ? AND strftime('%Y', media_time, 'localtime') != ?", normalizeSpaceID(spaceID), monthDay, year).
 		Order("media_time DESC").
 		Limit(limit).
 		Find(&items).Error; err != nil {
@@ -83,6 +98,11 @@ func (s *Service) ListOnThisDay(limit int) ([]models.MediaFile, error) {
 // 供首页「继续观看」区块展示。排除已删除（deleted_at 非空）记录。
 // limit 小于 1 时回退默认值，超过上限时收敛到上限。
 func (s *Service) ListContinueWatching(limit int) ([]models.MediaFile, error) {
+	return s.ListContinueWatchingInSpace(models.DefaultSpaceID, limit)
+}
+
+// ListContinueWatchingInSpace 查询指定 Space 的继续观看列表。
+func (s *Service) ListContinueWatchingInSpace(spaceID string, limit int) ([]models.MediaFile, error) {
 	if limit < 1 {
 		limit = 12
 	}
@@ -91,7 +111,7 @@ func (s *Service) ListContinueWatching(limit int) ([]models.MediaFile, error) {
 	}
 	var items []models.MediaFile
 	if err := s.db.
-		Where("last_position > 0 AND watched = ? AND deleted_at IS NULL", false).
+		Where("space_id = ? AND last_position > 0 AND watched = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), false).
 		Order("last_watched_at DESC").
 		Limit(limit).
 		Find(&items).Error; err != nil {

@@ -44,10 +44,16 @@ func NewTaskQueue(db *gorm.DB, exec ScanExecFunc) *TaskQueue {
 
 // Enqueue 入队一个扫描任务，落库为 pending 并唤醒 worker，返回任务 ID。
 func (q *TaskQueue) Enqueue(libraryID int64, path, dirType, scanType string) (int64, error) {
+	return q.EnqueueInSpace(models.DefaultSpaceID, libraryID, path, dirType, scanType)
+}
+
+// EnqueueInSpace 入队指定 Space 的扫描任务，落库为 pending 并唤醒 worker。
+func (q *TaskQueue) EnqueueInSpace(spaceID string, libraryID int64, path, dirType, scanType string) (int64, error) {
 	if scanType == "" {
 		scanType = models.ScanTypeFull
 	}
 	task := &models.ScanTask{
+		SpaceID:   normalizeSpaceID(spaceID),
 		LibraryID: libraryID,
 		ScanType:  scanType,
 		Status:    models.ScanTaskStatusPending,
@@ -79,7 +85,7 @@ func (q *TaskQueue) EnqueueScheduled(libs []models.LibraryPath, scanType string)
 			// 该库已有待执行 / 执行中的任务，跳过以防积压
 			continue
 		}
-		if _, err := q.Enqueue(lp.ID, lp.Path, lp.Type, scanType); err != nil {
+		if _, err := q.EnqueueInSpace(lp.SpaceID, lp.ID, lp.Path, lp.Type, scanType); err != nil {
 			log.Printf("[WARN] 定时扫描入队失败，跳过: libraryID=%d, err=%v", lp.ID, err)
 			continue
 		}
@@ -152,8 +158,13 @@ func (q *TaskQueue) Stop() {
 
 // ListTasks 返回所有扫描任务，按创建时间倒序（最近在前）。
 func (q *TaskQueue) ListTasks() ([]models.ScanTask, error) {
+	return q.ListTasksInSpace(models.DefaultSpaceID)
+}
+
+// ListTasksInSpace 返回指定 Space 的扫描任务，按创建时间倒序（最近在前）。
+func (q *TaskQueue) ListTasksInSpace(spaceID string) ([]models.ScanTask, error) {
 	var tasks []models.ScanTask
-	if err := q.db.Order("created_at DESC, id DESC").Find(&tasks).Error; err != nil {
+	if err := q.db.Where("space_id = ?", normalizeSpaceID(spaceID)).Order("created_at DESC, id DESC").Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	return tasks, nil

@@ -200,7 +200,11 @@ func (h *Handler) WithHLSPreSlice(hlsDir string, hlsMgr *player.HLSManager) *Han
 // ListLibraryPaths GET /api/library/paths
 // 每项附带 media_count（该库已索引、未软删的媒体文件数量），供存储库卡片展示。
 func (h *Handler) ListLibraryPaths(c *gin.Context) {
-	items, err := h.library.ListLibraryPathViews()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	items, err := h.library.ListLibraryPathViewsInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -210,6 +214,10 @@ func (h *Handler) ListLibraryPaths(c *gin.Context) {
 
 // CreateLibraryPath POST /api/library/paths
 func (h *Handler) CreateLibraryPath(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		Path        string `json:"path" binding:"required"`
 		Type        string `json:"type" binding:"required"`
@@ -223,7 +231,7 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 		return
 	}
 
-	lp, err := h.library.CreateLibraryPath(req.Path, req.Type, req.Label)
+	lp, err := h.library.CreateLibraryPathInSpace(spaceID, req.Path, req.Type, req.Label)
 	if err != nil {
 		if req.Type == "local" || req.Type == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "本地路径不可访问或不是目录"})
@@ -276,13 +284,17 @@ func (h *Handler) saveSMBConfig(c *gin.Context, host, username, password string)
 
 // DeleteLibraryPath DELETE /api/library/paths/:id
 func (h *Handler) DeleteLibraryPath(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	if err := h.library.DeleteLibraryPath(id); err != nil {
+	if err := h.library.DeleteLibraryPathInSpace(spaceID, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "DELETE_FAILED", "message": "删除失败"})
 		return
 	}
@@ -291,6 +303,10 @@ func (h *Handler) DeleteLibraryPath(c *gin.Context) {
 
 // ListMediaFiles GET /api/library/media
 func (h *Handler) ListMediaFiles(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	libraryID, _ := strconv.ParseInt(c.Query("library_id"), 10, 64)
 	sort := c.DefaultQuery("sort", "time_desc")
 	page, err := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -307,28 +323,38 @@ func (h *Handler) ListMediaFiles(c *gin.Context) {
 
 	// 收藏/标签筛选（FR-41）：favorite=true、tag_id=N
 	filter := parseMediaFilter(c, libraryID, sort, search)
-	items, total, err := h.library.ListMediaFilesFiltered(filter, page, pageSize)
+	filter.SpaceID = spaceID
+	result, err := h.library.ListMediaFilesPage(filter, library.MediaPageRequest{
+		Page:     page,
+		PageSize: pageSize,
+		Cursor:   c.Query("cursor"),
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"items":     items,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
+		"items":       result.Items,
+		"total":       result.Total,
+		"page":        result.Page,
+		"page_size":   result.PageSize,
+		"next_cursor": result.NextCursor,
 	})
 }
 
 // GetMediaFile GET /api/library/media/:id
 func (h *Handler) GetMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -338,13 +364,17 @@ func (h *Handler) GetMediaFile(c *gin.Context) {
 
 // DeleteMediaFile DELETE /api/library/media/:id
 func (h *Handler) DeleteMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	if err := h.library.DeleteMediaFile(id); err != nil {
+	if err := h.library.DeleteMediaFileInSpace(spaceID, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "DELETE_FAILED", "message": "删除失败"})
 		return
 	}
@@ -355,6 +385,10 @@ func (h *Handler) DeleteMediaFile(c *gin.Context) {
 // 批量软删媒体文件（FR-69）：body {ids:[...]}，单事务内复用 FR-25 软删（仅置 deleted_at、不动磁盘），
 // 跳过不存在/已软删 id。返回实际软删条数。
 func (h *Handler) BatchDeleteMediaFiles(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		IDs []int64 `json:"ids"`
 	}
@@ -363,7 +397,7 @@ func (h *Handler) BatchDeleteMediaFiles(c *gin.Context) {
 		return
 	}
 
-	deleted, err := h.library.BatchDeleteMediaFiles(req.IDs)
+	deleted, err := h.library.BatchDeleteMediaFilesInSpace(spaceID, req.IDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "DELETE_FAILED", "message": "批量删除失败"})
 		return
@@ -374,7 +408,11 @@ func (h *Handler) BatchDeleteMediaFiles(c *gin.Context) {
 // ListRecycleMediaFiles GET /api/library/recycle
 // 列出回收站内全部已软删的媒体文件（FR-25）。
 func (h *Handler) ListRecycleMediaFiles(c *gin.Context) {
-	items, err := h.library.ListDeletedMediaFiles()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	items, err := h.library.ListDeletedMediaFilesInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -385,13 +423,17 @@ func (h *Handler) ListRecycleMediaFiles(c *gin.Context) {
 // RestoreMediaFile POST /api/library/media/:id/restore
 // 从回收站还原指定媒体，使其回到常规列表（FR-25）。
 func (h *Handler) RestoreMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	if err := h.library.RestoreMediaFile(id); err != nil {
+	if err := h.library.RestoreMediaFileInSpace(spaceID, id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "回收站中不存在该媒体文件"})
 		return
 	}
@@ -403,6 +445,10 @@ func (h *Handler) RestoreMediaFile(c *gin.Context) {
 // 移动成功后删除 media_files 记录。盘符回收站路径取自 FR-24 设置键 recycle_bin_paths（JSON：盘符→目录）。
 // 存在软删项所在盘符未配置（含 SMB/无盘符项）时返回 409，不移动任何文件。
 func (h *Handler) RecycleCleanup(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	if h.settings == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
 		return
@@ -422,7 +468,7 @@ func (h *Handler) RecycleCleanup(c *gin.Context) {
 		}
 	}
 
-	result, err := h.library.CleanupRecycle(drivePaths)
+	result, err := h.library.CleanupRecycleInSpace(spaceID, drivePaths)
 	if err != nil {
 		if errors.Is(err, library.ErrRecycleBinPathUnset) {
 			c.JSON(http.StatusConflict, gin.H{"code": "RECYCLE_PATH_UNSET", "message": err.Error()})
@@ -437,6 +483,10 @@ func (h *Handler) RecycleCleanup(c *gin.Context) {
 // RenameMediaFile PUT /api/library/media/:id/rename
 // 请求体：{"new_name": "新文件名.mp4"}，磁盘改名 + 更新数据库记录。
 func (h *Handler) RenameMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
@@ -451,7 +501,7 @@ func (h *Handler) RenameMediaFile(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.RenameMediaFile(id, req.NewName)
+	mf, err := h.library.RenameMediaFileInSpace(spaceID, id, req.NewName)
 	if err != nil {
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
@@ -471,6 +521,10 @@ func (h *Handler) RenameMediaFile(c *gin.Context) {
 // UpdateDisplayName PUT /api/library/media/:id/display-name
 // 请求体：{"display_name": "..."}，仅更新库内显示名，不动磁盘文件名。空串表示清除显示名。
 func (h *Handler) UpdateDisplayName(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
@@ -483,7 +537,7 @@ func (h *Handler) UpdateDisplayName(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.UpdateDisplayName(id, req.DisplayName)
+	mf, err := h.library.UpdateDisplayNameInSpace(spaceID, id, req.DisplayName)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
@@ -498,6 +552,10 @@ func (h *Handler) UpdateDisplayName(c *gin.Context) {
 // UpdateMediaNotes PUT /api/library/media/:id/notes
 // 请求体：{"notes": "..."}，更新库内备注，空串表示清除备注（FR-137）。
 func (h *Handler) UpdateMediaNotes(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
@@ -510,7 +568,7 @@ func (h *Handler) UpdateMediaNotes(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.UpdateMediaNotes(id, req.Notes)
+	mf, err := h.library.UpdateMediaNotesInSpace(spaceID, id, req.Notes)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
@@ -526,6 +584,10 @@ func (h *Handler) UpdateMediaNotes(c *gin.Context) {
 // 按真实磁盘路径跨库浏览（FR-121）：parent_path 必填；sort 可选（name/size/type/time，缺省 name）；
 // library_id 已弃用，仍接受但忽略（导航按真实路径跨库聚合，向后兼容）。
 func (h *Handler) BrowseDirectory(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	parentPath := c.Query("parent_path")
 	if parentPath == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARENT_PATH", "message": "parent_path 不能为空"})
@@ -534,7 +596,7 @@ func (h *Handler) BrowseDirectory(c *gin.Context) {
 
 	sortKey := c.DefaultQuery("sort", library.BrowseSortName)
 
-	resp, err := h.library.BrowseDirectory(parentPath, sortKey)
+	resp, err := h.library.BrowseDirectoryInSpace(spaceID, parentPath, sortKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "BROWSE_FAILED", "message": "浏览目录失败"})
 		return
@@ -592,13 +654,17 @@ func (h *Handler) SaveSMBCredentials(c *gin.Context) {
 // 未注入队列时回退原直接异步扫描，返回 {"status":"scanning"}。
 // 扫描进度通过 GET /api/library/scan/progress SSE 与 GET /api/library/scan/tasks 获取。
 func (h *Handler) ScanLibrary(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	lp, err := h.library.GetLibraryPathByID(id)
+	lp, err := h.library.GetLibraryPathByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "目录不存在"})
 		return
@@ -610,12 +676,12 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 	// 扫描触发后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
 	// 预切片失败不阻塞扫描响应（仅记日志）。
 	if transcoder.IsFFmpegAvailable() && h.hlsDir != "" && h.hlsMgr != nil {
-		go h.preSliceAllVideos(context.Background())
+		go h.preSliceAllVideos(context.Background(), spaceID)
 	}
 
 	// 队列已注入：入队排队、单 worker 串行执行（FR-29）
 	if h.scanQueue != nil {
-		taskID, err := h.scanQueue.Enqueue(id, lp.Path, lp.Type, mode)
+		taskID, err := h.scanQueue.EnqueueInSpace(spaceID, id, lp.Path, lp.Type, mode)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "ENQUEUE_FAILED", "message": "扫描入队失败"})
 			return
@@ -625,7 +691,7 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 	}
 
 	// 未注入队列：回退原直接异步扫描
-	h.library.StartAsyncScan(id, lp.Path, lp.Type, mode)
+	h.library.StartAsyncScanInSpace(spaceID, id, lp.Path, lp.Type, mode)
 	c.JSON(http.StatusOK, gin.H{"status": "scanning"})
 }
 
@@ -633,12 +699,16 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 // 返回扫描任务列表（按入队时间倒序）与当前进行中的任务（FR-29）。
 // 当前 running 任务的进度用实时全局扫描状态覆盖，已完成任务用其持久化的 scanned_files。
 func (h *Handler) ListScanTasks(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	if h.scanQueue == nil {
 		c.JSON(http.StatusOK, gin.H{"tasks": []models.ScanTask{}, "current": nil})
 		return
 	}
 
-	tasks, err := h.scanQueue.ListTasks()
+	tasks, err := h.scanQueue.ListTasksInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询任务失败"})
 		return
@@ -649,7 +719,7 @@ func (h *Handler) ListScanTasks(c *gin.Context) {
 	var current *models.ScanTask
 	for i := range tasks {
 		if tasks[i].Status == models.ScanTaskStatusRunning {
-			if live.Status == "scanning" {
+			if live.Status == "scanning" && live.SpaceID == spaceID {
 				tasks[i].ScannedFiles = live.ScannedFiles
 				tasks[i].TotalFiles = live.TotalFiles
 			}
@@ -666,6 +736,10 @@ func (h *Handler) ListScanTasks(c *gin.Context) {
 // 连接持续保持打开（不在 completed/error 后主动关闭），以便接收后续扫描进度；
 // 仅在客户端断开（ctx.Done）时结束。避免浏览器 EventSource 在终态后反复重连成风暴。
 func (h *Handler) ScanProgressSSE(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -678,6 +752,9 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 		select {
 		case <-ticker.C:
 			status := library.GetScanStatus()
+			if status.SpaceID != "" && status.SpaceID != spaceID {
+				status = library.ScanStatus{Status: "idle"}
+			}
 			data, _ := json.Marshal(status)
 			payload := string(data)
 			if payload == lastSent {
@@ -693,13 +770,13 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 }
 
 // preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。
-func (h *Handler) preSliceAllVideos(ctx context.Context) {
-	files, _, err := h.library.ListMediaFiles(0, "", "", 1, 10000)
+func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
+	result, err := h.library.ListMediaFilesPage(library.MediaFilter{SpaceID: spaceID}, library.MediaPageRequest{Page: 1, PageSize: 100})
 	if err != nil {
 		log.Printf("[WARN] 预切片：获取媒体列表失败: %v", err)
 		return
 	}
-	for _, mf := range files {
+	for _, mf := range result.Items {
 		if strings.HasPrefix(mf.FilePath, "smb://") {
 			continue
 		}
@@ -714,12 +791,16 @@ func (h *Handler) preSliceAllVideos(ctx context.Context) {
 
 // GetThumbnail GET /api/library/thumbnail/:id
 func (h *Handler) GetThumbnail(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -757,13 +838,17 @@ func parseThumbnailSize(c *gin.Context) int {
 
 // GetRawImage GET /api/library/media/:id/raw
 func (h *Handler) GetRawImage(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -818,13 +903,17 @@ func (h *Handler) serveRawImage(c *gin.Context, mf *models.MediaFile) {
 // 鉴权后回传媒体原始文件（图片与视频一视同仁，不转码/不转换），以附件形式下载。
 // 经 c.File 流式回传，天然支持 HTTP Range（断点续传）。
 func (h *Handler) DownloadMediaFile(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -860,6 +949,10 @@ const (
 // 边写边 flush、不一次性读入内存；smb:// 路径项与磁盘不可访问项跳过（响应头 X-Skipped 计数）；
 // 用请求 context 控制取消，不设整体超时（规避大文件被客户端超时掐断）。
 func (h *Handler) BatchDownloadMediaFiles(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	ids := parseBatchIDs(c.Query("ids"))
 	if len(ids) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_IDS", "message": "未提供有效的 ids"})
@@ -870,7 +963,7 @@ func (h *Handler) BatchDownloadMediaFiles(c *gin.Context) {
 		return
 	}
 
-	files, err := h.library.GetMediaFilesByIDs(ids)
+	files, err := h.library.GetMediaFilesByIDsInSpace(spaceID, ids)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "QUERY_FAILED", "message": "查询失败"})
 		return
@@ -971,13 +1064,17 @@ func parseBatchIDs(raw string) []int64 {
 
 // ListMediaExtensions GET /api/library/extensions
 func (h *Handler) ListMediaExtensions(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
 	if err != nil || libraryID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
 		return
 	}
 
-	items, err := h.library.ListMediaExtensions(libraryID)
+	items, err := h.library.ListMediaExtensionsInSpace(spaceID, libraryID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -987,6 +1084,10 @@ func (h *Handler) ListMediaExtensions(c *gin.Context) {
 
 // AddMediaExtension POST /api/library/extensions
 func (h *Handler) AddMediaExtension(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		LibraryID int64  `json:"library_id" binding:"required"`
 		Extension string `json:"extension" binding:"required"`
@@ -996,7 +1097,7 @@ func (h *Handler) AddMediaExtension(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
 		return
 	}
-	if err := h.library.AddMediaExtension(req.LibraryID, req.Extension, req.Type); err != nil {
+	if err := h.library.AddMediaExtensionInSpace(spaceID, req.LibraryID, req.Extension, req.Type); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_EXTENSION", "message": err.Error()})
 		return
 	}
@@ -1006,6 +1107,10 @@ func (h *Handler) AddMediaExtension(c *gin.Context) {
 // DeleteMediaExtension DELETE /api/library/extensions
 // 删除媒体库自定义后缀（FR-64）：内置后缀不可删，删除不存在的后缀返回 400。
 func (h *Handler) DeleteMediaExtension(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	libraryID, err := strconv.ParseInt(c.Query("library_id"), 10, 64)
 	if err != nil || libraryID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_ID", "message": "无效的 library_id"})
@@ -1016,7 +1121,7 @@ func (h *Handler) DeleteMediaExtension(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_EXTENSION", "message": "extension 不能为空"})
 		return
 	}
-	if err := h.library.DeleteMediaExtension(libraryID, extension); err != nil {
+	if err := h.library.DeleteMediaExtensionInSpace(spaceID, libraryID, extension); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "DELETE_EXTENSION_FAILED", "message": err.Error()})
 		return
 	}
@@ -1026,13 +1131,17 @@ func (h *Handler) DeleteMediaExtension(c *gin.Context) {
 // GetSubtitles 返回媒体文件的外挂字幕轨道列表。
 // GET /api/play/:id/subtitles
 func (h *Handler) GetSubtitles(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -1066,6 +1175,10 @@ func (h *Handler) GetSubtitles(c *gin.Context) {
 // GetSubtitleContent 返回指定字幕轨道的 WebVTT 内容。
 // GET /api/play/:id/subtitles/:index
 func (h *Handler) GetSubtitleContent(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
@@ -1078,7 +1191,7 @@ func (h *Handler) GetSubtitleContent(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByID(id)
+	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return

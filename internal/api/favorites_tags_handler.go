@@ -16,6 +16,10 @@ import (
 // SetMediaFavorite PUT /api/library/media/:id/favorite
 // 请求体：{"favorite": true}，设置或取消收藏，返回更新后的媒体对象。
 func (h *Handler) SetMediaFavorite(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
@@ -28,7 +32,7 @@ func (h *Handler) SetMediaFavorite(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.SetMediaFavorite(id, req.Favorite)
+	mf, err := h.library.SetMediaFavoriteInSpace(spaceID, id, req.Favorite)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
@@ -42,7 +46,11 @@ func (h *Handler) SetMediaFavorite(c *gin.Context) {
 
 // ListTags GET /api/library/tags
 func (h *Handler) ListTags(c *gin.Context) {
-	tags, err := h.library.ListTags()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	tags, err := h.library.ListTagsInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -53,6 +61,10 @@ func (h *Handler) ListTags(c *gin.Context) {
 // CreateTag POST /api/library/tags
 // 请求体：{"name": "..."}，按名唯一创建，返回标签对象。
 func (h *Handler) CreateTag(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -60,7 +72,7 @@ func (h *Handler) CreateTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效"})
 		return
 	}
-	tag, err := h.library.CreateTag(req.Name)
+	tag, err := h.library.CreateTagInSpace(spaceID, req.Name)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_TAG", "message": err.Error()})
 		return
@@ -70,12 +82,20 @@ func (h *Handler) CreateTag(c *gin.Context) {
 
 // ListMediaTags GET /api/library/media/:id/tags
 func (h *Handler) ListMediaTags(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
 	}
-	tags, err := h.library.ListMediaTags(id)
+	tags, err := h.library.ListMediaTagsInSpace(spaceID, id)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
@@ -85,8 +105,16 @@ func (h *Handler) ListMediaTags(c *gin.Context) {
 // AddMediaTag POST /api/library/media/:id/tags
 // 请求体：{"tag_id": 1} 或 {"name": "..."}（按名时先建/取标签再绑定），返回绑定的标签。
 func (h *Handler) AddMediaTag(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
+		return
+	}
+	if _, err := h.library.GetMediaFileByIDInSpace(spaceID, id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
 	var req struct {
@@ -105,7 +133,7 @@ func (h *Handler) AddMediaTag(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "需提供 tag_id 或 name"})
 			return
 		}
-		tag, err := h.library.CreateTag(req.Name)
+		tag, err := h.library.CreateTagInSpace(spaceID, req.Name)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_TAG", "message": err.Error()})
 			return
@@ -113,13 +141,13 @@ func (h *Handler) AddMediaTag(c *gin.Context) {
 		tagID = tag.ID
 	}
 
-	if err := h.library.AddMediaTag(id, tagID); err != nil {
+	if err := h.library.AddMediaTagInSpace(spaceID, id, tagID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "ADD_TAG_FAILED", "message": err.Error()})
 		return
 	}
 
 	// 回读标签对象返回，便于前端直接展示
-	tags, err := h.library.ListMediaTags(id)
+	tags, err := h.library.ListMediaTagsInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -135,6 +163,10 @@ func (h *Handler) AddMediaTag(c *gin.Context) {
 
 // RemoveMediaTag DELETE /api/library/media/:id/tags/:tag_id
 func (h *Handler) RemoveMediaTag(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
 	id, ok := parseMediaID(c)
 	if !ok {
 		return
@@ -144,7 +176,11 @@ func (h *Handler) RemoveMediaTag(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_TAG_ID", "message": "无效的标签 ID"})
 		return
 	}
-	if err := h.library.RemoveMediaTag(id, tagID); err != nil {
+	if err := h.library.RemoveMediaTagInSpace(spaceID, id, tagID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "REMOVE_TAG_FAILED", "message": "去标签失败"})
 		return
 	}
