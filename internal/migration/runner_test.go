@@ -225,6 +225,15 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	if got := countWhere(t, gdb, "library_paths", "space_id = '' OR space_id IS NULL"); got != 0 {
 		t.Fatalf("library_paths 存在未回填 space_id 的记录: %d", got)
 	}
+	if !testColumnExists(t, gdb, "library_paths", "library_kind") {
+		t.Fatal("library_paths 缺少 library_kind 字段")
+	}
+	if !testColumnExists(t, gdb, "library_paths", "library_profile_json") {
+		t.Fatal("library_paths 缺少 library_profile_json 字段")
+	}
+	if got := countWhere(t, gdb, "library_paths", "library_kind != 'mixed'"); got != 0 {
+		t.Fatalf("旧库默认分型应回填 mixed, 实际异常记录: %d", got)
+	}
 	if got := countWhere(t, gdb, "media_files", "space_id = '' OR space_id IS NULL"); got != 0 {
 		t.Fatalf("media_files 存在未回填 space_id 的记录: %d", got)
 	}
@@ -237,6 +246,7 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 		"idx_media_files_space_id",
 		"idx_media_files_space_library_added",
 		"idx_library_paths_space_enabled_id",
+		"idx_library_paths_space_kind_id",
 		"idx_media_files_space_added_id",
 		"idx_media_files_space_media_time_id",
 		"idx_media_files_space_library_path_id",

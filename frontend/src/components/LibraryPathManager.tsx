@@ -14,6 +14,7 @@ import {
   SegmentedControl,
   Collapse,
   UnstyledButton,
+  Select,
 } from '@mantine/core';
 import {
   IconPlus,
@@ -27,10 +28,25 @@ import {
   IconChevronRight,
   IconTags,
 } from '@tabler/icons-react';
-import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types';
+import type {
+  LibraryKind,
+  LibraryKindInfo,
+  LibraryPath,
+  MediaExtension,
+  MediaExtensionType,
+  ScanMode,
+} from '@/types';
 
 /** 后缀筛选档位（FR-64）：全部 / 仅视频 / 仅图片 */
 type ExtFilter = 'all' | 'video' | 'image';
+
+function libraryKindName(kinds: LibraryKindInfo[], kind: LibraryKind): string {
+  return kinds.find((item) => item.kind === kind)?.name ?? kind;
+}
+
+function sourceTypeName(type: string): string {
+  return type === 'smb' ? 'SMB' : '本地';
+}
 
 /** 单个后缀徽标（FR-100）：内置以描边样式标识不可删、自定义带删除按钮 */
 function ExtensionBadge({ ext, onDelete }: { ext: MediaExtension; onDelete?: () => void }) {
@@ -63,7 +79,10 @@ interface LibraryPathManagerProps {
   paths: LibraryPath[];
   loading: boolean;
   scanLoading: Record<number, boolean>;
+  libraryKindLoading: Record<number, boolean>;
   newPath: string;
+  newLibraryKind: LibraryKind;
+  libraryKinds: LibraryKindInfo[];
   addingPath: boolean;
   extensionInputs: Record<number, string>;
   extensionTypes: Record<number, MediaExtensionType>;
@@ -71,7 +90,9 @@ interface LibraryPathManagerProps {
   /** 各库完整后缀列表（内置 + 自定义），供后缀管理列出与删除（FR-64） */
   extensionsByLibrary: Record<number, MediaExtension[]>;
   onNewPathChange: (value: string) => void;
+  onNewLibraryKindChange: (value: LibraryKind) => void;
   onAddPath: () => void;
+  onUpdateLibraryKind: (path: LibraryPath, libraryKind: LibraryKind) => void;
   onDeletePath: (path: LibraryPath) => void;
   onScan: (id: number, mode: ScanMode) => void;
   onBrowsePath: (path: LibraryPath) => void;
@@ -87,14 +108,19 @@ export default function LibraryPathManager({
   paths,
   loading,
   scanLoading,
+  libraryKindLoading,
   newPath,
+  newLibraryKind,
+  libraryKinds,
   addingPath,
   extensionInputs,
   extensionTypes,
   extensionLoading,
   extensionsByLibrary,
   onNewPathChange,
+  onNewLibraryKindChange,
   onAddPath,
+  onUpdateLibraryKind,
   onDeletePath,
   onScan,
   onBrowsePath,
@@ -107,6 +133,10 @@ export default function LibraryPathManager({
   const [extFilters, setExtFilters] = useState<Record<number, ExtFilter>>({});
   // 各库后缀徽标墙折叠态（FR-100），缺省折叠以收起信息噪声
   const [extExpanded, setExtExpanded] = useState<Record<number, boolean>>({});
+  const kindOptions = libraryKinds.map((item) => ({
+    value: item.kind,
+    label: `分型：${item.name}`,
+  }));
 
   return (
     <Box>
@@ -121,6 +151,14 @@ export default function LibraryPathManager({
           onKeyDown={(e) => e.key === 'Enter' && onAddPath()}
           style={{ flex: 1 }}
           size="sm"
+        />
+        <Select
+          aria-label="新目录内容分型"
+          data={kindOptions}
+          value={newLibraryKind}
+          onChange={(value) => onNewLibraryKindChange((value as LibraryKind) || 'mixed')}
+          size="sm"
+          w={150}
         />
         <Button
           size="sm"
@@ -156,6 +194,7 @@ export default function LibraryPathManager({
             const builtinExts = visibleExts.filter((e) => e.is_builtin);
             const customExts = visibleExts.filter((e) => !e.is_builtin);
             const expanded = extExpanded[p.id] || false;
+            const libraryKind = p.library_kind || 'mixed';
             return (
               <Card key={p.id} withBorder p="sm" radius="sm" bg="var(--mantine-color-default)">
                 {/* 库信息：占整行、可点进浏览 */}
@@ -177,10 +216,27 @@ export default function LibraryPathManager({
                   <Text size="xs" c="dimmed" truncate>
                     {p.path}
                   </Text>
+                  <Group gap={4} mt={6} wrap="wrap">
+                    <Badge size="xs" variant="outline" color="gray">
+                      源：{sourceTypeName(p.type)}
+                    </Badge>
+                    <Badge size="xs" variant="light" color="teal">
+                      内容：{libraryKindName(libraryKinds, libraryKind)}
+                    </Badge>
+                  </Group>
                 </Box>
 
                 {/* 操作按钮：纵向堆叠在信息下方、窄列可换行不拥挤 */}
                 <Group gap={4} mt="xs" wrap="wrap">
+                  <Select
+                    aria-label={`${p.label || p.path} 内容分型`}
+                    data={kindOptions}
+                    value={libraryKind}
+                    onChange={(value) => value && onUpdateLibraryKind(p, value as LibraryKind)}
+                    disabled={libraryKindLoading[p.id]}
+                    size="xs"
+                    w={120}
+                  />
                   <Button
                     size="xs"
                     variant="subtle"

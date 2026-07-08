@@ -2,6 +2,7 @@ import { http, HttpResponse, delay } from 'msw';
 import { mockPaths, mockMediaFiles } from './data';
 import type {
   LibraryPath,
+  LibraryKind,
   MediaFile,
   MediaExtension,
   Album,
@@ -224,7 +225,9 @@ const settingDefinitions: SettingDefinition[] = [
 ];
 
 const writableSettingKeys = new Set(
-  settingDefinitions.filter((definition) => definition.layer === 'runtime').map((definition) => definition.key),
+  settingDefinitions
+    .filter((definition) => definition.layer === 'runtime')
+    .map((definition) => definition.key),
 );
 
 const auditEvents: AuditEvent[] = [
@@ -360,7 +363,11 @@ function addUnifiedTask(task: TaskItem) {
 
 function currentSpaceID(request: Request): string {
   const url = new URL(request.url);
-  return url.searchParams.get('space_id') || request.headers.get('X-JianVideo-Space-Id') || 'space-default';
+  return (
+    url.searchParams.get('space_id') ||
+    request.headers.get('X-JianVideo-Space-Id') ||
+    'space-default'
+  );
 }
 
 function visibleUnifiedTasks(request: Request): TaskItem[] {
@@ -382,7 +389,10 @@ function visibleUnifiedTasks(request: Request): TaskItem[] {
   });
 }
 
-function countTasksBy<T extends string>(items: TaskItem[], keyOf: (item: TaskItem) => T): Record<T, number> {
+function countTasksBy<T extends string>(
+  items: TaskItem[],
+  keyOf: (item: TaskItem) => T,
+): Record<T, number> {
   return items.reduce<Record<T, number>>(
     (result, item) => {
       const key = keyOf(item);
@@ -483,13 +493,56 @@ export const handlers = [
     return HttpResponse.json({ items });
   }),
 
+  http.get('*/api/library/kinds', async () => {
+    await delay(80);
+    return HttpResponse.json({
+      items: [
+        {
+          kind: 'movie',
+          name: '电影',
+          description: '面向电影与长片，后续用于标题与年份解析。',
+          naming_hint: '片名 (年份)/片名.ext',
+          scan_strategy: '按文件与上级目录识别单片资源',
+        },
+        {
+          kind: 'series',
+          name: '剧集',
+          description: '面向电视剧、番剧与课程，后续用于季集入口。',
+          naming_hint: '剧名/Season 01/剧名 S01E01.ext',
+          scan_strategy: '保留季集解析上下文',
+        },
+        {
+          kind: 'home_video',
+          name: '家庭录像',
+          description: '面向家庭影像、相机视频和生活记录。',
+          naming_hint: '日期_地点_事件.ext',
+          scan_strategy: '优先保留拍摄时间与原始文件名',
+        },
+        {
+          kind: 'mixed',
+          name: '混合',
+          description: '兼容旧库与混合内容，不套用专门影视规则。',
+          naming_hint: '保持现有目录与文件名',
+          scan_strategy: '使用通用扫描策略',
+        },
+      ],
+    });
+  }),
+
   http.post('*/api/library/paths', async ({ request }) => {
     await delay(300);
-    const body = (await request.json()) as { path: string; type: string; label: string };
+    const body = (await request.json()) as {
+      library_kind?: LibraryKind;
+      label: string;
+      path: string;
+      type: string;
+    };
     const newPath: LibraryPath = {
       id: nextPathId++,
       path: body.path,
       type: body.type || 'local',
+      library_kind: body.library_kind || 'mixed',
+      library_profile_json: '{}',
       label: body.label || body.path,
       enabled: true,
       created_at: new Date().toISOString(),
@@ -505,9 +558,14 @@ export const handlers = [
     if (!path) {
       return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体库不存在' }, { status: 404 });
     }
-    const body = (await request.json()) as { label?: string; enabled?: boolean };
+    const body = (await request.json()) as {
+      enabled?: boolean;
+      label?: string;
+      library_kind?: LibraryKind;
+    };
     if (body.label !== undefined) path.label = body.label.trim();
     if (body.enabled !== undefined) path.enabled = body.enabled;
+    if (body.library_kind !== undefined) path.library_kind = body.library_kind;
     return HttpResponse.json(path);
   }),
 

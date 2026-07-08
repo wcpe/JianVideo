@@ -35,6 +35,8 @@ func InitSchema(d *sql.DB) error {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'local',
+    library_kind TEXT NOT NULL DEFAULT 'mixed',
+    library_profile_json TEXT NOT NULL DEFAULT '{}',
     label TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))

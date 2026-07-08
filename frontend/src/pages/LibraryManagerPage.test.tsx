@@ -81,6 +81,94 @@ describe('LibraryManagerPage', () => {
     });
   });
 
+  it('展示来源类型与内容分型，并可更新已有库分型', async () => {
+    let payload: { library_kind?: string } | null = null;
+    server.use(
+      http.get('*/api/library/paths', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              path: 'D:\\Videos\\Movies',
+              type: 'local',
+              library_kind: 'movie',
+              label: '电影',
+              enabled: true,
+              created_at: '2025-01-01T12:00:00Z',
+              media_count: 42,
+            },
+          ],
+        }),
+      ),
+      http.put('*/api/library/paths/:id', async ({ request }) => {
+        payload = (await request.json()) as { library_kind?: string };
+        return HttpResponse.json({
+          id: 1,
+          path: 'D:\\Videos\\Movies',
+          type: 'local',
+          library_kind: payload.library_kind,
+          label: '电影',
+          enabled: true,
+          created_at: '2025-01-01T12:00:00Z',
+          media_count: 42,
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement;
+    expect(within(card).getByText('源：本地')).toBeVisible();
+    expect(within(card).getByText('内容：电影')).toBeVisible();
+
+    await user.click(within(card).getByLabelText('电影 内容分型'));
+    await user.click(await screen.findByRole('option', { name: '分型：剧集' }));
+
+    await waitFor(() => {
+      expect(payload).toEqual({ library_kind: 'series' });
+    });
+  });
+
+  it('新增媒体库时提交选定内容分型', async () => {
+    let payload: { library_kind?: string; path?: string } | null = null;
+    server.use(
+      http.post('*/api/library/paths', async ({ request }) => {
+        payload = (await request.json()) as { library_kind?: string; path?: string };
+        return HttpResponse.json(
+          {
+            id: 99,
+            path: payload.path,
+            type: 'local',
+            library_kind: payload.library_kind,
+            label: payload.path,
+            enabled: true,
+            created_at: new Date().toISOString(),
+          },
+          { status: 201 },
+        );
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByPlaceholderText('输入目录路径，如 D:\\Videos'),
+      'D:\\Videos\\Family',
+    );
+    await user.click(screen.getAllByLabelText('新目录内容分型')[0]);
+    await user.click(await screen.findByRole('option', { name: '分型：家庭录像' }));
+    await user.click(screen.getByRole('button', { name: '添加' }));
+
+    await waitFor(() => {
+      expect(payload).toMatchObject({
+        library_kind: 'home_video',
+        path: 'D:\\Videos\\Family',
+      });
+    });
+  });
+
   it('不再渲染页内媒体文件列表', async () => {
     renderPage();
 

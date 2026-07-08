@@ -1,15 +1,29 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { notifications } from '@mantine/notifications';
 import * as libApi from '@/api/library';
-import type { LibraryPath, MediaExtension, MediaExtensionType, ScanMode } from '@/types';
+import type {
+  LibraryKind,
+  LibraryKindInfo,
+  LibraryPath,
+  MediaExtension,
+  MediaExtensionType,
+  ScanMode,
+} from '@/types';
+
+function libraryKindName(items: LibraryKindInfo[], kind: LibraryKind): string {
+  return items.find((item) => item.kind === kind)?.name ?? kind;
+}
 
 export function useLibraryPaths(onPathsChanged?: () => void) {
   const [paths, setPaths] = useState<LibraryPath[]>([]);
   const [loading, setLoading] = useState(false);
   const [newPath, setNewPath] = useState('');
+  const [newLibraryKind, setNewLibraryKind] = useState<LibraryKind>('mixed');
+  const [libraryKinds, setLibraryKinds] = useState<LibraryKindInfo[]>(libApi.defaultLibraryKinds);
   const [addingPath, setAddingPath] = useState(false);
   const addingPathRef = useRef(false);
   const [scanLoading, setScanLoading] = useState<Record<number, boolean>>({});
+  const [libraryKindLoading, setLibraryKindLoading] = useState<Record<number, boolean>>({});
   const [extensionInputs, setExtensionInputs] = useState<Record<number, string>>({});
   const [extensionTypes, setExtensionTypes] = useState<Record<number, MediaExtensionType>>({});
   const [extensionLoading, setExtensionLoading] = useState<Record<number, boolean>>({});
@@ -52,18 +66,32 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
     }
   }, [loadExtensionPolicies]);
 
+  const loadLibraryKinds = useCallback(async () => {
+    try {
+      const items = await libApi.getLibraryKinds();
+      setLibraryKinds(items.length > 0 ? items : libApi.defaultLibraryKinds);
+    } catch {
+      setLibraryKinds(libApi.defaultLibraryKinds);
+    }
+  }, []);
+
   // 挂载时自动加载路径列表
   useEffect(() => {
     loadPaths();
   }, [loadPaths]);
+
+  useEffect(() => {
+    loadLibraryKinds();
+  }, [loadLibraryKinds]);
 
   const handleAddPath = useCallback(async () => {
     if (!newPath.trim() || addingPathRef.current) return;
     addingPathRef.current = true;
     setAddingPath(true);
     try {
-      const created = await libApi.createLibraryPath(newPath.trim());
+      const created = await libApi.createLibraryPath(newPath.trim(), 'local', '', newLibraryKind);
       setNewPath('');
+      setNewLibraryKind('mixed');
       notifications.show({
         title: '添加成功',
         message: `目录 "${created.label || created.path}" 已添加`,
@@ -79,7 +107,30 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
       addingPathRef.current = false;
       setAddingPath(false);
     }
-  }, [newPath, loadPaths, onPathsChanged]);
+  }, [newPath, newLibraryKind, loadPaths, onPathsChanged]);
+
+  const handleUpdateLibraryKind = useCallback(
+    async (path: LibraryPath, libraryKind: LibraryKind) => {
+      if ((path.library_kind || 'mixed') === libraryKind) return;
+      setLibraryKindLoading((prev) => ({ ...prev, [path.id]: true }));
+      try {
+        const updated = await libApi.updateLibraryPath(path.id, { library_kind: libraryKind });
+        setPaths((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        notifications.show({
+          title: '分型已更新',
+          message: `"${updated.label || updated.path}" 已设为 ${libraryKindName(libraryKinds, updated.library_kind || 'mixed')}`,
+          color: 'green',
+          autoClose: 3000,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '更新媒体库分型失败';
+        notifications.show({ title: '更新失败', message, color: 'red', autoClose: 3000 });
+      } finally {
+        setLibraryKindLoading((prev) => ({ ...prev, [path.id]: false }));
+      }
+    },
+    [libraryKinds],
+  );
 
   const handleDeletePath = useCallback(
     async (path: LibraryPath, onConfirm?: () => Promise<void>) => {
@@ -186,8 +237,11 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
     paths,
     loading,
     newPath,
+    newLibraryKind,
+    libraryKinds,
     addingPath,
     scanLoading,
+    libraryKindLoading,
     extensionInputs,
     extensionTypes,
     extensionLoading,
@@ -195,11 +249,13 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
     extensionsByLibrary,
     // setter
     setNewPath,
+    setNewLibraryKind,
     setExtensionInputs,
     setExtensionTypes,
     // 操作
     loadPaths,
     handleAddPath,
+    handleUpdateLibraryKind,
     handleDeletePath,
     handleScan,
     handleAddExtension,

@@ -48,14 +48,19 @@ export default function LibraryManagerPage() {
         paths={paths.paths}
         loading={paths.loading}
         scanLoading={paths.scanLoading}
+        libraryKindLoading={paths.libraryKindLoading}
         newPath={paths.newPath}
+        newLibraryKind={paths.newLibraryKind}
+        libraryKinds={paths.libraryKinds}
         addingPath={paths.addingPath}
         extensionInputs={paths.extensionInputs}
         extensionTypes={paths.extensionTypes}
         extensionLoading={paths.extensionLoading}
         extensionsByLibrary={paths.extensionsByLibrary}
         onNewPathChange={paths.setNewPath}
+        onNewLibraryKindChange={paths.setNewLibraryKind}
         onAddPath={paths.handleAddPath}
+        onUpdateLibraryKind={paths.handleUpdateLibraryKind}
         onDeletePath={(p) => setDelPath({ opened: true, path: p, loading: false })}
         onScan={(id, mode) => paths.handleScan(id, mode)}
         onBrowsePath={handleOpenLibrary}

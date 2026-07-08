@@ -150,6 +150,8 @@
         "id": 1,
         "path": "/media/movies",
         "type": "local",
+        "library_kind": "movie",
+        "library_profile_json": "{}",
         "label": "电影",
         "enabled": true,
         "media_count": 42
@@ -157,6 +159,25 @@
     ]
   }
   ```
+
+### 获取媒体库内容分型
+
+- **方法 / 路径**：`GET /api/library/kinds`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "kind": "movie",
+        "name": "电影",
+        "description": "面向电影与长片，后续用于标题与年份解析。",
+        "naming_hint": "片名 (年份)/片名.ext",
+        "scan_strategy": "按文件与上级目录识别单片资源"
+      }
+    ]
+  }
+  ```
+- **说明**：当前内置 `movie` / `series` / `home_video` / `mixed` 四类；旧库与缺省值均为 `mixed`。`type=local/smb` 仍只表示来源类型，不表示内容分型。
 
 ### 添加媒体库目录
 
@@ -167,13 +188,14 @@
   {
     "path": "\\\\192.168.1.100\\Share\\Movies",
     "type": "smb",
+    "library_kind": "movie",
     "label": "NAS 电影",
     "smb_username": "optional",
     "smb_password": "optional"
   }
   ```
 - **响应**（201）：目录记录对象
-- **错误**：`400` 本地路径不可访问、不是目录或请求参数错误；`500` 保存失败
+- **错误**：`400` 本地路径不可访问、不是目录、请求参数错误或 `library_kind` 非法；`500` 保存失败
 - **说明**：`local` 路径必须在服务器本机存在且为目录；`smb` 路径支持 UNC 或 `smb://host/share/path` 输入，服务端统一存储为 `host/share/path`，凭据通过 `/api/smb/credentials` 保存。
 
 ### 更新媒体库目录
@@ -184,12 +206,13 @@
   ```json
   {
     "label": "家庭视频",
-    "enabled": true
+    "enabled": true,
+    "library_kind": "home_video"
   }
   ```
 - **响应**（200）：更新后的目录记录对象
-- **说明**：当前仅更新展示标签与启用状态，不修改目录真实路径或类型。成功更新会在同一事务内写入 `library.updated` 审计事件。
-- **错误**：`400` ID 或请求体无效，`404` 目录不存在，`500` 更新失败
+- **说明**：当前可更新展示标签、启用状态与内容分型，不修改目录真实路径或来源类型。成功更新会在同一事务内写入 `library.updated` 审计事件。
+- **错误**：`400` ID、请求体或 `library_kind` 无效，`404` 目录不存在，`500` 更新失败
 
 ### 删除媒体库目录
 

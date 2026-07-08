@@ -165,6 +165,8 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 | space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
 | path | TEXT | 目录绝对路径（本地或 SMB UNC 路径）；同一 Space 内唯一 |
 | type | TEXT | 目录类型：`local` 或 `smb` |
+| library_kind | TEXT | 内容分型：`movie` / `series` / `home_video` / `mixed`，旧库默认 `mixed` |
+| library_profile_json | TEXT | 每库分型配置预留，当前写空 JSON |
 | label | TEXT | 用户自定义标签 |
 | enabled | INTEGER | 是否启用（0/1） |
 | created_at | DATETIME | 添加时间 |
@@ -466,7 +468,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - 面包屑由后端按路径分隔符拆分构建；Windows 盘符路径保持 `D:/...` 形式，不额外加 `/D:`
 - `file_path` 索引确保前缀查询性能满足 NFR-08（500ms 内响应）
 - 前端 `/browse` 为资源管理器布局（FR-121）：左导航树（懒展开、自动展开当前路径祖先链）+ 可点地址栏（路径段）+ 工具栏（批量动作 + 视图模式 + 排序）+ 名称/修改日期/类型/大小详情列 + 状态栏；已移除全局页级面包屑 `PageBreadcrumbs`
-- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携起始 `path` 跳转 `/browse` 定位到该库根目录（导航按真实路径，FR-121）。`GET /api/library/paths` 每项附带 `media_count`（按当前 Space 的 `library_id` 一次 `GROUP BY` 统计、排除软删），避免按库 N+1 计数
+- 存储库管理页（`/library-manager`）只展示存储库卡片（扫描进度 + 已索引媒体数量 + 后缀管理 FR-64 + 内容分型 FR2-052），不内嵌媒体文件列表；卡片以一行 2-3 个的 `SimpleGrid` 网格布局（FR-65，`cols={{base:1,sm:2,lg:3}}`，卡内信息与操作纵向堆叠），点击卡片携起始 `path` 跳转 `/browse` 定位到该库根目录（导航按真实路径，FR-121）。`GET /api/library/paths` 每项附带 `media_count`（按当前 Space 的 `library_id` 一次 `GROUP BY` 统计、排除软删）与 `library_kind`，避免按库 N+1 计数，并在 UI 中明确区分来源类型 `local/smb` 与内容分型。
 - **真实路径树（FR-121，[ADR-0046](adr/0046-realpath-tree-directory-browse.md) 取代 [ADR-0037](adr/0037-aggregate-directory-browse.md)）**：`parent_path` 取哨兵 `__root__` 时返回当前 Space 各**盘符/共享根**（由各启用库 `path` 推导卷根：本地 `D:/...`→`D:`、UNC `//host/share/...`→`//host/share`，去重排序）；其余 `parent_path` 按真实路径**跨当前 Space 所有库**前缀聚合（子目录 = `space_id = ? AND file_path LIKE 'P/%'` 的下一级去重、文件 = 目录恰为 P 的项，均排除软删，不再按 `library_id` 收窄）。有路径包含关系的库在公共上级自然合并为单一树（`D:\1` 与 `D:\1\2` → `D:→1→2`；库 `D:\` 则整盘可浏览）。`DirInfo.library_id` 对子目录不再填，文件保留各自 `library_id` 供删除/下载等操作；`sort`（name/size/type/time）服务端排序。库注册真源 `library_paths`、媒体真源 `media_files` 不变
 
 ## 5. 关键机制
@@ -475,6 +477,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 - 本地目录注册时必须校验路径存在且为目录，入库前转为绝对路径并统一为正斜杠。
 - `ScanLibraryWithType(libraryID, dirPath, dirType, mode)` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
+- 扫描上下文（FR2-052）由 `ScanContextForLibraryInSpace` 在扫描入口读取 `library_paths.library_kind`，随 `space_id + library_id` 传入本地 / SMB 扫描链路；当前只提供 `movie` / `series` / `home_video` / `mixed` 上下文，完整季集推断、命名规则和每库后缀覆盖由 FR2-025/027/031 消费。
 - 扫描模式（FR-27）：`mode=incremental`（增量更新，缺省）只索引新增文件；`mode=full`（全量扫描）在入库后追加对账——以本次遍历到的现存路径集合为基准，库内未软删（`deleted_at IS NULL`）且不在集合中的记录经一条 `UPDATE` 标记软删进回收站（复用 FR-25），不物理删除、不动磁盘。遍历整体出错时放弃对账以免误删；对账仅本地扫描启用，SMB 轮询为增量语义（远程列举不保证完整）。
 - 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
 - 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入。

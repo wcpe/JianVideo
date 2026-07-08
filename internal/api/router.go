@@ -34,6 +34,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.POST("/paths", h.CreateLibraryPath)
 		lib.PUT("/paths/:id", h.UpdateLibraryPath)
 		lib.DELETE("/paths/:id", h.DeleteLibraryPath)
+		lib.GET("/kinds", h.ListLibraryKinds)
 
 		lib.GET("/media", h.ListMediaFiles)
 		lib.GET("/media/:id", h.GetMediaFile)

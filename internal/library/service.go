@@ -138,8 +138,17 @@ func (s *Service) CreateLibraryPath(path, dirType, label string) (*models.Librar
 
 // CreateLibraryPathInSpace 添加指定 Space 的媒体库目录。
 func (s *Service) CreateLibraryPathInSpace(spaceID, path, dirType, label string) (*models.LibraryPath, error) {
+	return s.CreateLibraryPathWithKindInSpace(spaceID, path, dirType, label, "")
+}
+
+// CreateLibraryPathWithKindInSpace 添加指定 Space 与内容分型的媒体库目录。
+func (s *Service) CreateLibraryPathWithKindInSpace(spaceID, path, dirType, label, libraryKind string) (*models.LibraryPath, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("路径不能为空")
+	}
+	kind, err := normalizeLibraryKind(libraryKind)
+	if err != nil {
+		return nil, err
 	}
 
 	if dirType == "" {
@@ -168,11 +177,13 @@ func (s *Service) CreateLibraryPathInSpace(spaceID, path, dirType, label string)
 	}
 
 	lp := &models.LibraryPath{
-		SpaceID: normalizeSpaceID(spaceID),
-		Path:    storedPath,
-		Type:    dirType,
-		Label:   label,
-		Enabled: 1,
+		SpaceID:            normalizeSpaceID(spaceID),
+		Path:               storedPath,
+		Type:               dirType,
+		LibraryKind:        kind,
+		LibraryProfileJSON: "{}",
+		Label:              label,
+		Enabled:            1,
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(lp).Error; err != nil {
@@ -262,6 +273,11 @@ func (s *Service) GetLibraryPathByIDInSpace(spaceID string, id int64) (*models.L
 
 // UpdateLibraryPathInSpace 更新指定 Space 的媒体库展示属性。
 func (s *Service) UpdateLibraryPathInSpace(spaceID string, id int64, label *string, enabled *bool) (*models.LibraryPath, error) {
+	return s.UpdateLibraryPathWithKindInSpace(spaceID, id, label, enabled, nil)
+}
+
+// UpdateLibraryPathWithKindInSpace 更新指定 Space 的媒体库展示属性与内容分型。
+func (s *Service) UpdateLibraryPathWithKindInSpace(spaceID string, id int64, label *string, enabled *bool, libraryKind *string) (*models.LibraryPath, error) {
 	spaceID = normalizeSpaceID(spaceID)
 	var after models.LibraryPath
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -269,7 +285,10 @@ func (s *Service) UpdateLibraryPathInSpace(spaceID string, id int64, label *stri
 		if err := tx.Where("space_id = ? AND id = ?", spaceID, id).First(&before).Error; err != nil {
 			return err
 		}
-		updates := libraryPathUpdates(label, enabled)
+		updates, err := libraryPathUpdates(label, enabled, libraryKind)
+		if err != nil {
+			return err
+		}
 		if len(updates) == 0 {
 			after = before
 			return nil
@@ -296,7 +315,7 @@ func (s *Service) UpdateLibraryPathInSpace(spaceID string, id int64, label *stri
 	return &after, nil
 }
 
-func libraryPathUpdates(label *string, enabled *bool) map[string]any {
+func libraryPathUpdates(label *string, enabled *bool, libraryKind *string) (map[string]any, error) {
 	updates := map[string]any{}
 	if label != nil {
 		updates["label"] = strings.TrimSpace(*label)
@@ -308,7 +327,14 @@ func libraryPathUpdates(label *string, enabled *bool) map[string]any {
 			updates["enabled"] = 0
 		}
 	}
-	return updates
+	if libraryKind != nil {
+		kind, err := normalizeLibraryKind(*libraryKind)
+		if err != nil {
+			return nil, err
+		}
+		updates["library_kind"] = kind
+	}
+	return updates, nil
 }
 
 func (s *Service) spaceIDForLibrary(libraryID int64) (string, error) {
@@ -801,12 +827,14 @@ func (s *Service) recordMetadataWritebackTx(tx *gorm.DB, spaceID string, mf *mod
 
 func libraryAuditPayload(lp *models.LibraryPath) map[string]any {
 	return map[string]any{
-		"id":       lp.ID,
-		"space_id": lp.SpaceID,
-		"path":     lp.Path,
-		"type":     lp.Type,
-		"label":    lp.Label,
-		"enabled":  lp.Enabled,
+		"id":                   lp.ID,
+		"space_id":             lp.SpaceID,
+		"path":                 lp.Path,
+		"type":                 lp.Type,
+		"library_kind":         lp.LibraryKind,
+		"library_profile_json": lp.LibraryProfileJSON,
+		"label":                lp.Label,
+		"enabled":              lp.Enabled,
 	}
 }
 
@@ -1188,13 +1216,43 @@ func (s *Service) ScanLibraryWithType(libraryID int64, dirPath, dirType, mode st
 
 // ScanLibraryWithTypeInSpace 按 Space 同步扫描指定目录。
 func (s *Service) ScanLibraryWithTypeInSpace(spaceID string, libraryID int64, dirPath, dirType, mode string) (int, error) {
+	scanCtx, err := s.ScanContextForLibraryInSpace(spaceID, libraryID)
+	if err != nil {
+		return 0, err
+	}
 	switch dirType {
 	case "smb":
 		// SMB 远程列举不保证完整，不做对账以免误删（FR-27 设计）
-		return s.scanSMBLibrary(spaceID, libraryID, dirPath)
+		return s.scanSMBLibrary(scanCtx, dirPath)
 	default:
-		return s.scanLocalLibrary(spaceID, libraryID, dirPath, mode)
+		return s.scanLocalLibrary(scanCtx, dirPath, mode)
 	}
+}
+
+// ScanContextForLibraryInSpace 读取扫描上下文；历史测试库缺少目录记录时回退 mixed。
+func (s *Service) ScanContextForLibraryInSpace(spaceID string, libraryID int64) (ScanContext, error) {
+	scanCtx := ScanContext{
+		SpaceID:     normalizeSpaceID(spaceID),
+		LibraryID:   libraryID,
+		LibraryKind: models.LibraryKindMixed,
+	}
+	if !s.db.Migrator().HasTable(&models.LibraryPath{}) {
+		return scanCtx, nil
+	}
+	var lp models.LibraryPath
+	err := s.db.Select("library_kind").Where("space_id = ? AND id = ?", scanCtx.SpaceID, libraryID).First(&lp).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return scanCtx, nil
+	}
+	if err != nil {
+		return ScanContext{}, err
+	}
+	kind, err := normalizeLibraryKind(lp.LibraryKind)
+	if err != nil {
+		return ScanContext{}, err
+	}
+	scanCtx.LibraryKind = kind
+	return scanCtx, nil
 }
 
 // StartAsyncScan 按类型启动异步扫描，立即返回。
@@ -1246,8 +1304,8 @@ func (s *Service) StartAsyncScanInSpace(spaceID string, libraryID int64, dirPath
 
 // scanLocalLibrary 扫描本地目录。
 // mode 为全量（ScanModeFull）时在入库后对账：库内未软删但本次未遍历到的记录标记软删（FR-27）。
-func (s *Service) scanLocalLibrary(spaceID string, libraryID int64, dirPath, mode string) (int, error) {
-	policy, err := s.mediaExtensionPolicy(libraryID)
+func (s *Service) scanLocalLibrary(scanCtx ScanContext, dirPath, mode string) (int, error) {
+	policy, err := s.mediaExtensionPolicy(scanCtx.LibraryID)
 	if err != nil {
 		return 0, err
 	}
@@ -1278,7 +1336,7 @@ func (s *Service) scanLocalLibrary(spaceID string, libraryID int64, dirPath, mod
 		updateScanStatus(func(ss *ScanStatus) {
 			ss.TotalFiles = len(paths)
 		})
-		count, err = s.indexMediaFiles(spaceID, libraryID, paths)
+		count, err = s.indexMediaFiles(scanCtx, paths)
 		if err != nil {
 			return count, err
 		}
@@ -1287,7 +1345,7 @@ func (s *Service) scanLocalLibrary(spaceID string, libraryID int64, dirPath, mod
 	// 全量模式对账：以本次遍历到的现存路径集合为基准，软删缺失记录。
 	// paths 为空（空库/全删空目录）也需对账，故不依赖 len(paths) > 0。
 	if mode == ScanModeFull {
-		if err := s.reconcileDeletedInSpace(spaceID, libraryID, paths); err != nil {
+		if err := s.reconcileDeletedInSpace(scanCtx.SpaceID, scanCtx.LibraryID, paths); err != nil {
 			return count, err
 		}
 	}
@@ -1317,7 +1375,7 @@ func (s *Service) reconcileDeletedInSpace(spaceID string, libraryID int64, exist
 }
 
 // scanSMBLibrary 扫描 SMB 共享目录。
-func (s *Service) scanSMBLibrary(spaceID string, libraryID int64, smbPath string) (int, error) {
+func (s *Service) scanSMBLibrary(scanCtx ScanContext, smbPath string) (int, error) {
 	// smbPath 格式: host/share/path
 	parts := strings.SplitN(smbPath, "/", 3)
 	if len(parts) < 2 {
@@ -1331,7 +1389,7 @@ func (s *Service) scanSMBLibrary(spaceID string, libraryID int64, smbPath string
 		remotePath = parts[2]
 	}
 
-	policy, err := s.mediaExtensionPolicy(libraryID)
+	policy, err := s.mediaExtensionPolicy(scanCtx.LibraryID)
 	if err != nil {
 		return 0, err
 	}
@@ -1387,7 +1445,7 @@ func (s *Service) scanSMBLibrary(spaceID string, libraryID int64, smbPath string
 		return 0, nil
 	}
 
-	return s.indexSMBMediaFiles(spaceID, libraryID, paths, smbFS)
+	return s.indexSMBMediaFiles(scanCtx.SpaceID, scanCtx.LibraryID, paths, smbFS)
 }
 
 // scanEnrichMaxConcurrency 扫描期单文件富化（含 ffprobe）并发上限硬顶，
@@ -1407,7 +1465,7 @@ func scanEnrichConcurrency() int {
 }
 
 // indexMediaFiles 将本地媒体文件路径批量入库。
-func (s *Service) indexMediaFiles(spaceID string, libraryID int64, paths []string) (int, error) {
+func (s *Service) indexMediaFiles(scanCtx ScanContext, paths []string) (int, error) {
 	// 统一所有路径为正斜杠，保证跨平台查询和去重一致
 	normalizedPaths := make([]string, len(paths))
 	for i, p := range paths {
@@ -1416,7 +1474,7 @@ func (s *Service) indexMediaFiles(spaceID string, libraryID int64, paths []strin
 
 	// 批量查询已有记录，避免 N+1 查询
 	var existingFiles []models.MediaFile
-	if err := s.db.Where("space_id = ? AND library_id = ? AND file_path IN ?", normalizeSpaceID(spaceID), libraryID, normalizedPaths).Find(&existingFiles).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND library_id = ? AND file_path IN ?", scanCtx.SpaceID, scanCtx.LibraryID, normalizedPaths).Find(&existingFiles).Error; err != nil {
 		return 0, err
 	}
 	existingSet := make(map[string]bool, len(existingFiles))
@@ -1454,7 +1512,7 @@ func (s *Service) indexMediaFiles(spaceID string, libraryID int64, paths []strin
 			if err != nil {
 				return
 			}
-			if _, err := s.CreateMediaFileInSpace(spaceID, libraryID, pf.normalized, info.Size()); err != nil {
+			if _, err := s.CreateMediaFileInSpace(scanCtx.SpaceID, scanCtx.LibraryID, pf.normalized, info.Size()); err != nil {
 				log.Printf("[WARN] 媒体文件入库失败: %s, err=%v", pf.normalized, err)
 				return
 			}

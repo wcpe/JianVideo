@@ -53,7 +53,7 @@ func TestCreateLibraryPath_API(t *testing.T) {
 	router, _ := setupTestRouter(t)
 	dir := filepath.ToSlash(t.TempDir())
 
-	body := `{"path":"` + dir + `","type":"local","label":"测试"}`
+	body := `{"path":"` + dir + `","type":"local","label":"测试","library_kind":"movie"}`
 	req := httptest.NewRequest("POST", "/api/library/paths", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -67,6 +67,54 @@ func TestCreateLibraryPath_API(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["path"] == nil {
 		t.Fatal("响应缺少 path 字段")
+	}
+	if resp["library_kind"] != "movie" {
+		t.Fatalf("响应 library_kind 期望 movie, 实际 %v", resp["library_kind"])
+	}
+}
+
+func TestListLibraryKinds_API(t *testing.T) {
+	router, _ := setupTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/api/library/kinds", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d", w.Code)
+	}
+	var resp struct {
+		Items []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if len(resp.Items) != 4 {
+		t.Fatalf("期望 4 个分型, 实际 %d", len(resp.Items))
+	}
+	if resp.Items[0].Kind != "movie" || resp.Items[0].Name != "电影" {
+		t.Fatalf("分型目录首项不正确: %+v", resp.Items[0])
+	}
+}
+
+func TestCreateLibraryPath_InvalidKind(t *testing.T) {
+	router, _ := setupTestRouter(t)
+	dir := filepath.ToSlash(t.TempDir())
+
+	body := `{"path":"` + dir + `","type":"local","label":"测试","library_kind":"anime"}`
+	req := httptest.NewRequest("POST", "/api/library/paths", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("非法分型期望 400, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "INVALID_LIBRARY_KIND") {
+		t.Fatalf("错误码应为 INVALID_LIBRARY_KIND, body: %s", w.Body.String())
 	}
 }
 
@@ -118,6 +166,27 @@ func TestListLibraryPaths_API_IncludesMediaCount(t *testing.T) {
 	}
 	if resp.Items[0].MediaCount != 2 {
 		t.Fatalf("期望 media_count=2, 实际 %d", resp.Items[0].MediaCount)
+	}
+}
+
+func TestUpdateLibraryPath_Kind_API(t *testing.T) {
+	router, svc := setupTestRouter(t)
+	lp, _ := svc.CreateLibraryPath(t.TempDir(), "local", "库")
+
+	req := httptest.NewRequest("PUT", "/api/library/paths/"+strconv.FormatInt(lp.ID, 10), bytes.NewBufferString(`{"library_kind":"home_video"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp models.LibraryPath
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.LibraryKind != models.LibraryKindHomeVideo {
+		t.Fatalf("更新后分型期望 home_video, 实际 %s", resp.LibraryKind)
 	}
 }
 

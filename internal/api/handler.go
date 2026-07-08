@@ -232,6 +232,11 @@ func (h *Handler) ListLibraryPaths(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+// ListLibraryKinds 返回内置媒体库分型目录。
+func (h *Handler) ListLibraryKinds(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"items": library.Kinds()})
+}
+
 // CreateLibraryPath POST /api/library/paths
 func (h *Handler) CreateLibraryPath(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)
@@ -242,6 +247,7 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 		Path        string `json:"path" binding:"required"`
 		Type        string `json:"type" binding:"required"`
 		Label       string `json:"label"`
+		LibraryKind string `json:"library_kind"`
 		SMBHost     string `json:"smb_host"`
 		SMBUsername string `json:"smb_username"`
 		SMBPassword string `json:"smb_password"`
@@ -251,8 +257,12 @@ func (h *Handler) CreateLibraryPath(c *gin.Context) {
 		return
 	}
 
-	lp, err := h.library.CreateLibraryPathInSpace(spaceID, req.Path, req.Type, req.Label)
+	lp, err := h.library.CreateLibraryPathWithKindInSpace(spaceID, req.Path, req.Type, req.Label, req.LibraryKind)
 	if err != nil {
+		if errors.Is(err, library.ErrInvalidLibraryKind) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_KIND", "message": "媒体库分型不支持"})
+			return
+		}
 		if req.Type == "local" || req.Type == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "本地路径不可访问或不是目录"})
 			return
@@ -333,15 +343,20 @@ func (h *Handler) UpdateLibraryPath(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Label   *string `json:"label"`
-		Enabled *bool   `json:"enabled"`
+		Label       *string `json:"label"`
+		Enabled     *bool   `json:"enabled"`
+		LibraryKind *string `json:"library_kind"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
 		return
 	}
-	lp, err := h.library.UpdateLibraryPathInSpace(spaceID, id, req.Label, req.Enabled)
+	lp, err := h.library.UpdateLibraryPathWithKindInSpace(spaceID, id, req.Label, req.Enabled, req.LibraryKind)
 	if err != nil {
+		if errors.Is(err, library.ErrInvalidLibraryKind) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_LIBRARY_KIND", "message": "媒体库分型不支持"})
+			return
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			status = http.StatusNotFound

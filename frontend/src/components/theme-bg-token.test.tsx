@@ -15,6 +15,7 @@ function libPath(over: Partial<LibraryPath> = {}): LibraryPath {
     id: 1,
     path: 'D:/Videos',
     type: 'local',
+    library_kind: 'mixed',
     label: '视频',
     enabled: true,
     created_at: '2025-01-01T00:00:00Z',
@@ -52,14 +53,27 @@ describe('卡片/面板背景随主题切换，不写死深色（亮色模式黑
           paths={[libPath()]}
           loading={false}
           scanLoading={{}}
+          libraryKindLoading={{}}
           newPath=""
+          newLibraryKind="mixed"
+          libraryKinds={[
+            {
+              kind: 'mixed',
+              name: '混合',
+              description: '',
+              naming_hint: '',
+              scan_strategy: '',
+            },
+          ]}
           addingPath={false}
           extensionInputs={{}}
           extensionTypes={{}}
           extensionLoading={{}}
           extensionsByLibrary={{}}
           onNewPathChange={() => {}}
+          onNewLibraryKindChange={() => {}}
           onAddPath={() => {}}
+          onUpdateLibraryKind={() => {}}
           onDeletePath={() => {}}
           onScan={() => {}}
           onBrowsePath={() => {}}

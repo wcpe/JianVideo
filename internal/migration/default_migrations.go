@@ -63,6 +63,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateTasksCenter,
 			Validate:    validateTasksCenter,
 		},
+		{
+			ID:          "20260708_0007_fr2_052_library_kinds",
+			Description: "补齐媒体库内容分型与扫描上下文索引",
+			SafeToRetry: true,
+			Estimate:    estimateLibraryKinds,
+			Up:          migrateLibraryKinds,
+			Validate:    validateLibraryKinds,
+		},
 	}
 }
 
@@ -98,6 +106,8 @@ func migrateCoreSchema(tx *gorm.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			path TEXT NOT NULL,
 			type TEXT NOT NULL DEFAULT 'local',
+			library_kind TEXT NOT NULL DEFAULT 'mixed',
+			library_profile_json TEXT NOT NULL DEFAULT '{}',
 			label TEXT,
 			enabled INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
@@ -636,6 +646,59 @@ func validateTasksCenter(_ context.Context, db *gorm.DB) (Validation, error) {
 		return Validation{}, fmt.Errorf("space 任务缺少 space_id: %d", count)
 	}
 	return Validation{Summary: "通用任务队列中心已就绪"}, nil
+}
+
+func estimateLibraryKinds(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var count int64
+	if tableExists(db, "library_paths") {
+		_ = db.Table("library_paths").Count(&count).Error
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateLibraryKinds(_ context.Context, tx *gorm.DB) error {
+	if err := addColumnIfMissing(tx, "library_paths", "library_kind", "TEXT NOT NULL DEFAULT 'mixed'"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "library_paths", "library_profile_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		UPDATE library_paths
+		SET library_kind = 'mixed'
+		WHERE library_kind IS NULL
+			OR library_kind = ''
+			OR library_kind NOT IN ('movie', 'series', 'home_video', 'mixed')
+	`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		UPDATE library_paths
+		SET library_profile_json = '{}'
+		WHERE library_profile_json IS NULL OR library_profile_json = ''
+	`).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_library_paths_space_kind_id ON library_paths(space_id, library_kind, id);`).Error
+}
+
+func validateLibraryKinds(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, column := range []string{"library_kind", "library_profile_json"} {
+		if !columnExists(db, "library_paths", column) {
+			return Validation{}, fmt.Errorf("library_paths 缺少 %s", column)
+		}
+	}
+	if count := countTableWhere(
+		db,
+		"library_paths",
+		"library_kind IS NULL OR library_kind = '' OR library_kind NOT IN ('movie', 'series', 'home_video', 'mixed')",
+	); count != 0 {
+		return Validation{}, fmt.Errorf("library_paths 存在非法 library_kind")
+	}
+	if !indexExists(db, "idx_library_paths_space_kind_id") {
+		return Validation{}, fmt.Errorf("媒体库分型索引不存在: idx_library_paths_space_kind_id")
+	}
+	return Validation{Summary: "媒体库内容分型已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

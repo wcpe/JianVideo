@@ -1,8 +1,20 @@
 /** 媒体库目录 */
+export type LibraryKind = 'movie' | 'series' | 'home_video' | 'mixed';
+
+export interface LibraryKindInfo {
+  kind: LibraryKind;
+  name: string;
+  description: string;
+  naming_hint: string;
+  scan_strategy: string;
+}
+
 export interface LibraryPath {
   id: number;
   path: string;
   type: string;
+  library_kind?: LibraryKind;
+  library_profile_json?: string;
   label: string;
   enabled: boolean;
   created_at: string;

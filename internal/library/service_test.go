@@ -56,6 +56,69 @@ func TestCreateLibraryPath(t *testing.T) {
 	if lp.Enabled != 1 {
 		t.Fatalf("期望启用状态 1, 实际 %d", lp.Enabled)
 	}
+	if lp.LibraryKind != models.LibraryKindMixed {
+		t.Fatalf("默认分型期望 mixed, 实际 %s", lp.LibraryKind)
+	}
+	if lp.LibraryProfileJSON != "{}" {
+		t.Fatalf("默认分型配置期望空 JSON, 实际 %s", lp.LibraryProfileJSON)
+	}
+}
+
+func TestCreateLibraryPathWithKind(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, t.TempDir(), "local", "剧集库", models.LibraryKindSeries)
+	if err != nil {
+		t.Fatalf("创建剧集库失败: %v", err)
+	}
+	if lp.LibraryKind != models.LibraryKindSeries {
+		t.Fatalf("分型期望 series, 实际 %s", lp.LibraryKind)
+	}
+
+	if _, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, t.TempDir(), "local", "坏分型", "anime"); !errors.Is(err, ErrInvalidLibraryKind) {
+		t.Fatalf("非法分型应返回 ErrInvalidLibraryKind, 实际 %v", err)
+	}
+}
+
+func TestUpdateLibraryPathWithKind(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, err := svc.CreateLibraryPath(t.TempDir(), "local", "待更新")
+	if err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	kind := models.LibraryKindHomeVideo
+	updated, err := svc.UpdateLibraryPathWithKindInSpace(models.DefaultSpaceID, lp.ID, nil, nil, &kind)
+	if err != nil {
+		t.Fatalf("更新分型失败: %v", err)
+	}
+	if updated.LibraryKind != models.LibraryKindHomeVideo {
+		t.Fatalf("分型期望 home_video, 实际 %s", updated.LibraryKind)
+	}
+
+	invalid := "documentary"
+	if _, err := svc.UpdateLibraryPathWithKindInSpace(models.DefaultSpaceID, lp.ID, nil, nil, &invalid); !errors.Is(err, ErrInvalidLibraryKind) {
+		t.Fatalf("非法分型更新应返回 ErrInvalidLibraryKind, 实际 %v", err)
+	}
+}
+
+func TestScanContextForLibraryCarriesKind(t *testing.T) {
+	svc, _ := newTestService(t)
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, t.TempDir(), "local", "剧集库", models.LibraryKindSeries)
+	if err != nil {
+		t.Fatalf("创建剧集库失败: %v", err)
+	}
+
+	scanCtx, err := svc.ScanContextForLibraryInSpace(models.DefaultSpaceID, lp.ID)
+	if err != nil {
+		t.Fatalf("读取扫描上下文失败: %v", err)
+	}
+	if scanCtx.LibraryKind != models.LibraryKindSeries {
+		t.Fatalf("扫描上下文分型期望 series, 实际 %s", scanCtx.LibraryKind)
+	}
+	if scanCtx.SpaceID != models.DefaultSpaceID || scanCtx.LibraryID != lp.ID {
+		t.Fatalf("扫描上下文归属不正确: %+v", scanCtx)
+	}
 }
 
 func TestListLibraryPaths(t *testing.T) {

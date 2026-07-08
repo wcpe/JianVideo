@@ -1,5 +1,7 @@
 import type {
   LibraryPath,
+  LibraryKind,
+  LibraryKindInfo,
   MediaFile,
   MediaListResponse,
   ScanResponse,
@@ -27,6 +29,37 @@ import { mockPaths, mockMediaFiles } from '@/mocks/data';
 let nextMockId = 100;
 let nextMockExtensionId = 1;
 const mockExtensions: MediaExtension[] = [];
+
+export const defaultLibraryKinds: LibraryKindInfo[] = [
+  {
+    kind: 'movie',
+    name: '电影',
+    description: '面向电影与长片，后续用于标题与年份解析。',
+    naming_hint: '片名 (年份)/片名.ext',
+    scan_strategy: '按文件与上级目录识别单片资源',
+  },
+  {
+    kind: 'series',
+    name: '剧集',
+    description: '面向电视剧、番剧与课程，后续用于季集入口。',
+    naming_hint: '剧名/Season 01/剧名 S01E01.ext',
+    scan_strategy: '保留季集解析上下文',
+  },
+  {
+    kind: 'home_video',
+    name: '家庭录像',
+    description: '面向家庭影像、相机视频和生活记录。',
+    naming_hint: '日期_地点_事件.ext',
+    scan_strategy: '优先保留拍摄时间与原始文件名',
+  },
+  {
+    kind: 'mixed',
+    name: '混合',
+    description: '兼容旧库与混合内容，不套用专门影视规则。',
+    naming_hint: '保持现有目录与文件名',
+    scan_strategy: '使用通用扫描策略',
+  },
+];
 
 // 标签 mock 状态（FR-41）：标签表 + 媒体-标签映射
 let nextMockTagId = 1;
@@ -59,17 +92,36 @@ async function realGetLibraryPaths(): Promise<LibraryPath[]> {
   return res.data.items;
 }
 
+async function realGetLibraryKinds(): Promise<LibraryKindInfo[]> {
+  const res = await client.get<{ items: LibraryKindInfo[] }>('/api/library/kinds');
+  return res.data.items;
+}
+
 async function realCreateLibraryPath(
   path: string,
   type = 'local',
   label = '',
+  libraryKind: LibraryKind = 'mixed',
 ): Promise<LibraryPath> {
   try {
-    const res = await client.post<LibraryPath>('/api/library/paths', { path, type, label });
+    const res = await client.post<LibraryPath>('/api/library/paths', {
+      path,
+      type,
+      label,
+      library_kind: libraryKind,
+    });
     return res.data;
   } catch (err) {
     throw new Error(getApiErrorMessage(err, '无法添加目录，请检查路径是否正确'), { cause: err });
   }
+}
+
+async function realUpdateLibraryPath(
+  id: number,
+  input: Partial<Pick<LibraryPath, 'label' | 'enabled' | 'library_kind'>>,
+): Promise<LibraryPath> {
+  const res = await client.put<LibraryPath>(`/api/library/paths/${id}`, input);
+  return res.data;
 }
 
 async function realDeleteLibraryPath(id: number): Promise<void> {
@@ -361,22 +413,43 @@ async function mockGetLibraryPaths(): Promise<LibraryPath[]> {
   }));
 }
 
+async function mockGetLibraryKinds(): Promise<LibraryKindInfo[]> {
+  await mockDelay(80);
+  return defaultLibraryKinds;
+}
+
 async function mockCreateLibraryPath(
   path: string,
   type = 'local',
   label = '',
+  libraryKind: LibraryKind = 'mixed',
 ): Promise<LibraryPath> {
   await mockDelay(200);
   const p: LibraryPath = {
     id: nextMockId++,
     path,
     type,
+    library_kind: libraryKind,
+    library_profile_json: '{}',
     label: label || path,
     enabled: true,
     created_at: new Date().toISOString(),
   };
   mockPaths.push(p);
   return p;
+}
+
+async function mockUpdateLibraryPath(
+  id: number,
+  input: Partial<Pick<LibraryPath, 'label' | 'enabled' | 'library_kind'>>,
+): Promise<LibraryPath> {
+  await mockDelay(120);
+  const path = mockPaths.find((item) => item.id === id);
+  if (!path) throw new Error('媒体库不存在');
+  if (input.label !== undefined) path.label = input.label.trim();
+  if (input.enabled !== undefined) path.enabled = input.enabled;
+  if (input.library_kind !== undefined) path.library_kind = input.library_kind;
+  return path;
 }
 
 async function mockDeleteLibraryPath(id: number): Promise<void> {
@@ -797,8 +870,17 @@ async function mockBrowseDirectory(parentPath: string, sort = 'name'): Promise<B
 export function getLibraryPaths() {
   return useMock ? mockGetLibraryPaths() : realGetLibraryPaths();
 }
-export function createLibraryPath(p: string, t = 'local', l = '') {
-  return useMock ? mockCreateLibraryPath(p, t, l) : realCreateLibraryPath(p, t, l);
+export function getLibraryKinds() {
+  return useMock ? mockGetLibraryKinds() : realGetLibraryKinds();
+}
+export function createLibraryPath(p: string, t = 'local', l = '', kind: LibraryKind = 'mixed') {
+  return useMock ? mockCreateLibraryPath(p, t, l, kind) : realCreateLibraryPath(p, t, l, kind);
+}
+export function updateLibraryPath(
+  id: number,
+  input: Partial<Pick<LibraryPath, 'label' | 'enabled' | 'library_kind'>>,
+) {
+  return useMock ? mockUpdateLibraryPath(id, input) : realUpdateLibraryPath(id, input);
 }
 export function deleteLibraryPath(id: number) {
   return useMock ? mockDeleteLibraryPath(id) : realDeleteLibraryPath(id);
