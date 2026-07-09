@@ -127,6 +127,30 @@ func InitSchema(d *sql.DB) error {
 );`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_inferences_media_id ON media_inferences(media_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_inferences_space_media ON media_inferences(space_id, media_id);`,
+		`CREATE TABLE IF NOT EXISTS cache_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    space_id TEXT NOT NULL DEFAULT 'space-default',
+    library_id INTEGER DEFAULT 0,
+    media_id INTEGER DEFAULT 0,
+    kind TEXT NOT NULL,
+    asset_level TEXT NOT NULL,
+    profile_id TEXT,
+    variant TEXT,
+    cache_key TEXT,
+    relative_path TEXT NOT NULL UNIQUE,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    file_count INTEGER NOT NULL DEFAULT 0,
+    rebuildable INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    accessed_at DATETIME,
+    missing_at DATETIME,
+    updated_at DATETIME NOT NULL
+);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_space_kind ON cache_assets(space_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_library_kind ON cache_assets(library_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_media_kind ON cache_assets(media_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_relative_path ON cache_assets(relative_path);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_assets_relative_path_unique ON cache_assets(relative_path);`,
 	}
 	for _, q := range queries {
 		if _, err := d.Exec(q); err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/storage"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
@@ -58,7 +59,7 @@ func (h *Handler) Negotiate(c *gin.Context) {
 
 	// 非 h264：同步产 fMP4（FR-51）；产出失败降级回 h264（不报错，保证可播）
 	if transcoder.IsAdvancedCodec(codec) {
-		if !h.produceFMP4(c.Request.Context(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec) {
+		if !h.produceFMP4(c.Request.Context(), mf.ID, mf.SpaceID, mf.LibraryID, mf.FilePath, mf.Width, mf.Height, codec) {
 			log.Printf("[WARN] fMP4 产出失败，降级回 h264: mediaID=%d, codec=%s", mf.ID, codec)
 			codec = transcoder.DefaultTargetCodec
 		}
@@ -90,7 +91,7 @@ func (h *Handler) chooseCodec(ctx context.Context, clientCaps map[string]bool) s
 
 // produceFMP4 为高级编码同步产出 fMP4 分片（FR-51）。
 // 缺 hlsDir / hlsMgr、ffmpeg 不可用、SMB 路径或源文件缺失、产出失败均返回 false（调用方降级）。
-func (h *Handler) produceFMP4(ctx context.Context, mediaID int64, filePath string, width, height int, codec string) bool {
+func (h *Handler) produceFMP4(ctx context.Context, mediaID int64, spaceID string, libraryID int64, filePath string, width, height int, codec string) bool {
 	if h.hlsDir == "" || h.hlsMgr == nil || !transcoder.IsFFmpegAvailable() {
 		return false
 	}
@@ -100,9 +101,22 @@ func (h *Handler) produceFMP4(ctx context.Context, mediaID int64, filePath strin
 	if _, err := os.Stat(filePath); err != nil {
 		return false
 	}
-	if _, err := transcoder.PreSliceWithCodec(ctx, mediaID, filePath, width, height, codec, h.hlsMgr, h.hlsDir); err != nil {
+	result, err := transcoder.PreSliceWithCodec(ctx, mediaID, filePath, width, height, codec, h.hlsMgr, h.hlsDir)
+	if err != nil {
 		log.Printf("[WARN] fMP4 预切片失败: mediaID=%d, codec=%s, err=%v", mediaID, codec, err)
 		return false
+	}
+	if h.cache != nil && result != nil {
+		if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
+			SpaceID:   spaceID,
+			LibraryID: libraryID,
+			MediaID:   mediaID,
+			Kind:      storage.CacheKindHLS,
+			ProfileID: codec,
+			Path:      result.OutputDir,
+		}); err != nil {
+			log.Printf("[WARN] fMP4 缓存登记失败: mediaID=%d, codec=%s, err=%v", mediaID, codec, err)
+		}
 	}
 	return true
 }

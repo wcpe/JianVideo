@@ -477,6 +477,18 @@ const unifiedTasks: TaskItem[] = [
   },
 ];
 
+const cacheKinds = ['thumbnail', 'hls', 'image_proxy', 'cover', 'metadata_temp'] as const;
+type MockCacheKind = (typeof cacheKinds)[number];
+type MockCacheRow = { kind: MockCacheKind; size_bytes: number; file_count: number; asset_count: number };
+
+const cacheRows: Record<MockCacheKind, MockCacheRow> = {
+  thumbnail: { kind: 'thumbnail', size_bytes: 280_000_000, file_count: 860, asset_count: 860 },
+  hls: { kind: 'hls', size_bytes: 1_920_000_000, file_count: 4180, asset_count: 12 },
+  image_proxy: { kind: 'image_proxy', size_bytes: 96_000_000, file_count: 44, asset_count: 44 },
+  cover: { kind: 'cover', size_bytes: 32_000_000, file_count: 26, asset_count: 26 },
+  metadata_temp: { kind: 'metadata_temp', size_bytes: 8_000_000, file_count: 18, asset_count: 18 },
+};
+
 // 公开分享（FR-43/FR-78）内存数据
 let shares: Share[] = [];
 let nextShareTokenSeq = 1;
@@ -1720,6 +1732,88 @@ export const handlers = [
       return HttpResponse.json({ code: 'TASK_NOT_FOUND', message: '任务不存在' }, { status: 404 });
     }
     return HttpResponse.json(item);
+  }),
+
+  http.get('*/api/storage/cache/summary', async () => {
+    await delay(80);
+    const rows = Object.values(cacheRows);
+    return HttpResponse.json({
+      total_size_bytes: rows.reduce((sum, row) => sum + row.size_bytes, 0),
+      total_file_count: rows.reduce((sum, row) => sum + row.file_count, 0),
+      total_assets: rows.reduce((sum, row) => sum + row.asset_count, 0),
+      by_kind: Object.fromEntries(rows.map((row) => [row.kind, { ...row, rebuildable: true }])),
+    });
+  }),
+
+  http.get('*/api/storage/cache/assets', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: [], page: 1, page_size: 20, total: 0 });
+  }),
+
+  http.post('*/api/storage/cache/inventory', async () => {
+    await delay(120);
+    const now = new Date().toISOString();
+    addUnifiedTask({
+      id: `cache-inventory-${Date.now()}`,
+      scope: 'space',
+      space_id: 'space-default',
+      type: 'cache.inventory',
+      status: 'succeeded',
+      priority: 0,
+      attempts: 0,
+      max_attempts: 1,
+      progress: 1,
+      resource_type: 'cache',
+      resource_id: 'inventory',
+      error: null,
+      created_at: now,
+      updated_at: now,
+      finished_at: now,
+    });
+    return HttpResponse.json({ discovered: 5, missing: 0, task_id: Date.now() });
+  }),
+
+  http.post('*/api/storage/cache/clean', async ({ request }) => {
+    await delay(120);
+    const body = (await request.json()) as { dry_run?: boolean; kinds?: MockCacheKind[] };
+    const kinds = body.kinds?.length ? body.kinds : [...cacheKinds];
+    const selected = kinds.map((kind) => cacheRows[kind]).filter(Boolean);
+    const result = {
+      dry_run: Boolean(body.dry_run),
+      task_id: body.dry_run ? undefined : Date.now(),
+      candidate_count: selected.reduce((sum, row) => sum + row.asset_count, 0),
+      total_size_bytes: selected.reduce((sum, row) => sum + row.size_bytes, 0),
+      total_file_count: selected.reduce((sum, row) => sum + row.file_count, 0),
+      deleted_count: 0,
+      deleted_size_bytes: 0,
+      failed_count: 0,
+    };
+    if (!body.dry_run) {
+      for (const kind of kinds) {
+        cacheRows[kind] = { ...cacheRows[kind], size_bytes: 0, file_count: 0, asset_count: 0 };
+      }
+      result.deleted_count = result.candidate_count;
+      result.deleted_size_bytes = result.total_size_bytes;
+      const now = new Date().toISOString();
+      addUnifiedTask({
+        id: `cache-clean-${Date.now()}`,
+        scope: 'space',
+        space_id: 'space-default',
+        type: 'cache.clean',
+        status: 'succeeded',
+        priority: 0,
+        attempts: 0,
+        max_attempts: 1,
+        progress: 1,
+        resource_type: 'cache',
+        resource_id: 'clean',
+        error: null,
+        created_at: now,
+        updated_at: now,
+        finished_at: now,
+      });
+    }
+    return HttpResponse.json(result, { status: body.dry_run ? 200 : 202 });
   }),
 
   http.post('*/api/tasks/:id/cancel', async ({ request, params }) => {

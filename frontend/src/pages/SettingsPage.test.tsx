@@ -33,9 +33,8 @@ describe('SettingsPage', () => {
   it('加载并展示现有设置值', async () => {
     renderPage();
     // 扫描周期初始值 3600 应填入输入框
-    await waitFor(() => {
-      expect(screen.getByLabelText('扫描周期（秒）')).toHaveValue('3600');
-    });
+    const scanInterval = await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 });
+    expect(scanInterval).toHaveValue('3600');
     // 回收站路径初始 JSON 回填为结构化行：盘符 D + 路径 D:/.recycle
     expect(screen.getByLabelText('盘符 1')).toHaveValue('D');
     expect(screen.getByLabelText('回收站路径 1')).toHaveValue('D:/.recycle');

@@ -29,6 +29,7 @@ import SharePage from './pages/SharePage';
 import MapPage from './pages/MapPage';
 import TranscodePage from './pages/TranscodePage';
 import TasksPage from './pages/TasksPage';
+import StorageCachePage from './pages/StorageCachePage';
 import LicensesPage from './pages/LicensesPage';
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
@@ -202,6 +203,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <TasksPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/storage-cache"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <StorageCachePage />
                 </AppLayout>
               </ProtectedRoute>
             }

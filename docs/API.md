@@ -872,6 +872,76 @@
 - **响应**（200）：重试后的任务对象。仅 `failed` / `canceled` 可重试；命中旧扫描 / 转码镜像任务时，先重试旧队列真源再同步通用任务镜像。
 - **说明**：通用状态只使用 `pending` / `running` / `succeeded` / `failed` / `canceled`。旧扫描 / 转码 API 仍可返回 `completed` / `error`，但统一任务 API 与 `packages/media-client` 均映射为 `succeeded` / `failed`。
 
+### 存储与缓存管理（FR2-048）
+
+- **方法 / 路径**：`GET /api/storage/cache/summary`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **查询参数**：`kind`、`library_id`、`media_id` 可选。
+- **响应**（200）：
+  ```json
+  {
+    "total_size_bytes": 1024,
+    "total_file_count": 3,
+    "total_assets": 2,
+    "by_kind": {
+      "thumbnail": {"kind": "thumbnail", "size_bytes": 512, "file_count": 1, "asset_count": 1, "rebuildable": true},
+      "hls": {"kind": "hls", "size_bytes": 512, "file_count": 2, "asset_count": 1, "rebuildable": true}
+    }
+  }
+  ```
+- **方法 / 路径**：`GET /api/storage/cache/assets`
+- **查询参数**：`kind`、`library_id`、`media_id`、`page`、`page_size` 可选。
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 1,
+        "space_id": "space-default",
+        "library_id": 1,
+        "media_id": 88,
+        "kind": "hls",
+        "asset_level": "directory",
+        "profile_id": "h264",
+        "relative_path": "hls/88",
+        "size_bytes": 512,
+        "file_count": 2,
+        "rebuildable": true,
+        "created_at": "2026-07-09T10:00:00Z",
+        "updated_at": "2026-07-09T10:00:00Z"
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "total": 1
+  }
+  ```
+- **方法 / 路径**：`POST /api/storage/cache/inventory`
+- **响应**（200）：`{"discovered":2,"missing":0,"task_id":101}`
+- **说明**：扫描数据目录下的缓存白名单，补齐历史缓存资产，并把磁盘缺失的登记标记 `missing_at`；HLS 只登记媒体目录，不为 segment 逐行建资产。
+- **方法 / 路径**：`POST /api/storage/cache/clean`
+- **请求**：
+  ```json
+  {
+    "dry_run": true,
+    "kinds": ["thumbnail", "hls"]
+  }
+  ```
+- **响应**（dry-run 200，真实清理 202）：
+  ```json
+  {
+    "dry_run": true,
+    "task_id": 0,
+    "candidate_count": 1,
+    "total_size_bytes": 512,
+    "total_file_count": 1,
+    "deleted_count": 0,
+    "deleted_size_bytes": 0,
+    "failed_count": 0
+  }
+  ```
+- **说明**：`kinds` 为空表示全部白名单类型；非法类型返回 `400`。dry-run 只计算影响范围并写 `cache.clean.preview` 审计；真实清理只删除 `thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/` 下登记的可重建缓存，写 `cache.clean` 任务与 `cache.clean.executed` 审计，不删除原媒体、数据库、WAL/SHM、审计或备份。
+
 ### 触发媒体健康巡检（FR-73）
 
 - **方法 / 路径**：`POST /api/library/health/scan`

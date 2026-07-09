@@ -29,6 +29,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
+	"github.com/wcpe/JianVideo/internal/storage"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	"github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
@@ -88,6 +89,9 @@ type Handler struct {
 
 	// 外部工具下载管理器（FR2-022）：未注入时工具下载端点返回 503。
 	tools *tools.Manager
+
+	// 存储与缓存管理（FR2-048）：缓存资产登记、统计、盘点与白名单清理。
+	cache *storage.Service
 }
 
 // NewHandler 创建处理器。
@@ -162,6 +166,12 @@ func (h *Handler) WithTaskWorkers(workers *tasksvc.WorkerRegistry) *Handler {
 // WithTools 注入外部工具下载管理器，启用 /api/system/tools 端点。
 func (h *Handler) WithTools(manager *tools.Manager) *Handler {
 	h.tools = manager
+	return h
+}
+
+// WithCache 注入缓存资产服务，启用 /api/storage/cache/* 端点。
+func (h *Handler) WithCache(svc *storage.Service) *Handler {
+	h.cache = svc
 	return h
 }
 
@@ -972,8 +982,21 @@ func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
 		if _, err := os.Stat(mf.FilePath); err != nil {
 			continue
 		}
-		if _, err := transcoder.PreSlice(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hlsMgr, h.hlsDir); err != nil {
+		result, err := transcoder.PreSlice(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hlsMgr, h.hlsDir)
+		if err != nil {
 			log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
+			continue
+		}
+		if h.cache != nil && result != nil {
+			if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
+				SpaceID:   mf.SpaceID,
+				LibraryID: mf.LibraryID,
+				MediaID:   mf.ID,
+				Kind:      storage.CacheKindHLS,
+				Path:      result.OutputDir,
+			}); err != nil {
+				log.Printf("[WARN] HLS 缓存登记失败: mediaID=%d, err=%v", mf.ID, err)
+			}
 		}
 	}
 }
@@ -1008,6 +1031,7 @@ func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
 		c.JSON(http.StatusAccepted, gin.H{"code": "GENERATING", "message": "缩略图生成中"})
 		return
 	}
+	h.registerCacheFile(c, mf, storage.CacheKindThumbnail, thumbnailPath, strconv.Itoa(size))
 
 	c.File(thumbnailPath)
 }
@@ -1071,6 +1095,7 @@ func (h *Handler) serveRawImage(c *gin.Context, mf *models.MediaFile) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "CONVERT_FAILED", "message": "图片转换失败"})
 			return
 		}
+		h.registerCacheFile(c, mf, storage.CacheKindImageProxy, jpegPath, "")
 		c.File(jpegPath)
 		return
 	}
@@ -1086,6 +1111,22 @@ func (h *Handler) serveRawImage(c *gin.Context, mf *models.MediaFile) {
 		contentType = http.DetectContentType(data)
 	}
 	c.Data(http.StatusOK, contentType, data)
+}
+
+func (h *Handler) registerCacheFile(c *gin.Context, mf *models.MediaFile, kind, path, variant string) {
+	if h.cache == nil {
+		return
+	}
+	if _, err := h.cache.RegisterFile(c.Request.Context(), storage.RegisterInput{
+		SpaceID:   mf.SpaceID,
+		LibraryID: mf.LibraryID,
+		MediaID:   mf.ID,
+		Kind:      kind,
+		Variant:   variant,
+		Path:      path,
+	}); err != nil {
+		log.Printf("[WARN] 缓存资产登记失败: mediaID=%d, kind=%s, err=%v", mf.ID, kind, err)
+	}
 }
 
 // DownloadMediaFile GET /api/library/media/:id/download

@@ -234,6 +234,15 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		tasks.POST("/:id/retry", h.RetryTask)
 	}
 
+	// 存储与缓存管理（FR2-048）：可重建缓存资产统计、盘点、dry-run 与安全清理。
+	cache := r.Group("/api/storage/cache")
+	{
+		cache.GET("/summary", h.StorageCacheSummary)
+		cache.GET("/assets", h.StorageCacheAssets)
+		cache.POST("/inventory", h.StorageCacheInventory)
+		cache.POST("/clean", h.StorageCacheClean)
+	}
+
 	// 播放路由（可选）
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		RegisterPlaybackRoutes(r, pbSvc[0])

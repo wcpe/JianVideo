@@ -831,8 +831,8 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     renderLayoutAt('/browse');
 
     const navbar = getNavbar();
-    // 14 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）、任务（FR2-037）
-    expect(navbar.querySelectorAll('.nav-link').length).toBe(14);
+    // 15 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）、任务（FR2-037）、缓存（FR2-048）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(15);
     // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1);
   });

@@ -30,6 +30,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
+	"github.com/wcpe/JianVideo/internal/storage"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	toolsvc "github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
@@ -173,7 +174,8 @@ func main() {
 	hlsMgr := player.NewHLSManager(hlsDir)
 
 	// 初始化缩略图存储目录（与数据库、HLS 同处数据目录下）
-	library.InitThumbnailDir(filepath.Dir(cfg.DBPath))
+	dataDir := filepath.Dir(cfg.DBPath)
+	library.InitThumbnailDir(dataDir)
 
 	// magick 路径注入与 HEIC/RAW 转换缓存目录初始化（FR-37，见 ADR）：
 	// 解析顺序与 ffmpeg 一致：环境变量 → 同目录捆绑版 → PATH。
@@ -183,7 +185,7 @@ func main() {
 		library.SetMagickPath(p)
 		log.Printf("[INFO] 采用持久化设置的 magick 路径: %s", p)
 	}
-	library.InitConvertCacheDir(filepath.Dir(cfg.DBPath))
+	library.InitConvertCacheDir(dataDir)
 	if library.IsMagickAvailable() {
 		log.Printf("[INFO] ImageMagick 可用: %s（HEIC/RAW 将转 JPEG 显示）", library.GetMagickPath())
 	} else {
@@ -226,6 +228,7 @@ func main() {
 	})
 	shareSvc := share.NewService(gormDB)
 	taskSvc := tasksvc.NewService(gormDB).WithAudit(auditSvc)
+	cacheSvc := storage.NewService(gormDB, dataDir).WithAudit(auditSvc).WithTasks(taskSvc)
 	if err := taskSvc.RecoverRunning(context.Background()); err != nil {
 		log.Printf("[WARN] 通用任务队列重启恢复失败: %v", err)
 	}
@@ -285,7 +288,17 @@ func main() {
 		if err != nil {
 			return fmt.Errorf("预生成反查媒体失败: mediaID=%d: %w", mediaID, err)
 		}
-		_, err = transcoder.PreSliceWithCodec(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, hlsMgr, hlsDir)
+		result, err := transcoder.PreSliceWithCodec(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, hlsMgr, hlsDir)
+		if err == nil && result != nil {
+			_, err = cacheSvc.RegisterDirectory(context.Background(), storage.RegisterInput{
+				SpaceID:   mf.SpaceID,
+				LibraryID: mf.LibraryID,
+				MediaID:   mf.ID,
+				Kind:      storage.CacheKindHLS,
+				ProfileID: codec,
+				Path:      result.OutputDir,
+			})
+		}
 		return err
 	}).WithAudit(auditSvc).WithTasks(taskSvc)
 	if err := pregenQueue.RecoverRunning(); err != nil {
@@ -294,7 +307,7 @@ func main() {
 	pregenQueue.Start()
 	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

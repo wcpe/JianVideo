@@ -95,6 +95,7 @@ jianvideo/
 │   ├── settings/             运行期键值设置真源
 │   ├── share/                分享链接 token 生命周期
 │   ├── smb/                  SMB(CIFS) 客户端
+│   ├── storage/              可重建缓存资产登记、盘点、统计与安全清理
 │   ├── transcoder/          FFmpeg 转码、多码率、硬件加速、字幕、预生成队列
 │   ├── update/              自更新
 │   ├── watcher/             文件系统事件监听（fsnotify）
@@ -119,7 +120,9 @@ jianvideo/
     ├── jianvideo.db           SQLite 元数据库（WAL）
     ├── hls/                   HLS 切片输出
     ├── thumbnails/            缩略图缓存
-    └── image_cache/           图片缓存
+    ├── image_cache/           图片缓存
+    ├── covers/                封面缓存
+    └── metadata_temp/         元数据临时缓存
 ```
 
 ### 2.2 v2 API client 与 mock 先行基础（FR2-006）
@@ -348,6 +351,23 @@ FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`�
 
 FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：配置写入、媒体库创建/更新/删除、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务创建/成功/失败/取消/重试、缓存清理和迁移开始/成功/失败都会写事件。业务模块通过 `audit.Recorder` 接口注入审计服务；必须审计的业务变更在同一个 SQLite 事务内调用 `RecordTx`，审计写入失败时业务事务整体回滚。查询使用 `GET /api/audit/events`，Space scoped 查询默认只返回当前 Space 的 `scope=space` 事件，系统级事件需显式 `scope=system`。
 
+**缓存资产（cache_assets）** — FR2-048
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| space_id | TEXT | Space 归属，缺省兼容 `space-default` |
+| library_id / media_id | INTEGER | 关联媒体库与媒体；盘点发现的孤立缓存可为空 |
+| kind | TEXT | `thumbnail` / `hls` / `image_proxy` / `cover` / `metadata_temp` |
+| asset_level | TEXT | `file` 或 `directory`；HLS 只按目录登记 |
+| profile_id / variant / cache_key | TEXT | 产物档位、变体或调用方缓存键 |
+| relative_path | TEXT UNIQUE | 相对数据目录的缓存路径 |
+| size_bytes / file_count | INTEGER | 占用空间与文件数，目录资产为聚合值 |
+| rebuildable | BOOLEAN | 是否可按需重建；首批缓存均为可重建 |
+| created_at / accessed_at / missing_at / updated_at | DATETIME | 创建、访问、磁盘缺失和更新时间 |
+
+FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；HLS 按媒体目录登记聚合 `size_bytes` 与 `file_count`，segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。
+
 **相册（albums）** — FR-40
 
 | 字段 | 类型 | 说明 |
@@ -545,6 +565,14 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - `WorkerRegistry` 按任务类型注册处理器和并发上限，默认扫描 1、转码 1、缩略图 4、内容哈希回填 1、轻任务 2；这些默认值也登记到 FR2-024 设置 registry（`task_worker_*_concurrency`），供运行期配置层暴露。
 - 旧 `scan_tasks` 与 `transcode_tasks` 仍服务既有页面；入队、状态变化、取消和重试会同步到通用 `tasks` 表。统一 `/api/tasks/:id/cancel|retry` 命中旧队列镜像时，会先调用旧队列动作，再刷新通用镜像，避免只改监控表不改执行真源。
 - 任务创建、取消、重试、失败终态写入 FR2-040 审计事件；Space scoped 查询默认只返回当前 Space 任务，系统级任务使用 `scope=system + space_id NULL`。
+
+### 5.1.2.2 存储与缓存管理（FR2-048）
+
+- 缓存登记由 `storage.Service` 提供，缩略图、HLS 预切片、图片代理和封面产物只登记数据目录白名单路径；HLS 目录级登记，避免每个 segment 产生一行资产。
+- `POST /api/storage/cache/inventory` 扫描白名单目录，补齐历史缓存资产并把磁盘已消失的登记标记 `missing_at`。
+- `GET /api/storage/cache/summary` 与 `GET /api/storage/cache/assets` 基于 `cache_assets` 聚合，支持 Space / 类型 / 库 / 媒体范围查询。
+- `POST /api/storage/cache/clean` 支持 dry-run 预览和真实清理。真实清理写 `cache.clean` 任务记录、删除缓存文件或目录、删除对应资产行，并写 `cache.clean.executed` 审计事件；dry-run 只写 `cache.clean.preview` 审计，不触碰磁盘。
+- 清理只能作用于 `thumbnail`、`hls`、`image_proxy`、`cover`、`metadata_temp` 白名单类型，不管理原媒体空间、不做自动复杂淘汰、跨磁盘迁移或云存储。
 
 ### 5.1.3 定时扫描调度（FR-28）
 

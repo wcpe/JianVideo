@@ -103,6 +103,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateMediaInferences,
 			Validate:    validateMediaInferences,
 		},
+		{
+			ID:          "20260709_0009_fr2_048_cache_assets",
+			Description: "建立缓存资产登记表与白名单清理索引",
+			SafeToRetry: true,
+			Estimate:    estimateCacheAssets,
+			Up:          migrateCacheAssets,
+			Validate:    validateCacheAssets,
+		},
 	}
 }
 
@@ -880,6 +888,29 @@ func migrateFileHashDedup(_ context.Context, tx *gorm.DB) error {
 	return nil
 }
 
+func estimateCacheAssets(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateCacheAssets(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.CacheAsset{}); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_space_kind ON cache_assets(space_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_library_kind ON cache_assets(library_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_media_kind ON cache_assets(media_id, kind);`,
+		`CREATE INDEX IF NOT EXISTS idx_cache_assets_relative_path ON cache_assets(relative_path);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_assets_relative_path_unique ON cache_assets(relative_path);`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateFileHashDedup(_ context.Context, db *gorm.DB) (Validation, error) {
 	if !tableExists(db, "media_hash_groups") {
 		return Validation{}, fmt.Errorf("media_hash_groups 表不存在")
@@ -900,6 +931,29 @@ func validateFileHashDedup(_ context.Context, db *gorm.DB) (Validation, error) {
 		}
 	}
 	return Validation{Summary: "媒体文件内容哈希字段与索引已就绪"}, nil
+}
+
+func validateCacheAssets(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "cache_assets") {
+		return Validation{}, fmt.Errorf("cache_assets 表不存在")
+	}
+	for _, column := range []string{"space_id", "kind", "asset_level", "relative_path", "size_bytes", "file_count", "rebuildable", "missing_at"} {
+		if !columnExists(db, "cache_assets", column) {
+			return Validation{}, fmt.Errorf("cache_assets 缺少 %s", column)
+		}
+	}
+	for _, indexName := range []string{
+		"idx_cache_assets_space_kind",
+		"idx_cache_assets_library_kind",
+		"idx_cache_assets_media_kind",
+		"idx_cache_assets_relative_path",
+		"idx_cache_assets_relative_path_unique",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("缓存资产索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "缓存资产表与索引已就绪"}, nil
 }
 
 func mediaTypeRuleSchemaStatements() []string {
