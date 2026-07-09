@@ -79,6 +79,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateMediaTypeRules,
 			Validate:    validateMediaTypeRules,
 		},
+		{
+			ID:          "20260708_0009_fr2_027_media_file_state",
+			Description: "补齐媒体文件缺失状态字段与扫描任务载荷",
+			SafeToRetry: true,
+			Estimate:    estimateMediaFileState,
+			Up:          migrateMediaFileState,
+			Validate:    validateMediaFileState,
+		},
 	}
 }
 
@@ -181,6 +189,7 @@ func migrateCoreSchema(tx *gorm.DB) error {
 	columns := map[string]string{
 		"display_name":      "TEXT DEFAULT ''",
 		"deleted_at":        "DATETIME",
+		"file_state":        "TEXT NOT NULL DEFAULT 'available'",
 		"media_time":        "DATETIME",
 		"media_time_source": "TEXT DEFAULT ''",
 		"camera":            "TEXT DEFAULT ''",
@@ -209,6 +218,7 @@ func migrateCoreSchema(tx *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_media_files_library_id ON media_files(library_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_files_file_name ON media_files(file_name);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_files_deleted_at ON media_files(deleted_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_file_state ON media_files(file_state);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_files_media_time ON media_files(media_time);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_files_last_viewed_at ON media_files(last_viewed_at);`,
 	}
@@ -785,6 +795,33 @@ func validateMediaTypeRules(_ context.Context, db *gorm.DB) (Validation, error) 
 		}
 	}
 	return Validation{Summary: "媒体类型规则已就绪"}, nil
+}
+
+func estimateMediaFileState(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateMediaFileState(_ context.Context, tx *gorm.DB) error {
+	if err := addColumnIfMissing(tx, "media_files", "file_state", "TEXT NOT NULL DEFAULT 'available'"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(tx, "scan_tasks", "payload_json", "TEXT"); err != nil {
+		return err
+	}
+	return tx.Exec("CREATE INDEX IF NOT EXISTS idx_media_files_file_state ON media_files(file_state)").Error
+}
+
+func validateMediaFileState(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !columnExists(db, "media_files", "file_state") {
+		return Validation{}, fmt.Errorf("media_files 缺少 file_state")
+	}
+	if !indexExists(db, "idx_media_files_file_state") {
+		return Validation{}, fmt.Errorf("media_files.file_state 索引不存在")
+	}
+	if !columnExists(db, "scan_tasks", "payload_json") {
+		return Validation{}, fmt.Errorf("scan_tasks 缺少 payload_json")
+	}
+	return Validation{Summary: "媒体文件缺失状态字段与扫描任务载荷已就绪"}, nil
 }
 
 func mediaTypeRuleSchemaStatements() []string {

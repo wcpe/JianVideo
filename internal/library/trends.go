@@ -42,7 +42,7 @@ func (r *gormMediaRepository) MediaTrends(spaceID string) (*MediaTrends, error) 
 				"COUNT(*) AS count, "+
 				"COALESCE(SUM(file_size), 0) AS size, "+
 				"COALESCE(SUM(duration), 0) AS duration").
-		Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID)).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
 		Group("date").
 		Order("date ASC").
 		Scan(&rows).Error; err != nil {

@@ -700,12 +700,12 @@
 
 - **方法 / 路径**：`POST /api/library/scan/:id`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
-- **查询参数**：`mode`（可选）——`full` 全量扫描（遍历后对账已删文件），`incremental` 或缺省/非法值为增量更新（只索引新增）。
+- **查询参数**：`mode`（可选）——`full` 全量扫描（遍历后分批对账缺失文件），`incremental` 或缺省/非法值为增量更新（只处理新增或变更路径）。
 - **响应**（200）：
   ```json
   {"status": "queued", "task_id": 12}
   ```
-- **说明**：触发扫描会先按当前 Space 查找媒体库目录；跨 Space 的目录 ID 返回 404，不入队、不回退默认 Space。成功后建一个 `pending` 扫描任务入队（FR-29），由单 worker 串行执行，接口立即返回任务 ID（未启用队列时回退直接异步扫描，返回 `{"status":"scanning"}`）。多次触发按入队顺序排队、不并发抢资源。worker 按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描按 `space_id + library_id + file_path` 去重，不会重复入库，入库的媒体文件会异步生成缩略图。可选查询参数 `mode`（`full`/`incremental`，缺省增量，向后兼容，FR-27）：`full` 在入库后对账——当前 Space 库内未软删但源文件已不存在的记录标记软删进回收站（复用 FR-25 软删，不物理删除、不动磁盘），对账仅本地扫描启用。当前进行中任务的实时进度通过「扫描进度」SSE 端点获取，任务列表通过「扫描任务列表」端点获取。
+- **说明**：触发扫描会先按当前 Space 查找媒体库目录；跨 Space 的目录 ID 返回 404，不入队、不回退默认 Space。成功后建一个 `pending` 扫描任务入队（FR-29），由单 worker 串行执行，接口立即返回任务 ID（未启用队列时回退直接异步扫描，返回 `{"status":"scanning"}`）。多次触发按入队顺序排队、不并发抢资源。worker 按 `LibraryPath.type` 分发本地递归扫描或 SMB 扫描，识别内置图片/视频后缀和该目录绑定的自定义后缀；重复扫描按 `space_id + library_id + file_path` 去重，不会重复入库，missing 记录源文件重新出现时恢复为 available，入库的媒体文件会异步生成缩略图。可选查询参数 `mode`（`full`/`incremental`，缺省增量，向后兼容，FR2-027）：`full` 在入库后分批对账——当前 Space 库内未软删且 active 的记录若源文件已不存在，标记 `file_state=missing` 并从常规列表隐藏，不进入回收站、不物理删除、不动磁盘；用户显式删除仍走回收站软删。对账仅本地扫描启用，SMB 轮询为增量语义。当前进行中任务的实时进度通过「扫描进度」SSE 端点获取，任务列表通过「扫描任务列表」端点获取。
 - **错误**：`400` ID 无效，`404` 目录不存在，`500` 入队失败
 
 ### 扫描进度（SSE）
@@ -742,6 +742,7 @@
         "status": "running",
         "scanned_files": 30,
         "total_files": 120,
+        "payload_json": "{\"kind\":\"library\",\"path\":\"D:/Videos\",\"dir_type\":\"local\"}",
         "error": "",
         "created_at": "2026-06-22T20:00:00Z",
         "started_at": "2026-06-22T20:00:01Z",
@@ -751,7 +752,7 @@
     "current": { "id": 12, "status": "running", "...": "同上" }
   }
   ```
-- **说明**：返回全部扫描任务（按入队时间倒序）与当前进行中任务 `current`（无则 `null`）。`status` 取值 `pending` / `running` / `completed` / `error`，`scan_type` 取值 `full` / `incremental`（当前 worker 统一按全量执行，full/incremental 差异留 FR-27 对接）。队列以 SQLite `scan_tasks` 表为持久化真源，由单 worker 串行执行；服务重启时把残留 `running` 任务重置为 `pending` 重新入队。当前 `running` 任务的 `scanned_files`/`total_files` 用实时全局扫描状态覆盖，已完成任务返回其持久化进度。前端页眉据此常驻展示进行中任务并可点开看任务列表与各自进度。
+- **说明**：返回全部扫描任务（按入队时间倒序）与当前进行中任务 `current`（无则 `null`）。`status` 取值 `pending` / `running` / `completed` / `error`，`scan_type` 取值 `full` / `incremental`。队列以 SQLite `scan_tasks` 表为持久化真源，由单 worker 串行执行；手动/定时扫描 payload 记录库路径与类型，watcher 事件 payload 记录 `ScanChange`。服务重启时把残留 `running` 任务重置为 `pending`，从 payload 或 `library_paths` 还原执行目标后重新入队。当前 `running` 任务的 `scanned_files`/`total_files` 用实时全局扫描状态覆盖，已完成任务返回其持久化进度。前端页眉据此常驻展示进行中任务并可点开看任务列表与各自进度。
 
 ### 通用任务中心（FR2-037）
 

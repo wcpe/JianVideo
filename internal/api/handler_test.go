@@ -588,7 +588,7 @@ func waitScanCompleted(t *testing.T) {
 }
 
 // TestScanLibrary_FullModeReconciles 端点 mode=full 触发对账：删除源文件后全量扫，
-// 缺失记录进回收站、常规列表消失；缺省 mode 为增量、不对账。
+// 缺失记录从常规列表隐藏且不进回收站；缺省 mode 为增量、不对账。
 func TestScanLibrary_FullModeReconciles(t *testing.T) {
 	router, svc := setupTestRouter(t)
 	dir := t.TempDir()
@@ -618,18 +618,15 @@ func TestScanLibrary_FullModeReconciles(t *testing.T) {
 		t.Fatalf("增量扫描不应对账软删, 回收站实际 %d 条", len(recycled))
 	}
 
-	// 再 mode=full 扫一次：缺失记录进回收站
+	// 再 mode=full 扫一次：缺失记录隐藏但不进回收站
 	req = httptest.NewRequest("POST", "/api/library/scan/"+strconv.FormatInt(lp.ID, 10)+"?mode=full", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	waitScanCompleted(t)
 
 	recycled, _ = svc.ListDeletedMediaFiles()
-	if len(recycled) != 1 {
-		t.Fatalf("全量扫描后回收站应有 1 条, 实际 %d", len(recycled))
-	}
-	if recycled[0].FileName != "gone.mp4" {
-		t.Fatalf("软删的应为 gone.mp4, 实际 %s", recycled[0].FileName)
+	if len(recycled) != 0 {
+		t.Fatalf("全量扫描后 missing 不应进入回收站, 实际 %d 条", len(recycled))
 	}
 	_, total, _ := svc.ListMediaFiles(lp.ID, "", "", 1, 20)
 	if total != 1 {

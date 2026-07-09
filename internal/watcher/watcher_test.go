@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +29,7 @@ func newTestWatcher(t *testing.T) (*Watcher, *library.Service, *gorm.DB, func())
 	}
 	// SQLite 内存库按连接隔离，watcher 异步写入必须复用同一连接
 	sqlDB.SetMaxOpenConns(1)
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.ScanTask{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
@@ -197,7 +199,7 @@ func TestWatcher_IgnoresNonMediaFiles(t *testing.T) {
 }
 
 func TestWatcher_RemovesMediaFile(t *testing.T) {
-	w, svc, _, cleanup := newTestWatcher(t)
+	w, svc, gdb, cleanup := newTestWatcher(t)
 	defer cleanup()
 
 	_, dir := createTestLibrary(t, svc)
@@ -225,12 +227,115 @@ func TestWatcher_RemovesMediaFile(t *testing.T) {
 		t.Fatalf("删除文件失败: %v", err)
 	}
 
-	// 等待删除记录
-	if !waitForCondition(t, "媒体文件记录删除", func() bool {
+	// 等待常规查询隐藏缺失记录
+	if !waitForCondition(t, "媒体文件记录隐藏", func() bool {
 		_, err := svc.GetMediaFileByPath(videoPath)
 		return err != nil
 	}) {
-		t.Fatal("等待媒体文件记录删除超时")
+		t.Fatal("等待媒体文件记录隐藏超时")
+	}
+
+	var mf models.MediaFile
+	if err := gdb.Where("file_path = ?", filepath.ToSlash(videoPath)).First(&mf).Error; err != nil {
+		t.Fatalf("查询缺失记录失败: %v", err)
+	}
+	if mf.FileState != models.MediaFileStateMissing {
+		t.Fatalf("删除事件应标记 missing，实际 %q", mf.FileState)
+	}
+	if mf.DeletedAt != nil {
+		t.Fatal("删除事件不应把记录放入回收站")
+	}
+}
+
+func TestWatcher_EnqueuesChangeWhenQueueInjected(t *testing.T) {
+	w, svc, gdb, cleanup := newTestWatcher(t)
+	defer cleanup()
+
+	libID, dir := createTestLibrary(t, svc)
+	var enqueued int32
+	q := library.NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		t.Fatal("watcher 事件不应触发整库扫描")
+		return 0, nil
+	}).WithChangeExec(func(change library.ScanChange) (int, error) {
+		if change.SpaceID != models.DefaultSpaceID || change.LibraryID != libID || change.Op != library.ScanChangeModified {
+			t.Fatalf("变更参数不正确: %+v", change)
+		}
+		atomic.AddInt32(&enqueued, 1)
+		return 1, nil
+	})
+	q.Start()
+	defer q.Stop()
+	w.WithScanQueue(q)
+
+	if err := w.Start(); err != nil {
+		t.Fatalf("启动监听器失败: %v", err)
+	}
+	videoPath := filepath.Join(dir, "queued.mp4")
+	if err := os.WriteFile(videoPath, []byte("fake video data"), 0o644); err != nil {
+		t.Fatalf("写入文件失败: %v", err)
+	}
+
+	if !waitForCondition(t, "watcher 变更入队", func() bool {
+		return atomic.LoadInt32(&enqueued) == 1
+	}) {
+		t.Fatal("等待 watcher 变更入队超时")
+	}
+}
+
+func TestWatcher_EnqueuesRemoveWhenQueueInjected(t *testing.T) {
+	w, svc, gdb, cleanup := newTestWatcher(t)
+	defer cleanup()
+
+	libID, dir := createTestLibrary(t, svc)
+	q := library.NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		t.Fatal("删除事件不应触发整库扫描")
+		return 0, nil
+	})
+	w.WithScanQueue(q)
+	w.mu.Lock()
+	w.pathToLib[filepath.ToSlash(dir)] = libID
+	w.pathToSpace[filepath.ToSlash(dir)] = models.DefaultSpaceID
+	w.mu.Unlock()
+
+	videoPath := filepath.Join(dir, "removed.mp4")
+	w.removeRecord(videoPath)
+
+	var task models.ScanTask
+	if err := gdb.First(&task).Error; err != nil {
+		t.Fatalf("查询扫描任务失败: %v", err)
+	}
+	if task.ScanType != models.ScanTypeIncremental {
+		t.Fatalf("删除事件应入队为增量任务，实际 %s", task.ScanType)
+	}
+	if !strings.Contains(task.PayloadJSON, string(library.ScanChangeRemoved)) || !strings.Contains(task.PayloadJSON, filepath.ToSlash(videoPath)) {
+		t.Fatalf("删除事件 payload 不正确: %s", task.PayloadJSON)
+	}
+}
+
+func TestWatcher_PollSMBEnqueuesIncrementalScanWhenQueueInjected(t *testing.T) {
+	w, _, gdb, cleanup := newTestWatcher(t)
+	defer cleanup()
+
+	q := library.NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		t.Fatal("SMB 轮询不应绕过队列直接扫描")
+		return 0, nil
+	})
+	w.WithScanQueue(q)
+	w.smbLibs = []models.LibraryPath{
+		{ID: 8, SpaceID: models.DefaultSpaceID, Path: "smb://server/share", Type: "smb"},
+	}
+
+	w.pollAllSMB()
+
+	var task models.ScanTask
+	if err := gdb.First(&task).Error; err != nil {
+		t.Fatalf("查询扫描任务失败: %v", err)
+	}
+	if task.LibraryID != 8 || task.ScanType != models.ScanTypeIncremental {
+		t.Fatalf("SMB 轮询任务不正确: %+v", task)
+	}
+	if !strings.Contains(task.PayloadJSON, "smb://server/share") {
+		t.Fatalf("SMB 轮询 payload 不正确: %s", task.PayloadJSON)
 	}
 }
 

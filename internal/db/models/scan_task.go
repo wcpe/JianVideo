@@ -35,6 +35,7 @@ type ScanTask struct {
 	Status       string     `gorm:"index;not null;default:'pending';index:idx_scan_tasks_space_status_created" json:"status"`
 	ScannedFiles int        `gorm:"default:0" json:"scanned_files"`
 	TotalFiles   int        `gorm:"default:0" json:"total_files"`
+	PayloadJSON  string     `json:"payload_json,omitempty"`
 	Error        string     `json:"error"`
 	CreatedAt    time.Time  `gorm:"index:idx_scan_tasks_space_status_created" json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`

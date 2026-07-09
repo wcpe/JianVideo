@@ -1,6 +1,6 @@
 # 功能规格：定期扫描、增量更新与目录事件监听
 
-> 状态：已审核接受　·　关联 PRD：FR2-027　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已实现　·　关联 PRD：FR2-027　·　阶段：P2 `0.23.x`　·　分支：`codex/fr2-027-scan-watch`
 
 ## 1. 背景与目标
 
@@ -53,17 +53,17 @@ API：
 
 ## 4. 任务拆分
 
-- [ ] 定义扫描变更模型与事件归一逻辑。
-- [ ] 将手动扫描、定时扫描、watcher 事件接入统一任务队列。
-- [ ] 实现增量扫描刷新已变更文件元数据。
-- [ ] 重写 full reconcile 为分批游标式流程。
-- [ ] 删除/缺失/重命名写审计事件。
-- [ ] 保留旧扫描 API 兼容层，包括 `mode=full|incremental` 查询参数。
-- [ ] 补单元测试：事件归一、debounce、扫描模式、路径归一。
-- [ ] 补集成测试：临时库 create/modify/delete/rename、重启恢复、取消任务。
-- [ ] 补 E2E：手动扫描入队、进度可查、列表刷新。
-- [ ] 补 Benchmark：大库 full reconcile 与增量扫描耗时/内存。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义扫描变更模型与事件归一逻辑。
+- [x] 将手动扫描、定时扫描、watcher 事件接入统一任务队列。
+- [x] 实现增量扫描刷新已变更文件元数据。
+- [x] 重写 full reconcile 为分批游标式流程。
+- [x] 删除/缺失/重命名写审计事件。
+- [x] 保留旧扫描 API 兼容层，包括 `mode=full|incremental` 查询参数。
+- [x] 补单元测试：事件归一、debounce、扫描模式、路径归一。
+- [x] 补集成测试：临时库 create/modify/delete/rename、重启恢复、取消任务。
+- [x] 补 E2E：手动扫描入队、进度可查、列表刷新。
+- [x] 补 Benchmark：大库 full reconcile 与增量扫描耗时/内存。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

@@ -180,7 +180,7 @@ func main() {
 	}
 
 	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。
-	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType).WithAudit(auditSvc).WithTasks(taskSvc)
+	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType).WithChangeExec(libSvc.ApplyScanChange).WithAudit(auditSvc).WithTasks(taskSvc)
 	if err := scanQueue.RecoverRunning(); err != nil {
 		log.Printf("[WARN] 扫描队列重启恢复失败: %v", err)
 	}
@@ -235,7 +235,7 @@ func main() {
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。
 	if w, err := watcher.New(libSvc); err != nil {
 		log.Printf("[WARN] 文件监听初始化失败: %v", err)
-	} else if err := w.Start(); err != nil {
+	} else if err := w.WithScanQueue(scanQueue).Start(); err != nil {
 		log.Printf("[WARN] 文件监听启动失败: %v", err)
 	} else {
 		defer w.Stop()

@@ -113,7 +113,7 @@ func (r *gormMediaRepository) ListMediaFiles(filter MediaFilter, page MediaPageR
 
 func (r *gormMediaRepository) GetMediaFileByID(spaceID string, id int64) (*models.MediaFile, error) {
 	var mf models.MediaFile
-	if err := r.db.Where("space_id = ? AND id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), id).
+	if err := r.db.Where("space_id = ? AND id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), id).
 		First(&mf).Error; err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (r *gormMediaRepository) GetMediaFileByID(spaceID string, id int64) (*model
 
 func (r *gormMediaRepository) ListMediaByPathPrefix(spaceID, prefix string) ([]models.MediaFile, error) {
 	var allFiles []models.MediaFile
-	err := r.db.Where("space_id = ? AND file_path LIKE ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), prefix+"%").
+	err := r.db.Where("space_id = ? AND file_path LIKE ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), prefix+"%").
 		Order("file_path ASC").Find(&allFiles).Error
 	return allFiles, err
 }
@@ -142,7 +142,7 @@ func (r *gormMediaRepository) GetLibraryPathByID(spaceID string, id int64) (*mod
 }
 
 func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
-	query := r.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(filter.SpaceID))
+	query := r.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(filter.SpaceID))
 	if filter.LibraryID > 0 {
 		query = query.Where("library_id = ?", filter.LibraryID)
 	}
@@ -233,5 +233,5 @@ func cursorSortSupported(sortKey string) bool {
 }
 
 func (r *gormMediaRepository) spaceMediaQuery(spaceID string) *gorm.DB {
-	return r.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID))
+	return r.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID))
 }

@@ -20,19 +20,19 @@ func countDeleted(t *testing.T, svc *Service, libraryID int64) int64 {
 	return n
 }
 
-// deletedAtOf 返回指定库内某路径记录的 deleted_at 是否非空（不存在则 t.Fatal）。
-func deletedAtOf(t *testing.T, svc *Service, libraryID int64, filePath string) bool {
+// fileStateOf 返回指定库内某路径记录的文件状态与 deleted_at 状态（不存在则 t.Fatal）。
+func fileStateOf(t *testing.T, svc *Service, libraryID int64, filePath string) (string, bool) {
 	t.Helper()
 	var mf models.MediaFile
 	if err := svc.db.Where("library_id = ? AND file_path = ?", libraryID, filepath.ToSlash(filePath)).
 		First(&mf).Error; err != nil {
 		t.Fatalf("查询记录失败: %s, err=%v", filePath, err)
 	}
-	return mf.DeletedAt != nil
+	return mf.FileState, mf.DeletedAt != nil
 }
 
 // TestFullScan_ReconcilesDeletedFiles 全量扫描对账：删除磁盘源文件后全量扫，
-// 该记录应被标记软删（进回收站），仍存在的文件不动。
+// 该记录应被标记 missing，仍存在的文件不动。
 func TestFullScan_ReconcilesDeletedFiles(t *testing.T) {
 	svc, _ := newTestService(t)
 	dir := t.TempDir()
@@ -66,20 +66,28 @@ func TestFullScan_ReconcilesDeletedFiles(t *testing.T) {
 		t.Fatalf("二次全量扫描失败: %v", err)
 	}
 
-	if !deletedAtOf(t, svc, 1, gone) {
-		t.Fatal("源文件已删除，全量扫描后该记录应被软删")
+	goneState, goneDeleted := fileStateOf(t, svc, 1, gone)
+	if goneDeleted {
+		t.Fatal("源文件已删除，全量扫描后该记录不应进入回收站")
 	}
-	if deletedAtOf(t, svc, 1, keep) {
+	if goneState != models.MediaFileStateMissing {
+		t.Fatalf("源文件已删除，全量扫描后应标记 missing，实际 %q", goneState)
+	}
+	keepState, keepDeleted := fileStateOf(t, svc, 1, keep)
+	if keepDeleted {
 		t.Fatal("仍存在的文件不应被软删")
 	}
+	if keepState != models.MediaFileStateAvailable {
+		t.Fatalf("仍存在的文件应保持 available，实际 %q", keepState)
+	}
 
-	// 软删项应可经回收站列表看到，常规列表不可见
+	// missing 项常规列表不可见，且不进入回收站
 	recycled, err := svc.ListDeletedMediaFiles()
 	if err != nil {
 		t.Fatalf("查询回收站失败: %v", err)
 	}
-	if len(recycled) != 1 {
-		t.Fatalf("回收站应有 1 条软删记录, 实际 %d", len(recycled))
+	if len(recycled) != 0 {
+		t.Fatalf("回收站不应包含 missing 记录, 实际 %d", len(recycled))
 	}
 	_, total, err := svc.ListMediaFiles(1, "", "", 1, 20)
 	if err != nil {
@@ -87,6 +95,58 @@ func TestFullScan_ReconcilesDeletedFiles(t *testing.T) {
 	}
 	if total != 1 {
 		t.Fatalf("常规列表应只剩 1 条, 实际 %d", total)
+	}
+}
+
+// TestFullScan_MarksMissingWithoutSoftDelete FR2-027：全量对账只标记 missing，
+// 不把缺失文件放入回收站；常规列表仍需隐藏 missing 项。
+func TestFullScan_MarksMissingWithoutSoftDelete(t *testing.T) {
+	svc, gdb := newTestService(t)
+	dir := t.TempDir()
+
+	keep := filepath.Join(dir, "keep.mp4")
+	gone := filepath.Join(dir, "gone.mp4")
+	if err := os.WriteFile(keep, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写文件失败: %v", err)
+	}
+	if err := os.WriteFile(gone, []byte("fake"), 0o644); err != nil {
+		t.Fatalf("写文件失败: %v", err)
+	}
+	if _, err := svc.ScanLibraryWithType(1, dir, "local", ScanModeFull); err != nil {
+		t.Fatalf("首次全量扫描失败: %v", err)
+	}
+
+	if err := os.Remove(gone); err != nil {
+		t.Fatalf("删除源文件失败: %v", err)
+	}
+	if _, err := svc.ScanLibraryWithType(1, dir, "local", ScanModeFull); err != nil {
+		t.Fatalf("二次全量扫描失败: %v", err)
+	}
+
+	var missing models.MediaFile
+	if err := gdb.Where("library_id = ? AND file_path = ?", int64(1), filepath.ToSlash(gone)).First(&missing).Error; err != nil {
+		t.Fatalf("缺失文件记录应仍存在: %v", err)
+	}
+	if missing.DeletedAt != nil {
+		t.Fatal("缺失文件不应进入回收站")
+	}
+	if missing.FileState != models.MediaFileStateMissing {
+		t.Fatalf("缺失文件应标记 missing，实际 %q", missing.FileState)
+	}
+
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{LibraryID: 1}, 1, 20)
+	if err != nil {
+		t.Fatalf("查询常规列表失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || filepath.ToSlash(items[0].FilePath) != filepath.ToSlash(keep) {
+		t.Fatalf("常规列表应只包含存在文件，total=%d items=%+v", total, items)
+	}
+	deleted, err := svc.ListDeletedMediaFiles()
+	if err != nil {
+		t.Fatalf("查询回收站失败: %v", err)
+	}
+	if len(deleted) != 0 {
+		t.Fatalf("missing 不应出现在回收站，实际 %d 条", len(deleted))
 	}
 }
 
@@ -151,18 +211,26 @@ func TestFullScan_OtherLibraryUntouched(t *testing.T) {
 		t.Fatalf("库 2 建记录失败: %v", err)
 	}
 
-	// 删源文件后只全量扫库 1，库 2 记录不应被软删
+	// 删源文件后只全量扫库 1，库 2 记录不应被误标
 	if err := os.Remove(shared); err != nil {
 		t.Fatalf("删除源文件失败: %v", err)
 	}
 	if _, err := svc.ScanLibraryWithType(1, dir, "local", ScanModeFull); err != nil {
 		t.Fatalf("库 1 二次全量扫描失败: %v", err)
 	}
-	if !deletedAtOf(t, svc, 1, shared) {
-		t.Fatal("库 1 缺失文件应被软删")
+	state1, deleted1 := fileStateOf(t, svc, 1, shared)
+	if deleted1 {
+		t.Fatal("库 1 缺失文件不应被软删")
 	}
-	if deletedAtOf(t, svc, 2, shared) {
+	if state1 != models.MediaFileStateMissing {
+		t.Fatalf("库 1 缺失文件应标记 missing，实际 %q", state1)
+	}
+	state2, deleted2 := fileStateOf(t, svc, 2, shared)
+	if deleted2 {
 		t.Fatal("库 2 同路径记录不应被对账误标")
+	}
+	if state2 != models.MediaFileStateAvailable {
+		t.Fatalf("库 2 同路径记录应保持 available，实际 %q", state2)
 	}
 }
 

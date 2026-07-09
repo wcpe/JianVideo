@@ -1,21 +1,77 @@
 package library
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
-// scanTarget 扫描目标的执行参数。仅 worker 执行期需要，不入库（path 真源在 library_paths 表）。
+const (
+	scanPayloadKindLibrary = "library"
+	scanPayloadKindChange  = "change"
+)
+
+// scanTarget 扫描目标的执行参数。入队时写入 payload，执行期同时暂存内存映射。
 type scanTarget struct {
 	libraryID int64
 	path      string
 	dirType   string
+	change    *ScanChange
+}
+
+type scanTaskPayload struct {
+	Kind    string      `json:"kind"`
+	Path    string      `json:"path,omitempty"`
+	DirType string      `json:"dir_type,omitempty"`
+	Change  *ScanChange `json:"change,omitempty"`
+}
+
+func encodeScanTarget(t scanTarget) (string, error) {
+	payload := scanTaskPayload{
+		Kind:    scanPayloadKindLibrary,
+		Path:    t.path,
+		DirType: t.dirType,
+	}
+	if t.change != nil {
+		change := NormalizeScanChange(*t.change)
+		payload.Kind = scanPayloadKindChange
+		payload.Change = &change
+		payload.Path = ""
+		payload.DirType = ""
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("编码扫描任务载荷失败: %w", err)
+	}
+	return string(b), nil
+}
+
+func decodeScanTarget(task models.ScanTask) (scanTarget, bool, error) {
+	if task.PayloadJSON == "" {
+		return scanTarget{}, false, nil
+	}
+	var payload scanTaskPayload
+	if err := json.Unmarshal([]byte(task.PayloadJSON), &payload); err != nil {
+		return scanTarget{}, false, fmt.Errorf("解析扫描任务载荷失败: %w", err)
+	}
+	switch payload.Kind {
+	case scanPayloadKindChange:
+		if payload.Change == nil {
+			return scanTarget{}, false, fmt.Errorf("扫描变更载荷缺少变更内容")
+		}
+		change := NormalizeScanChange(*payload.Change)
+		return scanTarget{libraryID: change.LibraryID, change: &change}, true, nil
+	case scanPayloadKindLibrary:
+		return scanTarget{libraryID: task.LibraryID, path: payload.Path, dirType: payload.DirType}, true, nil
+	default:
+		return scanTarget{}, false, fmt.Errorf("未知扫描任务载荷类型: %s", payload.Kind)
+	}
 }
 
 // targetStore 任务 ID → 扫描目标 的内存映射，配合队列在入队与执行间传递目标参数。
-// 仅过程态，并发安全；进程退出即丢弃（重启由 RecoverRunning 按 library_id 反查重建）。
+// 仅作快速路径；进程退出后由 scan_tasks.payload_json 或 library_paths 重建。
 type targetStore struct {
 	mu      sync.Mutex
 	targets map[int64]scanTarget

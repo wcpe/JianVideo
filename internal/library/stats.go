@@ -117,7 +117,7 @@ func (r *gormMediaRepository) fillRecentTimeline(spaceID string, stats *WatchSta
 	var rows []TimelineBucket
 	if err := r.db.Model(&models.MediaFile{}).
 		Select("strftime('%Y-%m-%d', last_watched_at, 'localtime') AS date, COUNT(*) AS count").
-		Where("space_id = ? AND deleted_at IS NULL AND last_watched_at IS NOT NULL", normalizeSpaceID(spaceID)).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition()+" AND last_watched_at IS NOT NULL", normalizeSpaceID(spaceID)).
 		Group("date").
 		Order("date DESC").
 		Limit(recentTimelineDays).
@@ -137,7 +137,7 @@ func (r *gormMediaRepository) fillPositionHeatmap(spaceID string, stats *WatchSt
 	var rows []ratioRow
 	if err := r.db.Model(&models.MediaFile{}).
 		Select("last_position / duration AS ratio").
-		Where("space_id = ? AND deleted_at IS NULL AND duration > 0 AND last_position > 0", normalizeSpaceID(spaceID)).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition()+" AND duration > 0 AND last_position > 0", normalizeSpaceID(spaceID)).
 		Scan(&rows).Error; err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (r *gormMediaRepository) fillByLibrary(spaceID string, stats *WatchStats) e
 	if err := r.db.Model(&models.MediaFile{}).
 		Select("media_files.library_id AS library_id, library_paths.label AS label, COUNT(*) AS watched").
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
-		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL AND media_files.watched = ?", normalizeSpaceID(spaceID), true).
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL AND "+activeFileStateCondition()+" AND media_files.watched = ?", normalizeSpaceID(spaceID), true).
 		Group("media_files.library_id").
 		Order("watched DESC").
 		Scan(&rows).Error; err != nil {
@@ -181,7 +181,7 @@ func (r *gormMediaRepository) fillByFormat(spaceID string, stats *WatchStats) er
 	var rows []FormatWatchCount
 	if err := r.db.Model(&models.MediaFile{}).
 		Select("format AS format, COUNT(*) AS watched").
-		Where("space_id = ? AND deleted_at IS NULL AND watched = ?", normalizeSpaceID(spaceID), true).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition()+" AND watched = ?", normalizeSpaceID(spaceID), true).
 		Group("format").
 		Order("watched DESC").
 		Scan(&rows).Error; err != nil {
@@ -195,7 +195,7 @@ func (r *gormMediaRepository) fillByFormat(spaceID string, stats *WatchStats) er
 func (r *gormMediaRepository) fillTopViewed(spaceID string, stats *WatchStats) error {
 	var items []models.MediaFile
 	if err := r.db.
-		Where("space_id = ? AND deleted_at IS NULL AND view_count > 0", normalizeSpaceID(spaceID)).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition()+" AND view_count > 0", normalizeSpaceID(spaceID)).
 		Order("view_count DESC").
 		Limit(topViewedLimit).
 		Find(&items).Error; err != nil {

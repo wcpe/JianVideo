@@ -61,6 +61,7 @@ func InitSchema(d *sql.DB) error {
     height INTEGER DEFAULT 0,
     bitrate INTEGER DEFAULT 0,
     subtitle_tracks TEXT,
+    file_state TEXT NOT NULL DEFAULT 'available',
     added_at DATETIME,
     modified_at DATETIME
 );`,

@@ -18,16 +18,20 @@ import (
 // 经函数注入而非直接依赖 Service，便于队列单测替身。
 type ScanExecFunc func(libraryID int64, path, dirType, mode string) (int, error)
 
+// ScanChangeExecFunc 扫描变更执行函数签名。
+type ScanChangeExecFunc func(change ScanChange) (int, error)
+
 // TaskQueue 扫描任务队列（FR-29）：以 SQLite ScanTask 表为持久化真源，
 // 单 worker goroutine 串行执行入队任务，服务重启时把残留 running 重置为 pending 重新入队。
 //
 // 职责单一：只负责「排队 + 串行调度 + 状态持久化」，扫描执行逻辑由注入的 exec 承担，
 // 不在此重写扫描（增量/全量对账是 FR-27）。
 type TaskQueue struct {
-	db    *gorm.DB
-	exec  ScanExecFunc
-	audit audit.Recorder
-	tasks *tasksvc.Service
+	db         *gorm.DB
+	exec       ScanExecFunc
+	changeExec ScanChangeExecFunc
+	audit      audit.Recorder
+	tasks      *tasksvc.Service
 
 	store targetStore // 任务执行目标的过程态内存映射
 
@@ -47,6 +51,12 @@ func (q *TaskQueue) WithAudit(rec audit.Recorder) *TaskQueue {
 // WithTasks 注入通用任务中心，使旧扫描队列生命周期同步到 tasks 真源。
 func (q *TaskQueue) WithTasks(svc *tasksvc.Service) *TaskQueue {
 	q.tasks = svc
+	return q
+}
+
+// WithChangeExec 注入单路径扫描变更执行函数。
+func (q *TaskQueue) WithChangeExec(exec ScanChangeExecFunc) *TaskQueue {
+	q.changeExec = exec
 	return q
 }
 
@@ -70,11 +80,17 @@ func (q *TaskQueue) EnqueueInSpace(spaceID string, libraryID int64, path, dirTyp
 	if scanType == "" {
 		scanType = models.ScanTypeFull
 	}
+	target := scanTarget{path: path, dirType: dirType, libraryID: libraryID}
+	payload, err := encodeScanTarget(target)
+	if err != nil {
+		return 0, err
+	}
 	task := &models.ScanTask{
-		SpaceID:   normalizeSpaceID(spaceID),
-		LibraryID: libraryID,
-		ScanType:  scanType,
-		Status:    models.ScanTaskStatusPending,
+		SpaceID:     normalizeSpaceID(spaceID),
+		LibraryID:   libraryID,
+		ScanType:    scanType,
+		Status:      models.ScanTaskStatusPending,
+		PayloadJSON: payload,
 	}
 	if err := q.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(task).Error; err != nil {
@@ -85,10 +101,42 @@ func (q *TaskQueue) EnqueueInSpace(spaceID string, libraryID int64, path, dirTyp
 		return 0, err
 	}
 	q.syncTask(task)
-	// 入队时把 path/dirType 暂存内存映射，供 worker 取用（path 不入库，避免冗余真源）
-	q.rememberTarget(task.ID, scanTarget{path: path, dirType: dirType, libraryID: libraryID})
+	q.rememberTarget(task.ID, target)
 	q.wake()
 	log.Printf("[INFO] 扫描任务已入队: taskID=%d, libraryID=%d, type=%s", task.ID, libraryID, scanType)
+	return task.ID, nil
+}
+
+// EnqueueChange 将 watcher/轮询产生的单路径变更入队为增量扫描任务。
+func (q *TaskQueue) EnqueueChange(change ScanChange) (int64, error) {
+	change = NormalizeScanChange(change)
+	if change.LibraryID <= 0 || change.Path == "" {
+		return 0, fmt.Errorf("扫描变更参数无效")
+	}
+	target := scanTarget{libraryID: change.LibraryID, change: &change}
+	payload, err := encodeScanTarget(target)
+	if err != nil {
+		return 0, err
+	}
+	task := &models.ScanTask{
+		SpaceID:     change.SpaceID,
+		LibraryID:   change.LibraryID,
+		ScanType:    models.ScanTypeIncremental,
+		Status:      models.ScanTaskStatusPending,
+		PayloadJSON: payload,
+	}
+	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(task).Error; err != nil {
+			return err
+		}
+		return q.recordAuditTx(tx, task, "task.created", "")
+	}); err != nil {
+		return 0, err
+	}
+	q.syncTask(task)
+	q.rememberTarget(task.ID, target)
+	q.wake()
+	log.Printf("[INFO] 扫描变更任务已入队: taskID=%d, libraryID=%d, op=%s", task.ID, change.LibraryID, change.Op)
 	return task.ID, nil
 }
 
@@ -148,6 +196,18 @@ func (q *TaskQueue) RecoverRunning() error {
 		return err
 	}
 	for _, t := range stale {
+		target, ok, err := q.targetFromTask(t)
+		if err == nil && ok {
+			q.rememberTarget(t.ID, target)
+			t.Status = models.ScanTaskStatusPending
+			t.StartedAt = nil
+			q.syncTask(&t)
+			continue
+		}
+		if err != nil {
+			q.markError(t.ID, err.Error())
+			continue
+		}
 		path, dirType, err := q.lookupTarget(t.LibraryID)
 		if err != nil {
 			// 目录已不存在，无法重新执行，标记为错误而非永久卡 pending
@@ -262,11 +322,18 @@ func (q *TaskQueue) RetryTaskInSpace(spaceID string, taskID int64) error {
 		return err
 	}
 	q.syncTask(&task)
-	path, dirType, err := q.lookupTarget(task.LibraryID)
+	target, ok, err := q.targetFromTask(task)
 	if err != nil {
 		return err
 	}
-	q.rememberTarget(task.ID, scanTarget{path: path, dirType: dirType, libraryID: task.LibraryID})
+	if !ok {
+		path, dirType, err := q.lookupTarget(task.LibraryID)
+		if err != nil {
+			return err
+		}
+		target = scanTarget{path: path, dirType: dirType, libraryID: task.LibraryID}
+	}
+	q.rememberTarget(task.ID, target)
 	q.wake()
 	return nil
 }
@@ -319,12 +386,20 @@ func (q *TaskQueue) nextPending() (models.ScanTask, bool) {
 func (q *TaskQueue) runTask(task models.ScanTask) {
 	target, ok := q.takeTarget(task.ID)
 	if !ok {
-		q.markError(task.ID, "扫描目标缺失：任务无法执行")
-		return
+		restored, restoredOK, err := q.targetFromTask(task)
+		if err != nil {
+			q.markError(task.ID, err.Error())
+			return
+		}
+		if !restoredOK {
+			q.markError(task.ID, "扫描目标缺失：任务无法执行")
+			return
+		}
+		target = restored
 	}
 
 	log.Printf("[INFO] 开始执行扫描任务: taskID=%d, libraryID=%d", task.ID, task.LibraryID)
-	count, err := q.exec(target.libraryID, target.path, target.dirType, task.ScanType)
+	count, err := q.runTarget(task, target)
 	now := time.Now()
 	if err != nil {
 		if txErr := q.db.Transaction(func(tx *gorm.DB) error {
@@ -368,6 +443,24 @@ func (q *TaskQueue) runTask(task models.ScanTask) {
 	log.Printf("[INFO] 扫描任务执行完成: taskID=%d, count=%d", task.ID, count)
 }
 
+func (q *TaskQueue) runTarget(task models.ScanTask, target scanTarget) (int, error) {
+	if target.change != nil {
+		if q.changeExec == nil {
+			return 0, fmt.Errorf("扫描变更执行器未配置")
+		}
+		return q.changeExec(*target.change)
+	}
+	return q.exec(target.libraryID, target.path, target.dirType, task.ScanType)
+}
+
+func (q *TaskQueue) targetFromTask(task models.ScanTask) (scanTarget, bool, error) {
+	target, ok, err := decodeScanTarget(task)
+	if err != nil || ok {
+		return target, ok, err
+	}
+	return scanTarget{}, false, nil
+}
+
 // markError 把任务标记为 error 并记录原因（用于无法执行的边界场景）。
 func (q *TaskQueue) markError(taskID int64, reason string) {
 	now := time.Now()
@@ -409,7 +502,7 @@ func (q *TaskQueue) syncTask(task *models.ScanTask) {
 		Status:         task.Status,
 		Progress:       progress,
 		IdempotencyKey: fmt.Sprintf("scan:%d", task.ID),
-		PayloadJSON:    fmt.Sprintf(`{"legacy_table":"scan_tasks","legacy_id":%d,"library_id":%d,"scan_type":%q}`, task.ID, task.LibraryID, task.ScanType),
+		PayloadJSON:    q.taskPayloadJSON(task),
 		ResourceType:   "library",
 		ResourceID:     fmt.Sprintf("%d", task.LibraryID),
 		Error:          task.Error,
@@ -419,6 +512,13 @@ func (q *TaskQueue) syncTask(task *models.ScanTask) {
 	}); err != nil {
 		log.Printf("[WARN] 同步扫描任务到通用任务中心失败: taskID=%d, err=%v", task.ID, err)
 	}
+}
+
+func (q *TaskQueue) taskPayloadJSON(task *models.ScanTask) string {
+	if task.PayloadJSON != "" {
+		return task.PayloadJSON
+	}
+	return fmt.Sprintf(`{"legacy_table":"scan_tasks","legacy_id":%d,"library_id":%d,"scan_type":%q}`, task.ID, task.LibraryID, task.ScanType)
 }
 
 func (q *TaskQueue) recordAuditTx(tx *gorm.DB, task *models.ScanTask, action, errText string) error {

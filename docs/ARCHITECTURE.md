@@ -190,6 +190,7 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 | height | INTEGER | 视频高度 |
 | bitrate | INTEGER | 总码率 |
 | subtitle_tracks | TEXT | 字幕轨道信息（JSON） |
+| file_state | TEXT, INDEX | 文件可用状态：`available` 正常、`missing` 源文件缺失；missing 不进回收站但从常规列表隐藏 |
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
 | favorite | INTEGER | 收藏标记（FR-41），0/1 |
@@ -383,12 +384,13 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | status | TEXT, INDEX | 任务状态：`pending` / `running` / `completed` / `error` |
 | scanned_files | INTEGER | 完成时记录的入库文件数 |
 | total_files | INTEGER | 待扫描文件总数 |
+| payload_json | TEXT | 扫描执行载荷：整库扫描保存路径/类型，watcher 变更保存 `ScanChange`，用于重启恢复与通用任务镜像 |
 | error | TEXT | 出错信息（status=error 时） |
 | created_at | DATETIME | 入队时间 |
 | started_at | DATETIME NULL | 开始执行时间 |
 | completed_at | DATETIME NULL | 结束时间 |
 
-扫描任务队列以本表为持久化真源，由单 worker 串行执行；任务列表按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+扫描任务队列以本表为持久化真源，由单 worker 串行执行；任务列表按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending`，并从 `payload_json` 或 `library_paths` 还原执行目标后重新入队（见 §5.1）。
 
 **分享链接（shares）（FR-43；密码/限次列见 FR-78）**
 
@@ -484,17 +486,17 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - 本地目录注册时必须校验路径存在且为目录，入库前转为绝对路径并统一为正斜杠。
 - `ScanLibraryWithType(libraryID, dirPath, dirType, mode)` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
 - 扫描上下文（FR2-052）由 `ScanContextForLibraryInSpace` 在扫描入口读取 `library_paths.library_kind`，随 `space_id + library_id` 传入本地 / SMB 扫描链路；当前只提供 `movie` / `series` / `home_video` / `mixed` 上下文，完整季集推断、命名规则和每库后缀覆盖由 FR2-025/027/031 消费。
-- 扫描模式（FR-27）：`mode=incremental`（增量更新，缺省）只索引新增文件；`mode=full`（全量扫描）在入库后追加对账——以本次遍历到的现存路径集合为基准，库内未软删（`deleted_at IS NULL`）且不在集合中的记录经一条 `UPDATE` 标记软删进回收站（复用 FR-25），不物理删除、不动磁盘。遍历整体出错时放弃对账以免误删；对账仅本地扫描启用，SMB 轮询为增量语义（远程列举不保证完整）。
+- 扫描模式（FR2-027）：`mode=incremental`（增量更新，缺省）只索引新增或变更文件；`mode=full`（全量扫描）在入库后追加对账——本地扫描不再保留全量路径集合，而是按 `media_files.id` 游标分批检查当前 Space/库内 active 记录的源文件是否存在。缺失源文件标记 `file_state=missing` 并从常规列表、统计和目录浏览隐藏，不进入回收站、不物理删除、不动磁盘；用户显式删除仍走 FR-25 软删。遍历整体出错时放弃对账以免误标；SMB 轮询为增量语义。
 - 媒体识别统一由 `library.Service` 的媒体类型规则服务维护：内置视频 / 图片规则由代码 registry 提供，用户规则持久化在 `media_type_rules`，支持全局默认与每库覆盖。扫描、列表 `type=` 筛选、统计、缩略图、上传校验和图片 raw 入口共用同一规则口径。
-- 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入。
+- 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入；missing 记录的源文件重新出现时会恢复为 `available` 并刷新文件大小和修改时间。
 - 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR-0030）。
 - 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScanInSpace` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（含 `space_id`，`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送当前 Space 视图，`completed`/`error` 后关闭连接。`ScanLibraryWithTypeInSpace` 仍保留同步签名供 watcher 与扫描队列调用。
 
 ### 5.1.2 扫描任务队列（FR-29）
 
-- `library.TaskQueue`（`task_queue.go`）以 SQLite `scan_tasks` 表为持久化真源，单 worker goroutine 串行执行入队任务。触发扫描（`POST /api/library/scan/:id`）改为 `EnqueueInSpace` 建 `pending` 任务，立即返回任务 ID；worker 取最早 `pending` 置 `running`、调注入的执行函数（`Service.ScanLibraryWithTypeInSpace`，函数注入便于测试替身、不在队列重写扫描逻辑），按结果置 `completed`（记 `scanned_files`）或 `error`（记错误）。
-- 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数（path/dirType）为过程态，存内存映射不入库（path 真源仍是 `library_paths`）。
-- 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`（按 `library_id` 反查目录重建执行目标）后再启动 worker 重新执行；目录已失效的任务标记为 `error` 而非永久卡 `pending`。
+- `library.TaskQueue`（`task_queue.go`）以 SQLite `scan_tasks` 表为持久化真源，单 worker goroutine 串行执行入队任务。触发扫描（`POST /api/library/scan/:id`）改为 `EnqueueInSpace` 建 `pending` 任务，立即返回任务 ID；watcher / SMB 轮询调用 `EnqueueChange` 写入单路径 `ScanChange` 任务。worker 取最早 `pending` 置 `running`，整库任务调 `Service.ScanLibraryWithTypeInSpace`，变更任务调 `Service.ApplyScanChange`，按结果置 `completed`（记 `scanned_files`）或 `error`（记错误）。
+- 串行调度用条件信号（容量 1 的 channel）唤醒 worker，队列空时阻塞等待不空转；扫描执行（高开销 IO）在锁外。扫描目标参数同时写入 `scan_tasks.payload_json` 并暂存内存映射，重启后可从 payload 还原 watcher 变更任务。
+- 重启恢复：启动时 `RecoverRunning()` 把残留 `running` 任务重置为 `pending`，优先从 `payload_json` 还原执行目标；旧任务缺 payload 时按 `library_id` 反查目录重建目标。目录已失效或 payload 损坏的任务标记为 `error` 而非永久卡 `pending`。
 - 进度桥接：因单 worker 串行，全局 `ScanStatus` 始终对应当前 `running` 任务；`GET /api/library/scan/tasks` 只返回当前 Space 任务，并在实时 `ScanStatus.space_id` 匹配时把 `scanned_files`/`total_files` 覆盖到 `running` 任务返回，已完成任务用其持久化进度，避免 worker 每 tick 写库。前端页眉据此常驻展示进行中任务。
 
 ### 5.1.2.1 通用异步任务队列中心（FR2-037）
@@ -530,7 +532,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 ### 5.2 文件监听与增量更新
 
 - 使用 `fsnotify` 对已注册本地目录进行递归监听，SMB 目录使用 5 分钟轮询扫描。
-- watcher 只调用 `library.Service` 上报新增/删除事件，不直接操作 DB，保持 `watcher → library → db` 单向依赖。
+- watcher 将新增/修改/删除事件归一为 `ScanChange` 并提交扫描任务队列；未注入队列的测试/兼容路径才直接调用 `library.Service.ApplyScanChange`。删除或丢失文件只标记 `file_state=missing`，不直接删除 DB 记录，保持 `watcher → library → db` 单向依赖。
 - Create/Write 事件先根据所属 `space_id + library_id` 调用统一媒体类型规则判断，支持图片、视频和该目录自定义后缀。
 - 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发入库，避免读取不完整文件。
 - Remove/Rename 事件按路径委托 library 删除对应索引。

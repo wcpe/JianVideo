@@ -93,7 +93,7 @@ func (s *Service) loadSummaryFormatRows(spaceID string) ([]summaryFormatRow, err
 				"COALESCE(SUM(media_files.file_size), 0) AS total_size, "+
 				"COALESCE(SUM(media_files.duration), 0) AS total_duration").
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
-		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL", spaceID).
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL AND "+activeFileStateCondition(), spaceID).
 		Group("media_files.library_id, LOWER(media_files.format)").
 		Scan(&rows).Error
 	return rows, err
@@ -191,7 +191,7 @@ func (r *gormMediaRepository) fillSummaryTotals(spaceID string, summary *Summary
 				"COALESCE(SUM(file_size), 0) AS total_size, "+
 				"COALESCE(SUM(duration), 0) AS total_duration",
 			imageExts, imageExts).
-		Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID)).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
 		Scan(&row).Error; err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func (r *gormMediaRepository) fillSummaryByLibrary(spaceID string, summary *Summ
 				"COALESCE(SUM(media_files.duration), 0) AS total_duration",
 			imageExts, imageExts).
 		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
-		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL", normalizeSpaceID(spaceID)).
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
 		Group("media_files.library_id").
 		Order("media_count DESC").
 		Scan(&rows).Error; err != nil {

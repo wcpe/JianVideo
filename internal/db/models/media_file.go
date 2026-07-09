@@ -2,6 +2,13 @@ package models
 
 import "time"
 
+const (
+	// MediaFileStateAvailable 表示源文件当前可访问。
+	MediaFileStateAvailable = "available"
+	// MediaFileStateMissing 表示源文件在扫描或监听中被判定丢失。
+	MediaFileStateMissing = "missing"
+)
+
 // MediaFile 媒体文件记录。
 type MediaFile struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
@@ -26,6 +33,9 @@ type MediaFile struct {
 
 	// 软删除/回收站（FR-25）：非空表示已软删（进回收站），源文件不动
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+
+	// 文件状态（FR2-027）：missing 表示源文件丢失但尚未进入回收站。
+	FileState string `gorm:"not null;default:'available';index" json:"file_state"`
 
 	// 媒体时间与 EXIF（FR-31）
 	MediaTime       *time.Time `gorm:"index" json:"media_time,omitempty"` // 多层降级解析出的媒体时间，供时间轴排序

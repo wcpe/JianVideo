@@ -36,6 +36,10 @@ function mediaTypesToExtensions(data: MediaTypesResponse, libraryID: number): Me
   });
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function useLibraryPaths(onPathsChanged?: () => void) {
   const [paths, setPaths] = useState<LibraryPath[]>([]);
   const [loading, setLoading] = useState(false);
@@ -185,7 +189,7 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
       setScanLoading((prev) => ({ ...prev, [id]: true }));
       try {
         // 扫描已改为后端异步执行，立即返回；实际进度由扫描进度 SSE 推送
-        await libApi.scanLibrary(id, mode);
+        await Promise.all([libApi.scanLibrary(id, mode), delay(300)]);
         const label = mode === 'full' ? '全量扫描已开始' : '增量更新已开始';
         notifications.show({
           title: label,

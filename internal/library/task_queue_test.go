@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -233,5 +234,92 @@ func TestTaskQueue_ListTasks(t *testing.T) {
 	// 最近入队的在最前
 	if tasks[0].LibraryID != 2 {
 		t.Fatalf("列表应按入队时间倒序, 首条 LibraryID 期望 2, 实际 %d", tasks[0].LibraryID)
+	}
+}
+
+// TestTaskQueue_EnqueueChangeExecutesChangeTarget 验证 watcher 事件进入扫描队列后，
+// worker 执行的是单路径变更而不是整库扫描。
+func TestTaskQueue_EnqueueChangeExecutesChangeTarget(t *testing.T) {
+	gdb := newTaskQueueDB(t)
+
+	execCalled := int32(0)
+	var gotChange ScanChange
+	q := NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		atomic.AddInt32(&execCalled, 1)
+		return 0, nil
+	}).WithChangeExec(func(change ScanChange) (int, error) {
+		gotChange = change
+		return 1, nil
+	})
+	q.Start()
+	defer q.Stop()
+
+	id, err := q.EnqueueChange(ScanChange{
+		SpaceID:   models.DefaultSpaceID,
+		LibraryID: 9,
+		Path:      "D:/media/a.mp4",
+		Op:        ScanChangeModified,
+	})
+	if err != nil {
+		t.Fatalf("变更入队失败: %v", err)
+	}
+
+	waitFor(t, 2*time.Second, func() bool {
+		var task models.ScanTask
+		if err := gdb.First(&task, id).Error; err != nil {
+			return false
+		}
+		return task.Status == models.ScanTaskStatusCompleted
+	})
+	if atomic.LoadInt32(&execCalled) != 0 {
+		t.Fatal("变更任务不应执行整库扫描函数")
+	}
+	if gotChange.Op != ScanChangeModified || gotChange.LibraryID != 9 || gotChange.Path != "D:/media/a.mp4" {
+		t.Fatalf("变更任务参数不正确: %+v", gotChange)
+	}
+}
+
+// TestTaskQueue_RestartedChangeTaskExecutesFromPayload 验证变更任务重启后
+// 仍能从持久化 payload 还原执行目标，而不是依赖进程内内存映射。
+func TestTaskQueue_RestartedChangeTaskExecutesFromPayload(t *testing.T) {
+	gdb := newTaskQueueDB(t)
+	change := ScanChange{
+		SpaceID:   models.DefaultSpaceID,
+		LibraryID: 7,
+		Path:      filepath.ToSlash("D:/Videos/restart.mp4"),
+		Op:        ScanChangeModified,
+	}
+	q1 := NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		t.Fatal("变更任务不应走整库扫描执行器")
+		return 0, nil
+	})
+	if _, err := q1.EnqueueChange(change); err != nil {
+		t.Fatalf("变更入队失败: %v", err)
+	}
+
+	var got atomic.Value
+	q2 := NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		t.Fatal("变更任务不应走整库扫描执行器")
+		return 0, nil
+	}).WithChangeExec(func(change ScanChange) (int, error) {
+		got.Store(change)
+		return 1, nil
+	})
+	q2.Start()
+	defer q2.Stop()
+
+	waitFor(t, 2*time.Second, func() bool {
+		var task models.ScanTask
+		if err := gdb.First(&task).Error; err != nil {
+			return false
+		}
+		return task.Status == models.ScanTaskStatusCompleted
+	})
+	restored, ok := got.Load().(ScanChange)
+	if !ok {
+		t.Fatal("未执行变更任务")
+	}
+	if restored.LibraryID != change.LibraryID || restored.Path != change.Path || restored.Op != change.Op {
+		t.Fatalf("恢复的变更不正确: %+v", restored)
 	}
 }
