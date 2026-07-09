@@ -44,8 +44,23 @@ func PreSliceWithCodec(
 	hlsMgr *player.HLSManager,
 	hlsDir string,
 ) (*PreSliceResult, error) {
+	return PreSliceWithCodecAndPolicy(ctx, mediaID, inputPath, srcWidth, srcHeight, codec, DefaultHardwarePolicy(), hlsMgr, hlsDir)
+}
+
+// PreSliceWithCodecAndPolicy 按目标编码与硬件策略执行预切片。
+func PreSliceWithCodecAndPolicy(
+	ctx context.Context,
+	mediaID int64,
+	inputPath string,
+	srcWidth int,
+	srcHeight int,
+	codec string,
+	policy HardwarePolicy,
+	hlsMgr *player.HLSManager,
+	hlsDir string,
+) (*PreSliceResult, error) {
 	if SelectOutputPath(codec) == OutputPathTS {
-		return PreSlice(ctx, mediaID, inputPath, srcWidth, srcHeight, hlsMgr, hlsDir)
+		return PreSliceWithPolicy(ctx, mediaID, inputPath, srcWidth, srcHeight, policy, hlsMgr, hlsDir)
 	}
 
 	if hlsDir == "" {
@@ -56,7 +71,7 @@ func PreSliceWithCodec(
 	if snap := probeSnapshot.Load(); snap != nil {
 		results = *snap
 	}
-	res, err := RunFMP4ToDir(ctx, mediaID, inputPath, codec, outputDir, results)
+	res, err := RunFMP4ToDirWithPolicy(ctx, mediaID, inputPath, codec, outputDir, results, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +98,20 @@ func PreSlice(
 	inputPath string,
 	srcWidth int,
 	srcHeight int,
+	hlsMgr *player.HLSManager,
+	hlsDir string,
+) (*PreSliceResult, error) {
+	return PreSliceWithPolicy(ctx, mediaID, inputPath, srcWidth, srcHeight, DefaultHardwarePolicy(), hlsMgr, hlsDir)
+}
+
+// PreSliceWithPolicy 为 H.264/TS 路径按硬件策略执行预切片。
+func PreSliceWithPolicy(
+	ctx context.Context,
+	mediaID int64,
+	inputPath string,
+	srcWidth int,
+	srcHeight int,
+	policy HardwarePolicy,
 	hlsMgr *player.HLSManager,
 	hlsDir string,
 ) (*PreSliceResult, error) {
@@ -125,8 +154,7 @@ func PreSlice(
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	pipeline := NewMultiPipeline(NewPipeline())
-	if err := pipeline.RunMultiToDir(runCtx, inputPath, qualityNames, outputDir); err != nil {
+	if err := runMultiToDirWithPolicy(runCtx, inputPath, qualityNames, outputDir, policy); err != nil {
 		// 失败清理；与成功日志对称，记录 mediaID/输出目录/档位上下文便于排查
 		_ = os.RemoveAll(outputDir)
 		log.Printf("[ERROR] HLS 预切片失败（ffmpeg 切片）: mediaID=%d, outputDir=%s, qualities=%v, err=%v",
@@ -159,6 +187,26 @@ func PreSlice(
 		Qualities:  qualityNames,
 		MasterPath: filepath.Join(outputDir, "master.m3u8"),
 	}, nil
+}
+
+func runMultiToDirWithPolicy(ctx context.Context, inputPath string, qualityNames []string, outputDir string, policy HardwarePolicy) error {
+	pipeline, err := NewPipelineForCodecWithPolicy(DefaultTargetCodec, policy)
+	if err != nil {
+		return err
+	}
+	err = NewMultiPipeline(pipeline).RunMultiToDir(ctx, inputPath, qualityNames, outputDir)
+	if err == nil || pipeline.deviceType == "" || !policy.Fallback {
+		return err
+	}
+	log.Printf("[WARN] HLS 硬件转码失败，改用软件回退: encoder=%s, err=%v", pipeline.encoderName, err)
+	if outputDir != "" {
+		_ = os.RemoveAll(outputDir)
+	}
+	software, softwareErr := NewPipelineForCodecWithPolicy(DefaultTargetCodec, HardwarePolicy{Mode: HWAccelModeSoftware, Fallback: true})
+	if softwareErr != nil {
+		return err
+	}
+	return NewMultiPipeline(software).RunMultiToDir(ctx, inputPath, qualityNames, outputDir)
 }
 
 // resPattern 匹配 ffmpeg -i 输出中的 "Video: h264 (...), yuv420p(...), 1920x1080" 之类。

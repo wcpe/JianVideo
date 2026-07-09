@@ -26,6 +26,10 @@ const (
 	KeyUpdateChannel = "update_channel"
 	// KeyTranscodeCodecPriority 转码首选目标编码优先级（FR-50），值为 JSON 数组（如 ["av1","h265","h264"]）。
 	KeyTranscodeCodecPriority = "transcode_codec_priority"
+	// KeyTranscodeHWAccelMode 默认硬件转码策略：auto/software/nvenc/qsv/amf/vaapi/videotoolbox。
+	KeyTranscodeHWAccelMode = "transcode_hwaccel_mode"
+	// KeyTranscodeHWAccelFallback 指定硬件不可用或失败时是否允许软件回退。
+	KeyTranscodeHWAccelFallback = "transcode_hwaccel_fallback"
 	// KeyFFmpegPath ffmpeg 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
 	KeyFFmpegPath = "ffmpeg_path"
 	// KeyFFprobePath ffprobe 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
@@ -115,6 +119,36 @@ func (s *Service) DebugLog() bool {
 func ParseDebugLog(raw string) bool {
 	v := strings.TrimSpace(raw)
 	return v == "1" || v == "true"
+}
+
+// ParseBoolSetting 解析布尔设置字符串；非法或空值按 defaultValue 兜底。
+func ParseBoolSetting(raw string, defaultValue bool) bool {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+// TranscodeHWAccelMode 读取默认硬件转码策略；缺失或读取失败时回退 auto。
+func (s *Service) TranscodeHWAccelMode() string {
+	raw, err := s.Get(KeyTranscodeHWAccelMode)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return "auto"
+	}
+	return strings.TrimSpace(raw)
+}
+
+// TranscodeHWAccelFallback 读取硬件转码失败时的软件回退开关；缺失或非法时默认开启。
+func (s *Service) TranscodeHWAccelFallback() bool {
+	raw, err := s.Get(KeyTranscodeHWAccelFallback)
+	if err != nil {
+		return true
+	}
+	return ParseBoolSetting(raw, true)
 }
 
 // GetAll 读取已登记运行期设置，返回 key → 公开展示值映射。

@@ -17,6 +17,7 @@ import {
   TypographyStylesProvider,
   Modal,
   Progress,
+  Switch,
 } from '@mantine/core';
 import { useClipboard, useDisclosure } from '@mantine/hooks';
 import {
@@ -30,7 +31,13 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import * as systemApi from '@/api/system';
-import { getSettings, updateSettings, SETTING_KEY_UPDATE_CHANNEL } from '@/api/settings';
+import {
+  getSettings,
+  updateSettings,
+  SETTING_KEY_UPDATE_CHANNEL,
+  SETTING_KEY_TRANSCODE_HWACCEL_MODE,
+  SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK,
+} from '@/api/settings';
 import { extractErrorMessage } from '@/utils/error';
 import { formatBytes, formatUptime } from '@/utils/format';
 import { loadCachedUpdate, saveCachedUpdate, clearCachedUpdate } from '@/utils/update-cache';
@@ -46,6 +53,31 @@ const ENV_ANCHORS = [
   { id: 'sys-env', label: '运行环境' },
   { id: 'sys-ffmpeg', label: 'FFmpeg' },
 ];
+
+const HW_ACCEL_MODE_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'software', label: '软件' },
+  { value: 'nvenc', label: 'NVENC' },
+  { value: 'qsv', label: 'QSV' },
+  { value: 'amf', label: 'AMF' },
+  { value: 'vaapi', label: 'VAAPI' },
+  { value: 'videotoolbox', label: 'VideoToolbox' },
+];
+
+type HWAccelMode = (typeof HW_ACCEL_MODE_OPTIONS)[number]['value'];
+
+function normalizeHWAccelMode(value: string | undefined): HWAccelMode {
+  if (HW_ACCEL_MODE_OPTIONS.some((option) => option.value === value)) {
+    return value as HWAccelMode;
+  }
+  return 'auto';
+}
+
+function parseSettingBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === '1' || value === 'true') return true;
+  if (value === '0' || value === 'false') return false;
+  return defaultValue;
+}
 
 /**
  * 单行信息项（FR-101 重排）：定宽 label 列 + 紧贴其后的 value 列的紧凑两列。
@@ -219,6 +251,11 @@ export default function SystemPage({ section }: { section: SystemSection }) {
   const [codecError, setCodecError] = useState<string | null>(null);
   const [codecLoading, setCodecLoading] = useState(false);
   const clipboard = useClipboard({ timeout: 2000 });
+  const [hwMode, setHWMode] = useState<HWAccelMode>('auto');
+  const [hwFallback, setHWFallback] = useState(true);
+  const [hwSaving, setHWSaving] = useState(false);
+  const [hwRetesting, setHWRetesting] = useState(false);
+  const [hwSettingsError, setHWSettingsError] = useState<string | null>(null);
 
   // 自更新（FR-46）
   const [channel, setChannel] = useState<'stable' | 'prerelease'>('stable');
@@ -261,8 +298,11 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     let active = true;
     getSettings()
       .then((s) => {
+        if (!active) return;
         const ch = s[SETTING_KEY_UPDATE_CHANNEL];
-        if (active && (ch === 'prerelease' || ch === 'stable')) setChannel(ch);
+        if (ch === 'prerelease' || ch === 'stable') setChannel(ch);
+        setHWMode(normalizeHWAccelMode(s[SETTING_KEY_TRANSCODE_HWACCEL_MODE]));
+        setHWFallback(parseSettingBool(s[SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK], true));
       })
       .catch(() => {
         /* 读失败用默认 stable */
@@ -290,6 +330,36 @@ export default function SystemPage({ section }: { section: SystemSection }) {
       setCodecError(extractErrorMessage(err, '编解码器测试失败'));
     } finally {
       setCodecLoading(false);
+    }
+  }, []);
+
+  const handleSaveHWPolicy = useCallback(async () => {
+    setHWSaving(true);
+    setHWSettingsError(null);
+    try {
+      const updated = await updateSettings({
+        [SETTING_KEY_TRANSCODE_HWACCEL_MODE]: hwMode,
+        [SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK]: hwFallback ? '1' : '0',
+      });
+      setHWMode(normalizeHWAccelMode(updated[SETTING_KEY_TRANSCODE_HWACCEL_MODE]));
+      setHWFallback(parseSettingBool(updated[SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK], hwFallback));
+    } catch (err) {
+      setHWSettingsError(extractErrorMessage(err, '保存硬件策略失败'));
+    } finally {
+      setHWSaving(false);
+    }
+  }, [hwFallback, hwMode]);
+
+  const handleHardwareRetest = useCallback(async () => {
+    setHWRetesting(true);
+    setHWSettingsError(null);
+    try {
+      setCodec(await systemApi.runCodecTest(true));
+      setInfo(await systemApi.getSystemInfo());
+    } catch (err) {
+      setHWSettingsError(extractErrorMessage(err, '硬件能力重测失败'));
+    } finally {
+      setHWRetesting(false);
     }
   }, []);
 
@@ -524,10 +594,53 @@ export default function SystemPage({ section }: { section: SystemSection }) {
           <Skeleton height={320} radius="md" />
         ) : info ? (
           <Card withBorder padding="md" radius="md">
-            <Title order={4} mb="sm">
-              硬件加速
-            </Title>
+            <Group justify="space-between" mb="sm">
+              <Title order={4}>硬件加速</Title>
+              <Button
+                variant="light"
+                size="xs"
+                leftSection={<IconRefresh size={16} />}
+                loading={hwRetesting}
+                onClick={handleHardwareRetest}
+              >
+                强制重测
+              </Button>
+            </Group>
             <Stack gap="xs">
+              <Stack gap={6}>
+                <Text size="sm" fw={600}>
+                  硬件策略
+                </Text>
+                <Group gap="xs" align="center">
+                  <SegmentedControl
+                    size="xs"
+                    value={hwMode}
+                    onChange={(value) => setHWMode(normalizeHWAccelMode(value))}
+                    data={HW_ACCEL_MODE_OPTIONS}
+                  />
+                  <Switch
+                    size="sm"
+                    checked={hwFallback}
+                    onChange={(event) => setHWFallback(event.currentTarget.checked)}
+                    aria-label="硬件不可用时软件回退"
+                    label="软件回退"
+                  />
+                  <Button
+                    variant="light"
+                    size="xs"
+                    leftSection={<IconCheck size={16} />}
+                    loading={hwSaving}
+                    onClick={handleSaveHWPolicy}
+                  >
+                    保存策略
+                  </Button>
+                </Group>
+                {hwSettingsError && (
+                  <Alert icon={<IconAlertCircle size={16} />} color="red" title="硬件策略出错">
+                    {hwSettingsError}
+                  </Alert>
+                )}
+              </Stack>
               <InfoRow label="首选编码器" value={info.hwaccel.preferred || '无（使用软件编码）'} />
               {/* 系统可输出编码并集（codecs），按编码逐个展示 */}
               <Group gap="xs" align="center">
@@ -549,7 +662,7 @@ export default function SystemPage({ section }: { section: SystemSection }) {
               <Group gap="xs">
                 {info.hwaccel.software_fallback && (
                   <Badge variant="light" color="yellow">
-                    软件回退
+                    当前使用软件编码
                   </Badge>
                 )}
                 {info.hwaccel.intel_gpu && (

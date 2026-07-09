@@ -34,6 +34,11 @@ func NewCapabilityService(db *gorm.DB) *CapabilityService {
 // force=false 时命中当前版本缓存即返回；未命中或 force 则实测并持久化（按版本 upsert）。
 // 每次实测后刷新进程级快照供选码使用。
 func (s *CapabilityService) CodecResults(ctx context.Context, force bool) (results []EncoderProbeResult, fromCache bool, version string, testedAt time.Time, err error) {
+	return s.CodecResultsWithAudit(ctx, force, nil)
+}
+
+// CodecResultsWithAudit 返回实测结果，并在强制重测成功时写入系统级审计。
+func (s *CapabilityService) CodecResultsWithAudit(ctx context.Context, force bool, rec audit.Recorder) (results []EncoderProbeResult, fromCache bool, version string, testedAt time.Time, err error) {
 	version = FFmpegVersion(ctx)
 
 	s.mu.Lock()
@@ -52,11 +57,14 @@ func (s *CapabilityService) CodecResults(ctx context.Context, force bool) (resul
 	// 未命中或强制：实测并持久化
 	results = ProbeEncoders(ctx)
 	testedAt = time.Now()
-	setProbeSnapshot(results)
-	if err = s.saveCache(version, results, testedAt); err != nil {
+	if err = s.saveCacheWithAudit(ctx, version, results, testedAt, force, rec); err != nil {
+		if force && rec != nil {
+			return nil, false, version, time.Time{}, err
+		}
 		// 持久化失败不影响本次结果返回，仅记日志
 		log.Printf("[WARN] 编码器实测结果持久化失败: version=%q, err=%v", version, err)
 	}
+	setProbeSnapshot(results)
 	return results, false, version, testedAt, nil
 }
 
@@ -154,8 +162,7 @@ func (s *CapabilityService) loadCache(version string) (cacheEntry, bool, error) 
 	return cacheEntry{results: results, testedAt: row.TestedAt}, true, nil
 }
 
-// saveCache 按 ffmpeg 版本 upsert 实测结果；版本为空则跳过（无可靠键）。
-func (s *CapabilityService) saveCache(version string, results []EncoderProbeResult, testedAt time.Time) error {
+func (s *CapabilityService) saveCacheWithAudit(ctx context.Context, version string, results []EncoderProbeResult, testedAt time.Time, force bool, rec audit.Recorder) error {
 	if version == "" {
 		return nil
 	}
@@ -164,8 +171,26 @@ func (s *CapabilityService) saveCache(version string, results []EncoderProbeResu
 		return err
 	}
 	row := models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: testedAt}
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "ffmpeg_version"}},
-		DoUpdates: clause.AssignmentColumns([]string{"results", "tested_at"}),
-	}).Create(&row).Error
+	write := func(tx *gorm.DB) error {
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "ffmpeg_version"}},
+			DoUpdates: clause.AssignmentColumns([]string{"results", "tested_at"}),
+		}).Create(&row).Error
+	}
+	if !force || rec == nil {
+		return write(s.db.WithContext(ctx))
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := write(tx); err != nil {
+			return err
+		}
+		return rec.RecordTx(ctx, tx, audit.EventInput{
+			Scope:        audit.ScopeSystem,
+			ActorType:    audit.ActorSystem,
+			Action:       "codec_probe.retested",
+			ResourceType: "codec_probe",
+			ResourceID:   version,
+			Metadata:     map[string]any{"ffmpeg_version": version, "result_count": len(results), "summary": "已强制重测硬件加速能力"},
+		})
+	})
 }

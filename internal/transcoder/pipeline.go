@@ -53,6 +53,30 @@ func NewPipelineForCodec(codec string) *Pipeline {
 	}
 }
 
+// NewPipelineForCodecWithPolicy 按目标编码与硬件策略创建转码管道。
+func NewPipelineForCodecWithPolicy(codec string, policy HardwarePolicy) (*Pipeline, error) {
+	if _, ok := CodecOutputParams(codec); !ok {
+		codec = DefaultTargetCodec
+	}
+	var results []EncoderProbeResult
+	if snap := probeSnapshot.Load(); snap != nil {
+		results = *snap
+	}
+	name, deviceType, _, err := SelectEncoderForCodecWithPolicy(results, codec, policy)
+	if err != nil {
+		return nil, err
+	}
+	return newPipelineForEncoder(codec, name, deviceType), nil
+}
+
+func newPipelineForEncoder(codec, name, deviceType string) *Pipeline {
+	hwAccel := ""
+	if deviceType != "" {
+		hwAccel = deviceType
+	}
+	return &Pipeline{encoderName: name, deviceType: deviceType, hwAccel: hwAccel, codec: codec}
+}
+
 // selectEncoder 读实测快照按硬件优先级为 codec 选编码器，冷态/无可用时软件兜底。
 func selectEncoder(codec string) (encoderName, deviceType string) {
 	// h264 维持既有入口（含冷态 libx264 兜底），保证默认行为不变

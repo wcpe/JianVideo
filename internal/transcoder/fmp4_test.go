@@ -79,6 +79,27 @@ func TestSelectFMP4Encoder_HardwarePreferred(t *testing.T) {
 	assert.Equal(t, "d3d11va", dev)
 }
 
+func TestSelectFMP4EncoderWithPolicy_RequestedFamily(t *testing.T) {
+	results := []EncoderProbeResult{
+		{Encoder: "hevc_nvenc", Family: "nvenc", Codec: "h265", TestedOK: true},
+		{Encoder: "hevc_qsv", Family: "qsv", Codec: "h265", TestedOK: true},
+	}
+
+	enc, dev, hardware, ok, err := SelectFMP4EncoderWithPolicy(results, "h265", HardwarePolicy{Mode: "qsv", Fallback: true})
+
+	assert.NoError(t, err)
+	assert.True(t, ok)
+	assert.True(t, hardware)
+	assert.Equal(t, "hevc_qsv", enc)
+	assert.Equal(t, "qsv", dev)
+}
+
+func TestSelectFMP4EncoderWithPolicy_UnavailableNoFallback(t *testing.T) {
+	_, _, _, _, err := SelectFMP4EncoderWithPolicy(nil, "h265", HardwarePolicy{Mode: "nvenc", Fallback: false})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "指定的硬件编码器 NVIDIA NVENC 不可用")
+}
+
 func TestSelectFMP4Encoder_UnsupportedCodec(t *testing.T) {
 	// h264 不归 fMP4 路径管，返回 false
 	_, _, ok := SelectFMP4Encoder(nil, "h264")

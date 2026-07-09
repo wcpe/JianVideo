@@ -97,6 +97,25 @@ var registry = []Definition{
 		Validate: validateStringArrayJSON,
 	},
 	{
+		Key: KeyTranscodeHWAccelMode, Label: "硬件转码策略", Description: "默认硬件转码策略：自动、软件或指定硬件家族。",
+		Layer: LayerRuntime, ValueType: ValueEnum, DefaultValue: "auto", HotApply: true, Consumer: "transcoder",
+		Options: []SettingOption{
+			{Value: "auto", Label: "自动"},
+			{Value: "software", Label: "软件"},
+			{Value: "nvenc", Label: "NVIDIA NVENC"},
+			{Value: "qsv", Label: "Intel QSV"},
+			{Value: "amf", Label: "AMD AMF"},
+			{Value: "vaapi", Label: "VAAPI"},
+			{Value: "videotoolbox", Label: "Apple VideoToolbox"},
+		},
+		Validate: validateEnum("auto", "software", "nvenc", "qsv", "amf", "vaapi", "videotoolbox"),
+	},
+	{
+		Key: KeyTranscodeHWAccelFallback, Label: "硬件失败软件回退", Description: "指定硬件不可用或转码失败时是否自动改用软件编码。",
+		Layer: LayerRuntime, ValueType: ValueBool, DefaultValue: "1", HotApply: true, Consumer: "transcoder",
+		Validate: validateBool,
+	},
+	{
 		Key: KeyFFmpegPath, Label: "FFmpeg 路径", Description: "ffmpeg 可执行文件路径；留空时按自动发现结果使用。",
 		Layer: LayerRuntime, ValueType: ValuePath, DefaultValue: "", HotApply: true, Consumer: "transcoder",
 		Validate: validateAny,

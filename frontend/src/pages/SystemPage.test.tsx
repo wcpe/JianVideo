@@ -133,6 +133,88 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     expect(screen.getAllByText('✗ 试编码失败').length).toBeGreaterThan(0);
   });
 
+  it('硬件加速区块可保存默认策略与软件回退', async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, string> | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            update_channel: 'stable',
+            transcode_hwaccel_mode: 'auto',
+            transcode_hwaccel_fallback: '1',
+          },
+        }),
+      ),
+      http.put('*/api/settings', async ({ request }) => {
+        const body = (await request.json()) as { settings: Record<string, string> };
+        saved = body.settings;
+        return HttpResponse.json({
+          settings: {
+            update_channel: 'stable',
+            ...body.settings,
+          },
+        });
+      }),
+    );
+
+    renderSection('hwaccel');
+    expect(await screen.findByText('硬件策略')).toBeVisible();
+
+    await user.click(screen.getByText('软件'));
+    await user.click(screen.getByLabelText('硬件不可用时软件回退'));
+    await user.click(screen.getByRole('button', { name: '保存策略' }));
+
+    await waitFor(() => {
+      expect(saved).toEqual({
+        transcode_hwaccel_mode: 'software',
+        transcode_hwaccel_fallback: '0',
+      });
+    });
+  });
+
+  it('硬件加速区块强制重测会携带 force=true', async () => {
+    const user = userEvent.setup();
+    let forceParam: string | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            update_channel: 'stable',
+            transcode_hwaccel_mode: 'auto',
+            transcode_hwaccel_fallback: '1',
+          },
+        }),
+      ),
+      http.post('*/api/system/codec-test', ({ request }) => {
+        forceParam = new URL(request.url).searchParams.get('force');
+        return HttpResponse.json({
+          ffmpeg_available: true,
+          results: [
+            {
+              encoder: 'libx264',
+              family: 'software',
+              codec: 'h264',
+              compiled: true,
+              tested_ok: true,
+              detail: '',
+            },
+          ],
+          from_cache: false,
+          ffmpeg_version: 'ffmpeg version 6.1.1',
+          tested_at: '2026-06-23T11:00:00Z',
+        });
+      }),
+    );
+
+    renderSection('hwaccel');
+    await user.click(await screen.findByRole('button', { name: '强制重测' }));
+
+    await waitFor(() => {
+      expect(forceParam).toBe('true');
+    });
+  });
+
   it('编解码区块点「测试编解码器」后渲染 per-codec 结果行并显示缓存来源', async () => {
     const user = userEvent.setup();
     renderSection('codec');

@@ -93,6 +93,19 @@ func SelectFMP4Encoder(results []EncoderProbeResult, codec string) (encoder, dev
 	return swFallback, "", true
 }
 
+// SelectFMP4EncoderWithPolicy 为高级编码按用户硬件策略选取 ffmpeg 编码器。
+func SelectFMP4EncoderWithPolicy(results []EncoderProbeResult, codec string, policy HardwarePolicy) (encoder, deviceType string, hardware bool, ok bool, err error) {
+	c := normalizeCodec(codec)
+	if !IsAdvancedCodec(c) {
+		return "", "", false, false, nil
+	}
+	encoder, deviceType, hardware, err = SelectEncoderForCodecWithPolicy(results, c, policy)
+	if err != nil {
+		return "", "", false, false, err
+	}
+	return encoder, deviceType, hardware, true, nil
+}
+
 // BuildFMP4Args 构建 fMP4/CMAF 输出的 ffmpeg 命令行参数（纯函数）。
 // 产出 HLS-fMP4（CMAF）：init.mp4 + seg_NNN.m4s + index.m3u8（VOD，含 EXT-X-MAP/ENDLIST）。
 // deviceType 非空时加 -hwaccel 设备初始化（与现有管道同风格）。
@@ -151,13 +164,21 @@ type FMP4Result struct {
 // 选实测可用编码器 → 构建参数 → 跑外部 ffmpeg → 校验 init/manifest 产出。
 // 失败时清理 outputDir 避免脏数据。codec 须为高级编码（h265/av1/vp9）。
 func RunFMP4ToDir(ctx context.Context, mediaID int64, inputPath, codec, outputDir string, results []EncoderProbeResult) (*FMP4Result, error) {
+	return RunFMP4ToDirWithPolicy(ctx, mediaID, inputPath, codec, outputDir, results, DefaultHardwarePolicy())
+}
+
+// RunFMP4ToDirWithPolicy 按硬件策略执行 fMP4/CMAF 转码。
+func RunFMP4ToDirWithPolicy(ctx context.Context, mediaID int64, inputPath, codec, outputDir string, results []EncoderProbeResult, policy HardwarePolicy) (*FMP4Result, error) {
 	if !IsFFmpegAvailable() {
 		return nil, fmt.Errorf("ffmpeg 不可用，无法生成 fMP4 分片")
 	}
 	if outputDir == "" {
 		return nil, fmt.Errorf("outputDir 不能为空")
 	}
-	encoder, deviceType, ok := SelectFMP4Encoder(results, codec)
+	encoder, deviceType, hardware, ok, err := SelectFMP4EncoderWithPolicy(results, codec, policy)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, fmt.Errorf("编码 %q 不是受支持的高级编码（h265/av1/vp9）", codec)
 	}
@@ -176,6 +197,11 @@ func RunFMP4ToDir(ctx context.Context, mediaID int64, inputPath, codec, outputDi
 	args := BuildFMP4Args(inputPath, encoder, codec, deviceType)
 	if err := runFMP4FFmpeg(runCtx, args, outputDir); err != nil {
 		_ = os.RemoveAll(outputDir)
+		if hardware && policy.Fallback {
+			log.Printf("[WARN] fMP4 硬件转码失败，改用软件回退: mediaID=%d, codec=%s, encoder=%s, err=%v",
+				mediaID, codec, encoder, err)
+			return RunFMP4ToDirWithPolicy(ctx, mediaID, inputPath, codec, outputDir, results, HardwarePolicy{Mode: HWAccelModeSoftware, Fallback: true})
+		}
 		log.Printf("[ERROR] fMP4 转码失败: mediaID=%d, codec=%s, encoder=%s, outputDir=%s, err=%v",
 			mediaID, codec, encoder, outputDir, err)
 		return nil, fmt.Errorf("fMP4 转码失败: %w", err)

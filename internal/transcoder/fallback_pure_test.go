@@ -186,3 +186,51 @@ func TestSelectBestEncoder_SnapshotNoH264(t *testing.T) {
 	assert.Equal(t, "libx264", enc)
 	assert.Equal(t, "", dev)
 }
+
+func TestSelectEncoderForCodecWithPolicy_AutoNoHardwareFallsBackSoftware(t *testing.T) {
+	results := []EncoderProbeResult{
+		{Encoder: "libx264", Family: "software", Codec: "h264", TestedOK: true},
+	}
+
+	enc, dev, hardware, err := SelectEncoderForCodecWithPolicy(results, "h264", HardwarePolicy{
+		Mode:     "auto",
+		Fallback: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "libx264", enc)
+	assert.Equal(t, "", dev)
+	assert.False(t, hardware)
+}
+
+func TestSelectEncoderForCodecWithPolicy_SpecificModeUsesRequestedFamily(t *testing.T) {
+	results := []EncoderProbeResult{
+		{Encoder: "h264_nvenc", Family: "nvenc", Codec: "h264", TestedOK: true},
+		{Encoder: "h264_qsv", Family: "qsv", Codec: "h264", TestedOK: true},
+	}
+
+	enc, dev, hardware, err := SelectEncoderForCodecWithPolicy(results, "h264", HardwarePolicy{
+		Mode:     "qsv",
+		Fallback: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "h264_qsv", enc)
+	assert.Equal(t, "qsv", dev)
+	assert.True(t, hardware)
+}
+
+func TestSelectEncoderForCodecWithPolicy_SpecificUnavailableNoFallback(t *testing.T) {
+	results := []EncoderProbeResult{
+		{Encoder: "h264_nvenc", Family: "nvenc", Codec: "h264", Compiled: true, TestedOK: false},
+		{Encoder: "libx264", Family: "software", Codec: "h264", TestedOK: true},
+	}
+
+	_, _, _, err := SelectEncoderForCodecWithPolicy(results, "h264", HardwarePolicy{
+		Mode:     "nvenc",
+		Fallback: false,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "指定的硬件编码器 NVIDIA NVENC 不可用，且已关闭软件回退")
+}

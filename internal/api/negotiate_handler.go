@@ -95,13 +95,14 @@ func (h *Handler) produceFMP4(ctx context.Context, mediaID int64, spaceID string
 	if h.hlsDir == "" || h.hlsMgr == nil || !transcoder.IsFFmpegAvailable() {
 		return false
 	}
+	h.refreshHWAccelSnapshot(ctx)
 	if strings.HasPrefix(filePath, "smb://") {
 		return false
 	}
 	if _, err := os.Stat(filePath); err != nil {
 		return false
 	}
-	result, err := transcoder.PreSliceWithCodec(ctx, mediaID, filePath, width, height, codec, h.hlsMgr, h.hlsDir)
+	result, err := transcoder.PreSliceWithCodecAndPolicy(ctx, mediaID, filePath, width, height, codec, h.hardwarePolicy(), h.hlsMgr, h.hlsDir)
 	if err != nil {
 		log.Printf("[WARN] fMP4 预切片失败: mediaID=%d, codec=%s, err=%v", mediaID, codec, err)
 		return false

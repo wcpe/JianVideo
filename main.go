@@ -63,6 +63,16 @@ func resolveTool(envVar, name string) string {
 	return name
 }
 
+func hardwarePolicyFromSettings(svc *settings.Service) transcoder.HardwarePolicy {
+	if svc == nil {
+		return transcoder.DefaultHardwarePolicy()
+	}
+	return transcoder.HardwarePolicy{
+		Mode:     transcoder.NormalizeHWAccelMode(svc.TranscodeHWAccelMode()),
+		Fallback: svc.TranscodeHWAccelFallback(),
+	}
+}
+
 func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service) {
 	if err := workers.Register(library.TaskTypeFileHashBackfill, tasksvc.DefaultConcurrency(library.TaskTypeFileHashBackfill), func(ctx context.Context, task models.Task) error {
 		return libSvc.HandleContentHashBackfillTask(ctx, taskSvc, task)
@@ -291,7 +301,8 @@ func main() {
 		if err != nil {
 			return fmt.Errorf("预生成反查媒体失败: mediaID=%d: %w", mediaID, err)
 		}
-		result, err := transcoder.PreSliceWithCodec(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, hlsMgr, hlsDir)
+		policy := hardwarePolicyFromSettings(settingsSvc)
+		result, err := transcoder.PreSliceWithCodecAndPolicy(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, policy, hlsMgr, hlsDir)
 		if err == nil && result != nil {
 			_, err = cacheSvc.RegisterDirectory(context.Background(), storage.RegisterInput{
 				SpaceID:   mf.SpaceID,

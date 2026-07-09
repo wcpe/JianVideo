@@ -13,6 +13,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/transcoder"
@@ -273,6 +274,41 @@ func TestHWAccelAndSystemInfo_SameSource(t *testing.T) {
 	}
 	if !hw.FromCache || !sys.HWAccel.FromCache {
 		t.Errorf("两端点均应标记 from_cache=true")
+	}
+}
+
+func TestCodecTest_ForceRecordsSystemAudit(t *testing.T) {
+	if !transcoder.IsFFmpegAvailable() {
+		t.Skip("ffmpeg 不可用，跳过强制重测审计测试")
+	}
+	gin.SetMode(gin.TestMode)
+
+	db := newCapabilityDB(t)
+	if err := db.AutoMigrate(&models.AuditEvent{}); err != nil {
+		t.Fatalf("迁移审计表失败: %v", err)
+	}
+
+	h := NewHandler(nil).
+		WithCapabilityService(transcoder.NewCapabilityService(db)).
+		WithAudit(audit.NewRecorder(db))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/system/codec-test?force=true", nil)
+	h.CodecTest(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("强制重测应返回 200，实际 %d, body=%s", w.Code, w.Body.String())
+	}
+
+	var event models.AuditEvent
+	if err := db.First(&event, "action = ?", "codec_probe.retested").Error; err != nil {
+		t.Fatalf("强制重测应写入 codec_probe.retested 审计: %v", err)
+	}
+	if event.Scope != audit.ScopeSystem || event.SpaceID != nil {
+		t.Fatalf("强制重测审计应为系统级，scope=%q space=%v", event.Scope, event.SpaceID)
+	}
+	if event.ResourceType != "codec_probe" {
+		t.Fatalf("审计 resource_type 应为 codec_probe，实际 %q", event.ResourceType)
 	}
 }
 

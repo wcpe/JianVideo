@@ -67,6 +67,37 @@ func TestNewPipelineForCodec_AV1Hardware(t *testing.T) {
 	}
 }
 
+func TestNewPipelineForCodecWithPolicy_UsesRequestedHardware(t *testing.T) {
+	setProbeSnapshot([]EncoderProbeResult{
+		{Encoder: "h264_nvenc", Family: "nvenc", Codec: "h264", TestedOK: true},
+		{Encoder: "h264_qsv", Family: "qsv", Codec: "h264", TestedOK: true},
+	})
+	defer setProbeSnapshot(nil)
+
+	p, err := NewPipelineForCodecWithPolicy("h264", HardwarePolicy{Mode: "qsv", Fallback: true})
+	if err != nil {
+		t.Fatalf("按策略创建管道失败: %v", err)
+	}
+	args := p.buildArgs("/tmp/a.mp4", 0)
+	if argValueAfter(args, "-c:v") != "h264_qsv" {
+		t.Errorf("-c:v = %q，期望 h264_qsv", argValueAfter(args, "-c:v"))
+	}
+	if !argHasPair(args, "-hwaccel", "qsv") {
+		t.Errorf("指定 qsv 策略时应包含 -hwaccel qsv，args=%v", args)
+	}
+}
+
+func TestNewPipelineForCodecWithPolicy_UnavailableNoFallback(t *testing.T) {
+	setProbeSnapshot([]EncoderProbeResult{
+		{Encoder: "h264_nvenc", Family: "nvenc", Codec: "h264", TestedOK: false},
+	})
+	defer setProbeSnapshot(nil)
+
+	if _, err := NewPipelineForCodecWithPolicy("h264", HardwarePolicy{Mode: "nvenc", Fallback: false}); err == nil {
+		t.Fatal("指定不可用硬件且关闭回退时应返回错误")
+	}
+}
+
 // TestNewPipelineForCodec_UnknownFallback 未知/空编码回落默认 h264。
 func TestNewPipelineForCodec_UnknownFallback(t *testing.T) {
 	setProbeSnapshot(nil)

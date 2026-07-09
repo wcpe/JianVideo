@@ -105,7 +105,7 @@ func (h *Handler) CodecTest(c *gin.Context) {
 
 	// 注入能力服务：走缓存（命中即返回、未命中或 force 实测并持久化）
 	if h.capability != nil {
-		results, fromCache, version, testedAt, err := h.capability.CodecResults(ctx, force)
+		results, fromCache, version, testedAt, err := h.capability.CodecResultsWithAudit(ctx, force, h.audit)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "CODEC_TEST_FAILED", "message": "编码器实测失败"})
 			return

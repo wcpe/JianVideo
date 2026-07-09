@@ -186,7 +186,7 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	for _, def := range defs {
 		seen[def.Key] = def
 	}
-	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency, KeyMediaInferenceEnabled, KeyMediaInferenceDisabledLibraries} {
+	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency, KeyMediaInferenceEnabled, KeyMediaInferenceDisabledLibraries, KeyTranscodeHWAccelMode, KeyTranscodeHWAccelFallback} {
 		if _, ok := seen[key]; !ok {
 			t.Fatalf("definitions 缺少 key=%s", key)
 		}
@@ -200,6 +200,12 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	if def := seen[KeyTaskWorkerThumbnailConcurrency]; def.DefaultValue != "4" || def.Consumer != "tasks.worker" {
 		t.Fatalf("缩略图 worker 并发配置异常: %+v", def)
 	}
+	if def := seen[KeyTranscodeHWAccelMode]; def.DefaultValue != "auto" || def.ValueType != ValueEnum || def.Consumer != "transcoder" {
+		t.Fatalf("硬件加速策略配置异常: %+v", def)
+	}
+	if def := seen[KeyTranscodeHWAccelFallback]; def.DefaultValue != "1" || def.ValueType != ValueBool || def.Consumer != "transcoder" {
+		t.Fatalf("硬件加速回退配置异常: %+v", def)
+	}
 }
 
 func TestTaskWorkerConcurrencySettings(t *testing.T) {
@@ -210,6 +216,31 @@ func TestTaskWorkerConcurrencySettings(t *testing.T) {
 	}
 	if err := svc.Set(KeyTaskWorkerThumbnailConcurrency, "0"); err == nil || !IsValidationError(err) {
 		t.Fatalf("任务并发配置必须拒绝非正整数, 实际 %v", err)
+	}
+}
+
+func TestHWAccelSettingsPersistReloadAndValidate(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewService(db)
+
+	if err := svc.SetMany(map[string]string{
+		KeyTranscodeHWAccelMode:     "qsv",
+		KeyTranscodeHWAccelFallback: "0",
+	}); err != nil {
+		t.Fatalf("写入硬件加速策略失败: %v", err)
+	}
+
+	reloaded := NewService(db)
+	all, err := reloaded.GetAll()
+	if err != nil {
+		t.Fatalf("重载设置失败: %v", err)
+	}
+	if all[KeyTranscodeHWAccelMode] != "qsv" || all[KeyTranscodeHWAccelFallback] != "0" {
+		t.Fatalf("硬件加速策略未持久化，实际: %v", all)
+	}
+
+	if err := svc.Set(KeyTranscodeHWAccelMode, "vulkan"); err == nil || !IsValidationError(err) {
+		t.Fatalf("用户策略不支持 vulkan，应返回校验错误，实际 %v", err)
 	}
 }
 

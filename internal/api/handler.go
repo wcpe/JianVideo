@@ -970,6 +970,7 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 
 // preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。
 func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
+	h.refreshHWAccelSnapshot(ctx)
 	result, err := h.library.ListMediaFilesPage(library.MediaFilter{SpaceID: spaceID, MediaType: library.MediaTypeVideo}, library.MediaPageRequest{Page: 1, PageSize: 100})
 	if err != nil {
 		log.Printf("[WARN] 预切片：获取媒体列表失败: %v", err)
@@ -982,7 +983,7 @@ func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
 		if _, err := os.Stat(mf.FilePath); err != nil {
 			continue
 		}
-		result, err := transcoder.PreSlice(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hlsMgr, h.hlsDir)
+		result, err := transcoder.PreSliceWithPolicy(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hardwarePolicy(), h.hlsMgr, h.hlsDir)
 		if err != nil {
 			log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
 			continue

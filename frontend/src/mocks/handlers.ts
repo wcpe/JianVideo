@@ -113,6 +113,8 @@ const settingsStore: Record<string, string> = {
   upload_naming_rule: 'original',
   update_channel: 'stable',
   transcode_codec_priority: '["h264"]',
+  transcode_hwaccel_mode: 'auto',
+  transcode_hwaccel_fallback: '1',
 };
 
 const toolStatuses: ToolStatus[] = [
@@ -299,6 +301,37 @@ const settingDefinitions: SettingDefinition[] = [
     consumer: 'transcoder',
   },
   {
+    key: 'transcode_hwaccel_mode',
+    label: '硬件转码策略',
+    description: '默认硬件转码策略：自动、软件或指定硬件家族。',
+    layer: 'runtime',
+    value_type: 'enum',
+    default_value: 'auto',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+    options: [
+      { value: 'auto', label: '自动' },
+      { value: 'software', label: '软件' },
+      { value: 'nvenc', label: 'NVIDIA NVENC' },
+      { value: 'qsv', label: 'Intel QSV' },
+      { value: 'amf', label: 'AMD AMF' },
+      { value: 'vaapi', label: 'VAAPI' },
+      { value: 'videotoolbox', label: 'Apple VideoToolbox' },
+    ],
+  },
+  {
+    key: 'transcode_hwaccel_fallback',
+    label: '硬件失败软件回退',
+    description: '指定硬件不可用或转码失败时是否自动改用软件编码。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '1',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+  },
+  {
     key: 'open_tabs',
     label: '目录标签',
     description: '目录浏览打开标签的持久化快照。',
@@ -408,6 +441,16 @@ const auditEvents: AuditEvent[] = [
     created_at: '2026-07-08T08:00:00Z',
   },
 ];
+
+function pushSystemAuditEvent(event: Omit<AuditEvent, 'id' | 'created_at' | 'scope' | 'space_id'>): void {
+  auditEvents.unshift({
+    ...event,
+    id: Math.max(0, ...auditEvents.map((item) => item.id)) + 1,
+    scope: 'system',
+    space_id: null,
+    created_at: new Date().toISOString(),
+  });
+}
 
 // 相册（FR-40）内存数据
 let albums: Album[] = [];
@@ -1462,8 +1505,22 @@ export const handlers = [
     });
   }),
 
-  http.post('*/api/system/codec-test', async () => {
+  http.post('*/api/system/codec-test', async ({ request }) => {
     await delay(200);
+    const force = new URL(request.url).searchParams.get('force') === 'true';
+    if (force) {
+      pushSystemAuditEvent({
+        actor_type: 'system',
+        actor_id: 'system',
+        action: 'codec_probe.retested',
+        resource_type: 'codec_probe',
+        resource_id: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
+        before_json: null,
+        after_json: null,
+        metadata_json: { ffmpeg_version: 'ffmpeg version 6.1.1', result_count: 5 },
+        request_id: 'req-codec-retest-mock',
+      });
+    }
     return HttpResponse.json({
       ffmpeg_available: true,
       results: [
@@ -1508,7 +1565,7 @@ export const handlers = [
           detail: '[av1_amf @ 0x55] AMF 不支持 AV1 编码',
         },
       ],
-      from_cache: true,
+      from_cache: !force,
       ffmpeg_version: 'ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers',
       tested_at: '2026-06-23T10:00:00Z',
     });
@@ -1712,7 +1769,21 @@ export const handlers = [
         { status: 400 },
       );
     }
+    const before = Object.fromEntries(
+      Object.keys(body.settings).map((key) => [key, settingsStore[key] ?? '']),
+    );
     Object.assign(settingsStore, body.settings);
+    pushSystemAuditEvent({
+      actor_type: 'system',
+      actor_id: 'system',
+      action: 'settings.updated',
+      resource_type: 'settings',
+      resource_id: 'settings',
+      before_json: before,
+      after_json: { ...body.settings },
+      metadata_json: { summary: '更新运行期设置' },
+      request_id: 'req-settings-mock',
+    });
     return HttpResponse.json({ settings: { ...settingsStore } });
   }),
 

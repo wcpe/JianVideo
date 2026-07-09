@@ -11,6 +11,9 @@ export const SETTING_KEY_SCAN_INTERVAL = 'scan_interval';
 export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel';
 // 转码目标编码优先级，JSON 数组；与后端 settings 常量一致
 export const SETTING_KEY_TRANSCODE_CODEC_PRIORITY = 'transcode_codec_priority';
+// 默认硬件转码策略与软件回退开关；与后端 settings 常量一致
+export const SETTING_KEY_TRANSCODE_HWACCEL_MODE = 'transcode_hwaccel_mode';
+export const SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK = 'transcode_hwaccel_fallback';
 // ffmpeg/ffprobe 可执行文件路径（FR-56），与后端 settings 常量一致
 export const SETTING_KEY_FFMPEG_PATH = 'ffmpeg_path';
 export const SETTING_KEY_FFPROBE_PATH = 'ffprobe_path';
@@ -59,6 +62,8 @@ const mockStore: SettingsMap = {
   [SETTING_KEY_RECYCLE_BIN_PATHS]: '{"D":"D:/.recycle"}',
   [SETTING_KEY_UPDATE_CHANNEL]: 'stable',
   [SETTING_KEY_TRANSCODE_CODEC_PRIORITY]: '["h264"]',
+  [SETTING_KEY_TRANSCODE_HWACCEL_MODE]: 'auto',
+  [SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK]: '1',
 };
 
 const mockDefinitions: SettingDefinition[] = [
@@ -106,6 +111,37 @@ const mockDefinitions: SettingDefinition[] = [
     layer: 'runtime',
     value_type: 'json',
     default_value: '["h264"]',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+  },
+  {
+    key: SETTING_KEY_TRANSCODE_HWACCEL_MODE,
+    label: '硬件转码策略',
+    description: '默认硬件转码策略：自动、软件或指定硬件家族。',
+    layer: 'runtime',
+    value_type: 'enum',
+    default_value: 'auto',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'transcoder',
+    options: [
+      { value: 'auto', label: '自动' },
+      { value: 'software', label: '软件' },
+      { value: 'nvenc', label: 'NVIDIA NVENC' },
+      { value: 'qsv', label: 'Intel QSV' },
+      { value: 'amf', label: 'AMD AMF' },
+      { value: 'vaapi', label: 'VAAPI' },
+      { value: 'videotoolbox', label: 'Apple VideoToolbox' },
+    ],
+  },
+  {
+    key: SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK,
+    label: '硬件失败软件回退',
+    description: '指定硬件不可用或转码失败时是否自动改用软件编码。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '1',
     sensitive: false,
     hot_apply: true,
     consumer: 'transcoder',
