@@ -97,7 +97,7 @@ describe('MonitorPage', () => {
       expect(screen.getByText('系统监控')).toBeVisible();
     });
     // 四张当前值卡标题
-    expect(screen.getByText('CPU 使用率')).toBeVisible();
+    expect(await screen.findByText('CPU 使用率')).toBeVisible();
     expect(screen.getByText('内存（进程已用）')).toBeVisible();
     expect(screen.getByText(/磁盘（已用 \d+%）/)).toBeVisible();
     expect(screen.getByText('转码并发')).toBeVisible();
