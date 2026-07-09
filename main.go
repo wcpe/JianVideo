@@ -31,6 +31,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
+	toolsvc "github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/watcher"
 	"github.com/wcpe/JianVideo/internal/web"
@@ -67,6 +68,19 @@ func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Servi
 	}); err != nil {
 		log.Printf("[WARN] 内容哈希回填 worker 注册失败: %v", err)
 	}
+}
+
+func applyInstalledTool(result toolsvc.InstallResult) error {
+	switch result.Tool {
+	case toolsvc.ToolFFmpeg:
+		transcoder.SetFFmpegPath(result.Path)
+	case toolsvc.ToolFFprobe:
+		transcoder.SetFFprobePath(result.Path)
+		library.SetFFprobePath(result.Path)
+	case toolsvc.ToolMagick:
+		library.SetMagickPath(result.Path)
+	}
+	return nil
 }
 
 func startTaskWorkers(ctx context.Context, workers *tasksvc.WorkerRegistry) {
@@ -203,6 +217,15 @@ func main() {
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
 	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	toolsManager := toolsvc.NewManager(toolsvc.ManagerOptions{
+		Installer: toolsvc.NewInstaller(filepath.Join(filepath.Dir(cfg.DBPath), "tools"), nil),
+		Settings:  settingsSvc,
+		Tasks:     taskSvc,
+		Apply:     applyInstalledTool,
+	})
+	if err := toolsManager.RegisterWorker(taskWorkers); err != nil {
+		log.Printf("[WARN] 工具下载 worker 注册失败: %v", err)
+	}
 	taskWorkerCtx, stopTaskWorkers := context.WithCancel(context.Background())
 	go startTaskWorkers(taskWorkerCtx, taskWorkers)
 	defer stopTaskWorkers()
@@ -257,7 +280,7 @@ func main() {
 	pregenQueue.Start()
 	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

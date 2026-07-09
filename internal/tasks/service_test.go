@@ -11,6 +11,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -311,6 +312,39 @@ func TestProgressSucceededAndFailedTransitions(t *testing.T) {
 	failed := mustGetTask(t, svc, claimedFailed.ID, Query{SpaceID: models.DefaultSpaceID})
 	if failed.Status != models.TaskStatusFailed || failed.Attempts != 1 || failed.Error != "转码失败" || failed.FinishedAt == nil {
 		t.Fatalf("失败终态异常: %+v", failed)
+	}
+}
+
+func TestMarkSucceededRecordsAuditEvent(t *testing.T) {
+	svc, db := newTaskTestService(t)
+	if err := db.AutoMigrate(&models.AuditEvent{}); err != nil {
+		t.Fatalf("迁移审计表失败: %v", err)
+	}
+	svc.WithAudit(audit.NewRecorder(db))
+	ctx := context.Background()
+	task := mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:   models.TaskScopeSpace,
+		SpaceID: models.DefaultSpaceID,
+		Type:    "tool.download",
+	})
+	claimed, err := svc.ClaimNext(ctx, ClaimQuery{Type: task.Type})
+	if err != nil {
+		t.Fatalf("领取任务失败: %v", err)
+	}
+
+	if err := svc.MarkSucceeded(ctx, claimed.ID); err != nil {
+		t.Fatalf("标记成功失败: %v", err)
+	}
+
+	var event models.AuditEvent
+	if err := db.First(&event, "action = ?", "task.succeeded").Error; err != nil {
+		t.Fatalf("应写入 task.succeeded 审计事件: %v", err)
+	}
+	if event.Scope != audit.ScopeSpace || event.SpaceID == nil || *event.SpaceID != models.DefaultSpaceID {
+		t.Fatalf("成功事件应保留任务作用域: %+v", event)
+	}
+	if event.ResourceType != "task" || event.ResourceID == "" {
+		t.Fatalf("成功事件资源字段不正确: %+v", event)
 	}
 }
 

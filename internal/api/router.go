@@ -195,6 +195,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sys.POST("/ffmpeg/detect", h.DetectFFmpeg)
 		// 代理连通性测试（FR-89）：保存前先验代理是否可达，用临时 client、不污染运行期代理
 		sys.POST("/proxy/test", h.TestProxy)
+		// 外部工具下载（FR2-022）：源列表、安装状态与下载入队
+		sys.GET("/tools", h.ListTools)
+		sys.GET("/tools/sources", h.ListToolSources)
+		sys.POST("/tools/download", h.DownloadTool)
 		// 远程自更新（FR-46）：检测 / 应用 / 回滚
 		sys.GET("/update/check", h.CheckUpdate)
 		sys.POST("/update/apply", h.ApplyUpdate)

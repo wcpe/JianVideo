@@ -674,6 +674,54 @@ export interface ProxyTestResult {
   target: string;
 }
 
+/** 可自动下载的外部工具 */
+export type ToolName = 'ffmpeg' | 'ffprobe' | 'magick';
+
+/** 工具下载源（FR2-022）：内置源或后端返回的可选来源 */
+export interface ToolSource {
+  id: string;
+  tool: ToolName;
+  platform: string;
+  arch: string;
+  version: string;
+  url: string;
+  sha256: string;
+  size: number;
+  label: string;
+  allow_http?: boolean;
+}
+
+/** 已安装工具记录 */
+export interface ToolInstallRecord {
+  version: string;
+  path: string;
+  updated_at: string;
+}
+
+/** 单个工具的运行期配置与安装状态 */
+export interface ToolStatus {
+  tool: ToolName;
+  setting_key: string;
+  configured_path: string;
+  installed: ToolInstallRecord[];
+}
+
+/** 工具下载入队请求 */
+export interface ToolDownloadInput {
+  tool: ToolName;
+  source_id?: string;
+  custom_url?: string;
+  sha256?: string;
+  version?: string;
+  allow_insecure_http?: boolean;
+}
+
+/** 工具下载入队响应 */
+export interface ToolDownloadResponse {
+  status: string;
+  task_id: string;
+}
+
 /** 回收站清理结果统计（FR-26）：成功移动数与失败跳过数 */
 export interface RecycleCleanupResult {
   moved: number;

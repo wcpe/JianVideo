@@ -30,6 +30,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
+	"github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/update"
 )
@@ -84,6 +85,9 @@ type Handler struct {
 	// 通用异步任务队列中心（FR2-037）：未注入时新任务端点返回 503，旧队列端点保持原兼容行为。
 	tasks       *tasksvc.Service
 	taskWorkers *tasksvc.WorkerRegistry
+
+	// 外部工具下载管理器（FR2-022）：未注入时工具下载端点返回 503。
+	tools *tools.Manager
 }
 
 // NewHandler 创建处理器。
@@ -152,6 +156,12 @@ func (h *Handler) WithTasks(svc *tasksvc.Service) *Handler {
 // WithTaskWorkers 注入通用任务 worker 注册表，供新任务入队后即时触发执行。
 func (h *Handler) WithTaskWorkers(workers *tasksvc.WorkerRegistry) *Handler {
 	h.taskWorkers = workers
+	return h
+}
+
+// WithTools 注入外部工具下载管理器，启用 /api/system/tools 端点。
+func (h *Handler) WithTools(manager *tools.Manager) *Handler {
+	h.tools = manager
 	return h
 }
 

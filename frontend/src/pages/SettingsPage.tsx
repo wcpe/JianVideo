@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Stack,
   Title,
@@ -16,9 +16,11 @@ import {
   Switch,
   Box,
   Select,
+  Progress,
+  Divider,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconAlertCircle, IconTrash, IconPlus } from '@tabler/icons-react';
+import { IconAlertCircle, IconTrash, IconPlus, IconDownload } from '@tabler/icons-react';
 import {
   getSettingDefinitions,
   getSettings,
@@ -35,7 +37,15 @@ import {
   SETTING_KEY_UPLOAD_NAMING_RULE,
 } from '@/api/settings';
 import { getLibraryPaths } from '@/api/library';
-import { getEnvVars, detectFFmpeg, testProxy } from '@/api/system';
+import {
+  getEnvVars,
+  detectFFmpeg,
+  testProxy,
+  getTools,
+  getToolSources,
+  downloadTool,
+} from '@/api/system';
+import { listTasks } from '@/api/tasks';
 import { changePassword } from '@/api/auth';
 import AnchorNav from '@/components/AnchorNav';
 import { extractErrorMessage } from '@/utils/error';
@@ -45,7 +55,16 @@ import {
   serializeRecycleBinRows,
   type RecycleBinRow,
 } from '@/utils/recycle-bin';
-import type { EnvVar, LibraryPath, SettingDefinition, SettingsMap } from '@/types';
+import type {
+  EnvVar,
+  LibraryPath,
+  SettingDefinition,
+  SettingsMap,
+  TaskItem,
+  ToolName,
+  ToolSource,
+  ToolStatus,
+} from '@/types';
 
 // 设置页左侧锚点（FR-113）：各分区标题挂同名 id，点击滚动定位、滚动高亮
 const SETTINGS_ANCHORS = [
@@ -58,6 +77,23 @@ const SETTINGS_ANCHORS = [
   { id: 'set-diagnostics', label: '诊断' },
   { id: 'set-env', label: '环境变量' },
 ];
+
+const TOOL_OPTIONS: { value: ToolName; label: string }[] = [
+  { value: 'ffmpeg', label: 'FFmpeg' },
+  { value: 'ffprobe', label: 'FFprobe' },
+  { value: 'magick', label: 'Magick' },
+];
+
+function formatToolSize(size: number): string {
+  if (size <= 0) return '大小未知';
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.ceil(size / 1024)} KB`;
+}
+
+function taskProgress(task: TaskItem | null): number {
+  if (!task) return 0;
+  return Math.max(0, Math.min(100, Math.round(task.progress * 100)));
+}
 
 /** 设置页（FR-24/FR-56/FR-63/FR-87）：按扫描/网络/工具路径/回收站分区读写运行期键值设置，并只读查看环境变量 */
 export default function SettingsPage() {
@@ -98,6 +134,19 @@ export default function SettingsPage() {
   const [detectResult, setDetectResult] = useState<{ available: boolean; version: string } | null>(
     null,
   );
+  const [toolStatuses, setToolStatuses] = useState<ToolStatus[]>([]);
+  const [toolSources, setToolSources] = useState<ToolSource[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(true);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [selectedTool, setSelectedTool] = useState<ToolName>('ffmpeg');
+  const [selectedSourceID, setSelectedSourceID] = useState<string | null>(null);
+  const [customURL, setCustomURL] = useState('');
+  const [customSHA256, setCustomSHA256] = useState('');
+  const [customVersion, setCustomVersion] = useState('');
+  const [allowLocalHTTP, setAllowLocalHTTP] = useState(false);
+  const [downloadingTool, setDownloadingTool] = useState(false);
+  const [downloadTaskID, setDownloadTaskID] = useState('');
+  const [latestToolTask, setLatestToolTask] = useState<TaskItem | null>(null);
 
   // 代理连通性测试（FR-89）
   const [testingProxy, setTestingProxy] = useState(false);
@@ -173,6 +222,28 @@ export default function SettingsPage() {
     };
   }, []);
 
+  // 工具下载状态（FR2-022）：读取可下载源与当前安装状态，下载任务走通用任务中心。
+  useEffect(() => {
+    let active = true;
+    setToolsLoading(true);
+    setToolsError(null);
+    Promise.all([getTools(), getToolSources()])
+      .then(([statuses, sources]) => {
+        if (!active) return;
+        setToolStatuses(statuses);
+        setToolSources(sources);
+      })
+      .catch((err) => {
+        if (active) setToolsError(extractErrorMessage(err, '加载工具下载信息失败'));
+      })
+      .finally(() => {
+        if (active) setToolsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // 回收站行编辑器操作
   const addRecycleRow = useCallback(() => {
     setRecycleBinRows((rows) => [...rows, { drive: '', path: '' }]);
@@ -195,6 +266,64 @@ export default function SettingsPage() {
     (key: string, fallback: string) => definitions[key]?.description ?? fallback,
     [definitions],
   );
+  const selectedToolSources = useMemo(
+    () => toolSources.filter((source) => source.tool === selectedTool),
+    [toolSources, selectedTool],
+  );
+  const downloadableSources = useMemo(
+    () => selectedToolSources.filter((source) => source.sha256),
+    [selectedToolSources],
+  );
+  const selectedSource = useMemo(
+    () => selectedToolSources.find((source) => source.id === selectedSourceID) ?? null,
+    [selectedToolSources, selectedSourceID],
+  );
+  const selectedToolStatus = useMemo(
+    () => toolStatuses.find((status) => status.tool === selectedTool) ?? null,
+    [toolStatuses, selectedTool],
+  );
+
+  useEffect(() => {
+    setSelectedSourceID((current) => {
+      if (current && downloadableSources.some((source) => source.id === current)) return current;
+      return downloadableSources[0]?.id ?? null;
+    });
+  }, [downloadableSources]);
+
+  const refreshToolTask = useCallback(async () => {
+    const page = await listTasks({
+      scope: 'system',
+      type: 'tool.download',
+      resource_type: 'tool',
+      resource_id: selectedTool,
+      page_size: 1,
+    });
+    setLatestToolTask(page.items[0] ?? null);
+  }, [selectedTool]);
+
+  useEffect(() => {
+    setLatestToolTask(null);
+    setDownloadTaskID('');
+    refreshToolTask().catch(() => {
+      /* 工具任务为空或加载失败不阻塞设置页 */
+    });
+  }, [refreshToolTask]);
+
+  useEffect(() => {
+    if (
+      !downloadTaskID &&
+      latestToolTask?.status !== 'pending' &&
+      latestToolTask?.status !== 'running'
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshToolTask().catch(() => {
+        /* 轮询失败时保持现有任务状态 */
+      });
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [downloadTaskID, latestToolTask?.status, refreshToolTask]);
 
   const handleSave = useCallback(async () => {
     // 回收站行非法（空盘符/重复盘符）时行内提示并阻止提交
@@ -283,6 +412,65 @@ export default function SettingsPage() {
       setDetecting(false);
     }
   }, [ffmpegPath]);
+
+  const handleDownloadTool = useCallback(async () => {
+    const customURLValue = customURL.trim();
+    const customSHAValue = customSHA256.trim();
+    if (!customURLValue && !selectedSourceID) {
+      notifications.show({
+        title: '下载源缺失',
+        message: '请选择内置来源或填写自定义下载 URL',
+        color: 'red',
+        autoClose: 4000,
+      });
+      return;
+    }
+    if (customURLValue && !customSHAValue) {
+      notifications.show({
+        title: '校验值缺失',
+        message: '自定义下载 URL 必须填写 SHA-256',
+        color: 'red',
+        autoClose: 4000,
+      });
+      return;
+    }
+    setDownloadingTool(true);
+    try {
+      const result = await downloadTool({
+        tool: selectedTool,
+        source_id: customURLValue ? undefined : (selectedSourceID ?? undefined),
+        custom_url: customURLValue || undefined,
+        sha256: customURLValue ? customSHAValue : undefined,
+        version: customURLValue ? customVersion.trim() || undefined : undefined,
+        allow_insecure_http: customURLValue ? allowLocalHTTP : undefined,
+      });
+      setDownloadTaskID(result.task_id);
+      await refreshToolTask();
+      notifications.show({
+        title: '下载已入队',
+        message: `任务 ${result.task_id} 已创建`,
+        color: 'green',
+        autoClose: 3000,
+      });
+    } catch (err) {
+      notifications.show({
+        title: '下载失败',
+        message: extractErrorMessage(err, '工具下载入队失败'),
+        color: 'red',
+        autoClose: 4000,
+      });
+    } finally {
+      setDownloadingTool(false);
+    }
+  }, [
+    allowLocalHTTP,
+    customSHA256,
+    customURL,
+    customVersion,
+    refreshToolTask,
+    selectedSourceID,
+    selectedTool,
+  ]);
 
   // 测试当前输入的代理是否可达（保存前先验；后端用临时 client 探测，不改运行期代理）
   const handleTestProxy = useCallback(async () => {
@@ -481,7 +669,9 @@ export default function SettingsPage() {
                         )
                   }
                   placeholder={
-                    networkProxyMasked ? '已设置，凭据不回显' : '如 http://host:port 或 socks5h://host:port'
+                    networkProxyMasked
+                      ? '已设置，凭据不回显'
+                      : '如 http://host:port 或 socks5h://host:port'
                   }
                   value={networkProxy}
                   onChange={(e) => {
@@ -570,6 +760,113 @@ export default function SettingsPage() {
                       <Badge color="red">不可用</Badge>
                     ))}
                 </Group>
+                <Divider label="自动下载" labelPosition="left" />
+                {toolsError && (
+                  <Alert icon={<IconAlertCircle size={16} />} color="red" title="加载失败">
+                    {toolsError}
+                  </Alert>
+                )}
+                {toolsLoading ? (
+                  <Skeleton height={180} radius="md" />
+                ) : (
+                  <Stack gap="sm">
+                    <Group grow align="flex-start">
+                      <Select
+                        label="工具"
+                        data={TOOL_OPTIONS}
+                        value={selectedTool}
+                        onChange={(value) => {
+                          if (value) setSelectedTool(value as ToolName);
+                        }}
+                        allowDeselect={false}
+                      />
+                      <Select
+                        label="内置来源"
+                        data={downloadableSources.map((source) => ({
+                          value: source.id,
+                          label: source.label,
+                        }))}
+                        value={selectedSourceID}
+                        onChange={setSelectedSourceID}
+                        placeholder="暂无可用内置来源"
+                        clearable
+                      />
+                    </Group>
+                    {selectedSource && (
+                      <Group gap="xs">
+                        <Text size="sm" fw={500}>
+                          {selectedSource.label}
+                        </Text>
+                        <Badge variant="light">{selectedSource.version}</Badge>
+                        <Badge variant="light">
+                          {selectedSource.platform}/{selectedSource.arch}
+                        </Badge>
+                        <Badge variant="light">{formatToolSize(selectedSource.size)}</Badge>
+                        <Text size="xs" c="dimmed">
+                          SHA-256 <Code>{selectedSource.sha256.slice(0, 12)}...</Code>
+                        </Text>
+                      </Group>
+                    )}
+                    <TextInput
+                      label="自定义下载 URL"
+                      placeholder="https://example.com/ffmpeg.zip"
+                      value={customURL}
+                      onChange={(e) => setCustomURL(e.currentTarget.value)}
+                    />
+                    <TextInput
+                      label="自定义 SHA-256"
+                      placeholder="64 位 SHA-256"
+                      value={customSHA256}
+                      onChange={(e) => setCustomSHA256(e.currentTarget.value)}
+                    />
+                    <Group grow align="flex-start">
+                      <TextInput
+                        label="自定义版本"
+                        placeholder="如 local-test"
+                        value={customVersion}
+                        onChange={(e) => setCustomVersion(e.currentTarget.value)}
+                      />
+                      <Switch
+                        mt="xl"
+                        label="允许本机 HTTP 测试源"
+                        checked={allowLocalHTTP}
+                        onChange={(e) => setAllowLocalHTTP(e.currentTarget.checked)}
+                      />
+                    </Group>
+                    <Group gap="sm" align="center">
+                      <Button
+                        leftSection={<IconDownload size={16} />}
+                        onClick={handleDownloadTool}
+                        loading={downloadingTool}
+                        disabled={!customURL.trim() && !selectedSourceID}
+                      >
+                        下载工具
+                      </Button>
+                      {selectedToolStatus?.configured_path && (
+                        <Badge color="green" variant="light">
+                          已配置：{selectedToolStatus.configured_path}
+                        </Badge>
+                      )}
+                    </Group>
+                    {latestToolTask && (
+                      <Stack gap={4}>
+                        <Group gap="xs">
+                          <Text size="sm">任务 {latestToolTask.id}</Text>
+                          <Badge>{latestToolTask.status}</Badge>
+                          {latestToolTask.checkpoint && (
+                            <Badge variant="light">{latestToolTask.checkpoint}</Badge>
+                          )}
+                        </Group>
+                        <Progress value={taskProgress(latestToolTask)} />
+                        {latestToolTask.error && (
+                          <Text size="xs" c="red">
+                            {latestToolTask.error}
+                          </Text>
+                        )}
+                      </Stack>
+                    )}
+                  </Stack>
+                )}
                 <Text size="xs" c="dimmed">
                   先「检测」验证路径可用，再用下方「保存设置」持久化；保存后即时生效，无需重启。
                 </Text>

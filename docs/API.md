@@ -1180,7 +1180,42 @@
   ```json
   { "reachable": true, "detail": "HTTP 200", "latency_ms": 123, "target": "https://api.github.com" }
   ```
-- **说明**：用**临时 `http.Client`** 经待测代理（`proxy` 可省/空 = 测直连）对默认目标 `https://api.github.com`（与自更新出站目标一致，FR-46）发一次轻量 GET 探测连通性。**仅探测、绝不改写运行期全局代理真源**（`netproxy.current`），与「保存即生效」的 `PUT /api/settings`（键 `network_proxy`，FR-80）解耦，供用户保存前先验。只要 HTTP 层拿到任意响应（含 4xx）即 `reachable:true`、`detail` 为 `HTTP <状态码>`；网络层错误（连不上代理 / 目标、超时）`reachable:false`、`detail` 为脱敏后的原因。**代理 URL 含 userinfo 凭据时返回与日志一律脱敏，绝不回显明文**（安全红线）。整体超时约 10s。
+- **说明**：用**临时 `http.Client`** 经待测代理（`proxy` 可省/空 = 测直连）对默认目标 `https://api.github.com`（与自更新出站目标一致，FR-46）发一次轻量 GET 探测连通性。请求体可选 `target` 覆盖探测目标，供 FR2-022 下载源连通性预检。**仅探测、绝不改写运行期全局代理真源**（`netproxy.current`），与「保存即生效」的 `PUT /api/settings`（键 `network_proxy`，FR-80）解耦，供用户保存前先验。只要 HTTP 层拿到任意响应（含 4xx）即 `reachable:true`、`detail` 为 `HTTP <状态码>`；网络层错误（连不上代理 / 目标、超时）`reachable:false`、`detail` 为脱敏后的原因。**代理 URL 含 userinfo 凭据时返回与日志一律脱敏，绝不回显明文**（安全红线）。整体超时约 10s。
+
+### 外部工具下载（FR2-022）
+
+- **方法 / 路径**：`GET /api/system/tools`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      { "tool": "ffmpeg", "setting_key": "ffmpeg_path", "configured_path": "D:/data/tools/ffmpeg/fr2-022-e2e/bin/ffmpeg.exe", "installed": [] }
+    ]
+  }
+  ```
+- **说明**：返回 ffmpeg、ffprobe、ImageMagick `magick` 的当前配置路径与受控工具目录内已安装版本。
+
+- **方法 / 路径**：`GET /api/system/tools/sources`
+- **响应**（200）：
+  ```json
+  {
+    "sources": [
+      { "id": "ffmpeg-source-8.1.2", "tool": "ffmpeg", "platform": "source", "arch": "all", "version": "8.1.2", "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz", "sha256": "", "size": 0, "label": "FFmpeg 官方源码包" }
+    ]
+  }
+  ```
+- **说明**：返回内置工具源元数据。缺少 `sha256` 的源只能展示，不能自动下载。
+
+- **方法 / 路径**：`POST /api/system/tools/download`
+- **请求**：
+  ```json
+  { "tool": "ffmpeg", "source_id": "", "custom_url": "http://127.0.0.1:18022/tool.tar.gz", "sha256": "<64位sha256>", "version": "fr2-022-e2e", "allow_insecure_http": true }
+  ```
+- **响应**（202）：
+  ```json
+  { "status": "queued", "task_id": "42" }
+  ```
+- **说明**：创建系统级 `tool.download` 任务。自定义 URL 必须提供合法 SHA-256；默认只接受 HTTPS，HTTP 仅允许本机测试源且需显式 `allow_insecure_http=true`。任务下载到受控临时目录后校验 SHA-256，安全解压 zip/tar.gz（拒绝路径穿越、symlink、hardlink 与非普通文件），探测 `-version` 成功后安装到数据目录 `tools/<tool>/<version>/` 并写入对应运行期设置。状态、进度、取消与重试复用 `/api/tasks`。
 
 ### 自更新下载进度（FR-90）
 

@@ -236,7 +236,11 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(mockNotificationShow).toHaveBeenCalledWith(
-        expect.objectContaining({ title: '保存失败', message: 'typo_key: 未知设置项', color: 'red' }),
+        expect.objectContaining({
+          title: '保存失败',
+          message: 'typo_key: 未知设置项',
+          color: 'red',
+        }),
       );
     });
   });
@@ -351,6 +355,89 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/不可达：/)).toBeVisible();
     });
+  });
+
+  it('工具路径区可从内置源发起工具下载并展示任务进度（FR2-022）', async () => {
+    const user = userEvent.setup();
+    let postBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get('*/api/system/tools', () =>
+        HttpResponse.json({
+          items: [
+            {
+              tool: 'ffmpeg',
+              setting_key: 'ffmpeg_path',
+              configured_path: '',
+              installed: [],
+            },
+          ],
+        }),
+      ),
+      http.get('*/api/system/tools/sources', () =>
+        HttpResponse.json({
+          sources: [
+            {
+              id: 'ffmpeg-local-fixture',
+              tool: 'ffmpeg',
+              platform: 'windows',
+              arch: 'amd64',
+              version: 'test-1',
+              url: 'https://example.invalid/ffmpeg.zip',
+              sha256: 'a'.repeat(64),
+              size: 1234,
+              label: '测试 FFmpeg',
+            },
+          ],
+        }),
+      ),
+      http.post('*/api/system/tools/download', async ({ request }) => {
+        postBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { status: 'queued', task_id: 'tool-download-test' },
+          { status: 202 },
+        );
+      }),
+      http.get('*/api/tasks', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'tool-download-test',
+              scope: 'system',
+              space_id: null,
+              type: 'tool.download',
+              status: 'running',
+              priority: 5,
+              attempts: 1,
+              max_attempts: 1,
+              progress: 0.5,
+              checkpoint: '下载中',
+              resource_type: 'tool',
+              resource_id: 'ffmpeg',
+              error: null,
+              created_at: '2026-07-10T08:00:00Z',
+              updated_at: '2026-07-10T08:01:00Z',
+            },
+          ],
+          page: 1,
+          page_size: 5,
+          total: 1,
+        }),
+      ),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('test-1')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '下载工具' }));
+
+    await waitFor(() => {
+      expect(postBody).toMatchObject({
+        tool: 'ffmpeg',
+        source_id: 'ffmpeg-local-fixture',
+      });
+    });
+    expect(screen.getByText(/tool-download-test/)).toBeVisible();
+    expect(screen.getByText(/下载中/)).toBeVisible();
   });
 
   it('保存 magick 路径走 PUT /api/settings（FR-63）', async () => {

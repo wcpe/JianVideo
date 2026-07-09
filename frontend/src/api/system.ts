@@ -6,6 +6,10 @@ import type {
   EnvVar,
   FFmpegDetectResult,
   ProxyTestResult,
+  ToolDownloadInput,
+  ToolDownloadResponse,
+  ToolSource,
+  ToolStatus,
 } from '@/types';
 import client from './client';
 
@@ -75,13 +79,28 @@ async function realDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
   return res.data;
 }
 
-async function realTestProxy(proxy?: string): Promise<ProxyTestResult> {
+async function realTestProxy(proxy?: string, target?: string): Promise<ProxyTestResult> {
   // 代理探测需发起出站请求、国内常较慢；单请求超时放宽到 15s（覆盖全局），避免前端先于后端超时。
   const res = await client.post<ProxyTestResult>(
     '/api/system/proxy/test',
-    { proxy: proxy ?? '' },
+    { proxy: proxy ?? '', target: target ?? '' },
     { timeout: 15000 },
   );
+  return res.data;
+}
+
+async function realGetTools(): Promise<ToolStatus[]> {
+  const res = await client.get<{ items: ToolStatus[] }>('/api/system/tools');
+  return res.data.items || [];
+}
+
+async function realGetToolSources(): Promise<ToolSource[]> {
+  const res = await client.get<{ sources: ToolSource[] }>('/api/system/tools/sources');
+  return res.data.sources || [];
+}
+
+async function realDownloadTool(input: ToolDownloadInput): Promise<ToolDownloadResponse> {
+  const res = await client.post<ToolDownloadResponse>('/api/system/tools/download', input);
   return res.data;
 }
 
@@ -280,7 +299,7 @@ async function mockDetectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
   };
 }
 
-async function mockTestProxy(proxy?: string): Promise<ProxyTestResult> {
+async function mockTestProxy(proxy?: string, target?: string): Promise<ProxyTestResult> {
   await mockDelay(300);
   // 模拟：含 bad 字样视为不可达，其余（含空=直连）视为可达
   const reachable = !proxy || !proxy.toLowerCase().includes('bad');
@@ -288,8 +307,82 @@ async function mockTestProxy(proxy?: string): Promise<ProxyTestResult> {
     reachable,
     detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
     latency_ms: reachable ? 123 : 0,
-    target: 'https://api.github.com',
+    target: target || 'https://api.github.com',
   };
+}
+
+async function mockGetTools(): Promise<ToolStatus[]> {
+  await mockDelay(120);
+  return [
+    {
+      tool: 'ffmpeg',
+      setting_key: 'ffmpeg_path',
+      configured_path: '/opt/jianvideo/data/tools/ffmpeg/mock/bin/ffmpeg',
+      installed: [
+        {
+          version: 'mock-6.1.1',
+          path: '/opt/jianvideo/data/tools/ffmpeg/mock/bin/ffmpeg',
+          updated_at: '2026-07-10T08:00:00Z',
+        },
+      ],
+    },
+    {
+      tool: 'ffprobe',
+      setting_key: 'ffprobe_path',
+      configured_path: '',
+      installed: [],
+    },
+    {
+      tool: 'magick',
+      setting_key: 'magick_path',
+      configured_path: '',
+      installed: [],
+    },
+  ];
+}
+
+async function mockGetToolSources(): Promise<ToolSource[]> {
+  await mockDelay(120);
+  return [
+    {
+      id: 'ffmpeg-mock',
+      tool: 'ffmpeg',
+      platform: 'windows',
+      arch: 'amd64',
+      version: 'mock-6.1.1',
+      url: 'https://example.invalid/ffmpeg.zip',
+      sha256: 'a'.repeat(64),
+      size: 12_582_912,
+      label: 'FFmpeg 示例源',
+    },
+    {
+      id: 'ffprobe-mock',
+      tool: 'ffprobe',
+      platform: 'windows',
+      arch: 'amd64',
+      version: 'mock-6.1.1',
+      url: 'https://example.invalid/ffprobe.zip',
+      sha256: 'b'.repeat(64),
+      size: 4_194_304,
+      label: 'FFprobe 示例源',
+    },
+    {
+      id: 'magick-mock',
+      tool: 'magick',
+      platform: 'windows',
+      arch: 'amd64',
+      version: 'mock-7.1.2',
+      url: 'https://example.invalid/magick.zip',
+      sha256: 'c'.repeat(64),
+      size: 24_117_248,
+      label: 'ImageMagick 示例源',
+    },
+  ];
+}
+
+async function mockDownloadTool(_input: ToolDownloadInput): Promise<ToolDownloadResponse> {
+  await mockDelay(180);
+  return { status: 'queued', task_id: `tool-download-${Date.now()}` };
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
@@ -330,8 +423,21 @@ export function detectFFmpeg(path?: string): Promise<FFmpegDetectResult> {
 }
 
 // 代理连通性测试（FR-89）：proxy 可空 = 测直连；用临时 client 探测，不改后端运行期代理
-export function testProxy(proxy?: string): Promise<ProxyTestResult> {
-  return useMock ? mockTestProxy(proxy) : realTestProxy(proxy);
+export function testProxy(proxy?: string, target?: string): Promise<ProxyTestResult> {
+  return useMock ? mockTestProxy(proxy, target) : realTestProxy(proxy, target);
+}
+
+// 工具状态与下载源（FR2-022）：复用系统任务入队，实际下载由后端 worker 执行。
+export function getTools(): Promise<ToolStatus[]> {
+  return useMock ? mockGetTools() : realGetTools();
+}
+
+export function getToolSources(): Promise<ToolSource[]> {
+  return useMock ? mockGetToolSources() : realGetToolSources();
+}
+
+export function downloadTool(input: ToolDownloadInput): Promise<ToolDownloadResponse> {
+  return useMock ? mockDownloadTool(input) : realDownloadTool(input);
 }
 
 // pingHealth 探测服务是否在线，用于自更新/回滚重启后轮询恢复。

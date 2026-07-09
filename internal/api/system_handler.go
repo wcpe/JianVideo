@@ -245,7 +245,8 @@ func (h *Handler) DetectFFmpeg(c *gin.Context) {
 // 含凭据的代理地址在返回与日志中一律脱敏。返回 {reachable, detail, latency_ms}。
 func (h *Handler) TestProxy(c *gin.Context) {
 	var req struct {
-		Proxy string `json:"proxy"`
+		Proxy  string `json:"proxy"`
+		Target string `json:"target"`
 	}
 	// 允许空 body / 缺省 proxy：绑定失败不视为错误，按测直连处理。
 	_ = c.ShouldBindJSON(&req)
@@ -253,11 +254,15 @@ func (h *Handler) TestProxy(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), proxyTestTimeout)
 	defer cancel()
 
-	reachable, detail, latency := netproxy.TestProxy(ctx, req.Proxy, defaultProxyTestTarget)
+	target := req.Target
+	if target == "" {
+		target = defaultProxyTestTarget
+	}
+	reachable, detail, latency := netproxy.TestProxy(ctx, req.Proxy, target)
 	c.JSON(http.StatusOK, gin.H{
 		"reachable":  reachable,
 		"detail":     detail,
 		"latency_ms": latency.Milliseconds(),
-		"target":     defaultProxyTestTarget,
+		"target":     target,
 	})
 }

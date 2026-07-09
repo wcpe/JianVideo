@@ -19,6 +19,8 @@ import type {
   TaskStatus,
   MediaTypeRule,
   MediaTypesResponse,
+  ToolSource,
+  ToolStatus,
 } from '@/types';
 
 // 内存中的可变数据（支持增删）
@@ -109,6 +111,63 @@ const settingsStore: Record<string, string> = {
   update_channel: 'stable',
   transcode_codec_priority: '["h264"]',
 };
+
+const toolStatuses: ToolStatus[] = [
+  {
+    tool: 'ffmpeg',
+    setting_key: 'ffmpeg_path',
+    configured_path: '',
+    installed: [],
+  },
+  {
+    tool: 'ffprobe',
+    setting_key: 'ffprobe_path',
+    configured_path: '',
+    installed: [],
+  },
+  {
+    tool: 'magick',
+    setting_key: 'magick_path',
+    configured_path: '',
+    installed: [],
+  },
+];
+
+const toolSources: ToolSource[] = [
+  {
+    id: 'ffmpeg-mock',
+    tool: 'ffmpeg',
+    platform: 'windows',
+    arch: 'amd64',
+    version: 'mock-6.1.1',
+    url: 'https://example.invalid/ffmpeg.zip',
+    sha256: 'a'.repeat(64),
+    size: 12_582_912,
+    label: 'FFmpeg 示例源',
+  },
+  {
+    id: 'ffprobe-mock',
+    tool: 'ffprobe',
+    platform: 'windows',
+    arch: 'amd64',
+    version: 'mock-6.1.1',
+    url: 'https://example.invalid/ffprobe.zip',
+    sha256: 'b'.repeat(64),
+    size: 4_194_304,
+    label: 'FFprobe 示例源',
+  },
+  {
+    id: 'magick-mock',
+    tool: 'magick',
+    platform: 'windows',
+    arch: 'amd64',
+    version: 'mock-7.1.2',
+    url: 'https://example.invalid/magick.zip',
+    sha256: 'c'.repeat(64),
+    size: 24_117_248,
+    label: 'ImageMagick 示例源',
+  },
+];
 
 const settingDefinitions: SettingDefinition[] = [
   {
@@ -1402,15 +1461,52 @@ export const handlers = [
   // 代理连通性测试（FR-89）：含 bad 字样视为不可达，其余（含空=直连）视为可达
   http.post('*/api/system/proxy/test', async ({ request }) => {
     await delay(120);
-    const body = (await request.json()) as { proxy?: string };
+    const body = (await request.json()) as { proxy?: string; target?: string };
     const proxy = body.proxy || '';
     const reachable = !proxy || !proxy.toLowerCase().includes('bad');
     return HttpResponse.json({
       reachable,
       detail: reachable ? 'HTTP 200' : 'dial tcp: connection refused',
       latency_ms: reachable ? 123 : 0,
-      target: 'https://api.github.com',
+      target: body.target || 'https://api.github.com',
     });
+  }),
+
+  http.get('*/api/system/tools', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: toolStatuses });
+  }),
+
+  http.get('*/api/system/tools/sources', async () => {
+    await delay(80);
+    return HttpResponse.json({ sources: toolSources });
+  }),
+
+  http.post('*/api/system/tools/download', async ({ request }) => {
+    await delay(120);
+    const body = (await request.json()) as { tool?: string };
+    const tool = body.tool || 'ffmpeg';
+    const now = new Date().toISOString();
+    const taskID = `tool-download-${Date.now()}`;
+    addUnifiedTask({
+      id: taskID,
+      scope: 'system',
+      space_id: null,
+      type: 'tool.download',
+      status: 'running',
+      priority: 5,
+      attempts: 1,
+      max_attempts: 1,
+      progress: 0.45,
+      checkpoint: '下载中',
+      resource_type: 'tool',
+      resource_id: tool,
+      error: null,
+      created_at: now,
+      updated_at: now,
+      started_at: now,
+    });
+    return HttpResponse.json({ status: 'queued', task_id: taskID }, { status: 202 });
   }),
 
   // 自更新（FR-46）

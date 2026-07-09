@@ -349,6 +349,27 @@ func TestTestProxy_DoesNotPolluteRuntimeProxy(t *testing.T) {
 	}
 }
 
+// TestTestProxy_UsesCustomTarget 验证 FR2-022 下载页可指定探测目标，用于预检工具下载源可达性。
+func TestTestProxy_UsesCustomTarget(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	payload, err := json.Marshal(map[string]string{"target": target.URL})
+	if err != nil {
+		t.Fatalf("序列化请求失败: %v", err)
+	}
+	resp := doProxyTest(t, string(payload))
+
+	if reachable, _ := resp["reachable"].(bool); !reachable {
+		t.Fatalf("自定义本机目标应可达，响应: %+v", resp)
+	}
+	if got, _ := resp["target"].(string); got != target.URL {
+		t.Fatalf("响应 target 应回显 %q，实际 %q", target.URL, got)
+	}
+}
+
 // TestTestProxy_EmptyBodyMeansDirect 空 body 不报错，按测直连处理（reachable 由网络决定，仅验契约不崩）。
 func TestTestProxy_EmptyBodyMeansDirect(t *testing.T) {
 	resp := doProxyTest(t, "")

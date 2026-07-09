@@ -534,20 +534,27 @@ func (s *Service) MarkSucceeded(ctx context.Context, id int64) error {
 		return fmt.Errorf("仅 running 任务可标记成功")
 	}
 	now := s.now().UTC()
-	result := s.db.WithContext(ctx).Model(&models.Task{}).Where("id = ? AND status = ?", id, models.TaskStatusRunning).Updates(map[string]any{
-		"status":      models.TaskStatusSucceeded,
-		"progress":    100,
-		"error":       "",
-		"finished_at": now,
-		"updated_at":  now,
+	task.Status = models.TaskStatusSucceeded
+	task.Progress = 100
+	task.Error = ""
+	task.FinishedAt = &now
+	task.UpdatedAt = now
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.Task{}).Where("id = ? AND status = ?", id, models.TaskStatusRunning).Updates(map[string]any{
+			"status":      models.TaskStatusSucceeded,
+			"progress":    100,
+			"error":       "",
+			"finished_at": now,
+			"updated_at":  now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("仅 running 任务可标记成功")
+		}
+		return s.recordAuditTx(ctx, tx, task, "task.succeeded", "")
 	})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("仅 running 任务可标记成功")
-	}
-	return nil
 }
 
 // MarkFailed 将 running 任务标记为 failed，或在剩余尝试次数内回到 pending。
