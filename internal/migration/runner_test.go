@@ -323,6 +323,28 @@ func TestMediaTypeRulesMigrationCreatesPartialIndexesAndBackfillsLegacyExtension
 	}
 }
 
+func TestOfflineTitleInferenceMigrationCreatesSchema(t *testing.T) {
+	gdb, dbPath := openLegacyDB(t)
+	runner := newDefaultRunner(t, gdb, dbPath)
+	if _, err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("默认迁移失败: %v", err)
+	}
+
+	if !testTableExists(t, gdb, "media_inferences") {
+		t.Fatal("media_inferences 表应存在")
+	}
+	for _, column := range []string{"media_id", "space_id", "kind", "title", "year", "season", "episode", "episode_title", "confidence", "source", "rule_version", "manual"} {
+		if !testColumnExists(t, gdb, "media_inferences", column) {
+			t.Fatalf("media_inferences 缺少列 %s", column)
+		}
+	}
+	for _, indexName := range []string{"idx_media_inferences_media_id", "idx_media_inferences_space_media"} {
+		if !testIndexExists(t, gdb, indexName) {
+			t.Fatalf("media_inferences 缺少索引 %s", indexName)
+		}
+	}
+}
+
 func TestTasksCenterMigrationBackfillsLegacyQueues(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "tasks-migration.db")
 	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})

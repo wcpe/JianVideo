@@ -47,6 +47,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/media", h.ListMediaFiles)
 		lib.GET("/media/:id", h.GetMediaFile)
+		lib.GET("/media/:id/inference", h.GetMediaInference)
+		lib.PUT("/media/:id/inference", h.UpdateMediaInference)
 		lib.GET("/media/:id/raw", h.GetRawImage)
 		lib.GET("/media/:id/download", h.DownloadMediaFile)
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
@@ -58,6 +60,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		// 批量软删（FR-69）：单事务对多个 media_id 复用软删，进回收站
 		lib.POST("/media/batch-delete", h.BatchDeleteMediaFiles)
+		lib.POST("/inference/backfill", h.BackfillMediaInferences)
 
 		// 批量打包下载（FR-91）：将选中媒体原文件流式打包为 zip 附件，smb 项跳过
 		lib.GET("/media/batch-download", h.BatchDownloadMediaFiles)

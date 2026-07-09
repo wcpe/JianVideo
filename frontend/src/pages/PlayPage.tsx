@@ -12,6 +12,8 @@ import {
   Menu,
   Drawer,
   Textarea,
+  TextInput,
+  NumberInput,
   Stack,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -43,7 +45,13 @@ import { useCinemaMode } from '@/hooks/cinema-context';
 import * as libApi from '@/api/library';
 import * as playApi from '@/api/play';
 import * as subtitleApi from '@/api/subtitle';
-import type { MediaFile, SubtitleTrack, SubtitleEntry, PlaybackDescriptor } from '@/types';
+import type {
+  MediaFile,
+  MediaInference,
+  SubtitleTrack,
+  SubtitleEntry,
+  PlaybackDescriptor,
+} from '@/types';
 
 // 双模式改名弹窗类型：显示名（仅库内）/ 真实文件名（磁盘改名）
 type NameEditKind = 'display' | 'real';
@@ -88,6 +96,21 @@ export default function PlayPage() {
   // 库内备注编辑（FR-137）：抽屉内编辑草稿与保存中标记，纳入基础搜索
   const [notesDraft, setNotesDraft] = useState('');
   const [notesSaving, setNotesSaving] = useState(false);
+  const [inference, setInference] = useState<MediaInference | null>(null);
+  const [inferenceTitle, setInferenceTitle] = useState('');
+  const [inferenceYear, setInferenceYear] = useState<number | string>('');
+  const [inferenceSeason, setInferenceSeason] = useState<number | string>('');
+  const [inferenceEpisode, setInferenceEpisode] = useState<number | string>('');
+  const [inferenceEpisodeTitle, setInferenceEpisodeTitle] = useState('');
+  const [inferenceSaving, setInferenceSaving] = useState(false);
+
+  const setInferenceDraft = (data: MediaInference | null) => {
+    setInferenceTitle(data?.title || '');
+    setInferenceYear(data?.year || '');
+    setInferenceSeason(data?.season || '');
+    setInferenceEpisode(data?.episode || '');
+    setInferenceEpisodeTitle(data?.episode_title || '');
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -103,6 +126,13 @@ export default function PlayPage() {
       .then((data) => setMedia(data))
       .catch(() => setError('媒体文件不存在'))
       .finally(() => setLoading(false));
+    libApi
+      .getMediaInference(mediaId)
+      .then((data) => {
+        setInference(data);
+        setInferenceDraft(data);
+      })
+      .catch(() => setInference(null));
 
     // 记录最近查看（FR-120）：进入播放页即标记 last_viewed_at，失败静默不阻塞播放
     void libApi.setMediaViewed(mediaId).catch(() => {});
@@ -255,6 +285,43 @@ export default function PlayPage() {
     }
   };
 
+  const numberValue = (value: number | string): number => {
+    if (typeof value === 'number') return value;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const confirmInferenceEdit = async () => {
+    if (!media) return;
+    setInferenceSaving(true);
+    try {
+      const updated = await libApi.updateMediaInference(media.id, {
+        title: inferenceTitle,
+        year: numberValue(inferenceYear),
+        season: numberValue(inferenceSeason),
+        episode: numberValue(inferenceEpisode),
+        episode_title: inferenceEpisodeTitle,
+      });
+      setInference(updated);
+      setInferenceDraft(updated);
+      notifications.show({
+        title: '保存成功',
+        message: '已更新影视信息',
+        color: 'green',
+        autoClose: 2500,
+      });
+    } catch (err) {
+      notifications.show({
+        title: '保存失败',
+        message: err instanceof Error ? err.message : '请稍后重试',
+        color: 'red',
+        autoClose: 3000,
+      });
+    } finally {
+      setInferenceSaving(false);
+    }
+  };
+
   if (loading) {
     return <Skeleton height={400} radius="md" />;
   }
@@ -299,7 +366,7 @@ export default function PlayPage() {
             返回
           </Button>
           <Title order={3} lineClamp={1} style={{ wordBreak: 'break-all' }}>
-            {mediaDisplayName(media)}
+            {mediaDisplayName(media, inference)}
           </Title>
           {/* 影院模式（FR-85）：临时收起左导航扩大视频区，切出/离开播放页自动恢复 */}
           <Button
@@ -331,6 +398,7 @@ export default function PlayPage() {
                 onClick={() => {
                   // 打开抽屉时同步备注草稿，确保编辑前展示最新已存值（FR-137）
                   setNotesDraft(media.notes || '');
+                  setInferenceDraft(inference);
                   setInfoOpened(true);
                 }}
               >
@@ -498,6 +566,42 @@ export default function PlayPage() {
               onClick={confirmNotesEdit}
             >
               保存备注
+            </Button>
+          </Group>
+        </Stack>
+
+        <Stack gap="xs" mt="md">
+          <Text size="xs" c="dimmed">
+            影视信息
+          </Text>
+          <TextInput
+            label="标题"
+            value={inferenceTitle}
+            onChange={(e) => setInferenceTitle(e.currentTarget.value)}
+          />
+          <Group grow>
+            <NumberInput label="年份" value={inferenceYear} onChange={setInferenceYear} min={0} />
+            <NumberInput label="季" value={inferenceSeason} onChange={setInferenceSeason} min={0} />
+            <NumberInput
+              label="集"
+              value={inferenceEpisode}
+              onChange={setInferenceEpisode}
+              min={0}
+            />
+          </Group>
+          <TextInput
+            label="集标题"
+            value={inferenceEpisodeTitle}
+            onChange={(e) => setInferenceEpisodeTitle(e.currentTarget.value)}
+          />
+          <Text size="xs" c="dimmed">
+            {inference
+              ? `${inference.manual ? '人工纠正' : '自动推断'} · 置信度 ${Math.round(inference.confidence * 100)}%`
+              : '暂无推断，可手动填写'}
+          </Text>
+          <Group justify="flex-end">
+            <Button size="xs" loading={inferenceSaving} onClick={confirmInferenceEdit}>
+              保存影视信息
             </Button>
           </Group>
         </Stack>

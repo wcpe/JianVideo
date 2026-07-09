@@ -209,7 +209,18 @@ func main() {
 
 	// 创建 API Handler 并注入 HLS 预切片依赖、运行期设置服务（FR-24）
 	// settingsSvc 已在 ffmpeg 路径注入处创建（FR-56），此处复用。
-	libSvc := library.NewService(gormDB).WithAudit(auditSvc)
+	libSvc := library.NewService(gormDB).WithAudit(auditSvc).WithInferenceConfigProvider(func(_ string, _ int64) library.InferenceConfig {
+		enabledRaw, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+		disabledRaw, _ := settingsSvc.Get(settings.KeyMediaInferenceDisabledLibraries)
+		enabled := true
+		if enabledRaw != "" {
+			enabled = settings.ParseDebugLog(enabledRaw)
+		}
+		return library.InferenceConfig{
+			Enabled:           enabled,
+			DisabledLibraries: library.ParseDisabledInferenceLibraries(disabledRaw),
+		}
+	})
 	shareSvc := share.NewService(gormDB)
 	taskSvc := tasksvc.NewService(gormDB).WithAudit(auditSvc)
 	if err := taskSvc.RecoverRunning(context.Background()); err != nil {

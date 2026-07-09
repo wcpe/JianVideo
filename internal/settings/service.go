@@ -52,6 +52,10 @@ const (
 	KeyTaskWorkerThumbnailConcurrency = "task_worker_thumbnail_concurrency"
 	// KeyTaskWorkerLightConcurrency 轻量后台任务 worker 并发上限（FR2-037），默认 2。
 	KeyTaskWorkerLightConcurrency = "task_worker_light_concurrency"
+	// KeyMediaInferenceEnabled 本地离线影视信息推断全局开关（FR2-031），"1"/"true" 为开启。
+	KeyMediaInferenceEnabled = "media_inference_enabled"
+	// KeyMediaInferenceDisabledLibraries 关闭影视推断的媒体库 ID JSON 数组（FR2-031）。
+	KeyMediaInferenceDisabledLibraries = "media_inference_disabled_libraries"
 )
 
 // Service 运行期设置业务逻辑。

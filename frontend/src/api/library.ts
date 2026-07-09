@@ -23,6 +23,8 @@ import type {
   FileHashBackfillResponse,
   UploadNamingRule,
   UploadResponse,
+  MediaInference,
+  MediaInferenceInput,
 } from '@/types';
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -120,6 +122,7 @@ const mockTagMappings: { tag_id: number; media_id: number }[] = [];
 
 // 软删除/回收站 mock 状态（FR-25）：被软删的媒体 ID 集合
 const mockDeletedIds = new Set<number>();
+const mockInferences = new Map<number, MediaInference>();
 
 // 扫描任务队列 mock 状态（FR-29）
 let nextMockTaskId = 1;
@@ -292,6 +295,31 @@ async function realGetRecentlyViewed(limit = 12): Promise<MediaFile[]> {
 
 async function realGetMediaFile(id: number): Promise<MediaFile> {
   const res = await client.get(`/api/library/media/${id}`);
+  return res.data;
+}
+
+async function realGetMediaInference(id: number): Promise<MediaInference | null> {
+  const res = await client.get<{ inference: MediaInference | null }>(
+    `/api/library/media/${id}/inference`,
+  );
+  return res.data.inference;
+}
+
+async function realUpdateMediaInference(
+  id: number,
+  input: MediaInferenceInput,
+): Promise<MediaInference> {
+  const res = await client.put<MediaInference>(`/api/library/media/${id}/inference`, input);
+  return res.data;
+}
+
+async function realBackfillMediaInferences(
+  libraryID?: number,
+): Promise<{ task_id?: number; updated: number; status: string }> {
+  const res = await client.post<{ task_id?: number; updated: number; status: string }>(
+    '/api/library/inference/backfill',
+    libraryID ? { library_id: libraryID } : {},
+  );
   return res.data;
 }
 
@@ -711,6 +739,49 @@ async function mockGetMediaFile(id: number): Promise<MediaFile> {
   return f;
 }
 
+async function mockGetMediaInference(id: number): Promise<MediaInference | null> {
+  await mockDelay(80);
+  return mockInferences.get(id) ?? null;
+}
+
+async function mockUpdateMediaInference(
+  id: number,
+  input: MediaInferenceInput,
+): Promise<MediaInference> {
+  await mockDelay(120);
+  const f = mockMediaFiles.find((m) => m.id === id);
+  if (!f) throw new Error('媒体文件不存在');
+  const now = new Date().toISOString();
+  const inference: MediaInference = {
+    id,
+    media_id: id,
+    space_id: 'space-default',
+    kind: input.kind ?? 'mixed',
+    title: input.title.trim(),
+    year: input.year ?? 0,
+    season: input.season ?? 0,
+    episode: input.episode ?? 0,
+    episode_title: input.episode_title?.trim() ?? '',
+    confidence: 1,
+    source: 'manual',
+    rule_version: 'fr2-031-v1',
+    manual: true,
+    created_at: mockInferences.get(id)?.created_at ?? now,
+    updated_at: now,
+  };
+  mockInferences.set(id, inference);
+  return inference;
+}
+
+async function mockBackfillMediaInferences(): Promise<{
+  task_id?: number;
+  updated: number;
+  status: string;
+}> {
+  await mockDelay(200);
+  return { task_id: nextMockTaskId++, updated: 0, status: 'succeeded' };
+}
+
 async function mockDeleteMediaFile(id: number): Promise<void> {
   await mockDelay(150);
   // 软删除（FR-25）：仅标记，不从内存数据移除（源文件不动）
@@ -1099,6 +1170,15 @@ export function getMediaFiles(params?: MediaListParams) {
 }
 export function getMediaFile(id: number) {
   return useMock ? mockGetMediaFile(id) : realGetMediaFile(id);
+}
+export function getMediaInference(id: number) {
+  return useMock ? mockGetMediaInference(id) : realGetMediaInference(id);
+}
+export function updateMediaInference(id: number, input: MediaInferenceInput) {
+  return useMock ? mockUpdateMediaInference(id, input) : realUpdateMediaInference(id, input);
+}
+export function backfillMediaInferences(libraryID?: number) {
+  return useMock ? mockBackfillMediaInferences() : realBackfillMediaInferences(libraryID);
 }
 export function deleteMediaFile(id: number) {
   return useMock ? mockDeleteMediaFile(id) : realDeleteMediaFile(id);

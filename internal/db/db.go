@@ -108,6 +108,25 @@ func InitSchema(d *sql.DB) error {
     created_at DATETIME NOT NULL
 );`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_space_created ON audit_events(scope, space_id, created_at, id);`,
+		`CREATE TABLE IF NOT EXISTS media_inferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'space-default',
+    kind TEXT NOT NULL DEFAULT 'mixed',
+    title TEXT,
+    year INTEGER DEFAULT 0,
+    season INTEGER DEFAULT 0,
+    episode INTEGER DEFAULT 0,
+    episode_title TEXT,
+    confidence REAL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'offline_rule',
+    rule_version TEXT NOT NULL DEFAULT 'fr2-031-v1',
+    manual INTEGER DEFAULT 0,
+    created_at DATETIME,
+    updated_at DATETIME
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_inferences_media_id ON media_inferences(media_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_inferences_space_media ON media_inferences(space_id, media_id);`,
 	}
 	for _, q := range queries {
 		if _, err := d.Exec(q); err != nil {

@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
@@ -223,6 +223,26 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内筛出当前仍未软删的有效项，再置 `deleted_at` 并逐项写 `media.deleted` 审计事件；跳过不存在/已软删 id，返回受影响行数；供时间轴、目录浏览与重复项清理消费（进回收站、可还原）。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
+
+**影视信息推断（media_inferences）（FR2-031）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| media_id | INTEGER, UNIQUE | 所属媒体；一个媒体最多一条当前推断 |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
+| kind | TEXT | 推断所用内容分型：`movie` / `series` / `home_video` / `mixed` |
+| title | TEXT | 推断或人工纠正的片名 / 剧名 |
+| year | INTEGER | 年份，缺失为 0 |
+| season / episode | INTEGER | 季号 / 集号，缺失为 0 |
+| episode_title | TEXT | 集标题，缺失为空 |
+| confidence | REAL | 规则置信度；人工纠正固定为 1 |
+| source | TEXT | `offline_rule` / `manual` |
+| rule_version | TEXT | 本地规则版本，当前为 `fr2-031-v1` |
+| manual | INTEGER | 是否人工纠正，1 表示人工值 |
+| created_at / updated_at | DATETIME | 创建 / 更新时间 |
+
+FR2-031 只做本地离线规则解析，不联网刮削、不下载海报、不做 AI 识别。扫描入库和 backfill 会按 `library_paths.library_kind` 执行：`movie` 解析片名/年份，`series` 解析中英文季集，`mixed` 采用保守规则，`home_video` 默认跳过。全局设置键 `media_inference_enabled` 可关闭推断；`media_inference_disabled_libraries` 存 JSON 数组，按库关闭。人工纠正经 `PUT /api/library/media/:id/inference` 写入 `manual=true` 并记录 `media.inference.updated` 审计事件；后续自动推断和 backfill 不覆盖人工值。展示优先级固定为：人工纠正推断 > `media_files.display_name` > 高置信自动推断（`confidence >= 0.75`）> 原始 `file_name`；低置信自动候选可存储但不替换显示名。
 >
 > 媒体时间与 EXIF（FR-31）：入库点 `CreateMediaFile` 统一富化元数据——图片用 `imagemeta`（纯 Go）提取拍摄时间与相机/镜头/光圈/快门/ISO/GPS，视频用 ffprobe 读 `creation_time`；再按 EXIF → 文件名日期 → 文件创建时间 → 修改时间的降级链定出 `media_time` 与 `media_time_source`。时间轴列表按 `COALESCE(media_time, added_at)` 排序。
 >

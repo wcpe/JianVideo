@@ -1,11 +1,19 @@
-import type { MediaFile } from '@/types';
+import type { MediaFile, MediaInference } from '@/types';
 
 const BUILT_IN_IMAGES = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+const HIGH_CONFIDENCE_THRESHOLD = 0.75;
 
-/** 媒体展示名（FR-30）：优先用库内显示名 display_name，为空或仅空白时回退真实文件名 file_name。 */
-export function mediaDisplayName(file: MediaFile): string {
+/** 媒体展示名（FR2-031）：人工推断优先，其次 display_name、高置信自动推断、真实文件名。 */
+export function mediaDisplayName(file: MediaFile, inference?: MediaInference | null): string {
+  const manualTitle = inference?.manual ? inference.title.trim() : '';
+  if (manualTitle) return manualTitle;
   const name = file.display_name?.trim();
-  return name ? name : file.file_name;
+  if (name) return name;
+  const autoTitle =
+    inference && !inference.manual && inference.confidence >= HIGH_CONFIDENCE_THRESHOLD
+      ? inference.title.trim()
+      : '';
+  return autoTitle || file.file_name;
 }
 
 /** 判断媒体文件是否为图片（含自定义图片后缀） */

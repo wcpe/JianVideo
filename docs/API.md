@@ -438,6 +438,64 @@
 - **说明**：仅更新库内显示名（`media_files.display_name`），**不改动磁盘真实文件名与路径**；服务端对 `display_name` 去首尾空白后落库，空串表示清除显示名。列表/卡片/详情展示名优先用 `display_name`，为空时回退 `file_name`。需改磁盘真实文件名请改用「重命名媒体文件」端点。
 - **错误**：`400` 请求体无效，`404` 媒体记录不存在，`500` 更新失败
 
+### 影视信息推断（FR2-031）
+
+- **方法 / 路径**：`GET /api/library/media/:id/inference`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：
+  ```json
+  {
+    "inference": {
+      "id": 1,
+      "media_id": 42,
+      "space_id": "space-default",
+      "kind": "series",
+      "title": "剧名",
+      "year": 0,
+      "season": 1,
+      "episode": 2,
+      "episode_title": "标题",
+      "confidence": 0.95,
+      "source": "offline_rule",
+      "rule_version": "fr2-031-v1",
+      "manual": false,
+      "created_at": "2026-07-09T10:00:00Z",
+      "updated_at": "2026-07-09T10:00:00Z"
+    },
+    "display_name": "剧名"
+  }
+  ```
+- **说明**：返回当前媒体的本地离线影视信息推断；无推断时 `inference` 为 `null`，`display_name` 仍按展示优先级返回。展示优先级为：人工纠正推断 > `media_files.display_name` > 高置信自动推断（`confidence >= 0.75`）> 原始文件名。低置信自动候选不替换显示名。
+- **错误**：`400` ID 无效，`404` 媒体记录不存在，`500` 查询失败
+
+- **方法 / 路径**：`PUT /api/library/media/:id/inference`
+- **请求**：
+  ```json
+  {
+    "kind": "series",
+    "title": "人工剧名",
+    "year": 2024,
+    "season": 1,
+    "episode": 2,
+    "episode_title": "人工集标题"
+  }
+  ```
+- **响应**（200）：更新后的 `MediaInference` 对象，`manual=true`、`source="manual"`、`confidence=1`。
+- **说明**：仅修改库内影视推断信息，不改磁盘文件名。人工纠正写 `media.inference.updated` 审计事件，并优先于后续自动推断和 backfill。
+- **错误**：`400` 请求体无效或 `kind` 非法，`404` 媒体记录不存在，`500` 保存失败
+
+- **方法 / 路径**：`POST /api/library/inference/backfill`
+- **请求**：
+  ```json
+  {"library_id": 1}
+  ```
+- **响应**（200）：
+  ```json
+  {"status": "succeeded", "task_id": 12, "updated": 8}
+  ```
+- **说明**：批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务跳过 `home_video`、关闭的库和已有人工纠正的媒体。若通用任务服务可用，会以 `library.inference.backfill` 入队并执行。
+- **错误**：`500` 入队或回填失败
+
 ### 编辑备注（FR-137）
 
 - **方法 / 路径**：`PUT /api/library/media/:id/notes`
@@ -1335,7 +1393,7 @@
   ```
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
 - **说明**：批量 upsert 键值，同一 key 覆盖旧值；所有 key 必须先登记为 `runtime`，并通过 registry 类型校验。任一 key 未知、不可运行期修改或值类型非法时整体返回 `400`，不写入任何设置。提交成功后回读返回，并触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时写入前校验协议和格式，落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），支持 http/https/socks5/socks5h，保存即生效（FR-80）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。
-- **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
+- **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`media_inference_enabled`（FR2-031，本地影视信息推断总开关，`"1"`/`"true"`=开启）、`media_inference_disabled_libraries`（FR2-031，按库关闭推断的库 ID JSON 数组）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
 - **错误**：`400` 请求参数错误、`settings` 为空或配置校验失败（`INVALID_SETTING`），`503` 设置服务未启用，`500` 保存失败
 
 ### 查询审计事件（FR2-040）

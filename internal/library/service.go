@@ -39,12 +39,13 @@ var (
 
 // Service 媒体库业务逻辑。
 type Service struct {
-	db         *gorm.DB
-	mediaRepo  MediaQueryRepository
-	audit      audit.Recorder
-	changeHook func(ScanChange)
-	smbCreds   *smb.CredentialStore
-	smbCredsMu sync.RWMutex
+	db              *gorm.DB
+	mediaRepo       MediaQueryRepository
+	audit           audit.Recorder
+	changeHook      func(ScanChange)
+	inferenceConfig InferenceConfigProvider
+	smbCreds        *smb.CredentialStore
+	smbCredsMu      sync.RWMutex
 }
 
 // 媒体类型常量。
@@ -432,6 +433,9 @@ func (s *Service) CreateMediaFileInSpace(spaceID string, libraryID int64, filePa
 	// 经可注入函数变量调用，便于测试观测扫描期富化并发。
 	enrichMediaMetadataFn(mf)
 	if err := s.db.Create(mf).Error; err != nil {
+		return nil, err
+	}
+	if _, err := s.InferAndStoreMediaInSpace(mf.SpaceID, mf.ID); err != nil {
 		return nil, err
 	}
 	return mf, nil

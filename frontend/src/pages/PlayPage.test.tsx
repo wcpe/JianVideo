@@ -228,6 +228,94 @@ describe('PlayPage', () => {
     );
   });
 
+  it('详情抽屉保存人工影视信息后刷新标题', async () => {
+    let inferenceBody: { title?: string; season?: number; episode?: number } | null = null;
+    server.use(
+      http.get('*/api/library/media/8', () =>
+        HttpResponse.json({
+          id: 8,
+          library_id: 1,
+          file_path: 'D:/Series/show.mkv',
+          file_name: 'show.mkv',
+          file_size: 0,
+          format: 'mkv',
+          video_codec: 'hevc',
+          audio_codec: 'aac',
+          duration: 0,
+          width: 0,
+          height: 0,
+          bitrate: 0,
+          subtitle_tracks: '',
+          added_at: '',
+          modified_at: '',
+        }),
+      ),
+      http.get('*/api/library/media/8/inference', () =>
+        HttpResponse.json({
+          inference: {
+            id: 1,
+            media_id: 8,
+            space_id: 'space-default',
+            kind: 'series',
+            title: '自动剧名',
+            year: 0,
+            season: 1,
+            episode: 2,
+            episode_title: '',
+            confidence: 0.95,
+            source: 'offline_rule',
+            rule_version: 'fr2-031-v1',
+            manual: false,
+            created_at: '',
+            updated_at: '',
+          },
+        }),
+      ),
+      http.put('*/api/library/media/8/inference', async ({ request }) => {
+        inferenceBody = (await request.json()) as {
+          title?: string;
+          season?: number;
+          episode?: number;
+        };
+        return HttpResponse.json({
+          id: 1,
+          media_id: 8,
+          space_id: 'space-default',
+          kind: 'series',
+          title: inferenceBody.title,
+          year: 0,
+          season: inferenceBody.season,
+          episode: inferenceBody.episode,
+          episode_title: '',
+          confidence: 1,
+          source: 'manual',
+          rule_version: 'fr2-031-v1',
+          manual: true,
+          created_at: '',
+          updated_at: '',
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPlayPage('/play/8');
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '自动剧名' })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(await screen.findByRole('menuitem', { name: '详情' }));
+    const title = await screen.findByLabelText('标题');
+    await user.clear(title);
+    await user.type(title, '人工剧名');
+    await user.click(screen.getByRole('button', { name: '保存影视信息' }));
+
+    await waitFor(() => expect(inferenceBody?.title).toBe('人工剧名'));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '人工剧名' })).toBeInTheDocument(),
+    );
+  });
+
   it('master.m3u8 不可用时改用 /api/play/:id/stream', async () => {
     // master.m3u8 探测返回 404 + JSON，content-type 不是 mpegurl，应降级
     server.use(

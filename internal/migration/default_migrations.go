@@ -95,6 +95,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFileHashDedup,
 			Validate:    validateFileHashDedup,
 		},
+		{
+			ID:          "20260708_0011_fr2_031_media_inferences",
+			Description: "建立本地离线影视信息推断表",
+			SafeToRetry: true,
+			Estimate:    estimateMediaInferences,
+			Up:          migrateMediaInferences,
+			Validate:    validateMediaInferences,
+		},
 	}
 }
 
@@ -121,6 +129,7 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		&models.TranscodeTask{},
 		&models.MetricSample{},
 		&models.MediaHashGroup{},
+		&models.MediaInference{},
 	)
 }
 
@@ -916,6 +925,33 @@ func mediaTypeRuleSchemaStatements() []string {
 			ON media_type_rules(space_id, library_id, type, extension)
 			WHERE library_id IS NOT NULL;`,
 	}
+}
+
+func estimateMediaInferences(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var count int64
+	if tableExists(db, "media_files") {
+		_ = db.Table("media_files").Count(&count).Error
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateMediaInferences(_ context.Context, tx *gorm.DB) error {
+	return tx.AutoMigrate(&models.MediaInference{})
+}
+
+func validateMediaInferences(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_inferences") {
+		return Validation{}, fmt.Errorf("media_inferences 表不存在")
+	}
+	for _, indexName := range []string{
+		"idx_media_inferences_media_id",
+		"idx_media_inferences_space_media",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("影视推断索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "本地离线影视信息推断表已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

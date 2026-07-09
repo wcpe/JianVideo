@@ -163,6 +163,16 @@ var registry = []Definition{
 		Validate: validatePositiveInt,
 	},
 	{
+		Key: KeyMediaInferenceEnabled, Label: "影视信息推断", Description: "是否启用本地离线影视标题、年份和季集推断。",
+		Layer: LayerRuntime, ValueType: ValueBool, DefaultValue: "1", HotApply: true, Consumer: "library.inference",
+		Validate: validateBool,
+	},
+	{
+		Key: KeyMediaInferenceDisabledLibraries, Label: "关闭推断的媒体库", Description: "不运行影视信息推断的媒体库 ID JSON 数组。",
+		Layer: LayerRuntime, ValueType: ValueJSON, DefaultValue: "[]", HotApply: true, Consumer: "library.inference",
+		Validate: validatePositiveIntArrayJSON,
+	},
+	{
 		Key: "server_port", Label: "监听端口", Description: "服务启动时确定的 HTTP 监听端口，运行期不可修改。",
 		Layer: LayerStartup, ValueType: ValueInt, DefaultValue: "", HotApply: false, Consumer: "config",
 	},
@@ -299,6 +309,22 @@ func validateStringArrayJSON(value string) error {
 	var arr []string
 	if err := json.Unmarshal([]byte(value), &arr); err != nil || len(arr) == 0 {
 		return fmt.Errorf("必须是非空字符串数组 JSON")
+	}
+	return nil
+}
+
+func validatePositiveIntArrayJSON(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var arr []int64
+	if err := json.Unmarshal([]byte(value), &arr); err != nil {
+		return fmt.Errorf("必须是整数数组 JSON")
+	}
+	for _, item := range arr {
+		if item <= 0 {
+			return fmt.Errorf("媒体库 ID 必须是正整数")
+		}
 	}
 	return nil
 }

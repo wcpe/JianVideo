@@ -4,6 +4,8 @@ import type {
   LibraryPath,
   LibraryKind,
   MediaFile,
+  MediaInference,
+  MediaInferenceInput,
   MediaExtension,
   Album,
   Tag,
@@ -26,6 +28,7 @@ import type {
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths];
 let mediaFiles = [...mockMediaFiles];
+const mediaInferences = new Map<number, MediaInference>();
 let mediaExtensions: MediaExtension[] = [];
 let mediaTypeRuleOverrides: MediaTypeRule[] = [];
 let nextPathId = Math.max(...paths.map((p) => p.id)) + 1;
@@ -968,6 +971,51 @@ export const handlers = [
       return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
     return HttpResponse.json(file);
+  }),
+
+  http.get('*/api/library/media/:id/inference', async ({ params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
+    }
+    return HttpResponse.json({ inference: mediaInferences.get(id) ?? null });
+  }),
+
+  http.put('*/api/library/media/:id/inference', async ({ request, params }) => {
+    await delay(100);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
+    }
+    const body = (await request.json()) as MediaInferenceInput;
+    const now = new Date().toISOString();
+    const inference: MediaInference = {
+      id,
+      media_id: id,
+      space_id: 'space-default',
+      kind: body.kind ?? 'mixed',
+      title: body.title.trim(),
+      year: body.year ?? 0,
+      season: body.season ?? 0,
+      episode: body.episode ?? 0,
+      episode_title: body.episode_title?.trim() ?? '',
+      confidence: 1,
+      source: 'manual',
+      rule_version: 'fr2-031-v1',
+      manual: true,
+      created_at: mediaInferences.get(id)?.created_at ?? now,
+      updated_at: now,
+    };
+    mediaInferences.set(id, inference);
+    return HttpResponse.json(inference);
+  }),
+
+  http.post('*/api/library/inference/backfill', async () => {
+    await delay(120);
+    return HttpResponse.json({ status: 'succeeded', task_id: Date.now(), updated: 0 });
   }),
 
   http.get('*/api/media-types', async ({ request }) => {

@@ -110,6 +110,12 @@ func TestGetAll(t *testing.T) {
 	if all[KeyScanInterval] != "300" || all[KeyRecycleBinPaths] != `{"D":"D:/.recycle"}` {
 		t.Fatalf("GetAll 返回不正确: %v", all)
 	}
+	if all[KeyMediaInferenceEnabled] != "1" {
+		t.Fatalf("影视推断默认应开启, 实际 %q", all[KeyMediaInferenceEnabled])
+	}
+	if all[KeyMediaInferenceDisabledLibraries] != "[]" {
+		t.Fatalf("每库影视推断关闭列表默认应为空数组, 实际 %q", all[KeyMediaInferenceDisabledLibraries])
+	}
 }
 
 func TestSetManyAtomicAndPersist(t *testing.T) {
@@ -180,7 +186,7 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	for _, def := range defs {
 		seen[def.Key] = def
 	}
-	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency} {
+	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency, KeyMediaInferenceEnabled, KeyMediaInferenceDisabledLibraries} {
 		if _, ok := seen[key]; !ok {
 			t.Fatalf("definitions 缺少 key=%s", key)
 		}

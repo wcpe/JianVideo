@@ -76,6 +76,35 @@ export interface MediaFile {
   location?: string;
 }
 
+/** 本地离线影视信息推断（FR2-031）：自动候选或人工纠正结果 */
+export interface MediaInference {
+  id: number;
+  media_id: number;
+  space_id: string;
+  kind: LibraryKind;
+  title: string;
+  year: number;
+  season: number;
+  episode: number;
+  episode_title: string;
+  confidence: number;
+  source: 'offline_rule' | 'manual' | string;
+  rule_version: string;
+  manual: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 人工纠正影视信息请求（FR2-031）：留空字段表示清除对应库内推断字段 */
+export interface MediaInferenceInput {
+  kind?: LibraryKind;
+  title: string;
+  year?: number;
+  season?: number;
+  episode?: number;
+  episode_title?: string;
+}
+
 /** 感知哈希去重重复组（FR-70）：一组互为近似重复的媒体，至少 2 项 */
 export type DuplicateGroup = MediaFile[];
 
