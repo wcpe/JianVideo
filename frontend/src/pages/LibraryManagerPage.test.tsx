@@ -213,9 +213,22 @@ describe('LibraryManagerPage', () => {
   it('为指定目录追加自定义后缀时带上 library_id', async () => {
     let payload: { library_id?: number; extension?: string; type?: string } | null = null;
     server.use(
-      http.post('*/api/library/extensions', async ({ request }) => {
+      http.post('*/api/media-types/rules', async ({ request }) => {
         payload = (await request.json()) as { library_id: number; extension: string; type: string };
-        return new HttpResponse(null, { status: 201 });
+        return HttpResponse.json(
+          {
+            id: 99,
+            library_id: payload.library_id,
+            type: payload.type,
+            extension: 'foo',
+            label: '',
+            description: '',
+            enabled: true,
+            builtin: false,
+            capabilities: ['scan'],
+          },
+          { status: 201 },
+        );
       }),
     );
 
@@ -278,26 +291,43 @@ describe('LibraryManagerPage', () => {
     expect(screen.getByLabelText('删除目录 电影')).toBeVisible();
   });
 
-  it('列出该库后缀，内置标识不可删、自定义可删（FR-64）', async () => {
+  it('列出媒体类型说明、能力标签和规则，内置不可删、自定义可删（FR2-025）', async () => {
     server.use(
-      http.get('*/api/library/extensions', () =>
+      http.get('*/api/media-types', () =>
         HttpResponse.json({
-          items: [
+          types: [
             {
-              id: 1,
+              type: 'video',
+              name: '视频',
+              description: '可播放、可转码的视频文件。',
+              default_extensions: ['mp4'],
+              capabilities: ['scan', 'transcode', 'thumbnail', 'metadata'],
+            },
+          ],
+          rules: [
+            {
+              id: 'builtin-video-mp4',
               library_id: 1,
+              space_id: 'space-default',
               extension: 'mp4',
               type: 'video',
-              is_builtin: 1,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'MP4 视频',
+              description: '常见视频容器。',
+              enabled: true,
+              builtin: true,
+              capabilities: ['scan', 'transcode', 'thumbnail', 'metadata'],
             },
             {
               id: 2,
               library_id: 1,
+              space_id: 'space-default',
               extension: 'foo',
               type: 'video',
-              is_builtin: 0,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'Foo 视频',
+              description: '自定义视频封装。',
+              enabled: true,
+              builtin: false,
+              capabilities: ['scan'],
             },
           ],
         }),
@@ -311,37 +341,51 @@ describe('LibraryManagerPage', () => {
     // 后缀墙默认折叠（FR-100），先展开摘要行
     await user.click(await within(card).findByLabelText('电影 后缀列表'));
 
-    // 内置后缀展示「内置」标识、无删除按钮；自定义后缀有删除按钮
     await waitFor(() => {
       expect(within(card).getByText(/mp4（内置）/)).toBeVisible();
     });
+    expect(within(card).getByText('视频')).toBeVisible();
+    expect(within(card).getByText('可播放、可转码的视频文件。')).toBeVisible();
+    expect(within(card).getByText('可扫描')).toBeVisible();
+    expect(within(card).getByText('可转码')).toBeVisible();
+    expect(within(card).getByText('MP4 视频')).toBeVisible();
+    expect(within(card).getByText('常见视频容器。')).toBeVisible();
     expect(within(card).queryByLabelText('删除后缀 mp4')).toBeNull();
     expect(within(card).getByLabelText('删除后缀 foo')).toBeVisible();
   });
 
-  it('删除自定义后缀走 DELETE /api/library/extensions（FR-64）', async () => {
-    let deleted: { library_id: string | null; extension: string | null } | null = null;
+  it('删除自定义规则走 DELETE /api/media-types/rules/:id（FR2-025）', async () => {
+    let deletedRuleID = '';
     server.use(
-      http.get('*/api/library/extensions', () =>
+      http.get('*/api/media-types', () =>
         HttpResponse.json({
-          items: [
+          types: [
+            {
+              type: 'video',
+              name: '视频',
+              description: '可播放、可转码的视频文件。',
+              default_extensions: ['mp4'],
+              capabilities: ['scan'],
+            },
+          ],
+          rules: [
             {
               id: 2,
               library_id: 1,
+              space_id: 'space-default',
               extension: 'foo',
               type: 'video',
-              is_builtin: 0,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'Foo 视频',
+              description: '自定义视频封装。',
+              enabled: true,
+              builtin: false,
+              capabilities: ['scan'],
             },
           ],
         }),
       ),
-      http.delete('*/api/library/extensions', ({ request }) => {
-        const url = new URL(request.url);
-        deleted = {
-          library_id: url.searchParams.get('library_id'),
-          extension: url.searchParams.get('extension'),
-        };
+      http.delete('*/api/media-types/rules/:id', ({ params }) => {
+        deletedRuleID = String(params.id);
         return new HttpResponse(null, { status: 204 });
       }),
     );
@@ -355,30 +399,54 @@ describe('LibraryManagerPage', () => {
     await user.click(await within(card).findByLabelText('删除后缀 foo'));
 
     await waitFor(() => {
-      expect(deleted).toEqual({ library_id: '1', extension: 'foo' });
+      expect(deletedRuleID).toBe('2');
     });
   });
 
   it('后缀筛选「视频/图片/全部」切换显示对应类型（FR-64）', async () => {
     server.use(
-      http.get('*/api/library/extensions', () =>
+      http.get('*/api/media-types', () =>
         HttpResponse.json({
-          items: [
+          types: [
             {
-              id: 1,
-              library_id: 1,
-              extension: 'mp4',
               type: 'video',
-              is_builtin: 1,
-              created_at: '2025-01-01T00:00:00Z',
+              name: '视频',
+              description: '可播放、可转码的视频文件。',
+              default_extensions: ['mp4'],
+              capabilities: ['scan'],
             },
             {
-              id: 2,
+              type: 'image',
+              name: '图片',
+              description: '可生成缩略图的图片文件。',
+              default_extensions: ['jpg'],
+              capabilities: ['scan', 'thumbnail', 'metadata'],
+            },
+          ],
+          rules: [
+            {
+              id: 'builtin-video-mp4',
               library_id: 1,
+              space_id: 'space-default',
+              extension: 'mp4',
+              type: 'video',
+              label: 'MP4 视频',
+              description: '常见视频容器。',
+              enabled: true,
+              builtin: true,
+              capabilities: ['scan'],
+            },
+            {
+              id: 'builtin-image-jpg',
+              library_id: 1,
+              space_id: 'space-default',
               extension: 'jpg',
               type: 'image',
-              is_builtin: 1,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'JPEG 图片',
+              description: '常见图片格式。',
+              enabled: true,
+              builtin: true,
+              capabilities: ['scan', 'thumbnail', 'metadata'],
             },
           ],
         }),
@@ -403,6 +471,65 @@ describe('LibraryManagerPage', () => {
     await waitFor(() => {
       expect(within(card).queryByText(/mp4（内置）/)).toBeNull();
       expect(within(card).getByText(/jpg（内置）/)).toBeVisible();
+    });
+  });
+
+  it('内置规则可通过 PUT 禁用（FR2-025）', async () => {
+    let payload: { library_id?: number; enabled?: boolean } | null = null;
+    server.use(
+      http.get('*/api/media-types', () =>
+        HttpResponse.json({
+          types: [
+            {
+              type: 'video',
+              name: '视频',
+              description: '可播放、可转码的视频文件。',
+              default_extensions: ['mp4'],
+              capabilities: ['scan'],
+            },
+          ],
+          rules: [
+            {
+              id: 'builtin-video-mp4',
+              library_id: 1,
+              space_id: 'space-default',
+              extension: 'mp4',
+              type: 'video',
+              label: 'MP4 视频',
+              description: '常见视频容器。',
+              enabled: true,
+              builtin: true,
+              capabilities: ['scan'],
+            },
+          ],
+        }),
+      ),
+      http.put('*/api/media-types/rules/:id', async ({ request }) => {
+        payload = (await request.json()) as { library_id?: number; enabled?: boolean };
+        return HttpResponse.json({
+          id: 'builtin-video-mp4',
+          library_id: 1,
+          space_id: 'space-default',
+          extension: 'mp4',
+          type: 'video',
+          label: 'MP4 视频',
+          description: '常见视频容器。',
+          enabled: payload.enabled,
+          builtin: true,
+          capabilities: ['scan'],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+    const card = (await screen.findByText('电影')).closest('.mantine-Card-root') as HTMLElement;
+
+    await user.click(await within(card).findByLabelText('电影 后缀列表'));
+    await user.click(await within(card).findByLabelText('禁用后缀 mp4'));
+
+    await waitFor(() => {
+      expect(payload).toEqual({ library_id: 1, enabled: false });
     });
   });
 
@@ -462,24 +589,41 @@ describe('LibraryManagerPage', () => {
 
   it('后缀墙默认折叠，点摘要行可展开并按内置/自定义分组（FR-100）', async () => {
     server.use(
-      http.get('*/api/library/extensions', () =>
+      http.get('*/api/media-types', () =>
         HttpResponse.json({
-          items: [
+          types: [
             {
-              id: 1,
+              type: 'video',
+              name: '视频',
+              description: '可播放、可转码的视频文件。',
+              default_extensions: ['mp4'],
+              capabilities: ['scan'],
+            },
+          ],
+          rules: [
+            {
+              id: 'builtin-video-mp4',
               library_id: 1,
+              space_id: 'space-default',
               extension: 'mp4',
               type: 'video',
-              is_builtin: 1,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'MP4 视频',
+              description: '常见视频容器。',
+              enabled: true,
+              builtin: true,
+              capabilities: ['scan'],
             },
             {
               id: 2,
               library_id: 1,
+              space_id: 'space-default',
               extension: 'foo',
               type: 'video',
-              is_builtin: 0,
-              created_at: '2025-01-01T00:00:00Z',
+              label: 'Foo 视频',
+              description: '自定义视频封装。',
+              enabled: true,
+              builtin: false,
+              capabilities: ['scan'],
             },
           ],
         }),

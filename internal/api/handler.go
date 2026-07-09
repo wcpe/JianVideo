@@ -943,7 +943,7 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 
 // preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。
 func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
-	result, err := h.library.ListMediaFilesPage(library.MediaFilter{SpaceID: spaceID}, library.MediaPageRequest{Page: 1, PageSize: 100})
+	result, err := h.library.ListMediaFilesPage(library.MediaFilter{SpaceID: spaceID, MediaType: library.MediaTypeVideo}, library.MediaPageRequest{Page: 1, PageSize: 100})
 	if err != nil {
 		log.Printf("[WARN] 预切片：获取媒体列表失败: %v", err)
 		return
@@ -987,7 +987,7 @@ func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
 	thumbnailPath := library.ThumbnailPathForSize(mf.FilePath, size)
 	if _, err := os.Stat(thumbnailPath); err != nil {
 		// 该尺寸缩略图不存在，异步生成后返回 202
-		go library.GenerateThumbnailSize(mf.FilePath, size)
+		go h.library.GenerateThumbnailSizeInSpace(mf.SpaceID, mf.LibraryID, mf.FilePath, size)
 		c.JSON(http.StatusAccepted, gin.H{"code": "GENERATING", "message": "缩略图生成中"})
 		return
 	}
@@ -1031,7 +1031,7 @@ func (h *Handler) GetRawImage(c *gin.Context) {
 // serveRawImage 回传图片原始内容（HEIC/RAW 经 ImageMagick 转 JPEG，FR-37）。
 // 抽出供鉴权版 GetRawImage 与分享版（FR-43）共用，行为一致。
 func (h *Handler) serveRawImage(c *gin.Context, mf *models.MediaFile) {
-	mediaType, ok := h.library.MediaTypeByPathForLibrary(mf.LibraryID, mf.FilePath)
+	mediaType, ok := h.library.MediaTypeByPathInSpace(mf.SpaceID, mf.LibraryID, mf.FilePath)
 	if !ok || mediaType != library.MediaTypeImage {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "NOT_IMAGE", "message": "仅支持图片 raw 访问"})
 		return

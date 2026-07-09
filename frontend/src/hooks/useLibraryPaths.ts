@@ -7,11 +7,33 @@ import type {
   LibraryPath,
   MediaExtension,
   MediaExtensionType,
+  MediaTypesResponse,
   ScanMode,
 } from '@/types';
 
 function libraryKindName(items: LibraryKindInfo[], kind: LibraryKind): string {
   return items.find((item) => item.kind === kind)?.name ?? kind;
+}
+
+function mediaTypesToExtensions(data: MediaTypesResponse, libraryID: number): MediaExtension[] {
+  const definitions = new Map(data.types.map((item) => [item.type, item]));
+  return data.rules.map((rule) => {
+    const definition = definitions.get(rule.type);
+    return {
+      id: rule.id,
+      library_id: rule.library_id ?? libraryID,
+      extension: rule.extension,
+      type: rule.type,
+      is_builtin: rule.builtin ? 1 : 0,
+      builtin: rule.builtin,
+      enabled: rule.enabled,
+      label: rule.label,
+      description: rule.description,
+      capabilities: rule.capabilities,
+      type_name: definition?.name,
+      type_description: definition?.description,
+    };
+  });
 }
 
 export function useLibraryPaths(onPathsChanged?: () => void) {
@@ -37,9 +59,10 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
     const entries = await Promise.all(
       items.map(async (path) => {
         try {
-          const extensions = await libApi.listMediaExtensions(path.id);
+          const mediaTypes = await libApi.listMediaTypes(path.id);
+          const extensions = mediaTypesToExtensions(mediaTypes, path.id);
           const imageExts = extensions
-            .filter((ext) => ext.type === 'image')
+            .filter((ext) => ext.type === 'image' && (ext.enabled ?? true))
             .map((ext) => ext.extension.toLowerCase().replace(/^\./, ''));
           return [path.id, { imageExts, all: extensions }] as const;
         } catch {
@@ -193,7 +216,7 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
       const mediaType = extensionTypes[path.id] || 'video';
       setExtensionLoading((prev) => ({ ...prev, [path.id]: true }));
       try {
-        await libApi.addMediaExtension(path.id, extension, mediaType);
+        await libApi.createMediaTypeRule({ library_id: path.id, extension, type: mediaType });
         setExtensionInputs((prev) => ({ ...prev, [path.id]: '' }));
         await loadExtensionPolicies([path], false);
         notifications.show({
@@ -214,19 +237,42 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
 
   // 删除自定义后缀（FR-64）：仅自定义可删，内置由 UI 禁用删除入口。
   const handleDeleteExtension = useCallback(
-    async (path: LibraryPath, extension: string) => {
+    async (path: LibraryPath, extension: MediaExtension) => {
       try {
-        await libApi.deleteMediaExtension(path.id, extension);
+        await libApi.deleteMediaTypeRule(extension.id ?? extension.extension);
         await loadExtensionPolicies([path], false);
         notifications.show({
           title: '后缀已删除',
-          message: `${extension} 已从 "${path.label || path.path}" 移除`,
+          message: `${extension.extension} 已从 "${path.label || path.path}" 移除`,
           color: 'green',
           autoClose: 3000,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : '删除后缀失败';
         notifications.show({ title: '删除失败', message, color: 'red', autoClose: 3000 });
+      }
+    },
+    [loadExtensionPolicies],
+  );
+
+  const handleToggleExtension = useCallback(
+    async (path: LibraryPath, extension: MediaExtension) => {
+      const nextEnabled = !(extension.enabled ?? true);
+      try {
+        await libApi.updateMediaTypeRule(extension.id ?? extension.extension, {
+          library_id: path.id,
+          enabled: nextEnabled,
+        });
+        await loadExtensionPolicies([path], false);
+        notifications.show({
+          title: nextEnabled ? '后缀已启用' : '后缀已禁用',
+          message: `${extension.extension} 规则已更新`,
+          color: 'green',
+          autoClose: 3000,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '更新后缀规则失败';
+        notifications.show({ title: '更新失败', message, color: 'red', autoClose: 3000 });
       }
     },
     [loadExtensionPolicies],
@@ -260,5 +306,6 @@ export function useLibraryPaths(onPathsChanged?: () => void) {
     handleScan,
     handleAddExtension,
     handleDeleteExtension,
+    handleToggleExtension,
   };
 }

@@ -68,6 +68,7 @@ export default function LibraryManagerPage() {
         onExtensionTypeChange={(id, t) => paths.setExtensionTypes((p) => ({ ...p, [id]: t }))}
         onAddExtension={paths.handleAddExtension}
         onDeleteExtension={paths.handleDeleteExtension}
+        onToggleExtension={paths.handleToggleExtension}
       />
       {progress?.status === 'scanning' && (
         <Box>

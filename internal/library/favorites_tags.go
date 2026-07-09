@@ -21,15 +21,16 @@ type MediaFilter struct {
 	TagID     int64
 
 	// FR-35 结构化筛选（零值表示不约束，全部走参数化查询，无 SQL 注入面）
-	MediaType  string     // "image" / "video" / ""(不限)
-	Formats    []string   // 按扩展名过滤（小写，不含点），如 [jpg png]
-	SizeMin    int64      // 文件大小下界（字节，含）；>0 生效
-	SizeMax    int64      // 文件大小上界（字节，含）；>0 生效
-	TimeFrom   *time.Time // 媒体时间下界（含）
-	TimeTo     *time.Time // 媒体时间上界（含）
-	PathPrefix string     // 目录前缀过滤（file_path LIKE prefix%）
-	Terms      []string   // 裸词关键词（多词 AND），FR-136 起跨文件名/显示名/相机/镜头/备注列匹配
-	HasGPS     bool       // 仅返回带 GPS 坐标的媒体（FR-39 照片地图）
+	MediaType           string     // "image" / "video" / ""(不限)
+	Formats             []string   // 按扩展名过滤（小写，不含点），如 [jpg png]
+	MediaTypeExtensions []string   // 已解析的类型后缀集合，由 Service 根据媒体类型规则填充
+	SizeMin             int64      // 文件大小下界（字节，含）；>0 生效
+	SizeMax             int64      // 文件大小上界（字节，含）；>0 生效
+	TimeFrom            *time.Time // 媒体时间下界（含）
+	TimeTo              *time.Time // 媒体时间上界（含）
+	PathPrefix          string     // 目录前缀过滤（file_path LIKE prefix%）
+	Terms               []string   // 裸词关键词（多词 AND），FR-136 起跨文件名/显示名/相机/镜头/备注列匹配
+	HasGPS              bool       // 仅返回带 GPS 坐标的媒体（FR-39 照片地图）
 
 	// FR-136 EXIF 专项关键词（多词 AND，全参数化）
 	CameraTerms []string // camera: token，仅约束 camera 列

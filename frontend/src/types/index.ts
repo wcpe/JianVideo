@@ -363,16 +363,73 @@ export interface SystemMetrics {
   current: MetricPoint | null;
 }
 
+/** 媒体类型规则能力 */
+export type MediaTypeCapability = 'scan' | 'transcode' | 'thumbnail' | 'metadata';
+
 /** 媒体库后缀类型 */
-export type MediaExtensionType = 'video' | 'image';
+export type MediaExtensionType = 'video' | 'image' | 'audio' | 'subtitle' | 'sidecar';
+
+/** 媒体类型定义 */
+export interface MediaTypeDefinition {
+  type: MediaExtensionType;
+  name: string;
+  description: string;
+  default_extensions: string[];
+  capabilities: MediaTypeCapability[];
+}
+
+/** 媒体类型后缀规则 */
+export interface MediaTypeRule {
+  id: number | string;
+  space_id: string;
+  library_id?: number | null;
+  extension: string;
+  type: MediaExtensionType;
+  label: string;
+  description: string;
+  enabled: boolean;
+  builtin: boolean;
+  capabilities: MediaTypeCapability[];
+}
+
+/** 媒体类型规则列表响应 */
+export interface MediaTypesResponse {
+  types: MediaTypeDefinition[];
+  rules: MediaTypeRule[];
+}
+
+/** 新增媒体类型规则请求 */
+export interface CreateMediaTypeRuleInput {
+  library_id?: number;
+  type: MediaExtensionType;
+  extension: string;
+  label?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+/** 更新媒体类型规则请求 */
+export interface UpdateMediaTypeRuleInput {
+  library_id?: number;
+  enabled?: boolean;
+  label?: string;
+  description?: string;
+}
 
 /** 媒体库后缀配置 */
 export interface MediaExtension {
-  id?: number;
+  id?: number | string;
   library_id: number;
   extension: string;
   type: MediaExtensionType;
-  is_builtin: number;
+  is_builtin?: number;
+  builtin?: boolean;
+  enabled?: boolean;
+  label?: string;
+  description?: string;
+  capabilities?: MediaTypeCapability[];
+  type_name?: string;
+  type_description?: string;
   created_at?: string;
 }
 

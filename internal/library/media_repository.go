@@ -161,11 +161,15 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 			taggedMedia)
 	}
 
-	switch filter.MediaType {
-	case MediaTypeImage:
-		query = query.Where("LOWER(format) IN ?", builtInImageExtensionList())
-	case MediaTypeVideo:
-		query = query.Where("LOWER(format) NOT IN ?", builtInImageExtensionList())
+	if len(filter.MediaTypeExtensions) > 0 {
+		query = query.Where("LOWER(format) IN ?", lowerAll(filter.MediaTypeExtensions))
+	} else {
+		switch filter.MediaType {
+		case MediaTypeImage:
+			query = query.Where("LOWER(format) IN ?", builtInImageExtensionList())
+		case MediaTypeVideo:
+			query = query.Where("LOWER(format) NOT IN ?", builtInImageExtensionList())
+		}
 	}
 	if len(filter.Formats) > 0 {
 		query = query.Where("LOWER(format) IN ?", lowerAll(filter.Formats))

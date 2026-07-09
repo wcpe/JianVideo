@@ -9,6 +9,10 @@ import type {
   BrowseResponse,
   MediaExtension,
   MediaExtensionType,
+  MediaTypesResponse,
+  MediaTypeRule,
+  CreateMediaTypeRuleInput,
+  UpdateMediaTypeRuleInput,
   ScanStatus,
   ScanTask,
   ScanTasksResponse,
@@ -29,6 +33,7 @@ import { mockPaths, mockMediaFiles } from '@/mocks/data';
 let nextMockId = 100;
 let nextMockExtensionId = 1;
 const mockExtensions: MediaExtension[] = [];
+const mockBuiltinRuleOverrides: MediaTypeRule[] = [];
 
 export const defaultLibraryKinds: LibraryKindInfo[] = [
   {
@@ -60,6 +65,51 @@ export const defaultLibraryKinds: LibraryKindInfo[] = [
     scan_strategy: '使用通用扫描策略',
   },
 ];
+
+const defaultMediaTypes: MediaTypesResponse['types'] = [
+  {
+    type: 'video',
+    name: '视频',
+    description: '可播放、可转码的视频文件。',
+    default_extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm'],
+    capabilities: ['scan', 'transcode', 'thumbnail', 'metadata'],
+  },
+  {
+    type: 'image',
+    name: '图片',
+    description: '可生成缩略图的图片文件。',
+    default_extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+    capabilities: ['scan', 'thumbnail', 'metadata'],
+  },
+];
+
+function builtinMockMediaTypeRules(libraryID = 0): MediaTypeRule[] {
+  return defaultMediaTypes.flatMap((type) =>
+    type.default_extensions.map((extension) => ({
+      id: `builtin-${type.type}-${extension}`,
+      space_id: 'space-default',
+      library_id: libraryID > 0 ? libraryID : null,
+      type: type.type,
+      extension,
+      label: `${extension.toUpperCase()} ${type.name}`,
+      description: `${extension} ${type.description}`,
+      enabled: true,
+      builtin: true,
+      capabilities: type.capabilities,
+    })),
+  );
+}
+
+function mockMediaRuleKey(rule: Pick<MediaTypeRule, 'library_id' | 'type' | 'extension'>): string {
+  return `${rule.library_id ?? 0}:${rule.type}:${rule.extension}`;
+}
+
+function effectiveBuiltinMockMediaTypeRules(libraryID = 0): MediaTypeRule[] {
+  const overrides = new Map(mockBuiltinRuleOverrides.map((rule) => [mockMediaRuleKey(rule), rule]));
+  return builtinMockMediaTypeRules(libraryID).map((rule) => {
+    return overrides.get(mockMediaRuleKey(rule)) ?? rule;
+  });
+}
 
 // 标签 mock 状态（FR-41）：标签表 + 媒体-标签映射
 let nextMockTagId = 1;
@@ -402,6 +452,42 @@ async function realDeleteMediaExtension(libraryID: number, extension: string): P
   }
 }
 
+async function realListMediaTypes(libraryID?: number): Promise<MediaTypesResponse> {
+  const res = await client.get<MediaTypesResponse>('/api/media-types', {
+    params: libraryID ? { library_id: libraryID } : undefined,
+  });
+  return res.data;
+}
+
+async function realCreateMediaTypeRule(input: CreateMediaTypeRuleInput): Promise<MediaTypeRule> {
+  try {
+    const res = await client.post<MediaTypeRule>('/api/media-types/rules', input);
+    return res.data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '添加后缀失败，请检查格式'), { cause: err });
+  }
+}
+
+async function realUpdateMediaTypeRule(
+  id: number | string,
+  input: UpdateMediaTypeRuleInput,
+): Promise<MediaTypeRule> {
+  try {
+    const res = await client.put<MediaTypeRule>(`/api/media-types/rules/${id}`, input);
+    return res.data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '更新后缀规则失败'), { cause: err });
+  }
+}
+
+async function realDeleteMediaTypeRule(id: number | string): Promise<void> {
+  try {
+    await client.delete(`/api/media-types/rules/${id}`);
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '删除后缀失败'), { cause: err });
+  }
+}
+
 // ─── Mock API 实现 ──────────────────────────────────
 
 async function mockGetLibraryPaths(): Promise<LibraryPath[]> {
@@ -462,6 +548,9 @@ async function mockDeleteLibraryPath(id: number): Promise<void> {
   }
   for (let i = mockExtensions.length - 1; i >= 0; i--) {
     if (mockExtensions[i].library_id === id) mockExtensions.splice(i, 1);
+  }
+  for (let i = mockBuiltinRuleOverrides.length - 1; i >= 0; i--) {
+    if (mockBuiltinRuleOverrides[i].library_id === id) mockBuiltinRuleOverrides.splice(i, 1);
   }
 }
 
@@ -786,6 +875,100 @@ async function mockDeleteMediaExtension(libraryID: number, extension: string): P
   mockExtensions.splice(idx, 1);
 }
 
+function mockRuleFromExtension(ext: MediaExtension): MediaTypeRule {
+  const mediaType = defaultMediaTypes.find((type) => type.type === ext.type);
+  return {
+    id: ext.id ?? 0,
+    space_id: 'space-default',
+    library_id: ext.library_id,
+    type: ext.type,
+    extension: ext.extension,
+    label: ext.label || `${ext.extension.toUpperCase()} ${mediaType?.name ?? '媒体'}`,
+    description: ext.description || `${ext.extension} ${mediaType?.description ?? '媒体规则'}`,
+    enabled: ext.enabled ?? true,
+    builtin: ext.builtin ?? Boolean(ext.is_builtin),
+    capabilities: ext.capabilities ?? mediaType?.capabilities ?? ['scan'],
+  };
+}
+
+async function mockListMediaTypes(libraryID?: number): Promise<MediaTypesResponse> {
+  await mockDelay(100);
+  const rules = [
+    ...effectiveBuiltinMockMediaTypeRules(libraryID),
+    ...mockExtensions
+      .filter((ext) => !libraryID || ext.library_id === libraryID)
+      .map((ext) => mockRuleFromExtension(ext)),
+  ];
+  return { types: defaultMediaTypes, rules };
+}
+
+async function mockCreateMediaTypeRule(input: CreateMediaTypeRuleInput): Promise<MediaTypeRule> {
+  await mockDelay(100);
+  const normalized = input.extension.trim().toLowerCase().replace(/^\./, '');
+  if (!normalized) throw new Error('后缀格式不支持');
+  const libraryID = input.library_id ?? 0;
+  let ext = mockExtensions.find(
+    (item) =>
+      item.library_id === libraryID && item.extension === normalized && item.type === input.type,
+  );
+  if (!ext) {
+    ext = {
+      id: nextMockExtensionId++,
+      library_id: libraryID,
+      extension: normalized,
+      type: input.type,
+      is_builtin: 0,
+      builtin: false,
+      enabled: input.enabled ?? true,
+      label: input.label,
+      description: input.description,
+      created_at: new Date().toISOString(),
+    };
+    mockExtensions.push(ext);
+  }
+  return mockRuleFromExtension(ext);
+}
+
+async function mockUpdateMediaTypeRule(
+  id: number | string,
+  input: UpdateMediaTypeRuleInput,
+): Promise<MediaTypeRule> {
+  await mockDelay(100);
+  const ruleID = String(id);
+  const ext = mockExtensions.find((item) => String(item.id) === ruleID);
+  if (ext) {
+    if (input.enabled !== undefined) ext.enabled = input.enabled;
+    if (input.label !== undefined) ext.label = input.label.trim();
+    if (input.description !== undefined) ext.description = input.description.trim();
+    return mockRuleFromExtension(ext);
+  }
+  const builtin = builtinMockMediaTypeRules(input.library_id).find(
+    (rule) => String(rule.id) === ruleID,
+  );
+  if (!builtin) throw new Error('规则不存在');
+  const updated = {
+    ...builtin,
+    enabled: input.enabled ?? builtin.enabled,
+    label: input.label ?? builtin.label,
+    description: input.description ?? builtin.description,
+  };
+  const key = mockMediaRuleKey(updated);
+  const idx = mockBuiltinRuleOverrides.findIndex((rule) => mockMediaRuleKey(rule) === key);
+  if (idx >= 0) {
+    mockBuiltinRuleOverrides[idx] = updated;
+  } else {
+    mockBuiltinRuleOverrides.push(updated);
+  }
+  return updated;
+}
+
+async function mockDeleteMediaTypeRule(id: number | string): Promise<void> {
+  await mockDelay(100);
+  const idx = mockExtensions.findIndex((item) => String(item.id) === String(id));
+  if (idx === -1) throw new Error('自定义后缀不存在');
+  mockExtensions.splice(idx, 1);
+}
+
 // 推导真实路径的卷根（FR-121）：本地 `D:/...` → `D:`；UNC `//host/share/...` → `//host/share`。
 function mockVolumeRoot(rawPath: string): string {
   const p = rawPath.replace(/\\/g, '/');
@@ -1018,4 +1201,16 @@ export function deleteMediaExtension(libraryID: number, extension: string) {
   return useMock
     ? mockDeleteMediaExtension(libraryID, extension)
     : realDeleteMediaExtension(libraryID, extension);
+}
+export function listMediaTypes(libraryID?: number) {
+  return useMock ? mockListMediaTypes(libraryID) : realListMediaTypes(libraryID);
+}
+export function createMediaTypeRule(input: CreateMediaTypeRuleInput) {
+  return useMock ? mockCreateMediaTypeRule(input) : realCreateMediaTypeRule(input);
+}
+export function updateMediaTypeRule(id: number | string, input: UpdateMediaTypeRuleInput) {
+  return useMock ? mockUpdateMediaTypeRule(id, input) : realUpdateMediaTypeRule(id, input);
+}
+export function deleteMediaTypeRule(id: number | string) {
+  return useMock ? mockDeleteMediaTypeRule(id) : realDeleteMediaTypeRule(id);
 }

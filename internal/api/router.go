@@ -28,6 +28,15 @@ func parseMediaID(c *gin.Context) (int64, bool) {
 // pbSvc 可选：传入时同时注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // hlsMgr 可选：传入时注册 HLS 切片路由。
 func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
+	mediaTypes := r.Group("/api/media-types")
+	{
+		mediaTypes.GET("", h.ListMediaTypes)
+		mediaTypes.GET("/rules", h.ListMediaTypes)
+		mediaTypes.POST("/rules", h.CreateMediaTypeRule)
+		mediaTypes.PUT("/rules/:id", h.UpdateMediaTypeRule)
+		mediaTypes.DELETE("/rules/:id", h.DeleteMediaTypeRule)
+	}
+
 	lib := r.Group("/api/library")
 	{
 		lib.GET("/paths", h.ListLibraryPaths)

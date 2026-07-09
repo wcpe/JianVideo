@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、图片/视频后缀策略、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
@@ -223,18 +223,23 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 >
 > 感知哈希去重（FR-70）：`dhash` 列存基于缩略图（320 宽 JPEG）的 64 位差分哈希（dHash），由 `library` 模块纯 Go 标准库实现（缩放 9×8 灰度 + 逐行相邻像素差分，不引第三方图像哈希库），抽成纯函数 `computeDHash`/`hammingDistance`/`clusterByHamming` 便于穷举测试。`ComputeMissingDHashes` 为「未软删且 `dhash=0`」的媒体有界并发补算（缩略图缺失先同步生成一次再算，单条失败仅记 WARN 跳过），`dhash=0` 兼作「未计算」哨兵，故二次扫描跳过已算项（幂等；featureless 纯色图哈希恰为 0 会被重算，开销极小、无害）。`FindDuplicateGroups(threshold)` 查「未软删且 `dhash!=0`」的媒体，按汉明距离 ≤ 阈值（默认 10）经并查集聚类为重复组（仅返回 ≥2 项的组，组内/组间稳定有序）。图片与视频都参与（视频用其缩略图单帧，代表性弱，属已知局限）。重复项页选中多余项后复用 FR-69 批量软删（进回收站、可还原），**不新建去重持久表、不持久化「已忽略重复对」**（YAGNI、守真源不变量）。
 
-**媒体后缀配置（media_extensions）**
+**媒体类型规则（media_type_rules）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | INTEGER PK | 自增主键 |
-| library_id | INTEGER FK | 所属媒体库目录 |
+| space_id | TEXT, INDEX | 所属 Space，默认 `space-default` |
+| library_id | INTEGER, NULL | 所属媒体库目录；空表示全局规则 |
+| type | TEXT | 媒体类型：`video` / `image` / `audio` / `subtitle` / `sidecar` |
 | extension | TEXT | 不带点的小写后缀 |
-| type | TEXT | 媒体类型：`video` 或 `image` |
-| is_builtin | INTEGER | 是否内置后缀（0/1；内置后缀运行时返回，不持久化） |
-| created_at | DATETIME | 添加时间 |
+| label | TEXT | 中文名称 |
+| description | TEXT | 中文说明 |
+| enabled | INTEGER | 是否启用（0/1） |
+| builtin | INTEGER | 是否覆盖内置规则（0/1） |
+| capabilities_json | TEXT | 能力标签 JSON：`scan` / `transcode` / `thumbnail` / `metadata` |
+| created_at / updated_at | DATETIME | 创建与更新时间 |
 
-唯一键为 `(library_id, extension)`。删除 `library_paths` 时，服务层在同一事务中删除该目录关联的 `media_files` 与自定义 `media_extensions`。
+唯一约束按全局和每库拆分：`UNIQUE(space_id,type,extension) WHERE library_id IS NULL`，以及 `UNIQUE(space_id,library_id,type,extension) WHERE library_id IS NOT NULL`。内置视频 / 图片规则由代码 registry 生成；用户禁用内置规则时写 override，不物理删除内置项。旧 `media_extensions` 数据在迁移中回填为每库自定义规则，旧 API 继续兼容一版。
 
 **播放 / 转码会话（内存，非持久化表）**
 
@@ -451,7 +456,8 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、后缀配置（列/增/删，删自定义不删内置 FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118） |
+| 媒体类型 | `/api/media-types` | 媒体类型定义、全局/每库后缀规则、内置规则禁用与自定义规则增删改（FR2-025） |
 | 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
 | 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
@@ -479,7 +485,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - `ScanLibraryWithType(libraryID, dirPath, dirType, mode)` 按 `LibraryPath.type` 分发：`local` 使用 `filepath.WalkDir` 递归扫描，`smb` 使用 SMB 客户端遍历共享目录。
 - 扫描上下文（FR2-052）由 `ScanContextForLibraryInSpace` 在扫描入口读取 `library_paths.library_kind`，随 `space_id + library_id` 传入本地 / SMB 扫描链路；当前只提供 `movie` / `series` / `home_video` / `mixed` 上下文，完整季集推断、命名规则和每库后缀覆盖由 FR2-025/027/031 消费。
 - 扫描模式（FR-27）：`mode=incremental`（增量更新，缺省）只索引新增文件；`mode=full`（全量扫描）在入库后追加对账——以本次遍历到的现存路径集合为基准，库内未软删（`deleted_at IS NULL`）且不在集合中的记录经一条 `UPDATE` 标记软删进回收站（复用 FR-25），不物理删除、不动磁盘。遍历整体出错时放弃对账以免误删；对账仅本地扫描启用，SMB 轮询为增量语义（远程列举不保证完整）。
-- 媒体识别统一由 `library.Service` 维护：内置视频后缀和图片后缀始终可用，自定义后缀通过 `media_extensions.library_id` 绑定到单个 `LibraryPath`。
+- 媒体识别统一由 `library.Service` 的媒体类型规则服务维护：内置视频 / 图片规则由代码 registry 提供，用户规则持久化在 `media_type_rules`，支持全局默认与每库覆盖。扫描、列表 `type=` 筛选、统计、缩略图、上传校验和图片 raw 入口共用同一规则口径。
 - 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入。
 - 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR-0030）。
 - 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScanInSpace` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（含 `space_id`，`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送当前 Space 视图，`completed`/`error` 后关闭连接。`ScanLibraryWithTypeInSpace` 仍保留同步签名供 watcher 与扫描队列调用。
@@ -525,7 +531,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 - 使用 `fsnotify` 对已注册本地目录进行递归监听，SMB 目录使用 5 分钟轮询扫描。
 - watcher 只调用 `library.Service` 上报新增/删除事件，不直接操作 DB，保持 `watcher → library → db` 单向依赖。
-- Create/Write 事件先根据所属 `library_id` 调用统一媒体后缀策略判断，支持图片、视频和该目录自定义后缀。
+- Create/Write 事件先根据所属 `space_id + library_id` 调用统一媒体类型规则判断，支持图片、视频和该目录自定义后缀。
 - 事件去抖：文件写入完成后（连续 500ms 无新事件）才触发入库，避免读取不完整文件。
 - Remove/Rename 事件按路径委托 library 删除对应索引。
 

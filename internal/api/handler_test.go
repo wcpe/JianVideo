@@ -20,6 +20,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 )
@@ -47,6 +48,43 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *library.Service) {
 	r := gin.New()
 	RegisterRoutes(r, h)
 	return r, svc
+}
+
+func setupMediaTypesRouter(t *testing.T) (*gin.Engine, *library.Service, *gorm.DB) {
+	t.Helper()
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := gdb.AutoMigrate(
+		&models.Space{},
+		&models.LibraryPath{},
+		&models.MediaFile{},
+		&models.MediaExtension{},
+		&models.MediaTypeRule{},
+		&models.AuditEvent{},
+	); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	now := time.Now()
+	for _, spaceID := range []string{models.DefaultSpaceID, "space-a", "space-b"} {
+		if err := gdb.Create(&models.Space{ID: spaceID, Name: spaceID, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatalf("创建 Space 失败: %v", err)
+		}
+	}
+
+	rec := audit.NewRecorder(gdb)
+	svc := library.NewService(gdb).WithAudit(rec)
+	h := NewHandler(svc).WithAudit(rec)
+
+	r := gin.New()
+	RegisterRoutes(r, h)
+	return r, svc, gdb
 }
 
 func TestCreateLibraryPath_API(t *testing.T) {
@@ -783,6 +821,104 @@ func TestMediaExtensionsAPI(t *testing.T) {
 	}
 	if status.ScannedFiles != 1 {
 		t.Fatalf("自定义后缀扫描期望 1, 实际 %d", status.ScannedFiles)
+	}
+}
+
+func TestMediaTypeRulesAPI_SpaceScopedCustomRuleAndAudit(t *testing.T) {
+	router, _, db := setupMediaTypesRouter(t)
+
+	body := `{"type":"image","extension":".foo","label":"Foo 图片","description":"自定义 Foo 图片"}`
+	req := httptest.NewRequest("POST", "/api/media-types/rules", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-JianVideo-Space-Id", "space-a")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("创建媒体类型规则期望 201, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/media-types/rules?type=image", nil)
+	req.Header.Set("X-JianVideo-Space-Id", "space-a")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询 space-a 规则期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"extension":"foo"`) {
+		t.Fatalf("space-a 应返回自定义 foo 规则, body: %s", w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/media-types/rules?type=image", nil)
+	req.Header.Set("X-JianVideo-Space-Id", "space-b")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询 space-b 规则期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"extension":"foo"`) {
+		t.Fatalf("space-b 不应看到 space-a 的自定义 foo 规则, body: %s", w.Body.String())
+	}
+
+	var auditCount int64
+	if err := db.Model(&models.AuditEvent{}).
+		Where("action = ? AND space_id = ?", "media_type_rule.created", "space-a").
+		Count(&auditCount).Error; err != nil {
+		t.Fatalf("统计审计事件失败: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("创建规则应写 1 条审计事件, 实际 %d", auditCount)
+	}
+}
+
+func TestMediaTypeRulesAPI_BuiltinCanDisableButNotDelete(t *testing.T) {
+	router, svc, _ := setupMediaTypesRouter(t)
+	libA, err := svc.CreateLibraryPath(filepath.ToSlash(t.TempDir()), "local", "库 A")
+	if err != nil {
+		t.Fatalf("创建媒体库 A 失败: %v", err)
+	}
+	libB, err := svc.CreateLibraryPath(filepath.ToSlash(t.TempDir()), "local", "库 B")
+	if err != nil {
+		t.Fatalf("创建媒体库 B 失败: %v", err)
+	}
+
+	req := httptest.NewRequest("PUT", "/api/media-types/rules/builtin:video:mp4", bytes.NewBufferString(`{"library_id":`+strconv.FormatInt(libA.ID, 10)+`,"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("禁用内置规则期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("禁用响应应返回 enabled=false, body: %s", w.Body.String())
+	}
+
+	req = httptest.NewRequest("DELETE", "/api/media-types/rules/builtin:video:mp4", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("删除内置规则期望 400, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/media-types/rules?type=video&library_id="+strconv.FormatInt(libA.ID, 10), nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询规则期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"extension":"mp4"`) || !strings.Contains(body, `"enabled":false`) {
+		t.Fatalf("禁用后内置 mp4 应仍返回且 enabled=false, body: %s", body)
+	}
+
+	req = httptest.NewRequest("GET", "/api/media-types/rules?type=video&library_id="+strconv.FormatInt(libB.ID, 10), nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("查询库 B 规则期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	if !strings.Contains(body, `"extension":"mp4"`) || !strings.Contains(body, `"enabled":true`) {
+		t.Fatalf("库 A 禁用不应影响库 B, body: %s", body)
 	}
 }
 

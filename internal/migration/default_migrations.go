@@ -71,6 +71,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateLibraryKinds,
 			Validate:    validateLibraryKinds,
 		},
+		{
+			ID:          "20260708_0008_fr2_025_media_type_rules",
+			Description: "建立媒体类型规则表并回填旧后缀配置",
+			SafeToRetry: true,
+			Estimate:    estimateMediaTypeRules,
+			Up:          migrateMediaTypeRules,
+			Validate:    validateMediaTypeRules,
+		},
 	}
 }
 
@@ -83,7 +91,6 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		return err
 	}
 	return tx.AutoMigrate(
-		&models.MediaExtension{},
 		&models.Album{},
 		&models.AlbumItem{},
 		&models.Tag{},
@@ -145,6 +152,26 @@ func migrateCoreSchema(tx *gorm.DB) error {
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_extensions_library_extension ON media_extensions(library_id, extension);`,
+		`CREATE TABLE IF NOT EXISTS media_type_rules (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			space_id TEXT NOT NULL DEFAULT '` + DefaultSpaceID + `',
+			library_id INTEGER,
+			type TEXT NOT NULL,
+			extension TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			builtin INTEGER NOT NULL DEFAULT 0,
+			capabilities_json TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_global_type_ext
+			ON media_type_rules(space_id, type, extension)
+			WHERE library_id IS NULL;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_library_type_ext
+			ON media_type_rules(space_id, library_id, type, extension)
+			WHERE library_id IS NOT NULL;`,
 	}
 	for _, stmt := range statements {
 		if err := tx.Exec(stmt).Error; err != nil {
@@ -699,6 +726,90 @@ func validateLibraryKinds(_ context.Context, db *gorm.DB) (Validation, error) {
 		return Validation{}, fmt.Errorf("媒体库分型索引不存在: idx_library_paths_space_kind_id")
 	}
 	return Validation{Summary: "媒体库内容分型已就绪"}, nil
+}
+
+func estimateMediaTypeRules(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var count int64
+	if tableExists(db, "media_extensions") {
+		_ = db.Table("media_extensions").Count(&count).Error
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateMediaTypeRules(_ context.Context, tx *gorm.DB) error {
+	for _, stmt := range mediaTypeRuleSchemaStatements() {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	if !tableExists(tx, "media_extensions") {
+		return nil
+	}
+	return tx.Exec(`
+		INSERT OR IGNORE INTO media_type_rules(
+			space_id, library_id, type, extension, label, description, enabled, builtin,
+			capabilities_json, created_at, updated_at
+		)
+		SELECT
+			COALESCE(NULLIF(library_paths.space_id, ''), ?),
+			media_extensions.library_id,
+			media_extensions.type,
+			ltrim(lower(trim(media_extensions.extension)), '.'),
+			'',
+			'',
+			1,
+			CASE WHEN media_extensions.is_built_in = 1 THEN 1 ELSE 0 END,
+			CASE media_extensions.type
+				WHEN 'image' THEN '["scan","thumbnail","metadata"]'
+				WHEN 'video' THEN '["scan","transcode","thumbnail","metadata"]'
+				ELSE '[]'
+			END,
+			media_extensions.created_at,
+			datetime('now')
+		FROM media_extensions
+		LEFT JOIN library_paths ON library_paths.id = media_extensions.library_id
+		WHERE trim(media_extensions.extension) != ''
+	`, DefaultSpaceID).Error
+}
+
+func validateMediaTypeRules(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_type_rules") {
+		return Validation{}, fmt.Errorf("media_type_rules 表不存在")
+	}
+	for _, indexName := range []string{
+		"idx_media_type_rules_space_global_type_ext",
+		"idx_media_type_rules_space_library_type_ext",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("媒体类型规则索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "媒体类型规则已就绪"}, nil
+}
+
+func mediaTypeRuleSchemaStatements() []string {
+	return []string{
+		`CREATE TABLE IF NOT EXISTS media_type_rules (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			space_id TEXT NOT NULL DEFAULT '` + DefaultSpaceID + `',
+			library_id INTEGER,
+			type TEXT NOT NULL,
+			extension TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			builtin INTEGER NOT NULL DEFAULT 0,
+			capabilities_json TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_global_type_ext
+			ON media_type_rules(space_id, type, extension)
+			WHERE library_id IS NULL;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_library_type_ext
+			ON media_type_rules(space_id, library_id, type, extension)
+			WHERE library_id IS NOT NULL;`,
+	}
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

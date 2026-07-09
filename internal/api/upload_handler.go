@@ -81,7 +81,7 @@ func (h *Handler) UploadMedia(c *gin.Context) {
 	}
 
 	// 仅接受图片 / 视频（按目标库的扩展名策略，含自定义后缀）
-	if _, ok := h.library.MediaTypeByPathForLibrary(lp.ID, fileHeader.Filename); !ok {
+	if _, ok := h.library.MediaTypeByPathInSpace(spaceID, lp.ID, fileHeader.Filename); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "UNSUPPORTED_TYPE", "message": library.ErrUploadUnsupportedType.Error()})
 		return
 	}

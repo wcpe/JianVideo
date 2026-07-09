@@ -74,6 +74,22 @@ func InitSchema(d *sql.DB) error {
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_extensions_library_extension ON media_extensions(library_id, extension);`,
+		`CREATE TABLE IF NOT EXISTS media_type_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    space_id TEXT NOT NULL DEFAULT 'space-default',
+    library_id INTEGER,
+    type TEXT NOT NULL,
+    extension TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    builtin INTEGER NOT NULL DEFAULT 0,
+    capabilities_json TEXT NOT NULL DEFAULT '[]',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_global_type_ext ON media_type_rules(space_id, type, extension) WHERE library_id IS NULL;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_type_rules_space_library_type_ext ON media_type_rules(space_id, library_id, type, extension) WHERE library_id IS NOT NULL;`,
 		`CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scope TEXT NOT NULL,

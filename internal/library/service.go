@@ -436,6 +436,13 @@ func (s *Service) ListMediaFiles(libraryID int64, sort, search string, page, pag
 
 // ListMediaFilesPage 按筛选条件返回带 cursor 的媒体分页结果。
 func (s *Service) ListMediaFilesPage(filter MediaFilter, page MediaPageRequest) (MediaPageResult, error) {
+	if filter.MediaType != "" && len(filter.MediaTypeExtensions) == 0 {
+		exts, err := s.EnabledExtensionsForType(filter.SpaceID, filter.LibraryID, filter.MediaType)
+		if err != nil {
+			return MediaPageResult{}, err
+		}
+		filter.MediaTypeExtensions = exts
+	}
 	return s.mediaRepo.ListMediaFiles(filter, page)
 }
 
@@ -1305,7 +1312,7 @@ func (s *Service) StartAsyncScanInSpace(spaceID string, libraryID int64, dirPath
 // scanLocalLibrary 扫描本地目录。
 // mode 为全量（ScanModeFull）时在入库后对账：库内未软删但本次未遍历到的记录标记软删（FR-27）。
 func (s *Service) scanLocalLibrary(scanCtx ScanContext, dirPath, mode string) (int, error) {
-	policy, err := s.mediaExtensionPolicy(scanCtx.LibraryID)
+	policy, err := s.mediaExtensionPolicyInSpace(scanCtx.SpaceID, scanCtx.LibraryID)
 	if err != nil {
 		return 0, err
 	}
@@ -1389,7 +1396,7 @@ func (s *Service) scanSMBLibrary(scanCtx ScanContext, smbPath string) (int, erro
 		remotePath = parts[2]
 	}
 
-	policy, err := s.mediaExtensionPolicy(scanCtx.LibraryID)
+	policy, err := s.mediaExtensionPolicyInSpace(scanCtx.SpaceID, scanCtx.LibraryID)
 	if err != nil {
 		return 0, err
 	}
@@ -1520,7 +1527,7 @@ func (s *Service) indexMediaFiles(scanCtx ScanContext, paths []string) (int, err
 			done := atomic.AddInt64(&count, 1)
 
 			// 异步生成缩略图，不阻塞入库
-			go GenerateThumbnail(pf.fullPath)
+			go s.GenerateThumbnailSizeInSpace(scanCtx.SpaceID, scanCtx.LibraryID, pf.fullPath, thumbnailWidth)
 
 			// 每处理 10 个文件更新一次进度
 			if done%10 == 0 {
@@ -1591,6 +1598,17 @@ func (s *Service) ListMediaExtensionsInSpace(spaceID string, libraryID int64) ([
 	if _, err := s.GetLibraryPathByIDInSpace(spaceID, libraryID); err != nil {
 		return nil, err
 	}
+	if s.mediaTypeRuleTableExists() {
+		rules, err := s.resolveMediaTypeRules(spaceID, libraryID, false)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]models.MediaExtension, 0, len(rules))
+		for _, rule := range rules {
+			items = append(items, mediaExtensionFromRule(libraryID, rule))
+		}
+		return sortedMediaExtensions(items), nil
+	}
 	custom, err := s.listCustomMediaExtensions(libraryID)
 	if err != nil {
 		return nil, err
@@ -1633,6 +1651,16 @@ func (s *Service) AddMediaExtensionInSpace(spaceID string, libraryID int64, exte
 	if _, ok := builtInMediaExtensions[ext]; ok {
 		return nil
 	}
+	if s.mediaTypeRuleTableExists() {
+		_, err := s.CreateMediaTypeRuleInSpace(spaceID, MediaTypeRuleInput{
+			LibraryID: &libraryID,
+			Type:      mediaType,
+			Extension: ext,
+			Label:     strings.ToUpper(ext) + " 自定义",
+			Enabled:   boolPtr(true),
+		})
+		return err
+	}
 
 	item := models.MediaExtension{LibraryID: libraryID, Extension: ext, Type: mediaType, IsBuiltIn: 0}
 	return s.db.Where(models.MediaExtension{LibraryID: libraryID, Extension: ext}).Attrs(item).FirstOrCreate(&item).Error
@@ -1659,6 +1687,18 @@ func (s *Service) DeleteMediaExtensionInSpace(spaceID string, libraryID int64, e
 	if _, err := s.GetLibraryPathByIDInSpace(spaceID, libraryID); err != nil {
 		return err
 	}
+	if s.mediaTypeRuleTableExists() {
+		rules, err := s.resolveMediaTypeRules(spaceID, libraryID, true)
+		if err != nil {
+			return err
+		}
+		for _, rule := range rules {
+			if rule.LibraryID != nil && *rule.LibraryID == libraryID && rule.Extension == ext && !rule.Builtin {
+				return s.DeleteMediaTypeRuleInSpace(spaceID, rule.ID)
+			}
+		}
+		return fmt.Errorf("自定义后缀不存在")
+	}
 
 	result := s.db.Where("library_id = ? AND extension = ?", libraryID, ext).Delete(&models.MediaExtension{})
 	if result.Error != nil {
@@ -1672,7 +1712,7 @@ func (s *Service) DeleteMediaExtensionInSpace(spaceID string, libraryID int64, e
 
 // IsMediaFile 判断文件是否为内置支持的媒体文件。
 func (s *Service) IsMediaFile(path string) bool {
-	_, ok := mediaTypeByExtension(normalizeExtension(filepath.Ext(path)))
+	_, ok := mediaTypeByPathFromBuiltins(path)
 	return ok
 }
 
@@ -1690,11 +1730,7 @@ func (s *Service) IsImageFile(path string) bool {
 
 // MediaTypeByPathForLibrary 根据媒体库与路径后缀获取媒体类型。
 func (s *Service) MediaTypeByPathForLibrary(libraryID int64, path string) (string, bool) {
-	policy, err := s.mediaExtensionPolicy(libraryID)
-	if err != nil {
-		return "", false
-	}
-	return policy.MediaTypeByPath(path)
+	return s.MediaTypeByPathInSpace(models.DefaultSpaceID, libraryID, path)
 }
 
 type mediaExtensionPolicy map[string]string
@@ -1719,24 +1755,6 @@ func mediaTypeByExtension(ext string) (string, bool) {
 	}
 	mediaType, ok := builtInMediaExtensions[ext]
 	return mediaType, ok
-}
-
-func (s *Service) mediaExtensionPolicy(libraryID int64) (mediaExtensionPolicy, error) {
-	policy := make(mediaExtensionPolicy, len(builtInMediaExtensions))
-	for ext, mediaType := range builtInMediaExtensions {
-		policy[ext] = mediaType
-	}
-	if s.db == nil || libraryID <= 0 {
-		return policy, nil
-	}
-	custom, err := s.listCustomMediaExtensions(libraryID)
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range custom {
-		policy[item.Extension] = item.Type
-	}
-	return policy, nil
 }
 
 func (s *Service) listCustomMediaExtensions(libraryID int64) ([]models.MediaExtension, error) {

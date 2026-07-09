@@ -303,16 +303,29 @@ describe('TimelinePage', () => {
           ],
         }),
       ),
-      http.get('*/api/library/extensions', () =>
+      http.get('*/api/media-types', () =>
         HttpResponse.json({
-          items: [
+          types: [
+            {
+              type: 'image',
+              name: '图片',
+              description: '图片文件',
+              default_extensions: ['jpg'],
+              capabilities: ['scan', 'thumbnail', 'metadata'],
+            },
+          ],
+          rules: [
             {
               id: 1,
+              space_id: 'library:1',
               library_id: 1,
               extension: 'foo',
               type: 'image',
-              is_builtin: 0,
-              created_at: '2025-01-09T12:00:00Z',
+              label: 'FOO 图片',
+              description: '自定义图片规则',
+              enabled: true,
+              builtin: false,
+              capabilities: ['scan', 'thumbnail', 'metadata'],
             },
           ],
         }),

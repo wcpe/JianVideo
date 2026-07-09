@@ -766,6 +766,71 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 	}
 }
 
+func TestCustomImageExtensionUsesUnifiedRuleAcrossScanFilterSummaryThumbnail(t *testing.T) {
+	svc, _ := newTestService(t)
+	origRunThumbnail := runThumbnail
+	runThumbnail = func(_ thumbnailJob) {}
+	t.Cleanup(func() { runThumbnail = origRunThumbnail })
+
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPath(dir, "local", "自定义图片后缀")
+	if err != nil {
+		t.Fatalf("创建媒体库目录失败: %v", err)
+	}
+	customPath := filepath.Join(dir, "poster.foo")
+	if err := os.WriteFile(customPath, []byte("fake image"), 0o644); err != nil {
+		t.Fatalf("写入自定义图片失败: %v", err)
+	}
+	if err := svc.AddMediaExtension(lp.ID, ".foo", MediaTypeImage); err != nil {
+		t.Fatalf("添加自定义图片后缀失败: %v", err)
+	}
+
+	count, err := svc.ScanLibraryWithTypeInSpace(models.DefaultSpaceID, lp.ID, dir, "local", ScanModeIncremental)
+	if err != nil {
+		t.Fatalf("扫描自定义图片后缀失败: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("自定义图片后缀扫描期望 1, 实际 %d", count)
+	}
+
+	images, err := svc.ListMediaFilesPage(MediaFilter{
+		SpaceID:   models.DefaultSpaceID,
+		LibraryID: lp.ID,
+		MediaType: MediaTypeImage,
+	}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按 image 筛选失败: %v", err)
+	}
+	if images.Total != 1 || len(images.Items) != 1 || images.Items[0].Format != "foo" {
+		t.Fatalf("自定义图片后缀应被 image 筛选命中, total=%d items=%+v", images.Total, images.Items)
+	}
+
+	videos, err := svc.ListMediaFilesPage(MediaFilter{
+		SpaceID:   models.DefaultSpaceID,
+		LibraryID: lp.ID,
+		MediaType: MediaTypeVideo,
+	}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按 video 筛选失败: %v", err)
+	}
+	if videos.Total != 0 {
+		t.Fatalf("自定义图片后缀不应被 video 筛选命中, 实际 %d", videos.Total)
+	}
+
+	summary, err := svc.GetLibrarySummaryInSpace(models.DefaultSpaceID)
+	if err != nil {
+		t.Fatalf("查询 summary 失败: %v", err)
+	}
+	if summary.ImageCount != 1 || summary.VideoCount != 0 {
+		t.Fatalf("summary 应按自定义图片后缀统计, image=%d video=%d", summary.ImageCount, summary.VideoCount)
+	}
+
+	job, ok := resolveThumbnailJobForMediaType(customPath, MediaTypeImage)
+	if !ok || job.kind != kindImage {
+		t.Fatalf("自定义图片后缀应进入图片缩略图入口, ok=%v job=%+v", ok, job)
+	}
+}
+
 // TestDeleteMediaExtension 删除自定义后缀（FR-64）：只删自定义、内置不可删、删不存在报错。
 func TestDeleteMediaExtension(t *testing.T) {
 	svc, _ := newTestService(t)

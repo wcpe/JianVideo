@@ -27,6 +27,8 @@ import {
   IconX,
   IconChevronRight,
   IconTags,
+  IconCircleCheck,
+  IconCircleOff,
 } from '@tabler/icons-react';
 import type {
   LibraryKind,
@@ -40,6 +42,13 @@ import type {
 /** 后缀筛选档位（FR-64）：全部 / 仅视频 / 仅图片 */
 type ExtFilter = 'all' | 'video' | 'image';
 
+const capabilityNames: Record<string, string> = {
+  scan: '可扫描',
+  transcode: '可转码',
+  thumbnail: '可缩略图',
+  metadata: '可解析元数据',
+};
+
 function libraryKindName(kinds: LibraryKindInfo[], kind: LibraryKind): string {
   return kinds.find((item) => item.kind === kind)?.name ?? kind;
 }
@@ -48,30 +57,86 @@ function sourceTypeName(type: string): string {
   return type === 'smb' ? 'SMB' : '本地';
 }
 
-/** 单个后缀徽标（FR-100）：内置以描边样式标识不可删、自定义带删除按钮 */
-function ExtensionBadge({ ext, onDelete }: { ext: MediaExtension; onDelete?: () => void }) {
+function isBuiltinExtension(ext: MediaExtension): boolean {
+  return ext.builtin ?? Boolean(ext.is_builtin);
+}
+
+/** 单个后缀规则（FR2-025）：内置可禁用、自定义可删除，并展示中文说明与能力 */
+function ExtensionBadge({
+  ext,
+  onDelete,
+  onToggle,
+  showTypeInfo = false,
+}: {
+  ext: MediaExtension;
+  onDelete?: () => void;
+  onToggle?: () => void;
+  showTypeInfo?: boolean;
+}) {
+  const builtin = isBuiltinExtension(ext);
+  const enabled = ext.enabled ?? true;
   return (
-    <Badge
-      size="sm"
-      variant={ext.is_builtin ? 'outline' : 'light'}
-      color={ext.type === 'image' ? 'teal' : 'blue'}
-      rightSection={
-        ext.is_builtin || !onDelete ? undefined : (
-          <ActionIcon
-            size="xs"
-            variant="transparent"
-            color="red"
-            aria-label={`删除后缀 ${ext.extension}`}
-            onClick={onDelete}
-          >
-            <IconX size={10} />
-          </ActionIcon>
-        )
-      }
-    >
-      {ext.extension}
-      {ext.is_builtin ? '（内置）' : ''}
-    </Badge>
+    <Box>
+      <Group gap={4} wrap="nowrap">
+        <Badge
+          size="sm"
+          variant={builtin ? 'outline' : 'light'}
+          color={enabled ? (ext.type === 'image' ? 'teal' : 'blue') : 'gray'}
+          rightSection={
+            builtin && onToggle ? (
+              <ActionIcon
+                size="xs"
+                variant="transparent"
+                color={enabled ? 'gray' : 'green'}
+                aria-label={`${enabled ? '禁用' : '启用'}后缀 ${ext.extension}`}
+                onClick={onToggle}
+              >
+                {enabled ? <IconCircleOff size={10} /> : <IconCircleCheck size={10} />}
+              </ActionIcon>
+            ) : !builtin && onDelete ? (
+              <ActionIcon
+                size="xs"
+                variant="transparent"
+                color="red"
+                aria-label={`删除后缀 ${ext.extension}`}
+                onClick={onDelete}
+              >
+                <IconX size={10} />
+              </ActionIcon>
+            ) : undefined
+          }
+        >
+          {ext.extension}
+          {builtin ? '（内置）' : ''}
+          {enabled ? '' : '（已禁用）'}
+        </Badge>
+      </Group>
+      <Text size="xs" mt={3}>
+        {ext.label || ext.type_name || ext.extension}
+      </Text>
+      {ext.description && (
+        <Text size="xs" c="dimmed">
+          {ext.description}
+        </Text>
+      )}
+      {showTypeInfo && ext.type_name && (
+        <Group gap={4} mt={3} wrap="wrap">
+          <Badge size="xs" variant="light" color={ext.type === 'image' ? 'teal' : 'blue'}>
+            {ext.type_name}
+          </Badge>
+          {ext.capabilities?.map((capability) => (
+            <Badge key={capability} size="xs" variant="outline" color="gray">
+              {capabilityNames[capability] || capability}
+            </Badge>
+          ))}
+        </Group>
+      )}
+      {showTypeInfo && ext.type_description && (
+        <Text size="xs" c="dimmed" mt={2}>
+          {ext.type_description}
+        </Text>
+      )}
+    </Box>
   );
 }
 
@@ -100,7 +165,8 @@ interface LibraryPathManagerProps {
   onExtensionTypeChange: (pathId: number, type: MediaExtensionType) => void;
   onAddExtension: (path: LibraryPath) => void;
   /** 删除某库的自定义后缀（FR-64） */
-  onDeleteExtension: (path: LibraryPath, extension: string) => void;
+  onDeleteExtension: (path: LibraryPath, extension: MediaExtension) => void;
+  onToggleExtension?: (path: LibraryPath, extension: MediaExtension) => void;
 }
 
 /** 路径管理 UI 组件：添加、浏览、扫描、删除路径及自定义后缀管理 */
@@ -128,6 +194,7 @@ export default function LibraryPathManager({
   onExtensionTypeChange,
   onAddExtension,
   onDeleteExtension,
+  onToggleExtension,
 }: LibraryPathManagerProps) {
   // 各库后缀筛选档位（FR-64），缺省「全部」
   const [extFilters, setExtFilters] = useState<Record<number, ExtFilter>>({});
@@ -191,8 +258,8 @@ export default function LibraryPathManager({
             const exts = extensionsByLibrary[p.id] || [];
             const visibleExts = filter === 'all' ? exts : exts.filter((e) => e.type === filter);
             // 折叠态展开后按内置/自定义分组（FR-100）
-            const builtinExts = visibleExts.filter((e) => e.is_builtin);
-            const customExts = visibleExts.filter((e) => !e.is_builtin);
+            const builtinExts = visibleExts.filter((e) => isBuiltinExtension(e));
+            const customExts = visibleExts.filter((e) => !isBuiltinExtension(e));
             const expanded = extExpanded[p.id] || false;
             const libraryKind = p.library_kind || 'mixed';
             return (
@@ -310,7 +377,7 @@ export default function LibraryPathManager({
                       }
                       data={[
                         { value: 'all', label: '全部' },
-                        { value: 'video', label: '视频' },
+                        { value: 'video', label: '视频类' },
                         { value: 'image', label: '图片' },
                       ]}
                     />
@@ -322,7 +389,12 @@ export default function LibraryPathManager({
                       </Text>
                       <Group gap={4} wrap="wrap">
                         {builtinExts.map((e) => (
-                          <ExtensionBadge key={e.extension} ext={e} />
+                          <ExtensionBadge
+                            key={String(e.id ?? e.extension)}
+                            ext={e}
+                            onToggle={onToggleExtension ? () => onToggleExtension(p, e) : undefined}
+                            showTypeInfo
+                          />
                         ))}
                       </Group>
                     </Box>
@@ -335,9 +407,9 @@ export default function LibraryPathManager({
                       <Group gap={4} wrap="wrap">
                         {customExts.map((e) => (
                           <ExtensionBadge
-                            key={e.extension}
+                            key={String(e.id ?? e.extension)}
                             ext={e}
-                            onDelete={() => onDeleteExtension(p, e.extension)}
+                            onDelete={() => onDeleteExtension(p, e)}
                           />
                         ))}
                       </Group>
@@ -367,7 +439,7 @@ export default function LibraryPathManager({
                       variant={(extensionTypes[p.id] || 'video') === 'video' ? 'filled' : 'light'}
                       onClick={() => onExtensionTypeChange(p.id, 'video')}
                     >
-                      视频
+                      视频类
                     </Button>
                     <Button
                       size="xs"

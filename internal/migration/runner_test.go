@@ -280,6 +280,49 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	}
 }
 
+func TestMediaTypeRulesMigrationCreatesPartialIndexesAndBackfillsLegacyExtensions(t *testing.T) {
+	gdb, dbPath := openLegacyDB(t)
+	if err := gdb.Exec(`
+		CREATE TABLE media_extensions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			library_id INTEGER NOT NULL,
+			extension TEXT NOT NULL,
+			type TEXT NOT NULL,
+			is_built_in INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		)
+	`).Error; err != nil {
+		t.Fatalf("创建旧后缀表失败: %v", err)
+	}
+	if err := gdb.Exec(`
+		INSERT INTO media_extensions(library_id, extension, type, is_built_in, created_at)
+		VALUES (1, '.foo', 'image', 0, '2026-07-04T00:00:00Z')
+	`).Error; err != nil {
+		t.Fatalf("插入旧后缀失败: %v", err)
+	}
+
+	if _, err := newDefaultRunner(t, gdb, dbPath).Run(context.Background()); err != nil {
+		t.Fatalf("执行默认迁移失败: %v", err)
+	}
+
+	if !testTableExists(t, gdb, "media_type_rules") {
+		t.Fatal("media_type_rules 表应由迁移创建")
+	}
+	for _, indexName := range []string{
+		"idx_media_type_rules_space_global_type_ext",
+		"idx_media_type_rules_space_library_type_ext",
+	} {
+		if !testIndexExists(t, gdb, indexName) {
+			t.Fatalf("媒体类型规则 partial unique index 不存在: %s", indexName)
+		}
+	}
+	if got := countWhere(t, gdb, "media_type_rules",
+		"space_id = ? AND library_id = ? AND extension = ? AND type = ? AND builtin = 0 AND enabled = 1",
+		DefaultSpaceID, 1, "foo", "image"); got != 1 {
+		t.Fatalf("旧 media_extensions 自定义后缀应回填到 media_type_rules, 实际 %d", got)
+	}
+}
+
 func TestTasksCenterMigrationBackfillsLegacyQueues(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "tasks-migration.db")
 	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})

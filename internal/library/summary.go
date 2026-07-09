@@ -1,6 +1,8 @@
 package library
 
 import (
+	"sort"
+
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -28,15 +30,128 @@ type SummaryRow struct {
 }
 
 // GetLibrarySummary 聚合媒体库总量（FR-117）：纯查询、全程带 deleted_at IS NULL、无副作用。
-// 视频/图片拆分复用全站一致谓词（builtInImageExtensionList）：图片=LOWER(format) IN 集合，视频=NOT IN。
-// by_library 用单次 GROUP BY library_id（LEFT JOIN library_paths 取 label）一次取齐，避免逐库查询（N+1）。
+// 视频/图片拆分复用媒体类型规则服务，避免扫描、筛选和统计口径分叉。
+// by_library 用单次 GROUP BY library_id + format 一次取齐，避免逐库逐格式查询（N+1）。
 func (s *Service) GetLibrarySummary() (*Summary, error) {
 	return s.GetLibrarySummaryInSpace(models.DefaultSpaceID)
 }
 
 // GetLibrarySummaryInSpace 聚合指定 Space 的媒体库总量。
 func (s *Service) GetLibrarySummaryInSpace(spaceID string) (*Summary, error) {
-	return s.mediaRepo.LibrarySummary(spaceID)
+	spaceID = normalizeSpaceID(spaceID)
+	summary := &Summary{ByLibrary: []SummaryRow{}}
+	if err := s.fillSummaryLibraryCount(spaceID, summary); err != nil {
+		return nil, err
+	}
+	if err := s.fillRuleBasedSummary(spaceID, summary); err != nil {
+		return nil, err
+	}
+	return summary, nil
+}
+
+type summaryFormatRow struct {
+	LibraryID     int64
+	Label         string
+	Format        string
+	MediaCount    int
+	TotalSize     int64
+	TotalDuration float64
+}
+
+func (s *Service) fillSummaryLibraryCount(spaceID string, summary *Summary) error {
+	var count int64
+	if err := s.db.Model(&models.LibraryPath{}).Where("space_id = ? AND enabled = ?", spaceID, 1).Count(&count).Error; err != nil {
+		return err
+	}
+	summary.LibraryCount = int(count)
+	return nil
+}
+
+func (s *Service) fillRuleBasedSummary(spaceID string, summary *Summary) error {
+	rows, err := s.loadSummaryFormatRows(spaceID)
+	if err != nil {
+		return err
+	}
+	byLibrary := map[int64]*SummaryRow{}
+	policies := map[int64]mediaExtensionPolicy{}
+	for _, row := range rows {
+		mediaType := s.summaryMediaType(spaceID, row.LibraryID, row.Format, policies)
+		applySummaryFormatRow(summary, byLibrary, row, mediaType)
+	}
+	summary.ByLibrary = sortedSummaryRows(byLibrary)
+	return nil
+}
+
+func (s *Service) loadSummaryFormatRows(spaceID string) ([]summaryFormatRow, error) {
+	var rows []summaryFormatRow
+	err := s.db.Model(&models.MediaFile{}).
+		Select(
+			"media_files.library_id AS library_id, "+
+				"library_paths.label AS label, "+
+				"LOWER(media_files.format) AS format, "+
+				"COUNT(*) AS media_count, "+
+				"COALESCE(SUM(media_files.file_size), 0) AS total_size, "+
+				"COALESCE(SUM(media_files.duration), 0) AS total_duration").
+		Joins("LEFT JOIN library_paths ON library_paths.id = media_files.library_id").
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL", spaceID).
+		Group("media_files.library_id, LOWER(media_files.format)").
+		Scan(&rows).Error
+	return rows, err
+}
+
+func (s *Service) summaryMediaType(spaceID string, libraryID int64, ext string, policies map[int64]mediaExtensionPolicy) string {
+	policy, ok := policies[libraryID]
+	if !ok {
+		var err error
+		policy, err = s.mediaExtensionPolicyInSpace(spaceID, libraryID)
+		if err != nil {
+			policy = mediaExtensionPolicy{}
+		}
+		policies[libraryID] = policy
+	}
+	mediaType, _ := policy.MediaTypeByExtension(ext)
+	return mediaType
+}
+
+func applySummaryFormatRow(summary *Summary, byLibrary map[int64]*SummaryRow, row summaryFormatRow, mediaType string) {
+	summary.Total += row.MediaCount
+	summary.TotalSize += row.TotalSize
+	summary.TotalDuration += row.TotalDuration
+	item := summaryRowForLibrary(byLibrary, row)
+	item.MediaCount += row.MediaCount
+	item.TotalSize += row.TotalSize
+	item.TotalDuration += row.TotalDuration
+	switch mediaType {
+	case MediaTypeImage:
+		summary.ImageCount += row.MediaCount
+		item.ImageCount += row.MediaCount
+	case MediaTypeVideo:
+		summary.VideoCount += row.MediaCount
+		item.VideoCount += row.MediaCount
+	}
+}
+
+func summaryRowForLibrary(byLibrary map[int64]*SummaryRow, row summaryFormatRow) *SummaryRow {
+	if item, ok := byLibrary[row.LibraryID]; ok {
+		return item
+	}
+	item := &SummaryRow{LibraryID: row.LibraryID, Label: row.Label}
+	byLibrary[row.LibraryID] = item
+	return item
+}
+
+func sortedSummaryRows(byLibrary map[int64]*SummaryRow) []SummaryRow {
+	rows := make([]SummaryRow, 0, len(byLibrary))
+	for _, item := range byLibrary {
+		rows = append(rows, *item)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].MediaCount == rows[j].MediaCount {
+			return rows[i].LibraryID < rows[j].LibraryID
+		}
+		return rows[i].MediaCount > rows[j].MediaCount
+	})
+	return rows
 }
 
 func (r *gormMediaRepository) LibrarySummary(spaceID string) (*Summary, error) {

@@ -592,7 +592,70 @@
     ]
   }
   ```
-- **说明**：返回内置后缀和绑定到该媒体库目录的自定义后缀；自定义后缀不会影响其他目录。
+- **说明**：兼容旧端点；内部映射到媒体类型规则服务，返回内置后缀和绑定到该媒体库目录的自定义后缀；自定义后缀不会影响其他目录。
+
+### 查询媒体类型与扫描规则（FR2-025）
+
+- **方法 / 路径**：`GET /api/media-types`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **查询参数**：
+  - `library_id`：可选；传入后返回该媒体库的全局规则 + 每库覆盖规则
+  - `type`：可选；按 `video` / `image` / `audio` / `subtitle` / `sidecar` 过滤规则
+- **响应**（200）：
+  ```json
+  {
+    "types": [
+      {
+        "type": "video",
+        "name": "视频",
+        "description": "可播放、可转码的视频文件。",
+        "default_extensions": ["mp4", "mkv"],
+        "capabilities": ["scan", "transcode", "thumbnail", "metadata"]
+      }
+    ],
+    "rules": [
+      {
+        "id": "builtin:video:mp4",
+        "space_id": "space-default",
+        "library_id": 1,
+        "type": "video",
+        "extension": "mp4",
+        "label": "MP4 视频",
+        "description": "mp4 可扫描、预览、转码并提取技术元数据的视频文件。",
+        "enabled": true,
+        "builtin": true,
+        "capabilities": ["scan", "transcode", "thumbnail", "metadata"]
+      }
+    ]
+  }
+  ```
+- **说明**：内置规则由代码 registry 生成，禁用内置项时写 override 记录；扫描、列表 `type=` 筛选、统计、缩略图与上传校验共用该规则口径。
+
+### 新增媒体类型规则（FR2-025）
+
+- **方法 / 路径**：`POST /api/media-types/rules`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求**：
+  ```json
+  {"library_id": 1, "type": "image", "extension": ".rawx", "label": "RAWX 图片", "description": "自定义相机格式"}
+  ```
+- **响应**（201）：规则对象。
+- **说明**：`extension` 规范化为不带点的小写后缀；`library_id` 省略表示全局规则。配置变更写入审计事件，不自动全库重扫。
+- **错误**：`400` 目录不存在、媒体类型不支持或后缀格式不支持。
+
+### 更新媒体类型规则（FR2-025）
+
+- **方法 / 路径**：`PUT /api/media-types/rules/:id`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求**：`{"enabled": false}`，可选字段还包括 `label`、`description`、`library_id`
+- **响应**（200）：更新后的规则对象。
+- **说明**：内置规则 ID 形如 `builtin:video:mp4`；内置规则不可物理删除，但可通过 `enabled=false` 禁用扫描。
+
+### 删除媒体类型规则（FR2-025）
+
+- **方法 / 路径**：`DELETE /api/media-types/rules/:id`
+- **响应**（204）：空
+- **说明**：仅自定义规则可删除；删除内置规则返回 `400`，应改用禁用。
 
 ### 添加媒体库自定义后缀
 
@@ -606,7 +669,7 @@
   }
   ```
 - **响应**（201）：空
-- **说明**：`type` 仅允许 `video` 或 `image`；后缀会规范化为小写且去掉前导点。内置后缀无需入库，重复添加视为幂等成功。
+- **说明**：兼容旧端点；`type` 仅允许 `video` 或 `image`；后缀会规范化为小写且去掉前导点。内置后缀无需入库，重复添加视为幂等成功。
 - **错误**：`400` 参数无效、目录不存在或后缀格式不支持
 
 ### 删除媒体库自定义后缀（FR-64）
@@ -616,7 +679,7 @@
   - `library_id`：媒体库 ID（必填）
   - `extension`：要删除的后缀（必填，规范化为小写、去前导点后匹配）
 - **响应**（204）：空
-- **说明**：仅删除自定义后缀；**内置后缀不可删**（请求删除内置后缀返回 400）。删除不存在的自定义后缀返回 400。
+- **说明**：兼容旧端点；仅删除自定义后缀；**内置后缀不可删**（请求删除内置后缀返回 400）。删除不存在的自定义后缀返回 400。
 - **错误**：`400` 无效 `library_id`、空 `extension`、尝试删除内置后缀或后缀不存在
 
 ### Web 上传媒体入库

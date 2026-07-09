@@ -17,15 +17,84 @@ import type {
   SettingDefinition,
   TaskItem,
   TaskStatus,
+  MediaTypeRule,
+  MediaTypesResponse,
 } from '@/types';
 
 // 内存中的可变数据（支持增删）
 let paths = [...mockPaths];
 let mediaFiles = [...mockMediaFiles];
 let mediaExtensions: MediaExtension[] = [];
+let mediaTypeRuleOverrides: MediaTypeRule[] = [];
 let nextPathId = Math.max(...paths.map((p) => p.id)) + 1;
 let nextMediaId = Math.max(...mediaFiles.map((m) => m.id)) + 1;
 let nextExtensionId = 1;
+
+const mediaTypeDefinitions: MediaTypesResponse['types'] = [
+  {
+    type: 'video',
+    name: '视频',
+    description: '可播放、可转码的视频文件。',
+    default_extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm'],
+    capabilities: ['scan', 'transcode', 'thumbnail', 'metadata'],
+  },
+  {
+    type: 'image',
+    name: '图片',
+    description: '可生成缩略图的图片文件。',
+    default_extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+    capabilities: ['scan', 'thumbnail', 'metadata'],
+  },
+];
+
+function mediaTypeDefinition(type: string) {
+  return mediaTypeDefinitions.find((item) => item.type === type);
+}
+
+function builtinMediaTypeRules(libraryID = 0): MediaTypeRule[] {
+  return mediaTypeDefinitions.flatMap((type) =>
+    type.default_extensions.map((extension) => ({
+      id: `builtin-${type.type}-${extension}`,
+      space_id: 'space-default',
+      library_id: libraryID > 0 ? libraryID : null,
+      type: type.type,
+      extension,
+      label: `${extension.toUpperCase()} ${type.name}`,
+      description: `${extension} ${type.description}`,
+      enabled: true,
+      builtin: true,
+      capabilities: type.capabilities,
+    })),
+  );
+}
+
+function mediaTypeRuleKey(rule: Pick<MediaTypeRule, 'library_id' | 'type' | 'extension'>): string {
+  return `${rule.library_id ?? 0}:${rule.type}:${rule.extension}`;
+}
+
+function effectiveBuiltinMediaTypeRules(libraryID = 0): MediaTypeRule[] {
+  const overrides = new Map(mediaTypeRuleOverrides.map((rule) => [mediaTypeRuleKey(rule), rule]));
+  return builtinMediaTypeRules(libraryID).map((rule) => {
+    return overrides.get(mediaTypeRuleKey(rule)) ?? rule;
+  });
+}
+
+function mediaRuleFromExtension(ext: MediaExtension): MediaTypeRule {
+  const definition = mediaTypeDefinition(ext.type);
+  return {
+    id: ext.id ?? 0,
+    space_id: 'space-default',
+    library_id: ext.library_id,
+    type: ext.type,
+    extension: ext.extension,
+    label: ext.label || `${ext.extension.toUpperCase()} ${definition?.name ?? '媒体'}`,
+    description: ext.description || `${ext.extension} ${definition?.description ?? '媒体规则'}`,
+    enabled: ext.enabled ?? true,
+    builtin: ext.builtin ?? Boolean(ext.is_builtin),
+    capabilities: ext.capabilities ?? definition?.capabilities ?? ['scan'],
+  };
+}
+
 // 运行期设置内存存储（支持读写往返）
 const settingsStore: Record<string, string> = {
   scan_interval: '3600',
@@ -573,9 +642,10 @@ export const handlers = [
     await delay(200);
     const id = Number(params.id);
     paths = paths.filter((p) => p.id !== id);
-    // 同时删除关联的媒体文件与自定义后缀
+    // 同时删除关联的媒体文件、后缀和规则覆盖
     mediaFiles = mediaFiles.filter((m) => m.library_id !== id);
     mediaExtensions = mediaExtensions.filter((ext) => ext.library_id !== id);
+    mediaTypeRuleOverrides = mediaTypeRuleOverrides.filter((rule) => rule.library_id !== id);
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -838,6 +908,110 @@ export const handlers = [
       return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
     return HttpResponse.json(file);
+  }),
+
+  http.get('*/api/media-types', async ({ request }) => {
+    await delay(100);
+    const libraryID = Number(new URL(request.url).searchParams.get('library_id') || '0');
+    return HttpResponse.json({
+      types: mediaTypeDefinitions,
+      rules: [
+        ...effectiveBuiltinMediaTypeRules(libraryID),
+        ...mediaExtensions
+          .filter((ext) => !libraryID || ext.library_id === libraryID)
+          .map((ext) => mediaRuleFromExtension(ext)),
+      ],
+    });
+  }),
+
+  http.post('*/api/media-types/rules', async ({ request }) => {
+    await delay(100);
+    const body = (await request.json()) as {
+      library_id?: number;
+      extension: string;
+      type: 'image' | 'video';
+      label?: string;
+      description?: string;
+      enabled?: boolean;
+    };
+    const extension = body.extension.trim().toLowerCase().replace(/^\./, '');
+    if (!extension) {
+      return HttpResponse.json(
+        { code: 'INVALID_EXTENSION', message: '后缀格式不支持' },
+        { status: 400 },
+      );
+    }
+    const libraryID = body.library_id ?? 0;
+    let ext = mediaExtensions.find(
+      (item) =>
+        item.library_id === libraryID && item.extension === extension && item.type === body.type,
+    );
+    if (!ext) {
+      ext = {
+        id: nextExtensionId++,
+        library_id: libraryID,
+        extension,
+        type: body.type,
+        is_builtin: 0,
+        builtin: false,
+        enabled: body.enabled ?? true,
+        label: body.label,
+        description: body.description,
+        created_at: new Date().toISOString(),
+      };
+      mediaExtensions.push(ext);
+    }
+    return HttpResponse.json(mediaRuleFromExtension(ext), { status: 201 });
+  }),
+
+  http.put('*/api/media-types/rules/:id', async ({ params, request }) => {
+    await delay(100);
+    const id = String(params.id);
+    const body = (await request.json()) as {
+      library_id?: number;
+      enabled?: boolean;
+      label?: string;
+      description?: string;
+    };
+    const ext = mediaExtensions.find((item) => String(item.id) === id);
+    if (ext) {
+      if (body.enabled !== undefined) ext.enabled = body.enabled;
+      if (body.label !== undefined) ext.label = body.label.trim();
+      if (body.description !== undefined) ext.description = body.description.trim();
+      return HttpResponse.json(mediaRuleFromExtension(ext));
+    }
+    const builtin = builtinMediaTypeRules(body.library_id).find((rule) => String(rule.id) === id);
+    if (!builtin) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '规则不存在' }, { status: 404 });
+    }
+    const updated = {
+      ...builtin,
+      enabled: body.enabled ?? builtin.enabled,
+      label: body.label ?? builtin.label,
+      description: body.description ?? builtin.description,
+    };
+    const key = mediaTypeRuleKey(updated);
+    const idx = mediaTypeRuleOverrides.findIndex((rule) => mediaTypeRuleKey(rule) === key);
+    if (idx >= 0) {
+      mediaTypeRuleOverrides[idx] = updated;
+    } else {
+      mediaTypeRuleOverrides.push(updated);
+    }
+    return HttpResponse.json(updated);
+  }),
+
+  http.delete('*/api/media-types/rules/:id', async ({ params }) => {
+    await delay(100);
+    const id = String(params.id);
+    const idx = mediaExtensions.findIndex((ext) => String(ext.id) === id);
+    if (idx === -1) {
+      return HttpResponse.json(
+        { code: 'DELETE_RULE_FAILED', message: '自定义后缀不存在' },
+        { status: 400 },
+      );
+    }
+    mediaExtensions.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get('*/api/library/extensions', async ({ request }) => {
