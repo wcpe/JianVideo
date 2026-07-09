@@ -1,6 +1,6 @@
 # 功能规格：文件级/哈希去重
 
-> 状态：已审核接受　·　关联 PRD：FR2-061　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已交付@v0.23.0　·　关联 PRD：FR2-061　·　阶段：P2 `0.23.x`　·　分支：codex/fr2-061-file-hash-dedup
 
 ## 1. 背景与目标
 
@@ -32,6 +32,7 @@ Schema：
 
 - `media_files.content_hash`、`content_hash_algo`、`content_hash_computed_at`、`content_hash_stale`。
 - 索引：`(space_id, file_size, content_hash)`，并保留 `content_hash_stale` 查询索引。
+- `media_hash_groups` 保存每个 Space 的内容哈希重复组快照，回填完成后重建，查询时仍回连 `media_files` 排除软删、missing 与 stale 项。
 
 计算：
 
@@ -52,16 +53,16 @@ API：
 
 ## 4. 任务拆分
 
-- [ ] 增加内容 hash 字段、索引与迁移。
-- [ ] 实现流式 SHA-256 计算与 stale 判断。
-- [ ] 接入扫描变更和 backfill 任务队列。
-- [ ] 新增精确重复查询 API。
-- [ ] 前端去重页区分精确重复与相似重复。
-- [ ] 接入批量软删和审计。
-- [ ] 补单元测试：hash 计算、size+hash 分组、stale 判断。
-- [ ] 补集成测试：重复文件分组、大文件流式、SMB/不可读失败。
-- [ ] 补 Benchmark：1m/5m/10m hash 分组查询延迟。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 增加内容 hash 字段、索引与迁移。
+- [x] 实现流式 SHA-256 计算与 stale 判断。
+- [x] 接入扫描变更和 backfill 任务队列。
+- [x] 新增精确重复查询 API。
+- [x] 前端去重页区分精确重复与相似重复。
+- [x] 接入批量软删和审计。
+- [x] 补单元测试：hash 计算、size+hash 分组、stale 判断。
+- [x] 补集成测试：重复文件分组、大文件流式、SMB/不可读失败。
+- [x] 补 Benchmark：1m/5m/10m hash 分组查询延迟。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

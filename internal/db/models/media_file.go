@@ -12,11 +12,11 @@ const (
 // MediaFile 媒体文件记录。
 type MediaFile struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
-	SpaceID        string    `gorm:"not null;default:space-default;index:idx_media_files_space_id" json:"space_id"`
+	SpaceID        string    `gorm:"not null;default:space-default;index:idx_media_files_space_id;index:idx_media_files_space_size_content_hash,priority:1;index:idx_media_files_space_content_hash_stale,priority:1" json:"space_id"`
 	LibraryID      int64     `gorm:"index;not null" json:"library_id"`
 	FilePath       string    `gorm:"not null;index:idx_media_files_file_path" json:"file_path"`
 	FileName       string    `gorm:"index;not null" json:"file_name"`
-	FileSize       int64     `gorm:"default:0" json:"file_size"`
+	FileSize       int64     `gorm:"default:0;index:idx_media_files_space_size_content_hash,priority:2" json:"file_size"`
 	Format         string    `json:"format"`
 	VideoCodec     string    `json:"video_codec"`
 	AudioCodec     string    `json:"audio_codec"`
@@ -62,6 +62,12 @@ type MediaFile struct {
 	// 汉明距离 ≤ 阈值的媒体视为近似重复，供「重复项」页聚类清理。
 	// 显式列名 dhash，与去重服务的手写 SQL 条件保持一致。
 	DHash int64 `gorm:"column:dhash;default:0" json:"dhash,omitempty"`
+
+	// 内容哈希去重（FR2-061）：源文件 SHA-256。stale=true 表示文件大小或 mtime 已变化，需回填重算。
+	ContentHash           string     `gorm:"size:64;default:'';index:idx_media_files_space_size_content_hash,priority:3;index:idx_media_files_space_content_hash_stale,priority:2" json:"content_hash,omitempty"`
+	ContentHashAlgo       string     `gorm:"default:''" json:"content_hash_algo,omitempty"`
+	ContentHashComputedAt *time.Time `json:"content_hash_computed_at,omitempty"`
+	ContentHashStale      bool       `gorm:"not null;default:true;index:idx_media_files_space_content_hash_stale,priority:3" json:"content_hash_stale"`
 
 	// 观看状态/续播（FR-44）
 	LastPosition  float64    `gorm:"default:0" json:"last_position"` // 上次播放位置（秒）

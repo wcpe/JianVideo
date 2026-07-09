@@ -82,7 +82,8 @@ type Handler struct {
 	audit audit.Recorder
 
 	// 通用异步任务队列中心（FR2-037）：未注入时新任务端点返回 503，旧队列端点保持原兼容行为。
-	tasks *tasksvc.Service
+	tasks       *tasksvc.Service
+	taskWorkers *tasksvc.WorkerRegistry
 }
 
 // NewHandler 创建处理器。
@@ -145,6 +146,12 @@ func (h *Handler) WithAudit(rec audit.Recorder) *Handler {
 // WithTasks 注入通用任务服务，启用 /api/tasks 端点。
 func (h *Handler) WithTasks(svc *tasksvc.Service) *Handler {
 	h.tasks = svc
+	return h
+}
+
+// WithTaskWorkers 注入通用任务 worker 注册表，供新任务入队后即时触发执行。
+func (h *Handler) WithTaskWorkers(workers *tasksvc.WorkerRegistry) *Handler {
+	h.taskWorkers = workers
 	return h
 }
 

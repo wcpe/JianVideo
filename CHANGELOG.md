@@ -15,6 +15,7 @@
 - **FR2-037 通用异步任务队列中心**：新增 `tasks` 通用任务真源、状态机、重试退避、优先级公平领取、worker registry、Space/System scope、审计事件和 `/api/tasks` 列表/统计/详情/取消/重试 API；旧扫描队列与预生成转码队列同步到通用任务表，旧状态 `completed/error` 在边界层映射为 `succeeded/failed`。前端新增「任务」页，支持状态/类型/资源过滤、统计卡、取消和重试；`packages/media-client` 与 MSW mock 对齐通用任务状态。新增 FR2-037 SQLite benchmark harness，报告输出到 `.tmp/benchmark/fr2-037/`。
 - **FR2-040 全操作审计日志**：新增 `internal/audit` 审计事件真源、脱敏工具、cursor 分页查询 API 与系统控制台审计 tab；配置、媒体库、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务、缓存清理和迁移事件写入 `audit_events`。关键业务变更与审计事件同 SQLite 事务提交，审计失败时回滚业务变更，Space scoped 查询默认不返回系统级事件。
 - **FR2-052 多媒体库分型**：`library_paths` 新增 `library_kind` 与 `library_profile_json`，旧库迁移默认 `mixed`；`GET /api/library/kinds` 返回 `movie/series/home_video/mixed` 的中文说明、命名提示与推荐扫描策略，库路径创建/更新支持分型校验与回读。扫描上下文携带 `library_kind`，媒体库管理页新增分型选择并区分来源类型与内容分型，MSW mock 与前端类型同步。
+- **FR2-061 文件级/哈希去重**：`media_files` 新增 SHA-256 内容哈希字段、计算时间、stale 标记与 `(space_id, file_size, content_hash)` 组合索引；`media_hash_groups` 保存 Space 内重复组快照，精确查询会回连 `media_files` 复验软删、missing 与 stale 状态。扫描增量变更会在大小或 mtime 变化后置 stale，回填通过 FR2-037 任务 `library.file_hash_backfill` 流式计算源文件内容 hash。新增 `POST /api/library/file-hashes/backfill` 与 `GET /api/library/duplicates/exact`，旧 dHash 去重保留为 Space scoped 的「相似重复」；重复项页区分「精确重复 / 相似重复」，两类处理都复用批量软删并写审计，不物理删除源文件。Benchmark 报告输出到 `.tmp/benchmark/fr2-061/`。
 
 ## 0.22.0（2026-07-08）
 

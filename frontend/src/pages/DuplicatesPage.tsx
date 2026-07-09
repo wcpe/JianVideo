@@ -1,35 +1,49 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Stack, Group, Text, Button, Loader, Center, Paper, Badge } from '@mantine/core';
+import { Stack, Group, Text, Button, Loader, Center, Paper, Badge, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconTrash, IconScan, IconCopyOff } from '@tabler/icons-react';
+import { IconTrash, IconScan, IconCopyOff, IconFingerprint } from '@tabler/icons-react';
 import * as libApi from '@/api/library';
 import PageHeader from '@/components/PageHeader';
 import MediaRow from '@/components/MediaRow';
 import EmptyState from '@/components/EmptyState';
-import type { DuplicateGroup } from '@/types';
+import type { DuplicateGroup, ExactDuplicateGroup, MediaFile } from '@/types';
 
-/**
- * 重复项页（FR-70）：展示按感知哈希（dHash）聚类的近似重复组。
- * 用户勾选组内多余项后批量软删（复用 FR-69 批量软删端点）进回收站，可在回收站还原。
- * 「扫描重复项」按钮触发后端为缺哈希媒体补算 dHash 再刷新。
- */
+type DuplicateMode = 'exact' | 'similar';
+
+function exactGroupItems(groups: ExactDuplicateGroup[]): MediaFile[][] {
+  return groups.map((group) => group.items);
+}
+
+function visibleItems(mode: DuplicateMode, exact: ExactDuplicateGroup[], similar: DuplicateGroup[]) {
+  return mode === 'exact' ? exactGroupItems(exact) : similar;
+}
+
 export default function DuplicatesPage() {
-  const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [mode, setMode] = useState<DuplicateMode>('exact');
+  const [exactGroups, setExactGroups] = useState<ExactDuplicateGroup[]>([]);
+  const [similarGroups, setSimilarGroups] = useState<DuplicateGroup[]>([]);
   const [loading, setLoading] = useState(false);
-  const [scanning, setScanning] = useState(false);
+  const [exactBackfilling, setExactBackfilling] = useState(false);
+  const [similarScanning, setSimilarScanning] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // 选中待删除的媒体 ID 集合
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (targetMode: DuplicateMode) => {
     setLoading(true);
     try {
-      const data = await libApi.getDuplicateGroups();
-      setGroups(data);
-      // 刷新后清理已不存在的选中项
+      let nextGroups: MediaFile[][];
+      if (targetMode === 'exact') {
+        const exact = await libApi.getExactDuplicateGroups();
+        setExactGroups(exact);
+        nextGroups = exactGroupItems(exact);
+      } else {
+        const similar = await libApi.getDuplicateGroups();
+        setSimilarGroups(similar);
+        nextGroups = similar;
+      }
       setSelected((prev) => {
         const alive = new Set<number>();
-        for (const g of data) for (const m of g) if (prev.has(m.id)) alive.add(m.id);
+        for (const group of nextGroups) for (const media of group) if (prev.has(media.id)) alive.add(media.id);
         return alive;
       });
     } catch (err) {
@@ -45,8 +59,8 @@ export default function DuplicatesPage() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    void load(mode);
+  }, [load, mode]);
 
   const toggle = useCallback((id: number) => {
     setSelected((prev) => {
@@ -57,26 +71,49 @@ export default function DuplicatesPage() {
     });
   }, []);
 
-  const handleScan = useCallback(async () => {
-    setScanning(true);
+  const handleExactBackfill = useCallback(async () => {
+    setExactBackfilling(true);
     try {
-      const computed = await libApi.scanDuplicates();
+      const task = await libApi.backfillFileHashes();
       notifications.show({
-        title: '扫描完成',
-        message: `本次计算 ${computed} 项媒体哈希`,
+        title: '已入队',
+        message: `内容哈希回填任务 ${task.task_id} 已创建`,
         color: 'green',
         autoClose: 3000,
       });
-      await load();
+      await load('exact');
     } catch (err) {
       notifications.show({
-        title: '扫描失败',
-        message: err instanceof Error ? err.message : '去重扫描失败',
+        title: '入队失败',
+        message: err instanceof Error ? err.message : '内容哈希回填失败',
         color: 'red',
         autoClose: 3000,
       });
     } finally {
-      setScanning(false);
+      setExactBackfilling(false);
+    }
+  }, [load]);
+
+  const handleSimilarScan = useCallback(async () => {
+    setSimilarScanning(true);
+    try {
+      const computed = await libApi.scanDuplicates();
+      notifications.show({
+        title: '扫描完成',
+        message: `本次计算 ${computed} 项媒体感知哈希`,
+        color: 'green',
+        autoClose: 3000,
+      });
+      await load('similar');
+    } catch (err) {
+      notifications.show({
+        title: '扫描失败',
+        message: err instanceof Error ? err.message : '相似重复扫描失败',
+        color: 'red',
+        autoClose: 3000,
+      });
+    } finally {
+      setSimilarScanning(false);
     }
   }, [load]);
 
@@ -93,7 +130,7 @@ export default function DuplicatesPage() {
         autoClose: 3000,
       });
       setSelected(new Set());
-      await load();
+      await load(mode);
     } catch (err) {
       notifications.show({
         title: '删除失败',
@@ -104,7 +141,14 @@ export default function DuplicatesPage() {
     } finally {
       setDeleting(false);
     }
-  }, [selected, load]);
+  }, [selected, load, mode]);
+
+  const groups = visibleItems(mode, exactGroups, similarGroups);
+  const actionLabel = mode === 'exact' ? '回填精确哈希' : '扫描相似重复';
+  const actionLoading = mode === 'exact' ? exactBackfilling : similarScanning;
+  const actionIcon = mode === 'exact' ? <IconFingerprint size={16} /> : <IconScan size={16} />;
+  const actionHandler = mode === 'exact' ? handleExactBackfill : handleSimilarScan;
+  const showHeaderAction = groups.length > 0;
 
   return (
     <Stack gap="md">
@@ -112,15 +156,17 @@ export default function DuplicatesPage() {
         title="重复项"
         actions={
           <Group gap="sm">
-            <Button
-              variant="light"
-              color="purple"
-              leftSection={<IconScan size={16} />}
-              loading={scanning}
-              onClick={handleScan}
-            >
-              扫描重复项
-            </Button>
+            {showHeaderAction ? (
+              <Button
+                variant="light"
+                color={mode === 'exact' ? 'blue' : 'purple'}
+                leftSection={actionIcon}
+                loading={actionLoading}
+                onClick={actionHandler}
+              >
+                {actionLabel}
+              </Button>
+            ) : null}
             <Button
               color="red"
               leftSection={<IconTrash size={16} />}
@@ -133,14 +179,21 @@ export default function DuplicatesPage() {
           </Group>
         }
       />
-      <Text size="sm" c="dimmed">
-        基于缩略图感知哈希（dHash）检出的近似重复媒体，按组列出。勾选每组中要删除的多余项后点「删除选中项」软删进回收站（可还原）。
-        若新入库媒体尚未参与，请先点「扫描重复项」补算哈希。
-      </Text>
+
+      <Tabs value={mode} onChange={(value) => setMode((value as DuplicateMode) || 'exact')}>
+        <Tabs.List>
+          <Tabs.Tab value="exact" leftSection={<IconFingerprint size={16} />}>
+            精确重复
+          </Tabs.Tab>
+          <Tabs.Tab value="similar" leftSection={<IconScan size={16} />}>
+            相似重复
+          </Tabs.Tab>
+        </Tabs.List>
+      </Tabs>
 
       {loading && groups.length === 0 ? (
         <Center py="xl">
-          <Loader color="purple" />
+          <Loader color={mode === 'exact' ? 'blue' : 'purple'} />
         </Center>
       ) : groups.length === 0 ? (
         <EmptyState
@@ -152,12 +205,12 @@ export default function DuplicatesPage() {
             />
           }
           title="没有发现重复项"
-          description="基于缩略图感知哈希（dHash）未检出近似重复媒体。若新入库媒体尚未参与，点「扫描重复项」补算哈希后再看。"
+          description={mode === 'exact' ? '当前没有精确重复媒体。' : '当前没有相似重复媒体。'}
           action={{
-            label: '扫描重复项',
-            leftIcon: <IconScan size={16} />,
-            loading: scanning,
-            onClick: handleScan,
+            label: actionLabel,
+            leftIcon: actionIcon,
+            loading: actionLoading,
+            onClick: actionHandler,
           }}
         />
       ) : (
@@ -165,11 +218,11 @@ export default function DuplicatesPage() {
           {groups.map((group, gi) => (
             <Paper key={group[0].id} withBorder p="md" radius="md">
               <Group mb="xs" gap="xs">
-                <Badge variant="light" color="purple">
+                <Badge variant="light" color={mode === 'exact' ? 'blue' : 'purple'}>
                   第 {gi + 1} 组
                 </Badge>
                 <Text size="sm" c="dimmed">
-                  {group.length} 项相似
+                  {group.length} 项{mode === 'exact' ? '精确重复' : '相似'}
                 </Text>
               </Group>
               <Stack gap="xs">

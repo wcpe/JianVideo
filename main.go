@@ -61,6 +61,29 @@ func resolveTool(envVar, name string) string {
 	return name
 }
 
+func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service) {
+	if err := workers.Register(library.TaskTypeFileHashBackfill, tasksvc.DefaultConcurrency(library.TaskTypeFileHashBackfill), func(ctx context.Context, task models.Task) error {
+		return libSvc.HandleContentHashBackfillTask(ctx, taskSvc, task)
+	}); err != nil {
+		log.Printf("[WARN] 内容哈希回填 worker 注册失败: %v", err)
+	}
+}
+
+func startTaskWorkers(ctx context.Context, workers *tasksvc.WorkerRegistry) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := workers.RunPending(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[WARN] 通用任务 worker 执行失败: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func main() {
 	// 记录进程启动时刻，供系统诊断「运行环境」计算运行时长（FR-60）。
 	startTime := time.Now()
@@ -178,6 +201,11 @@ func main() {
 	if err := taskSvc.RecoverRunning(context.Background()); err != nil {
 		log.Printf("[WARN] 通用任务队列重启恢复失败: %v", err)
 	}
+	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
+	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	taskWorkerCtx, stopTaskWorkers := context.WithCancel(context.Background())
+	go startTaskWorkers(taskWorkerCtx, taskWorkers)
+	defer stopTaskWorkers()
 
 	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。
 	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType).WithChangeExec(libSvc.ApplyScanChange).WithAudit(auditSvc).WithTasks(taskSvc)
@@ -229,7 +257,7 @@ func main() {
 	pregenQueue.Start()
 	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

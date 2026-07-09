@@ -416,15 +416,16 @@ func (s *Service) CreateMediaFileInSpace(spaceID string, libraryID int64, filePa
 	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
 
 	mf := &models.MediaFile{
-		SpaceID:    normalizeSpaceID(spaceID),
-		LibraryID:  libraryID,
-		FilePath:   filePath,
-		FileName:   filepath.Base(filePath),
-		FileSize:   fileSize,
-		Format:     ext,
-		FileState:  models.MediaFileStateAvailable,
-		AddedAt:    time.Now(),
-		ModifiedAt: time.Now(),
+		SpaceID:          normalizeSpaceID(spaceID),
+		LibraryID:        libraryID,
+		FilePath:         filePath,
+		FileName:         filepath.Base(filePath),
+		FileSize:         fileSize,
+		Format:           ext,
+		FileState:        models.MediaFileStateAvailable,
+		ContentHashStale: true,
+		AddedAt:          time.Now(),
+		ModifiedAt:       time.Now(),
 	}
 	// 填充媒体时间与 EXIF（FR-31）：图片提取 EXIF，视频读 creation_time，
 	// 再按 exif → 文件名 → 创建 → 修改时间降级链定 media_time。
@@ -513,13 +514,40 @@ func (s *Service) BatchDeleteMediaFilesInSpace(spaceID string, ids []int64) (int
 	now := time.Now()
 	var affected int64
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var before []models.MediaFile
+		if err := tx.Where("space_id = ? AND id IN ? AND deleted_at IS NULL", spaceID, ids).
+			Order("id ASC").
+			Find(&before).Error; err != nil {
+			return err
+		}
+		if len(before) == 0 {
+			return nil
+		}
+		validIDs := make([]int64, 0, len(before))
+		for i := range before {
+			validIDs = append(validIDs, before[i].ID)
+		}
 		result := tx.Model(&models.MediaFile{}).
-			Where("space_id = ? AND id IN ? AND deleted_at IS NULL", spaceID, ids).
+			Where("space_id = ? AND id IN ?", spaceID, validIDs).
 			Update("deleted_at", now)
 		if result.Error != nil {
 			return result.Error
 		}
 		affected = result.RowsAffected
+		for i := range before {
+			if err := s.recordAuditTx(tx, audit.EventInput{
+				Scope:        audit.ScopeSpace,
+				SpaceID:      spaceID,
+				ActorType:    audit.ActorSystem,
+				Action:       "media.deleted",
+				ResourceType: "media",
+				ResourceID:   fmt.Sprintf("%d", before[i].ID),
+				Before:       mediaAuditPayload(&before[i]),
+				After:        map[string]any{"deleted_at": now},
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -1095,6 +1123,7 @@ func (s *Service) updateExistingMediaFromPath(mf *models.MediaFile, newPath stri
 		"modified_at": info.ModTime(),
 		"file_state":  models.MediaFileStateAvailable,
 	}
+	addContentHashStaleUpdate(updates, mf, info.Size(), info.ModTime())
 	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", mf.ID).Updates(updates).Error; err != nil {
 		return err
 	}
@@ -1108,6 +1137,7 @@ func (s *Service) updateExistingMediaFromInfo(mf *models.MediaFile, info os.File
 		"modified_at": info.ModTime(),
 		"file_state":  models.MediaFileStateAvailable,
 	}
+	addContentHashStaleUpdate(updates, mf, info.Size(), info.ModTime())
 	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", mf.ID).Updates(updates).Error; err != nil {
 		return err
 	}
@@ -1662,7 +1692,7 @@ func (s *Service) indexMediaFiles(scanCtx ScanContext, paths []string) (int, err
 	for i, fullPath := range paths {
 		normalized := normalizedPaths[i]
 		if existing, ok := existingSet[normalized]; ok {
-			if info, err := os.Stat(fullPath); err == nil && (existing.FileState != models.MediaFileStateAvailable || existing.FileSize != info.Size()) {
+			if info, err := os.Stat(fullPath); err == nil && (existing.FileState != models.MediaFileStateAvailable || existing.FileSize != info.Size() || !existing.ModifiedAt.Equal(info.ModTime())) {
 				change := NormalizeScanChange(ScanChange{
 					SpaceID:   scanCtx.SpaceID,
 					LibraryID: scanCtx.LibraryID,

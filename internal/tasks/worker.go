@@ -76,6 +76,8 @@ func DefaultConcurrency(taskType string) int {
 	switch {
 	case taskType == "library.scan":
 		return 1
+	case taskType == "library.file_hash_backfill":
+		return 1
 	case strings.HasPrefix(taskType, "transcode."):
 		return 1
 	case strings.HasPrefix(taskType, "thumbnail."):
@@ -135,12 +137,26 @@ func (r *WorkerRegistry) workerLoop(ctx context.Context, spec workerSpec) error 
 
 func (r *WorkerRegistry) finishTask(ctx context.Context, spec workerSpec, task *models.Task) error {
 	if err := spec.handler(ctx, *task); err != nil {
+		if r.taskCanceled(ctx, task.ID) {
+			return nil
+		}
 		if markErr := r.service.MarkFailed(ctx, task.ID, err.Error()); markErr != nil {
 			return markErr
 		}
 		return nil
 	}
-	return r.service.MarkSucceeded(ctx, task.ID)
+	if err := r.service.MarkSucceeded(ctx, task.ID); err != nil {
+		if r.taskCanceled(ctx, task.ID) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *WorkerRegistry) taskCanceled(ctx context.Context, id int64) bool {
+	task, err := r.service.getByID(ctx, id)
+	return err == nil && task.Status == models.TaskStatusCanceled
 }
 
 func firstWorkerError(errs <-chan error) error {

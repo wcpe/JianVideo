@@ -22,9 +22,14 @@ func (s *Service) DedupThreshold() int {
 // 缩略图缺失时先同步生成一次再计算；单条失败仅记 WARN 跳过、不中断整体。
 // 有界并发（复用缩略图并发上限语义），返回本次成功计算的条数。已算过的天然跳过（幂等）。
 func (s *Service) ComputeMissingDHashes() (int, error) {
+	return s.ComputeMissingDHashesInSpace(models.DefaultSpaceID)
+}
+
+// ComputeMissingDHashesInSpace 为指定 Space 内缺 dHash 的媒体计算感知哈希。
+func (s *Service) ComputeMissingDHashesInSpace(spaceID string) (int, error) {
 	var pending []models.MediaFile
 	if err := s.db.
-		Where("deleted_at IS NULL AND dhash = 0 AND " + activeFileStateCondition()).
+		Where("space_id = ? AND deleted_at IS NULL AND dhash = 0 AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
 		Order("id ASC").
 		Find(&pending).Error; err != nil {
 		return 0, err
@@ -85,9 +90,14 @@ func (s *Service) computeDHashForMedia(filePath string) (uint64, bool) {
 // FindDuplicateGroups 查全部「未软删、active 且已算 dHash」的媒体，按汉明距离阈值聚类为重复组。
 // 仅返回成员数 ≥ 2 的组；组内按 id 升序、组间按首成员 id 升序（稳定可测）。
 func (s *Service) FindDuplicateGroups(threshold int) ([][]models.MediaFile, error) {
+	return s.FindDuplicateGroupsInSpace(models.DefaultSpaceID, threshold)
+}
+
+// FindDuplicateGroupsInSpace 查指定 Space 内「未软删、active 且已算 dHash」的媒体。
+func (s *Service) FindDuplicateGroupsInSpace(spaceID string, threshold int) ([][]models.MediaFile, error) {
 	var media []models.MediaFile
 	if err := s.db.
-		Where("deleted_at IS NULL AND dhash != 0 AND " + activeFileStateCondition()).
+		Where("space_id = ? AND deleted_at IS NULL AND dhash != 0 AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
 		Order("id ASC").
 		Find(&media).Error; err != nil {
 		return nil, err

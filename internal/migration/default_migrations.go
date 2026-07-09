@@ -87,6 +87,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateMediaFileState,
 			Validate:    validateMediaFileState,
 		},
+		{
+			ID:          "20260708_0010_fr2_061_file_hash_dedup",
+			Description: "补齐媒体文件内容哈希字段与精确去重索引",
+			SafeToRetry: true,
+			Estimate:    estimateFileHashDedup,
+			Up:          migrateFileHashDedup,
+			Validate:    validateFileHashDedup,
+		},
 	}
 }
 
@@ -112,6 +120,7 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		&models.TranscodePreset{},
 		&models.TranscodeTask{},
 		&models.MetricSample{},
+		&models.MediaHashGroup{},
 	)
 }
 
@@ -187,27 +196,31 @@ func migrateCoreSchema(tx *gorm.DB) error {
 		}
 	}
 	columns := map[string]string{
-		"display_name":      "TEXT DEFAULT ''",
-		"deleted_at":        "DATETIME",
-		"file_state":        "TEXT NOT NULL DEFAULT 'available'",
-		"media_time":        "DATETIME",
-		"media_time_source": "TEXT DEFAULT ''",
-		"camera":            "TEXT DEFAULT ''",
-		"lens":              "TEXT DEFAULT ''",
-		"aperture":          "TEXT DEFAULT ''",
-		"shutter":           "TEXT DEFAULT ''",
-		"iso":               "INTEGER DEFAULT 0",
-		"gps_lat":           "REAL DEFAULT 0",
-		"gps_lon":           "REAL DEFAULT 0",
-		"location":          "TEXT DEFAULT ''",
-		"favorite":          "INTEGER DEFAULT 0",
-		"notes":             "TEXT DEFAULT ''",
-		"dhash":             "INTEGER DEFAULT 0",
-		"last_position":     "REAL DEFAULT 0",
-		"watched":           "INTEGER DEFAULT 0",
-		"last_watched_at":   "DATETIME",
-		"last_viewed_at":    "DATETIME",
-		"view_count":        "INTEGER DEFAULT 0",
+		"display_name":             "TEXT DEFAULT ''",
+		"deleted_at":               "DATETIME",
+		"file_state":               "TEXT NOT NULL DEFAULT 'available'",
+		"media_time":               "DATETIME",
+		"media_time_source":        "TEXT DEFAULT ''",
+		"camera":                   "TEXT DEFAULT ''",
+		"lens":                     "TEXT DEFAULT ''",
+		"aperture":                 "TEXT DEFAULT ''",
+		"shutter":                  "TEXT DEFAULT ''",
+		"iso":                      "INTEGER DEFAULT 0",
+		"gps_lat":                  "REAL DEFAULT 0",
+		"gps_lon":                  "REAL DEFAULT 0",
+		"location":                 "TEXT DEFAULT ''",
+		"favorite":                 "INTEGER DEFAULT 0",
+		"notes":                    "TEXT DEFAULT ''",
+		"dhash":                    "INTEGER DEFAULT 0",
+		"content_hash":             "TEXT DEFAULT ''",
+		"content_hash_algo":        "TEXT DEFAULT ''",
+		"content_hash_computed_at": "DATETIME",
+		"content_hash_stale":       "INTEGER NOT NULL DEFAULT 1",
+		"last_position":            "REAL DEFAULT 0",
+		"watched":                  "INTEGER DEFAULT 0",
+		"last_watched_at":          "DATETIME",
+		"last_viewed_at":           "DATETIME",
+		"view_count":               "INTEGER DEFAULT 0",
 	}
 	for column, definition := range columns {
 		if err := addColumnIfMissing(tx, "media_files", column, definition); err != nil {
@@ -822,6 +835,62 @@ func validateMediaFileState(_ context.Context, db *gorm.DB) (Validation, error) 
 		return Validation{}, fmt.Errorf("scan_tasks 缺少 payload_json")
 	}
 	return Validation{Summary: "媒体文件缺失状态字段与扫描任务载荷已就绪"}, nil
+}
+
+func estimateFileHashDedup(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateFileHashDedup(_ context.Context, tx *gorm.DB) error {
+	columns := map[string]string{
+		"content_hash":             "TEXT DEFAULT ''",
+		"content_hash_algo":        "TEXT DEFAULT ''",
+		"content_hash_computed_at": "DATETIME",
+		"content_hash_stale":       "INTEGER NOT NULL DEFAULT 1",
+	}
+	for column, definition := range columns {
+		if err := addColumnIfMissing(tx, "media_files", column, definition); err != nil {
+			return fmt.Errorf("迁移 media_files.%s 失败: %w", column, err)
+		}
+	}
+	if err := tx.AutoMigrate(&models.MediaHashGroup{}); err != nil {
+		return fmt.Errorf("迁移 media_hash_groups 失败: %w", err)
+	}
+	statements := []string{
+		`UPDATE media_files SET content_hash_stale = 1 WHERE content_hash_stale IS NULL;`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_size_content_hash ON media_files(space_id, file_size, content_hash);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_space_content_hash_stale ON media_files(space_id, content_hash, content_hash_stale);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_hash_groups_space_size_hash ON media_hash_groups(space_id, file_size, content_hash);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_hash_groups_space_first ON media_hash_groups(space_id, first_media_id);`,
+	}
+	for _, stmt := range statements {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFileHashDedup(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_hash_groups") {
+		return Validation{}, fmt.Errorf("media_hash_groups 表不存在")
+	}
+	for _, column := range []string{"content_hash", "content_hash_algo", "content_hash_computed_at", "content_hash_stale"} {
+		if !columnExists(db, "media_files", column) {
+			return Validation{}, fmt.Errorf("media_files 缺少 %s", column)
+		}
+	}
+	for _, indexName := range []string{
+		"idx_media_files_space_size_content_hash",
+		"idx_media_files_space_content_hash_stale",
+		"idx_media_hash_groups_space_size_hash",
+		"idx_media_hash_groups_space_first",
+	} {
+		if !indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("内容哈希索引不存在: %s", indexName)
+		}
+	}
+	return Validation{Summary: "媒体文件内容哈希字段与索引已就绪"}, nil
 }
 
 func mediaTypeRuleSchemaStatements() []string {

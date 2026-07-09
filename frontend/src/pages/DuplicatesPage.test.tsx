@@ -48,6 +48,7 @@ function renderPage() {
 describe('DuplicatesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    server.use(http.get('*/api/library/duplicates/exact', () => HttpResponse.json({ groups: [] })));
   });
 
   it('渲染页面标题', async () => {
@@ -73,11 +74,10 @@ describe('DuplicatesPage', () => {
     );
     const user = userEvent.setup();
     renderPage();
-    // 空态组件渲染（标题文案）
     expect(await screen.findByText('没有发现重复项')).toBeVisible();
-    // 点击空态内的扫描 CTA（与顶栏同名，取空态卡片内的）
+    await user.click(screen.getByRole('tab', { name: '相似重复' }));
     const emptyState = screen.getByTestId('empty-state');
-    await user.click(within(emptyState).getByRole('button', { name: /扫描重复项/ }));
+    await user.click(within(emptyState).getByRole('button', { name: /扫描相似重复/ }));
     await waitFor(() => expect(scanned).toBe(true));
   });
 
@@ -89,7 +89,9 @@ describe('DuplicatesPage', () => {
         }),
       ),
     );
+    const user = userEvent.setup();
     renderPage();
+    await user.click(await screen.findByRole('tab', { name: '相似重复' }));
     await waitFor(() => {
       expect(screen.getByText('重复A.jpg')).toBeVisible();
       expect(screen.getByText('重复B.jpg')).toBeVisible();
@@ -107,9 +109,8 @@ describe('DuplicatesPage', () => {
     );
     const user = userEvent.setup();
     renderPage();
-    // 顶栏与空态 CTA 同名，点击顶栏（首个）即可触发
-    const buttons = await screen.findAllByRole('button', { name: /扫描重复项/ });
-    await user.click(buttons[0]);
+    await user.click(await screen.findByRole('tab', { name: '相似重复' }));
+    await user.click(await screen.findByRole('button', { name: /扫描相似重复/ }));
     await waitFor(() => expect(scanned).toBe(true));
   });
 
@@ -136,12 +137,11 @@ describe('DuplicatesPage', () => {
 
     const user = userEvent.setup();
     renderPage();
+    await user.click(await screen.findByRole('tab', { name: '相似重复' }));
 
-    // 勾选「多余.jpg」对应的复选框
     const card = (await screen.findByText('多余.jpg')).closest('.mantine-Card-root') as HTMLElement;
     await user.click(within(card).getByRole('checkbox'));
 
-    // 点击「删除选中项」
     await user.click(screen.getByRole('button', { name: /删除选中项/ }));
 
     await waitFor(() => expect(deletedIDs).toEqual([12]));
@@ -157,13 +157,13 @@ describe('DuplicatesPage', () => {
         }),
       ),
     );
+    const user = userEvent.setup();
     renderPage();
+    await user.click(await screen.findByRole('tab', { name: '相似重复' }));
     const card = (await screen.findByText('统一行A.jpg')).closest(
       '.mantine-Card-root',
     ) as HTMLElement;
-    // MediaRow 复用 MediaThumbnail：行内含缩略图 img
     expect(within(card).getByRole('img', { name: '统一行A.jpg' })).toBeInTheDocument();
-    // 行内含勾选框
     expect(within(card).getByRole('checkbox', { name: '选择 统一行A.jpg' })).toBeInTheDocument();
   });
 
@@ -178,5 +178,62 @@ describe('DuplicatesPage', () => {
     renderPage();
     const btn = await screen.findByRole('button', { name: /删除选中项/ });
     expect(btn).toBeDisabled();
+  });
+
+  it('区分精确重复与相似重复', async () => {
+    server.use(
+      http.get('*/api/library/duplicates/exact', () =>
+        HttpResponse.json({
+          groups: [
+            {
+              content_hash: 'hash-a',
+              file_size: 100,
+              items: [makeMedia(21, '精确A.mp4'), makeMedia(22, '精确B.mp4')],
+            },
+          ],
+        }),
+      ),
+      http.get('*/api/library/duplicates', () =>
+        HttpResponse.json({
+          groups: [[makeMedia(31, '相似A.jpg'), makeMedia(32, '相似B.jpg')]],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole('tab', { name: '精确重复' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: '相似重复' })).toBeVisible();
+    expect(await screen.findByText('精确A.mp4')).toBeVisible();
+    expect(screen.queryByText('相似A.jpg')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: '相似重复' }));
+    expect(await screen.findByText('相似A.jpg')).toBeVisible();
+  });
+
+  it('点击回填精确哈希调用任务端点并保留相似扫描入口', async () => {
+    let backfillCalled = false;
+    let similarScanCalled = false;
+    server.use(
+      http.get('*/api/library/duplicates/exact', () => HttpResponse.json({ groups: [] })),
+      http.get('*/api/library/duplicates', () => HttpResponse.json({ groups: [] })),
+      http.post('*/api/library/file-hashes/backfill', () => {
+        backfillCalled = true;
+        return HttpResponse.json({ status: 'queued', task_id: '7' }, { status: 202 });
+      }),
+      http.post('*/api/library/duplicates/scan', () => {
+        similarScanCalled = true;
+        return HttpResponse.json({ computed: 0 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /回填精确哈希/ }));
+    await waitFor(() => expect(backfillCalled).toBe(true));
+
+    await user.click(screen.getByRole('tab', { name: '相似重复' }));
+    await user.click(await screen.findByRole('button', { name: /扫描相似重复/ }));
+    await waitFor(() => expect(similarScanCalled).toBe(true));
   });
 });

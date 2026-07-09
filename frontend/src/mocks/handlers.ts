@@ -363,6 +363,7 @@ const deletedMediaIds = new Set<number>();
 // 扫描任务队列（FR-29）内存数据
 const scanTasks: ScanTask[] = [];
 let nextScanTaskId = 1;
+let nextFileHashTaskId = 1;
 const unifiedTasks: TaskItem[] = [
   {
     id: 'task-mock-scan-running',
@@ -1759,6 +1760,36 @@ export const handlers = [
 
   // 查询重复组：mock 默认无重复组（需要重复组的用例用 server.use 覆盖）
   http.get('*/api/library/duplicates', async () => {
+    await delay(150);
+    return HttpResponse.json({ groups: [] });
+  }),
+
+  // 触发内容哈希回填：mock 只入通用任务，不在请求线程内计算。
+  http.post('*/api/library/file-hashes/backfill', async ({ request }) => {
+    await delay(120);
+    const spaceID = currentSpaceID(request);
+    const taskID = `file-hash-${nextFileHashTaskId++}`;
+    addUnifiedTask({
+      id: taskID,
+      scope: 'space',
+      space_id: spaceID,
+      type: 'library.file_hash_backfill',
+      status: 'pending',
+      priority: 0,
+      attempts: 0,
+      max_attempts: 3,
+      progress: 0,
+      resource_type: 'library',
+      resource_id: spaceID,
+      error: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    return HttpResponse.json({ status: 'queued', task_id: taskID }, { status: 202 });
+  }),
+
+  // 查询精确重复组：mock 默认无重复组（需要重复组的用例用 server.use 覆盖）
+  http.get('*/api/library/duplicates/exact', async () => {
     await delay(150);
     return HttpResponse.json({ groups: [] });
   }),

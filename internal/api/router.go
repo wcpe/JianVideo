@@ -65,6 +65,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 感知哈希去重（FR-70）：扫描计算缺失 dHash + 查询重复组
 		lib.POST("/duplicates/scan", h.ScanDuplicates)
 		lib.GET("/duplicates", h.ListDuplicates)
+		lib.POST("/file-hashes/backfill", h.BackfillFileHashes)
+		lib.GET("/duplicates/exact", h.ListExactDuplicates)
 
 		// 软删除与回收站（FR-25）：列出已软删项、还原
 		lib.GET("/recycle", h.ListRecycleMediaFiles)

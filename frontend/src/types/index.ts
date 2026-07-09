@@ -39,6 +39,11 @@ export interface MediaFile {
   subtitle_tracks: string;
   added_at: string;
   modified_at: string;
+  /** 内容哈希（FR2-061）：SHA-256 精确去重使用，旧数据可能缺省 */
+  content_hash?: string;
+  content_hash_algo?: string;
+  content_hash_computed_at?: string | null;
+  content_hash_stale?: boolean;
   /** 库内显示名（FR-30）：空则展示回退到 file_name，不影响磁盘真实文件名；旧数据可能缺省 */
   display_name?: string;
   /** 收藏标记（FR-41），旧数据可能缺省 */
@@ -73,6 +78,19 @@ export interface MediaFile {
 
 /** 感知哈希去重重复组（FR-70）：一组互为近似重复的媒体，至少 2 项 */
 export type DuplicateGroup = MediaFile[];
+
+/** 内容哈希精确重复组（FR2-061）：一组 SHA-256 完全相同的媒体，至少 2 项 */
+export interface ExactDuplicateGroup {
+  content_hash: string;
+  file_size: number;
+  items: MediaFile[];
+}
+
+/** 内容哈希回填任务响应（FR2-061） */
+export interface FileHashBackfillResponse {
+  status: string;
+  task_id: string;
+}
 
 /** 标签（FR-41） */
 export interface Tag {

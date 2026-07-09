@@ -27,7 +27,7 @@ func newTestService(t *testing.T) (*Service, *gorm.DB) {
 		t.Fatalf("获取底层连接失败: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.MediaHashGroup{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	return NewService(gdb), gdb

@@ -19,6 +19,8 @@ import type {
   Tag,
   RecycleCleanupResult,
   DuplicateGroup,
+  ExactDuplicateGroup,
+  FileHashBackfillResponse,
   UploadNamingRule,
   UploadResponse,
 } from '@/types';
@@ -314,6 +316,16 @@ async function realScanDuplicates(): Promise<number> {
 // 查询重复组：返回按汉明距离聚类、各 ≥2 项的近似重复组。
 async function realGetDuplicateGroups(): Promise<DuplicateGroup[]> {
   const res = await client.get<{ groups: DuplicateGroup[] }>('/api/library/duplicates');
+  return res.data.groups;
+}
+
+async function realBackfillFileHashes(): Promise<FileHashBackfillResponse> {
+  const res = await client.post<FileHashBackfillResponse>('/api/library/file-hashes/backfill');
+  return res.data;
+}
+
+async function realGetExactDuplicateGroups(): Promise<ExactDuplicateGroup[]> {
+  const res = await client.get<{ groups: ExactDuplicateGroup[] }>('/api/library/duplicates/exact');
   return res.data.groups;
 }
 
@@ -742,6 +754,20 @@ async function mockGetDuplicateGroups(): Promise<DuplicateGroup[]> {
     .sort((a, b) => a[0].id - b[0].id);
 }
 
+async function mockBackfillFileHashes(): Promise<FileHashBackfillResponse> {
+  await mockDelay(200);
+  return { status: 'queued', task_id: String(nextMockTaskId++) };
+}
+
+async function mockGetExactDuplicateGroups(): Promise<ExactDuplicateGroup[]> {
+  const groups = await mockGetDuplicateGroups();
+  return groups.map((items) => ({
+    content_hash: `mock-sha256-${items[0].file_size}`,
+    file_size: items[0].file_size,
+    items,
+  }));
+}
+
 async function mockGetRecycleMediaFiles(): Promise<MediaFile[]> {
   await mockDelay(150);
   return mockMediaFiles.filter((m) => mockDeletedIds.has(m.id));
@@ -1087,6 +1113,12 @@ export function scanDuplicates() {
 }
 export function getDuplicateGroups() {
   return useMock ? mockGetDuplicateGroups() : realGetDuplicateGroups();
+}
+export function backfillFileHashes() {
+  return useMock ? mockBackfillFileHashes() : realBackfillFileHashes();
+}
+export function getExactDuplicateGroups() {
+  return useMock ? mockGetExactDuplicateGroups() : realGetExactDuplicateGroups();
 }
 export function renameMediaFile(id: number, newName: string) {
   return useMock ? mockRenameMediaFile(id, newName) : realRenameMediaFile(id, newName);

@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
@@ -195,6 +195,10 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 | modified_at | DATETIME | 文件最后修改时间 |
 | favorite | INTEGER | 收藏标记（FR-41），0/1 |
 | dhash | INTEGER | 感知哈希（FR-70）：基于缩略图的 64 位 dHash，0 表示未计算 |
+| content_hash | TEXT | 内容哈希（FR2-061）：源文件 SHA-256，空表示未计算 |
+| content_hash_algo | TEXT | 内容哈希算法，首批固定 `sha256` |
+| content_hash_computed_at | DATETIME | 内容哈希计算时间 |
+| content_hash_stale | INTEGER, INDEX | 内容哈希过期标记，文件大小或 mtime 变化后置 1 |
 | last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
 | watched | INTEGER | 是否已看完（FR-44），0/1 |
 | last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
@@ -210,19 +214,34 @@ FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非�
 
 > 注：本表列出 `media_files` 与当前已实现能力相关的字段。
 >
-> FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、cursor 分页与组合索引使用边界。关键索引包括 `idx_media_files_space_added_id`、`idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_deleted_id`、`idx_media_files_space_format_added_id`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
+> FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、cursor 分页与组合索引使用边界。关键索引包括 `idx_media_files_space_added_id`、`idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_deleted_id`、`idx_media_files_space_format_added_id`、`idx_media_files_space_size_content_hash`、`idx_media_files_space_content_hash_stale`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 >
 > 观看热力与统计（FR-75）：`view_count` 列由 `MarkWatched` 在置 `watched`/清零续播位置的**同一次 UPDATE** 内用 `view_count + 1` 原子自增——「看完计一次」，位置上报（`UpdateWatchPosition`）不计数，避免约 10s 一次的位置上报重复累加。`library.GetWatchStats()` 纯查询/聚合现有列（全程 `deleted_at IS NULL`）产出已看/未看计数、最近观看时间线（`last_watched_at` 按本地时区 `strftime` 天分桶）、续播位置热力（`last_position/duration` 比例分 10 档，`duration>0`）、各库/各格式已看分布、观看次数 Top N，经 `GET /api/library/stats` 返回，供观看统计页（`/stats`）自建（无图表库）可视化。不新建观看明细表（YAGNI、守真源不变量），统计是 `media_files` 现有列的只读派生。
 >
-> 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内对 `id IN (?) AND deleted_at IS NULL` 一次 `UPDATE` 置 `deleted_at`，复用单条软删语义、跳过不存在/已软删 id，返回受影响行数；供时间轴与目录浏览的列表多选批量删除（进回收站、可还原）消费。
+> 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内筛出当前仍未软删的有效项，再置 `deleted_at` 并逐项写 `media.deleted` 审计事件；跳过不存在/已软删 id，返回受影响行数；供时间轴、目录浏览与重复项清理消费（进回收站、可还原）。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
 >
 > 媒体时间与 EXIF（FR-31）：入库点 `CreateMediaFile` 统一富化元数据——图片用 `imagemeta`（纯 Go）提取拍摄时间与相机/镜头/光圈/快门/ISO/GPS，视频用 ffprobe 读 `creation_time`；再按 EXIF → 文件名日期 → 文件创建时间 → 修改时间的降级链定出 `media_time` 与 `media_time_source`。时间轴列表按 `COALESCE(media_time, added_at)` 排序。
 >
-> 感知哈希去重（FR-70）：`dhash` 列存基于缩略图（320 宽 JPEG）的 64 位差分哈希（dHash），由 `library` 模块纯 Go 标准库实现（缩放 9×8 灰度 + 逐行相邻像素差分，不引第三方图像哈希库），抽成纯函数 `computeDHash`/`hammingDistance`/`clusterByHamming` 便于穷举测试。`ComputeMissingDHashes` 为「未软删且 `dhash=0`」的媒体有界并发补算（缩略图缺失先同步生成一次再算，单条失败仅记 WARN 跳过），`dhash=0` 兼作「未计算」哨兵，故二次扫描跳过已算项（幂等；featureless 纯色图哈希恰为 0 会被重算，开销极小、无害）。`FindDuplicateGroups(threshold)` 查「未软删且 `dhash!=0`」的媒体，按汉明距离 ≤ 阈值（默认 10）经并查集聚类为重复组（仅返回 ≥2 项的组，组内/组间稳定有序）。图片与视频都参与（视频用其缩略图单帧，代表性弱，属已知局限）。重复项页选中多余项后复用 FR-69 批量软删（进回收站、可还原），**不新建去重持久表、不持久化「已忽略重复对」**（YAGNI、守真源不变量）。
+> 感知哈希去重（FR-70）：`dhash` 列存基于缩略图（320 宽 JPEG）的 64 位差分哈希（dHash），由 `library` 模块纯 Go 标准库实现（缩放 9×8 灰度 + 逐行相邻像素差分，不引第三方图像哈希库），抽成纯函数 `computeDHash`/`hammingDistance`/`clusterByHamming` 便于穷举测试。`ComputeMissingDHashesInSpace` 为当前 Space「未软删且 `dhash=0`」的媒体有界并发补算（缩略图缺失先同步生成一次再算，单条失败仅记 WARN 跳过），`dhash=0` 兼作「未计算」哨兵，故二次扫描跳过已算项（幂等；featureless 纯色图哈希恰为 0 会被重算，开销极小、无害）。`FindDuplicateGroupsInSpace(threshold)` 查当前 Space「未软删且 `dhash!=0`」的媒体，按汉明距离 ≤ 阈值（默认 10）经并查集聚类为相似重复组（仅返回 ≥2 项的组，组内/组间稳定有序）。图片与视频都参与（视频用其缩略图单帧，代表性弱，属已知局限）。重复项页选中多余项后复用 FR-69 批量软删（进回收站、可还原），**不新建去重持久表、不持久化「已忽略重复对」**（YAGNI、守真源不变量）。
+>
+> 内容哈希精确去重（FR2-061）：`content_hash` 真源记录源文件 SHA-256，`content_hash_algo` 固定 `sha256`，`content_hash_computed_at` 记录计算时间，`content_hash_stale` 在文件大小或 mtime 变化后置 1。`ComputeFileContentHash` 以流式读文件计算 SHA-256；`BackfillContentHashes` 分批处理当前 Space 中缺失、过期或算法不一致的记录，单条不可读 / SMB 失败只记 WARN 并跳过，不写入错误 hash，完成后重建当前 Space 的 `media_hash_groups` 重复组快照。`POST /api/library/file-hashes/backfill` 入队 FR2-037 通用任务 `library.file_hash_backfill`，worker 串行执行并写进度；`GET /api/library/duplicates/exact` 先从 `media_hash_groups` 取候选，再回连 `media_files` 复验未软删、非 missing、hash 非空、算法为 `sha256` 且非 stale，避免 1000 万级资产上对全量媒体做分组扫描。前端重复项页区分「精确重复」与「相似重复」，两类处理都复用批量软删，不物理删除源文件。
+
+**内容哈希重复组快照（media_hash_groups）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| space_id | TEXT, INDEX | 所属 Space |
+| file_size | INTEGER | 重复组文件大小 |
+| content_hash | TEXT | 重复组 SHA-256 内容哈希 |
+| content_hash_algo | TEXT | 算法标识，首批固定 `sha256` |
+| item_count | INTEGER | 快照内组成员数 |
+| first_media_id | INTEGER, INDEX | 组内最小媒体 ID，用于稳定排序与分页截断 |
+| updated_at | DATETIME | 快照重建时间 |
 
 **媒体类型规则（media_type_rules）**
 
@@ -458,7 +477,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118）、dHash 相似去重（FR-70）与内容哈希精确去重（FR2-061） |
 | 媒体类型 | `/api/media-types` | 媒体类型定义、全局/每库后缀规则、内置规则禁用与自定义规则增删改（FR2-025） |
 | 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
@@ -488,7 +507,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 - 扫描上下文（FR2-052）由 `ScanContextForLibraryInSpace` 在扫描入口读取 `library_paths.library_kind`，随 `space_id + library_id` 传入本地 / SMB 扫描链路；当前只提供 `movie` / `series` / `home_video` / `mixed` 上下文，完整季集推断、命名规则和每库后缀覆盖由 FR2-025/027/031 消费。
 - 扫描模式（FR2-027）：`mode=incremental`（增量更新，缺省）只索引新增或变更文件；`mode=full`（全量扫描）在入库后追加对账——本地扫描不再保留全量路径集合，而是按 `media_files.id` 游标分批检查当前 Space/库内 active 记录的源文件是否存在。缺失源文件标记 `file_state=missing` 并从常规列表、统计和目录浏览隐藏，不进入回收站、不物理删除、不动磁盘；用户显式删除仍走 FR-25 软删。遍历整体出错时放弃对账以免误标；SMB 轮询为增量语义。
 - 媒体识别统一由 `library.Service` 的媒体类型规则服务维护：内置视频 / 图片规则由代码 registry 提供，用户规则持久化在 `media_type_rules`，支持全局默认与每库覆盖。扫描、列表 `type=` 筛选、统计、缩略图、上传校验和图片 raw 入口共用同一规则口径。
-- 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入；missing 记录的源文件重新出现时会恢复为 `available` 并刷新文件大小和修改时间。
+- 扫描入库按 `space_id + library_id + file_path` 去重，重复扫描不会重复写入；missing 记录的源文件重新出现时会恢复为 `available` 并刷新文件大小和修改时间。已有记录的文件大小或 mtime 变化时，同步把 `content_hash_stale` 置 1，等待 FR2-061 内容哈希任务重新计算。
 - 图片文件可通过 `GET /api/library/media/:id/raw` 提供本地预览；视频文件继续走播放链路。HEIC/RAW（cr2/nef/arw/dng/rw2 等）浏览器无法直接渲染，`raw` 端点经外部 ImageMagick（`magick`）转成 JPEG 后返回，结果缓存于数据目录下 `image_cache/`（按「源路径 + 源修改时间」hash 命名，二次命中不重转）；magick 不可用返回 `503`、转换失败返回 `500`，均记中文日志（FR-37，见 ADR-0030）。
 - 异步扫描：`POST /api/library/scan/:id` 经 `Service.StartAsyncScanInSpace` 在后台 goroutine 执行，接口立即返回不阻塞主线程；进度由 `scan_status.go` 维护的全局 `ScanStatus`（含 `space_id`，`sync.RWMutex` 并发安全，同一时刻仅跟踪一个扫描任务）记录，经 `GET /api/library/scan/progress` SSE 端点每 500ms 推送当前 Space 视图，`completed`/`error` 后关闭连接。`ScanLibraryWithTypeInSpace` 仍保留同步签名供 watcher 与扫描队列调用。
 
@@ -503,7 +522,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 - `internal/tasks.Service` 负责通用任务入队、幂等键查重、领取、取消、重试、进度更新、成功 / 失败终态和 `running` 恢复。状态真源只使用 `pending` / `running` / `succeeded` / `failed` / `canceled`；旧 `completed` / `error` 仅在扫描 / 转码适配层映射。
 - `ClaimNext` 按类型、状态、`next_run_at`、优先级与创建时间领取任务；连续高优先级领取达到上限后会让较低优先级任务获得机会，避免饥饿。失败且仍有剩余次数时按退避写入 `next_run_at` 并回到 `pending`。
-- `WorkerRegistry` 按任务类型注册处理器和并发上限，默认扫描 1、转码 1、缩略图 4、轻任务 2；这些默认值也登记到 FR2-024 设置 registry（`task_worker_*_concurrency`），供运行期配置层暴露。
+- `WorkerRegistry` 按任务类型注册处理器和并发上限，默认扫描 1、转码 1、缩略图 4、内容哈希回填 1、轻任务 2；这些默认值也登记到 FR2-024 设置 registry（`task_worker_*_concurrency`），供运行期配置层暴露。
 - 旧 `scan_tasks` 与 `transcode_tasks` 仍服务既有页面；入队、状态变化、取消和重试会同步到通用 `tasks` 表。统一 `/api/tasks/:id/cancel|retry` 命中旧队列镜像时，会先调用旧队列动作，再刷新通用镜像，避免只改监控表不改执行真源。
 - 任务创建、取消、重试、失败终态写入 FR2-040 审计事件；Space scoped 查询默认只返回当前 Space 任务，系统级任务使用 `scope=system + space_id NULL`。
 
