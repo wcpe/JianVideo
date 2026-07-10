@@ -51,8 +51,8 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel autoconf automake libtool mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel autoconf automake libtool mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
@@ -102,8 +102,8 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel autoconf automake libtool mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel autoconf automake libtool mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
@@ -145,8 +145,8 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel autoconf automake libtool mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel autoconf automake libtool mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
