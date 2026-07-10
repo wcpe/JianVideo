@@ -276,6 +276,9 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('CC=cc CXX=c++', script)
         self.assertIn('-DUSE_JPEG -DUSE_JPEG8 -I$prefix/include', script)
         self.assertIn('Libs.private: -ljpeg -lws2_32', script)
+        self.assertIn('--host=aarch64-w64-mingw32 --disable-asm', script)
+        self.assertIn('--cc="$CC" --cxx="$CXX"', script)
+        self.assertIn('--arch=aarch64 --target-os=mingw32 --enable-cross-compile --disable-asm', script)
         self.assertIn("autoreconf -fi -I m4", script)
         self.assertIn("--disable-examples", script)
 
@@ -283,7 +286,7 @@ class ToolMirrorTest(unittest.TestCase):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn("command -v nasm >/dev/null || x264_args+=(--disable-asm)", script)
         self.assertIn("command -v nasm >/dev/null || ffmpeg_args+=(--disable-x86asm)", script)
-        self.assertIn('case "$(uname -m)" in', script)
+        self.assertIn('case "${MSYSTEM:-}:$(uname -m)" in', script)
 
     def test_imagemagick_expands_static_delegate_dependencies(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")

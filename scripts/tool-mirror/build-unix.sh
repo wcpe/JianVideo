@@ -101,15 +101,17 @@ fi
 
 x264="$(source_dir 'x264-*')"
 x264_args=(--prefix="$prefix" --enable-static --disable-cli --disable-opencl)
-case "$(uname -m)" in
-  x86_64|amd64) command -v nasm >/dev/null || x264_args+=(--disable-asm) ;;
+case "${MSYSTEM:-}:$(uname -m)" in
+  CLANGARM64:*) x264_args+=(--host=aarch64-w64-mingw32 --disable-asm) ;;
+  *:x86_64|*:amd64) command -v nasm >/dev/null || x264_args+=(--disable-asm) ;;
 esac
 (cd "$x264" && ./configure "${x264_args[@]}" && make -j"$jobs" && make install)
 
 ffmpeg="$(source_dir 'ffmpeg-*')"
-ffmpeg_args=(--prefix="$prefix" --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" --enable-gpl --enable-libx264 --disable-doc --disable-debug --disable-ffplay --enable-static --disable-shared)
-case "$(uname -m)" in
-  x86_64|amd64) command -v nasm >/dev/null || ffmpeg_args+=(--disable-x86asm) ;;
+ffmpeg_args=(--prefix="$prefix" --cc="$CC" --cxx="$CXX" --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" --enable-gpl --enable-libx264 --disable-doc --disable-debug --disable-ffplay --enable-static --disable-shared)
+case "${MSYSTEM:-}:$(uname -m)" in
+  CLANGARM64:*) ffmpeg_args+=(--arch=aarch64 --target-os=mingw32 --enable-cross-compile --disable-asm) ;;
+  *:x86_64|*:amd64) command -v nasm >/dev/null || ffmpeg_args+=(--disable-x86asm) ;;
 esac
 (cd "$ffmpeg" && ./configure "${ffmpeg_args[@]}" && make -j"$jobs" && make install)
 
