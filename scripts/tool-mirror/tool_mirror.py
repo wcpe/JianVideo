@@ -96,6 +96,8 @@ def validate_toolchain(runner: dict, required: bool) -> list[str]:
         errors.append(f"{label}: discovery workflow_run 必须是 GitHub HTTPS URL")
     if evidence.get("sha256") and not valid_sha256(evidence["sha256"]):
         errors.append(f"{label}: discovery 证据 SHA-256 格式无效")
+    if not evidence.get("observed_image_version"):
+        errors.append(f"{label}: discovery 证据缺少观测到的 runner image 版本")
     return errors
 
 

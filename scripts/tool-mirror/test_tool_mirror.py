@@ -43,6 +43,7 @@ class ToolMirrorTest(unittest.TestCase):
             "evidence": {
                 "workflow_run": "https://github.com/example/repo/actions/runs/1",
                 "sha256": "b" * 64,
+                "observed_image_version": "1",
             },
         }
 
@@ -108,7 +109,9 @@ class ToolMirrorTest(unittest.TestCase):
             self.assertTrue(toolchain["image"])
             self.assertTrue(toolchain["tools"])
             self.assertTrue(toolchain["packages"])
+            self.assertNotIn("ImageVersion", toolchain["image"])
             self.assertTrue(toolchain["evidence"]["sha256"])
+            self.assertTrue(toolchain["evidence"]["observed_image_version"])
         windows = {item["id"]: item for item in data["runners"] if item["platform"] == "windows"}
         self.assertEqual("UCRT64", windows["windows-x86_64"]["toolchain"]["shell"]["msystem"])
         self.assertEqual("CLANGARM64", windows["windows-aarch64"]["toolchain"]["shell"]["msystem"])

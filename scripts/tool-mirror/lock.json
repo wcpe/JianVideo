@@ -13,8 +13,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "ubuntu24",
-          "ImageVersion": "20260705.232.1"
+          "ImageOS": "ubuntu24"
         },
         "tools": {
           "cc": {
@@ -80,7 +79,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "622c7604d3165877c6e7d9b70f35f50ffc0f522f725e61fe945490b1644be519"
+          "sha256": "622c7604d3165877c6e7d9b70f35f50ffc0f522f725e61fe945490b1644be519",
+          "observed_image_version": "20260705.232.1"
         }
       }
     },
@@ -94,8 +94,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "ubuntu24-arm64",
-          "ImageVersion": "20260706.52.2"
+          "ImageOS": "ubuntu24-arm64"
         },
         "tools": {
           "cc": {
@@ -161,7 +160,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "8f9ed115faf340b2d53bea9197e2f4aac24416dfe5ee89caae18fbd79173394a"
+          "sha256": "8f9ed115faf340b2d53bea9197e2f4aac24416dfe5ee89caae18fbd79173394a",
+          "observed_image_version": "20260706.52.2"
         }
       }
     },
@@ -175,8 +175,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "win25-vs2026",
-          "ImageVersion": "20260628.158.1"
+          "ImageOS": "win25-vs2026"
         },
         "tools": {
           "cc": {
@@ -252,7 +251,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "5789b6bd554e2c7bb7c31bcf66df4349143f040265ce8ecac1b6c0b26f5854e0"
+          "sha256": "5789b6bd554e2c7bb7c31bcf66df4349143f040265ce8ecac1b6c0b26f5854e0",
+          "observed_image_version": "20260628.158.1"
         },
         "shell": {
           "msystem": "UCRT64",
@@ -270,8 +270,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "win11-arm64",
-          "ImageVersion": "20260706.102.1"
+          "ImageOS": "win11-arm64"
         },
         "tools": {
           "cc": {
@@ -348,7 +347,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "3fd0844db3fb649f66d622141d9284b773837639f9d38ccdb58d16567f970df0"
+          "sha256": "3fd0844db3fb649f66d622141d9284b773837639f9d38ccdb58d16567f970df0",
+          "observed_image_version": "20260706.102.1"
         },
         "shell": {
           "msystem": "CLANGARM64",
@@ -366,8 +366,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "macos15",
-          "ImageVersion": "20260629.0276.1"
+          "ImageOS": "macos15"
         },
         "tools": {
           "cc": {
@@ -431,7 +430,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "52ebd226245a9bb783b38ea657f8387310d38c0713b3755a7fd3e59aed41c7ad"
+          "sha256": "52ebd226245a9bb783b38ea657f8387310d38c0713b3755a7fd3e59aed41c7ad",
+          "observed_image_version": "20260629.0276.1"
         }
       }
     },
@@ -445,8 +445,7 @@
       "toolchain": {
         "status": "locked",
         "image": {
-          "ImageOS": "macos15",
-          "ImageVersion": "20260706.0213.1"
+          "ImageOS": "macos15"
         },
         "tools": {
           "cc": {
@@ -510,7 +509,8 @@
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
-          "sha256": "6a609c69eb0acb7b11cd4251402d865a9d85a19eb43c06e8f1335f8281bff7fa"
+          "sha256": "6a609c69eb0acb7b11cd4251402d865a9d85a19eb43c06e8f1335f8281bff7fa",
+          "observed_image_version": "20260706.0213.1"
         }
       }
     }
