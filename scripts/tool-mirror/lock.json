@@ -1,0 +1,271 @@
+{
+  "schema_version": 2,
+  "release": "tools-v1.0.0",
+  "source_date_epoch": 1704067200,
+  "runners": [
+    {
+      "label": "ubuntu-24.04",
+      "id": "linux-x86_64",
+      "platform": "linux",
+      "arch": "x86_64",
+      "runner_os": "Linux",
+      "runner_arch": "X64",
+      "toolchain": {
+        "status": "blocked",
+        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 ubuntu-24.04 的不可变 runner image、编译器、构建工具和包版本证据。"
+      }
+    },
+    {
+      "label": "ubuntu-24.04-arm",
+      "id": "linux-aarch64",
+      "platform": "linux",
+      "arch": "aarch64",
+      "runner_os": "Linux",
+      "runner_arch": "ARM64",
+      "toolchain": {
+        "status": "blocked",
+        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 ubuntu-24.04-arm 的不可变 runner image、编译器、构建工具和包版本证据。"
+      }
+    },
+    {
+      "label": "windows-2025",
+      "id": "windows-x86_64",
+      "platform": "windows",
+      "arch": "x86_64",
+      "runner_os": "Windows",
+      "runner_arch": "X64",
+      "toolchain": {
+        "status": "blocked",
+        "shell": {"msystem": "UCRT64", "prefix": "/ucrt64"},
+        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 windows-2025 的 UCRT64 runner image、编译器、构建工具和 pacman 包版本证据。"
+      }
+    },
+    {
+      "label": "windows-11-arm",
+      "id": "windows-aarch64",
+      "platform": "windows",
+      "arch": "aarch64",
+      "runner_os": "Windows",
+      "runner_arch": "ARM64",
+      "toolchain": {
+        "status": "blocked",
+        "shell": {"msystem": "CLANGARM64", "prefix": "/clangarm64"},
+        "blocking_reason": "尚未通过 tool-mirror discovery 证明 windows-11-arm 的 CLANGARM64 环境可用并回填 runner image、编译器、构建工具和 pacman 包版本；在此之前预检必须阻断。"
+      }
+    },
+    {
+      "label": "macos-15-intel",
+      "id": "macos-x86_64",
+      "platform": "macos",
+      "arch": "x86_64",
+      "runner_os": "macOS",
+      "runner_arch": "X64",
+      "toolchain": {
+        "status": "blocked",
+        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 macos-15-intel 的不可变 runner image、Apple Clang、构建工具和 Homebrew 包版本证据。"
+      }
+    },
+    {
+      "label": "macos-15",
+      "id": "macos-aarch64",
+      "platform": "macos",
+      "arch": "aarch64",
+      "runner_os": "macOS",
+      "runner_arch": "ARM64",
+      "toolchain": {
+        "status": "blocked",
+        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 macos-15 的不可变 runner image、Apple Clang、构建工具和 Homebrew 包版本证据。"
+      }
+    }
+  ],
+  "delegate_fixtures": {
+    "status": "blocked",
+    "manifest": "fixtures/manifest.json",
+    "blocking_reason": "仓库尚无带许可证与来源元数据的可再分发 HEIC/RAW fixture；禁止仅检查格式列表冒充真实 JPEG 转换通过。"
+  },
+  "packages": [
+    {
+      "name": "ffmpeg",
+      "version": "8.1.2",
+      "license": "GPL-3.0-or-later",
+      "license_file": "COPYING.GPLv3",
+      "archive_name": "ffmpeg-8.1.2.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+      "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+      "verification": {
+        "method": "pgp",
+        "signature_url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz.asc",
+        "key_url": "https://ffmpeg.org/ffmpeg-devel.asc",
+        "key_format": "armored_file",
+        "key_fingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8"
+      }
+    },
+    {
+      "name": "x264",
+      "version": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+      "license": "GPL-2.0-or-later",
+      "license_file": "COPYING",
+      "archive_name": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
+      "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2",
+      "sha256": "6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://code.videolan.org/videolan/x264.git",
+        "commit": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55"
+      }
+    },
+    {
+      "name": "imagemagick",
+      "version": "7.1.2-27",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "archive_name": "ImageMagick-7.1.2-27.tar.xz",
+      "url": "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-27/ImageMagick-7.1.2-27.tar.xz",
+      "sha256": "f65773f1f465c730f1c025c92a2524966f772ebeb77de0d817c336e1f565e9ef",
+      "verification": {
+        "method": "github_attestation",
+        "repository": "ImageMagick/ImageMagick",
+        "tag": "7.1.2-27",
+        "asset": "ImageMagick-7.1.2-27.tar.xz",
+        "digest": "sha256:f65773f1f465c730f1c025c92a2524966f772ebeb77de0d817c336e1f565e9ef",
+        "bundle_asset": "ImageMagick-7.1.2-27.intoto.jsonl",
+        "bundle_url": "https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-27/ImageMagick-7.1.2-27.intoto.jsonl",
+        "bundle_sha256": "dcc8a3fbe10c96f7f7865beea742e00341d2b2761ced925139f027d615b02b55",
+        "source_digest": "b661ac969aa3a0d326690f95830aab246569f090",
+        "source_ref": "refs/heads/main",
+        "signer_workflow": "ImageMagick/ImageMagick/.github/workflows/release.yml"
+      }
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.1",
+      "license": "Zlib",
+      "license_file": "LICENSE",
+      "archive_name": "zlib-1.3.1.tar.xz",
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz",
+      "sha256": "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32",
+      "verification": {
+        "method": "pgp",
+        "signature_url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz.asc",
+        "key_url": "https://madler.net/madler/pgp.html",
+        "key_format": "html_armored_block",
+        "key_fingerprint": "5ED46A6721D365587791E2AA783FCD8E58BCAFBA"
+      }
+    },
+    {
+      "name": "libpng",
+      "version": "1.6.50",
+      "license": "Libpng",
+      "license_file": "LICENSE",
+      "archive_name": "libpng-2b978915d82377df13fcbb1fb56660195ded868a.tar.gz",
+      "url": "https://github.com/pnggroup/libpng/archive/2b978915d82377df13fcbb1fb56660195ded868a.tar.gz",
+      "sha256": "fba1c8e793f01b493f3f47a926862edbfab487ae4240e02ec67131f1e2bf067f",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://github.com/pnggroup/libpng.git",
+        "commit": "2b978915d82377df13fcbb1fb56660195ded868a"
+      }
+    },
+    {
+      "name": "libjpeg-turbo",
+      "version": "3.1.3",
+      "license": "BSD-3-Clause AND IJG AND Zlib",
+      "license_file": "LICENSE.md",
+      "archive_name": "libjpeg-turbo-3.1.3.tar.gz",
+      "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.3/libjpeg-turbo-3.1.3.tar.gz",
+      "sha256": "075920b826834ac4ddf97661cc73491047855859affd671d52079c6867c1c6c0",
+      "verification": {
+        "method": "github_release_asset",
+        "repository": "libjpeg-turbo/libjpeg-turbo",
+        "tag": "3.1.3",
+        "asset": "libjpeg-turbo-3.1.3.tar.gz",
+        "digest": "sha256:075920b826834ac4ddf97661cc73491047855859affd671d52079c6867c1c6c0"
+      }
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0",
+      "license": "BSD-3-Clause",
+      "license_file": "COPYING",
+      "archive_name": "libwebp-4fa21912338357f89e4fd51cf2368325b59e9bd9.tar.gz",
+      "url": "https://github.com/webmproject/libwebp/archive/4fa21912338357f89e4fd51cf2368325b59e9bd9.tar.gz",
+      "sha256": "923f3382a47a2af185c3240c954cf004428b237bd7317413a95146d01eb4b94b",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://github.com/webmproject/libwebp.git",
+        "commit": "4fa21912338357f89e4fd51cf2368325b59e9bd9"
+      }
+    },
+    {
+      "name": "libtiff",
+      "version": "4.7.1",
+      "license": "libtiff",
+      "license_file": "LICENSE.md",
+      "archive_name": "libtiff-8300e0f79b1599c18dd6dc50caa9ab9200d11889.tar.gz",
+      "url": "https://gitlab.com/libtiff/libtiff/-/archive/8300e0f79b1599c18dd6dc50caa9ab9200d11889/libtiff-8300e0f79b1599c18dd6dc50caa9ab9200d11889.tar.gz",
+      "sha256": "3191533fbfb4ec5089bf289231ce774ff5492149974eea5ea87b4c380946f6e1",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://gitlab.com/libtiff/libtiff.git",
+        "commit": "8300e0f79b1599c18dd6dc50caa9ab9200d11889"
+      }
+    },
+    {
+      "name": "libheif",
+      "version": "1.20.2",
+      "license": "LGPL-3.0-only",
+      "license_file": "COPYING",
+      "archive_name": "libheif-1.20.2.tar.gz",
+      "url": "https://github.com/strukturag/libheif/releases/download/v1.20.2/libheif-1.20.2.tar.gz",
+      "sha256": "68ac9084243004e0ef3633f184eeae85d615fe7e4444373a0a21cebccae9d12a",
+      "verification": {
+        "method": "github_release_asset",
+        "repository": "strukturag/libheif",
+        "tag": "v1.20.2",
+        "asset": "libheif-1.20.2.tar.gz",
+        "digest": "sha256:68ac9084243004e0ef3633f184eeae85d615fe7e4444373a0a21cebccae9d12a"
+      }
+    },
+    {
+      "name": "libraw",
+      "version": "0.21.4",
+      "license": "LGPL-2.1-only OR CDDL-1.0",
+      "license_file": "LICENSE.LGPL",
+      "archive_name": "LibRaw-9646d776c7c61976080a8f2be67928df0750493e.tar.gz",
+      "url": "https://github.com/LibRaw/LibRaw/archive/9646d776c7c61976080a8f2be67928df0750493e.tar.gz",
+      "sha256": "5e1d810e0005be42f99361b6a08bafdc7fa0c89f60772d97a7bac0a1700143b8",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://github.com/LibRaw/LibRaw.git",
+        "commit": "9646d776c7c61976080a8f2be67928df0750493e"
+      }
+    },
+    {
+      "name": "libde265",
+      "version": "1.0.16",
+      "license": "LGPL-3.0-or-later",
+      "license_file": "COPYING",
+      "archive_name": "libde265-7ba65889d3d6d8a0d99b5360b028243ba843be3a.tar.gz",
+      "url": "https://github.com/strukturag/libde265/archive/7ba65889d3d6d8a0d99b5360b028243ba843be3a.tar.gz",
+      "sha256": "9dedf12d5b5047c270d1fc54f5d92fc29d9ea21b94d3f2d998200258353189a0",
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://github.com/strukturag/libde265.git",
+        "commit": "7ba65889d3d6d8a0d99b5360b028243ba843be3a"
+      }
+    },
+    {
+      "name": "x265",
+      "version": "4.1",
+      "license": "GPL-2.0-only",
+      "license_file": "COPYING",
+      "optional": true,
+      "feature": "heic-write",
+      "archive_name": "",
+      "url": "",
+      "sha256": "",
+      "verification": {"method": "immutable_git_commit", "repository": "https://code.videolan.org/videolan/x265.git", "commit": ""},
+      "blocking_reason": "VideoLAN 官方仓库尚未核实 4.1 对应的不可变源码 commit；启用 HEIC 写入前必须经 discovery/上游核实后回填。"
+    }
+  ]
+}

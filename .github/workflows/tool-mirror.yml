@@ -1,0 +1,189 @@
+name: 可信工具镜像
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 全部六格成功后发布 tools-v1.0.0
+        required: true
+        type: boolean
+        default: false
+      enable_heic_write:
+        description: 启用 x265 HEIC 写入
+        required: true
+        type: boolean
+        default: false
+  push:
+    branches:
+      - "tool-mirror/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tool-mirror-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  static_validate:
+    name: 离线静态验证
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 运行离线测试与静态契约
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/tool-mirror/test_tool_mirror.py
+          python scripts/tool-mirror/static_validate.py
+
+  discovery:
+    name: 发现 ${{ matrix.id }} 工具链
+    needs: static_validate
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
+          - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
+          - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 断言 runner 身份并采集环境
+        shell: bash
+        env:
+          EVIDENCE: ${{ runner.temp }}/tool-mirror-discovery-${{ matrix.id }}.json
+        run: |
+          set -euo pipefail
+          python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
+          python scripts/tool-mirror/tool_mirror.py discover "$EVIDENCE" --runner "${{ matrix.runner }}"
+          python -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest(), p.name)' "$EVIDENCE" > "$EVIDENCE.sha256"
+      - name: 上传工具链发现证据
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tool-mirror-discovery-${{ matrix.id }}
+          path: |
+            ${{ runner.temp }}/tool-mirror-discovery-${{ matrix.id }}.json
+            ${{ runner.temp }}/tool-mirror-discovery-${{ matrix.id }}.json.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  preflight:
+    name: 正式预检 ${{ matrix.id }}
+    needs: static_validate
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
+          - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
+          - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 校验 runner 和可信锁
+        shell: bash
+        env:
+          ENABLE_HEIC_WRITE: ${{ inputs.enable_heic_write }}
+        run: |
+          set -euo pipefail
+          python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
+          args=()
+          [ "$ENABLE_HEIC_WRITE" = "true" ] && args+=(--enable-heic-write)
+          python scripts/tool-mirror/tool_mirror.py "${args[@]}" preflight --runner "${{ matrix.runner }}"
+
+  build:
+    name: 构建 ${{ matrix.id }}
+    needs: [static_validate, preflight]
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
+          - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
+          - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 断言 runner 身份
+        shell: bash
+        run: python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
+      - name: 下载、验证并构建已锁定源码
+        shell: bash
+        env:
+          ENABLE_HEIC_WRITE: ${{ inputs.enable_heic_write }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=()
+          [ "$ENABLE_HEIC_WRITE" = "true" ] && args+=(--enable-heic-write)
+          python scripts/tool-mirror/tool_mirror.py "${args[@]}" build "$RUNNER_TEMP/sources" "$RUNNER_TEMP/payload" --runner "${{ matrix.runner }}"
+          python scripts/tool-mirror/tool_mirror.py "${args[@]}" licenses "$RUNNER_TEMP/jianvideo-tool-build/sources" "$RUNNER_TEMP/payload/licenses"
+          python scripts/tool-mirror/tool_mirror.py "${args[@]}" sbom "$RUNNER_TEMP/payload/sbom.cdx.json"
+          python scripts/tool-mirror/tool_mirror.py verify-binaries "$RUNNER_TEMP/payload/bin"
+          magick="$RUNNER_TEMP/payload/bin/magick"
+          [ "$RUNNER_OS" = "Windows" ] && magick="$magick.exe"
+          python scripts/tool-mirror/verify_fixtures.py --magick "$magick"
+          python scripts/tool-mirror/tool_mirror.py manifest "$RUNNER_TEMP/payload" "$RUNNER_TEMP/payload/manifest.json"
+          python scripts/tool-mirror/verify-artifact.py "$RUNNER_TEMP/payload/manifest.json" "$RUNNER_TEMP/payload"
+          python scripts/tool-mirror/tool_mirror.py package "$RUNNER_TEMP/payload" "$RUNNER_TEMP/jianvideo-tools-${{ matrix.id }}.zip"
+      - name: 上传构建产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: jianvideo-tools-${{ matrix.id }}
+          path: ${{ runner.temp }}/jianvideo-tools-${{ matrix.id }}.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: 生成构建来源证明
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ runner.temp }}/jianvideo-tools-${{ matrix.id }}.zip
+
+  release:
+    name: 原子发布 tools-v1.0.0
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: tool-mirror-release-tools-v1.0.0
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      attestations: read
+    steps:
+      - name: 检出发布脚本
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 下载全部六格 ZIP
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: jianvideo-tools-*
+          path: dist
+          merge-multiple: true
+      - name: 创建草稿、回下载证明并发布
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+        run: bash scripts/tool-mirror/release.sh dist tools-v1.0.0
