@@ -34,6 +34,16 @@ if DNG_SPEC and DNG_SPEC.loader:
 
 
 class ToolMirrorTest(unittest.TestCase):
+    def test_download_retries_transient_connection_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "archive.tar"
+            with patch.object(tool_mirror.urllib.request, "urlopen", side_effect=(OSError("reset"), BytesIO(b"ok"))):
+                with patch.object(tool_mirror.time, "sleep") as mocked_sleep:
+                    tool_mirror.download("https://example.com/archive.tar", destination)
+            self.assertEqual(destination.read_bytes(), b"ok")
+            self.assertFalse(destination.with_name("archive.tar.part").exists())
+            mocked_sleep.assert_called_once_with(1)
+
     def test_request_headers_only_forward_token_to_github(self):
         with patch.dict(os.environ, {"GH_TOKEN": "secret", "GITHUB_TOKEN": ""}, clear=False):
             self.assertNotIn("Authorization", tool_mirror.request_headers("https://madler.net/madler/pgp.html"))

@@ -265,9 +265,20 @@ def request_headers(url: str) -> dict[str, str]:
 
 def download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.with_name(f"{destination.name}.part")
     request = urllib.request.Request(url, headers=request_headers(url))
-    with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
-        shutil.copyfileobj(response, output)
+    for attempt in range(3):
+        partial.unlink(missing_ok=True)
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            partial.replace(destination)
+            return
+        except OSError:
+            partial.unlink(missing_ok=True)
+            if attempt == 2:
+                raise
+            time.sleep(attempt + 1)
 
 
 def download_json(url: str) -> dict:
