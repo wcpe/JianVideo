@@ -221,6 +221,7 @@ class ToolMirrorTest(unittest.TestCase):
 
     def test_libraw_build_disables_examples_and_loads_local_macros(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
+        self.assertIn('m4_include([m4/ax_openmp.m4])', script)
         self.assertIn("autoreconf -fi -I m4", script)
         self.assertIn("./configure --prefix=\"$prefix\" --enable-static --disable-shared --disable-examples", script)
 

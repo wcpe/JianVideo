@@ -74,6 +74,21 @@ fi
 cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265=ON -DWITH_X265=$([ "$heic_write" = "--enable-heic-write" ] && printf ON || printf OFF) -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PNG=TRUE
 
 libraw="$(source_dir 'LibRaw-*')"
+if [ "${RUNNER_OS:-}" = "Windows" ]; then
+  python - "$libraw/configure.ac" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+marker = "AC_CONFIG_MACRO_DIR([m4])"
+include = "m4_include([m4/ax_openmp.m4])"
+if include not in text:
+    if marker not in text:
+        raise SystemExit("错误：LibRaw 缺少 m4 宏目录声明")
+    path.write_text(text.replace(marker, f"{marker}\n{include}", 1), encoding="utf-8")
+PY
+fi
 (cd "$libraw" && autoreconf -fi -I m4 && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 
 x264="$(source_dir 'x264-*')"
