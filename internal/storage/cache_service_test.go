@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
 func newCacheTestService(t *testing.T) (*Service, *gorm.DB, string) {
@@ -32,6 +36,7 @@ func newCacheTestService(t *testing.T) (*Service, *gorm.DB, string) {
 		&models.MediaFile{},
 		&models.CacheAsset{},
 		&models.AuditEvent{},
+		&models.Task{},
 	); err != nil {
 		t.Fatalf("迁移测试表失败: %v", err)
 	}
@@ -39,7 +44,8 @@ func newCacheTestService(t *testing.T) (*Service, *gorm.DB, string) {
 	if err := db.Create(&models.Space{ID: models.DefaultSpaceID, Name: "默认 Space", OwnerUserID: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("创建默认 Space 失败: %v", err)
 	}
-	return NewService(db, dataDir).WithAudit(audit.NewRecorder(db)), db, dataDir
+	taskSvc := tasksvc.NewService(db)
+	return NewService(db, dataDir).WithAudit(audit.NewRecorder(db)).WithTasks(taskSvc), db, dataDir
 }
 
 func TestCacheRegisterRejectsNonWhitelistPaths(t *testing.T) {
@@ -138,14 +144,19 @@ func TestCacheSummaryAndDryRunClean(t *testing.T) {
 
 	result, err := svc.Clean(context.Background(), CleanInput{SpaceID: models.DefaultSpaceID, Kinds: []string{CacheKindThumbnail}})
 	if err != nil {
-		t.Fatalf("执行清理失败: %v", err)
+		t.Fatalf("清理任务入队失败: %v", err)
 	}
-	if result.DeletedCount != 1 || result.DeletedSizeBytes != 5 {
-		t.Fatalf("清理结果不符: %+v", result)
+	if result.TaskID == 0 || result.DeletedCount != 0 || result.DeletedSizeBytes != 0 {
+		t.Fatalf("真实清理请求应只返回任务 ID: %+v", result)
 	}
+	if _, err := os.Stat(thumb); err != nil {
+		t.Fatalf("worker 执行前不应删除缩略图: %v", err)
+	}
+	runCacheWorkers(t, svc)
 	if _, err := os.Stat(thumb); !os.IsNotExist(err) {
-		t.Fatalf("缩略图应被删除，stat err=%v", err)
+		t.Fatalf("worker 执行后缩略图应被删除，stat err=%v", err)
 	}
+	assertCacheTaskSucceeded(t, svc.tasks, result.TaskID)
 	if _, err := os.Stat(proxy); err != nil {
 		t.Fatalf("非目标 kind 不应被删除: %v", err)
 	}
@@ -170,9 +181,22 @@ func TestCacheInventoryMarksMissingAndDiscoversWhitelistFiles(t *testing.T) {
 	}
 	existing := filepath.Join(dataDir, "thumbnails", "existing.jpg")
 	mustWriteFile(t, existing, "abc")
-	if _, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID}); err != nil {
-		t.Fatalf("盘点失败: %v", err)
+	first, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("盘点任务入队失败: %v", err)
 	}
+	if first.TaskID == 0 {
+		t.Fatal("盘点任务应返回任务 ID")
+	}
+	var before int64
+	if err := db.Model(&models.CacheAsset{}).Count(&before).Error; err != nil {
+		t.Fatalf("统计 worker 前缓存资产失败: %v", err)
+	}
+	if before != 0 {
+		t.Fatalf("worker 执行前不应盘点缓存，实际资产数 %d", before)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, first.TaskID)
 	var asset models.CacheAsset
 	if err := db.Where("kind = ? AND relative_path = ?", CacheKindThumbnail, filepath.ToSlash(filepath.Join("thumbnails", "existing.jpg"))).First(&asset).Error; err != nil {
 		t.Fatalf("盘点应发现白名单文件: %v", err)
@@ -184,14 +208,172 @@ func TestCacheInventoryMarksMissingAndDiscoversWhitelistFiles(t *testing.T) {
 	if err := os.Remove(existing); err != nil {
 		t.Fatalf("删除缓存文件失败: %v", err)
 	}
-	if _, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID}); err != nil {
-		t.Fatalf("二次盘点失败: %v", err)
+	second, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("二次盘点任务入队失败: %v", err)
 	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, second.TaskID)
 	if err := db.First(&asset, asset.ID).Error; err != nil {
 		t.Fatalf("读取盘点资产失败: %v", err)
 	}
 	if asset.MissingAt == nil {
 		t.Fatalf("磁盘缺失资产应标记 missing_at: %+v", asset)
+	}
+}
+
+func TestCacheWorkersRejectInvalidTaskPayload(t *testing.T) {
+	svc, _, dataDir := newCacheTestService(t)
+	thumb := filepath.Join(dataDir, "thumbnails", "safe.jpg")
+	mustWriteFile(t, thumb, "safe")
+	if _, err := svc.RegisterFile(context.Background(), RegisterInput{
+		SpaceID: models.DefaultSpaceID,
+		Kind:    CacheKindThumbnail,
+		Path:    thumb,
+	}); err != nil {
+		t.Fatalf("登记测试缓存失败: %v", err)
+	}
+
+	mismatchedSpace, err := json.Marshal(map[string]any{
+		"space_id": "space-other",
+		"kinds":    []string{CacheKindThumbnail},
+	})
+	if err != nil {
+		t.Fatalf("编码跨 Space payload 失败: %v", err)
+	}
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{name: "损坏 JSON", payload: `{"space_id":`, want: "payload"},
+		{name: "跨 Space", payload: string(mismatchedSpace), want: "Space"},
+		{name: "非法类型", payload: `{"space_id":"space-default","kinds":["database"]}`, want: "缓存类型无效"},
+	}
+	ids := make(map[string]int64, len(cases))
+	for _, tc := range cases {
+		task, err := svc.tasks.Enqueue(context.Background(), tasksvc.EnqueueInput{
+			Scope:        models.TaskScopeSpace,
+			SpaceID:      models.DefaultSpaceID,
+			Type:         TaskTypeCacheClean,
+			MaxAttempts:  1,
+			PayloadJSON:  tc.payload,
+			ResourceType: "cache",
+			ResourceID:   "clean",
+		})
+		if err != nil {
+			t.Fatalf("%s 任务入队失败: %v", tc.name, err)
+		}
+		ids[tc.name] = task.ID
+	}
+
+	runCacheWorkers(t, svc)
+	for _, tc := range cases {
+		task, err := svc.tasks.Get(context.Background(), ids[tc.name], tasksvc.Query{SpaceID: models.DefaultSpaceID})
+		if err != nil {
+			t.Fatalf("读取 %s 任务失败: %v", tc.name, err)
+		}
+		if task.Status != models.TaskStatusFailed || !strings.Contains(task.Error, tc.want) {
+			t.Fatalf("%s 应被 worker 二次校验拒绝: %+v", tc.name, task)
+		}
+	}
+	if _, err := os.Stat(thumb); err != nil {
+		t.Fatalf("非法任务不得删除白名单内文件: %v", err)
+	}
+}
+
+func TestCacheCleanRetryIsIdempotent(t *testing.T) {
+	svc, db, dataDir := newCacheTestService(t)
+	base := time.Date(2026, 7, 9, 11, 0, 0, 0, time.UTC)
+	svc.tasks.SetNowForTest(func() time.Time { return base })
+	recorder := &failOnceAuditRecorder{
+		Recorder: svc.audit,
+		action:   "cache.clean.executed",
+		err:      errors.New("模拟审计暂时失败"),
+	}
+	svc.WithAudit(recorder)
+	thumb := filepath.Join(dataDir, "thumbnails", "retry.jpg")
+	mustWriteFile(t, thumb, "retry")
+	if _, err := svc.RegisterFile(context.Background(), RegisterInput{
+		SpaceID: models.DefaultSpaceID,
+		Kind:    CacheKindThumbnail,
+		Path:    thumb,
+	}); err != nil {
+		t.Fatalf("登记重试缓存失败: %v", err)
+	}
+
+	queued, err := svc.Clean(context.Background(), CleanInput{
+		SpaceID: models.DefaultSpaceID,
+		Kinds:   []string{CacheKindThumbnail},
+	})
+	if err != nil {
+		t.Fatalf("清理任务入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	pending, err := svc.tasks.Get(context.Background(), queued.TaskID, tasksvc.Query{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("读取待重试任务失败: %v", err)
+	}
+	if pending.Status != models.TaskStatusPending || pending.Attempts != 1 || pending.NextRunAt == nil {
+		t.Fatalf("首次暂时失败应进入退避重试: %+v", pending)
+	}
+	if _, err := os.Stat(thumb); !os.IsNotExist(err) {
+		t.Fatalf("首次执行已删除的文件不应恢复，stat err=%v", err)
+	}
+	var assets int64
+	if err := db.Model(&models.CacheAsset{}).Where("relative_path = ?", filepath.ToSlash(filepath.Join("thumbnails", "retry.jpg"))).Count(&assets).Error; err != nil {
+		t.Fatalf("统计重试缓存资产失败: %v", err)
+	}
+	if assets != 0 {
+		t.Fatalf("首次执行后缓存资产应已删除，实际 %d", assets)
+	}
+
+	svc.tasks.SetNowForTest(func() time.Time { return base.Add(2 * time.Second) })
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, queued.TaskID)
+	var auditCount int64
+	if err := db.Model(&models.AuditEvent{}).Where("action = ?", "cache.clean.executed").Count(&auditCount).Error; err != nil {
+		t.Fatalf("统计清理审计失败: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("幂等重试最终应只落一条成功清理审计，实际 %d", auditCount)
+	}
+}
+
+type failOnceAuditRecorder struct {
+	audit.Recorder
+	action string
+	err    error
+	failed bool
+}
+
+func (r *failOnceAuditRecorder) Record(ctx context.Context, input audit.EventInput) error {
+	if input.Action == r.action && !r.failed {
+		r.failed = true
+		return r.err
+	}
+	return r.Recorder.Record(ctx, input)
+}
+
+func runCacheWorkers(t *testing.T, svc *Service) {
+	t.Helper()
+	registry := tasksvc.NewWorkerRegistry(svc.tasks)
+	if err := svc.RegisterWorkers(registry); err != nil {
+		t.Fatalf("注册缓存 worker 失败: %v", err)
+	}
+	if err := registry.RunPending(context.Background()); err != nil {
+		t.Fatalf("运行缓存 worker 失败: %v", err)
+	}
+}
+
+func assertCacheTaskSucceeded(t *testing.T, tasks *tasksvc.Service, taskID int64) {
+	t.Helper()
+	task, err := tasks.Get(context.Background(), taskID, tasksvc.Query{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("读取缓存任务失败: %v", err)
+	}
+	if task.Status != models.TaskStatusSucceeded || task.Progress != 100 || task.FinishedAt == nil {
+		t.Fatalf("缓存任务终态不符: %+v", task)
 	}
 }
 

@@ -569,9 +569,9 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 ### 5.1.2.2 存储与缓存管理（FR2-048）
 
 - 缓存登记由 `storage.Service` 提供，缩略图、HLS 预切片、图片代理和封面产物只登记数据目录白名单路径；HLS 目录级登记，避免每个 segment 产生一行资产。
-- `POST /api/storage/cache/inventory` 扫描白名单目录，补齐历史缓存资产并把磁盘已消失的登记标记 `missing_at`。
+- `POST /api/storage/cache/inventory` 只入队 `cache.inventory` 并返回 `202 + task_id`；`WorkerRegistry` 后台扫描白名单目录，补齐历史缓存资产并把磁盘已消失的登记标记 `missing_at`。
 - `GET /api/storage/cache/summary` 与 `GET /api/storage/cache/assets` 基于 `cache_assets` 聚合，支持 Space / 类型 / 库 / 媒体范围查询。
-- `POST /api/storage/cache/clean` 支持 dry-run 预览和真实清理。真实清理写 `cache.clean` 任务记录、删除缓存文件或目录、删除对应资产行，并写 `cache.clean.executed` 审计事件；dry-run 只写 `cache.clean.preview` 审计，不触碰磁盘。
+- `POST /api/storage/cache/clean` 的 dry-run 同步预览并返回 200，只写 `cache.clean.preview` 审计且不触碰磁盘；真实清理只入队 `cache.clean` 并返回 `202 + task_id`。`WorkerRegistry` 二次校验 Space、payload、类型与路径白名单后删除缓存文件或目录及对应资产行，更新进度并写 `cache.clean.executed` 审计；取消会中止任务上下文，重试按幂等语义继续处理剩余资产。
 - 清理只能作用于 `thumbnail`、`hls`、`image_proxy`、`cover`、`metadata_temp` 白名单类型，不管理原媒体空间、不做自动复杂淘汰、跨磁盘迁移或云存储。
 
 ### 5.1.3 定时扫描调度（FR-28）

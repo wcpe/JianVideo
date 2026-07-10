@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ import (
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
-func setupCacheRouter(t *testing.T) (*gin.Engine, *gorm.DB, string) {
+func setupCacheRouter(t *testing.T) (*gin.Engine, *gorm.DB, string, *tasksvc.WorkerRegistry, *tasksvc.Service) {
 	t.Helper()
 	dataDir := t.TempDir()
 	gdb, err := gorm.Open(sqlite.Open(filepath.Join(dataDir, "jianvideo.db")), &gorm.Config{})
@@ -50,14 +51,18 @@ func setupCacheRouter(t *testing.T) (*gin.Engine, *gorm.DB, string) {
 	auditSvc := audit.NewRecorder(gdb)
 	taskSvc := tasksvc.NewService(gdb)
 	cacheSvc := storage.NewService(gdb, dataDir).WithAudit(auditSvc).WithTasks(taskSvc)
+	registry := tasksvc.NewWorkerRegistry(taskSvc)
+	if err := cacheSvc.RegisterWorkers(registry); err != nil {
+		t.Fatalf("注册缓存 worker 失败: %v", err)
+	}
 	h := NewHandler(library.NewService(gdb)).WithAudit(auditSvc).WithTasks(taskSvc).WithCache(cacheSvc)
 	r := gin.New()
 	RegisterRoutes(r, h)
-	return r, gdb, dataDir
+	return r, gdb, dataDir, registry, taskSvc
 }
 
 func TestStorageCacheAPI_SummaryInventoryDryRunAndClean(t *testing.T) {
-	r, db, dataDir := setupCacheRouter(t)
+	r, db, dataDir, registry, taskSvc := setupCacheRouter(t)
 	thumb := filepath.Join(dataDir, "thumbnails", "a.jpg")
 	hlsDir := filepath.Join(dataDir, "hls", "88")
 	mustWriteAPIFile(t, thumb, "12345")
@@ -65,9 +70,27 @@ func TestStorageCacheAPI_SummaryInventoryDryRunAndClean(t *testing.T) {
 	mustWriteAPIFile(t, filepath.Join(hlsDir, "480p_segment_000.ts"), "segment")
 
 	w := serveCacheRequest(r, http.MethodPost, "/api/storage/cache/inventory", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("盘点期望 200, 实际 %d, body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("盘点期望 202, 实际 %d, body=%s", w.Code, w.Body.String())
 	}
+	var inventory storage.InventoryResult
+	if err := json.Unmarshal(w.Body.Bytes(), &inventory); err != nil {
+		t.Fatalf("解析盘点任务失败: %v", err)
+	}
+	if inventory.TaskID == 0 {
+		t.Fatal("盘点响应应包含任务 ID")
+	}
+	var assetsBefore int64
+	if err := db.Model(&models.CacheAsset{}).Count(&assetsBefore).Error; err != nil {
+		t.Fatalf("统计 worker 前缓存资产失败: %v", err)
+	}
+	if assetsBefore != 0 {
+		t.Fatalf("handler 不应直接执行盘点，实际资产数 %d", assetsBefore)
+	}
+	if err := registry.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行盘点 worker 失败: %v", err)
+	}
+	assertAPICacheTaskStatus(t, taskSvc, inventory.TaskID, models.TaskStatusSucceeded)
 
 	w = serveCacheRequest(r, http.MethodGet, "/api/storage/cache/summary", nil)
 	if w.Code != http.StatusOK {
@@ -95,25 +118,26 @@ func TestStorageCacheAPI_SummaryInventoryDryRunAndClean(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("执行清理期望 202, 实际 %d, body=%s", w.Code, w.Body.String())
 	}
+	var clean storage.CleanResult
+	if err := json.Unmarshal(w.Body.Bytes(), &clean); err != nil {
+		t.Fatalf("解析清理任务失败: %v", err)
+	}
+	if clean.TaskID == 0 {
+		t.Fatal("清理响应应包含任务 ID")
+	}
+	if _, err := os.Stat(thumb); err != nil {
+		t.Fatalf("handler 返回 202 时不应直接删除缩略图: %v", err)
+	}
+	assertAPICacheTaskStatus(t, taskSvc, clean.TaskID, models.TaskStatusPending)
+	if err := registry.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行清理 worker 失败: %v", err)
+	}
+	assertAPICacheTaskStatus(t, taskSvc, clean.TaskID, models.TaskStatusSucceeded)
 	if _, err := os.Stat(thumb); !os.IsNotExist(err) {
-		t.Fatalf("执行清理应删除缩略图, err=%v", err)
+		t.Fatalf("worker 执行后应删除缩略图, err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(hlsDir, "master.m3u8")); err != nil {
 		t.Fatalf("HLS 未被选中，不应删除: %v", err)
-	}
-	var taskCount int64
-	if err := db.Model(&models.Task{}).Where("type = ?", storage.TaskTypeCacheClean).Count(&taskCount).Error; err != nil {
-		t.Fatalf("统计清理任务失败: %v", err)
-	}
-	if taskCount != 1 {
-		t.Fatalf("执行清理应写入任务中心，实际 %d", taskCount)
-	}
-	var task models.Task
-	if err := db.Where("type = ?", storage.TaskTypeCacheClean).First(&task).Error; err != nil {
-		t.Fatalf("读取清理任务失败: %v", err)
-	}
-	if task.Status != models.TaskStatusSucceeded || task.Progress != 100 || task.FinishedAt == nil {
-		t.Fatalf("清理任务状态不符: %+v", task)
 	}
 	var auditCount int64
 	if err := db.Model(&models.AuditEvent{}).Where("action IN ?", []string{"cache.clean.preview", "cache.clean.executed"}).Count(&auditCount).Error; err != nil {
@@ -125,11 +149,25 @@ func TestStorageCacheAPI_SummaryInventoryDryRunAndClean(t *testing.T) {
 }
 
 func TestStorageCacheAPI_RejectsUnsafeCleanKind(t *testing.T) {
-	r, _, _ := setupCacheRouter(t)
+	r, _, _, _, _ := setupCacheRouter(t)
 	body := bytes.NewBufferString(`{"dry_run":true,"kinds":["database"]}`)
 	w := serveCacheRequest(r, http.MethodPost, "/api/storage/cache/clean", body)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("非法 kind 期望 400, 实际 %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func assertAPICacheTaskStatus(t *testing.T, svc *tasksvc.Service, taskID int64, status string) {
+	t.Helper()
+	task, err := svc.Get(context.Background(), taskID, tasksvc.Query{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("读取缓存任务失败: %v", err)
+	}
+	if task.Status != status {
+		t.Fatalf("缓存任务状态 got=%s want=%s: %+v", task.Status, status, task)
+	}
+	if status == models.TaskStatusSucceeded && (task.Progress != 100 || task.FinishedAt == nil) {
+		t.Fatalf("缓存任务成功终态字段不完整: %+v", task)
 	}
 }
 

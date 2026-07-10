@@ -27,10 +27,6 @@ var (
 	ErrNoPendingTask = errors.New("没有可领取的任务")
 )
 
-type runningTaskContext struct {
-	cancel context.CancelFunc
-}
-
 // Service 管理通用异步任务的入队、领取、状态流转与审计。
 type Service struct {
 	db             *gorm.DB
@@ -38,8 +34,13 @@ type Service struct {
 	now            func() time.Time
 	mu             sync.Mutex
 	priorityStreak map[string]int
-	runningMu      sync.Mutex
-	runningCancels map[int64]*runningTaskContext
+	cancelMu       sync.Mutex
+	runningCancels map[int64]runningCancellation
+}
+
+type runningCancellation struct {
+	token  *byte
+	cancel context.CancelFunc
 }
 
 // EnqueueInput 描述创建通用异步任务所需的字段。
@@ -120,7 +121,7 @@ func NewService(db *gorm.DB) *Service {
 		db:             db,
 		now:            time.Now,
 		priorityStreak: map[string]int{},
-		runningCancels: map[int64]*runningTaskContext{},
+		runningCancels: map[int64]runningCancellation{},
 	}
 }
 
@@ -466,7 +467,7 @@ func (s *Service) Cancel(ctx context.Context, id int64, query Query) error {
 	if err != nil {
 		return err
 	}
-	s.cancelRunning(id)
+	s.signalCancellation(id)
 	return nil
 }
 
@@ -635,32 +636,35 @@ func (s *Service) RecoverRunning(ctx context.Context) error {
 		}).Error
 }
 
-func (s *Service) bindRunningContext(parent context.Context, taskID int64) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(parent)
-	running := &runningTaskContext{cancel: cancel}
-	s.runningMu.Lock()
-	s.runningCancels[taskID] = running
-	s.runningMu.Unlock()
-	if task, err := s.getByID(parent, taskID); err == nil && task.Status == models.TaskStatusCanceled {
-		cancel()
-	}
-	return ctx, func() {
-		s.runningMu.Lock()
-		if s.runningCancels[taskID] == running {
-			delete(s.runningCancels, taskID)
+func (s *Service) bindCancellation(id int64, cancel context.CancelFunc) func() {
+	token := new(byte)
+	s.cancelMu.Lock()
+	s.runningCancels[id] = runningCancellation{token: token, cancel: cancel}
+	s.cancelMu.Unlock()
+	return func() {
+		s.cancelMu.Lock()
+		if current, ok := s.runningCancels[id]; ok && current.token == token {
+			delete(s.runningCancels, id)
 		}
-		s.runningMu.Unlock()
-		cancel()
+		s.cancelMu.Unlock()
 	}
 }
 
-func (s *Service) cancelRunning(taskID int64) {
-	s.runningMu.Lock()
-	running := s.runningCancels[taskID]
-	s.runningMu.Unlock()
-	if running != nil {
-		running.cancel()
+func (s *Service) signalCancellation(id int64) {
+	s.cancelMu.Lock()
+	current, ok := s.runningCancels[id]
+	s.cancelMu.Unlock()
+	if ok {
+		current.cancel()
 	}
+}
+
+func (s *Service) isCanceled(ctx context.Context, id int64) (bool, error) {
+	task, err := s.getByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return task.Status == models.TaskStatusCanceled, nil
 }
 
 func (s *Service) findUnfinishedByKey(ctx context.Context, key string) (models.Task, bool, error) {

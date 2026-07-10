@@ -74,7 +74,7 @@ func (h *Handler) StorageCacheInventory(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CACHE_INVENTORY_FAILED", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusAccepted, result)
 }
 
 // StorageCacheClean 处理缓存清理预览与执行请求。

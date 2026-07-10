@@ -7,11 +7,13 @@ import { server } from '../mocks/beforeAll';
 import StorageCachePage from './StorageCachePage';
 
 describe('StorageCachePage（FR2-048）', () => {
-  it('展示缓存统计并执行 dry-run', async () => {
+  it('展示缓存统计、轮询盘点任务并执行 dry-run', async () => {
     let cleanCalled = false;
+    let summaryCalls = 0;
     server.use(
-      http.get('*/api/storage/cache/summary', () =>
-        HttpResponse.json({
+      http.get('*/api/storage/cache/summary', () => {
+        summaryCalls += 1;
+        return HttpResponse.json({
           total_size_bytes: 12,
           total_file_count: 3,
           total_assets: 2,
@@ -22,6 +24,25 @@ describe('StorageCachePage（FR2-048）', () => {
             cover: { kind: 'cover', size_bytes: 0, file_count: 0, asset_count: 0 },
             metadata_temp: { kind: 'metadata_temp', size_bytes: 0, file_count: 0, asset_count: 0 },
           },
+        });
+      }),
+      http.post('*/api/storage/cache/inventory', () =>
+        HttpResponse.json({ task_id: 10 }, { status: 202 }),
+      ),
+      http.get('*/api/tasks/10', () =>
+        HttpResponse.json({
+          id: '10',
+          scope: 'space',
+          space_id: 'space-default',
+          type: 'cache.inventory',
+          status: 'succeeded',
+          priority: 0,
+          attempts: 0,
+          max_attempts: 3,
+          progress: 1,
+          error: null,
+          created_at: '2026-07-09T10:00:00Z',
+          updated_at: '2026-07-09T10:00:01Z',
         }),
       ),
       http.post('*/api/storage/cache/clean', async ({ request }) => {
@@ -48,6 +69,9 @@ describe('StorageCachePage（FR2-048）', () => {
     expect(await screen.findByText('缓存管理')).toBeInTheDocument();
     expect(await screen.findAllByText('缩略图')).not.toHaveLength(0);
     expect(screen.getAllByText('HLS')).not.toHaveLength(0);
+
+    await userEvent.click(screen.getByRole('button', { name: '盘点' }));
+    await waitFor(() => expect(summaryCalls).toBeGreaterThanOrEqual(2));
 
     await userEvent.click(screen.getByRole('button', { name: '预览清理' }));
 

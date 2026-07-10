@@ -234,6 +234,9 @@ func main() {
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
 	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
+		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)
+	}
 	toolsManager := toolsvc.NewManager(toolsvc.ManagerOptions{
 		Installer: toolsvc.NewInstaller(filepath.Join(filepath.Dir(cfg.DBPath), "tools"), nil),
 		Settings:  settingsSvc,

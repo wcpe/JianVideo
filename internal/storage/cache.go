@@ -3,8 +3,10 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +34,8 @@ const (
 
 	TaskTypeCacheInventory = "cache.inventory"
 	TaskTypeCacheClean     = "cache.clean"
+
+	cacheTaskMaxAttempts = 3
 )
 
 // ErrUnsafeCachePath 表示缓存路径不在允许管理的目录内。
@@ -42,11 +46,12 @@ var (
 
 // Service 管理缓存资产元数据、盘点和清理任务。
 type Service struct {
-	db    *gorm.DB
-	data  string
-	audit audit.Recorder
-	tasks *tasksvc.Service
-	now   func() time.Time
+	db         *gorm.DB
+	data       string
+	audit      audit.Recorder
+	tasks      *tasksvc.Service
+	now        func() time.Time
+	workerGate chan struct{}
 }
 
 // RegisterInput 描述缓存文件或目录登记所需的字段。
@@ -118,10 +123,14 @@ type InventoryInput struct {
 	SpaceID string
 }
 
+type inventoryTaskPayload struct {
+	SpaceID string `json:"space_id"`
+}
+
 // InventoryResult 表示缓存盘点结果。
 type InventoryResult struct {
-	Discovered int64 `json:"discovered"`
-	Missing    int64 `json:"missing"`
+	Discovered int64 `json:"discovered,omitempty"`
+	Missing    int64 `json:"missing,omitempty"`
 	TaskID     int64 `json:"task_id,omitempty"`
 }
 
@@ -130,6 +139,11 @@ type CleanInput struct {
 	SpaceID string   `json:"space_id"`
 	Kinds   []string `json:"kinds"`
 	DryRun  bool     `json:"dry_run"`
+}
+
+type cleanTaskPayload struct {
+	SpaceID string   `json:"space_id"`
+	Kinds   []string `json:"kinds"`
 }
 
 // CleanResult 表示缓存清理或预览结果。
@@ -147,7 +161,12 @@ type CleanResult struct {
 
 // NewService 创建缓存资产服务。
 func NewService(db *gorm.DB, dataDir string) *Service {
-	return &Service{db: db, data: cleanAbs(dataDir), now: time.Now}
+	return &Service{
+		db:         db,
+		data:       cleanAbs(dataDir),
+		now:        time.Now,
+		workerGate: make(chan struct{}, 1),
+	}
 }
 
 // WithAudit 配置缓存操作审计记录器。
@@ -160,6 +179,161 @@ func (s *Service) WithAudit(rec audit.Recorder) *Service {
 func (s *Service) WithTasks(tasks *tasksvc.Service) *Service {
 	s.tasks = tasks
 	return s
+}
+
+// RegisterWorkers 注册缓存盘点与清理任务处理器。
+func (s *Service) RegisterWorkers(registry *tasksvc.WorkerRegistry) error {
+	if s.tasks == nil {
+		return errors.New("缓存任务服务未配置")
+	}
+	if registry == nil {
+		return errors.New("缓存 worker 注册表不能为空")
+	}
+	if err := registry.Register(TaskTypeCacheInventory, 1, s.handleInventoryTask); err != nil {
+		return err
+	}
+	return registry.Register(TaskTypeCacheClean, 1, s.handleCleanTask)
+}
+
+func (s *Service) handleInventoryTask(ctx context.Context, task models.Task) error {
+	release, err := s.enterWorker(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	var payload inventoryTaskPayload
+	if err := decodeTaskPayload(task.PayloadJSON, &payload); err != nil {
+		return err
+	}
+	spaceID, err := s.validateTaskEnvelope(ctx, task, TaskTypeCacheInventory, "inventory", payload.SpaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.updateTaskProgress(ctx, task.ID, 5, "已校验盘点任务"); err != nil {
+		return err
+	}
+	discovered, err := s.scanInventoryKinds(ctx, spaceID, task.ID)
+	if err != nil {
+		return err
+	}
+	missing, err := s.markMissing(ctx, spaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.updateTaskProgress(ctx, task.ID, 90, "已同步缺失状态"); err != nil {
+		return err
+	}
+	result := InventoryResult{Discovered: discovered, Missing: missing, TaskID: task.ID}
+	if err := s.recordAudit(ctx, spaceID, "cache.inventory", result); err != nil {
+		return err
+	}
+	return s.updateTaskProgress(ctx, task.ID, 95, "已写入盘点审计")
+}
+
+func (s *Service) handleCleanTask(ctx context.Context, task models.Task) error {
+	release, err := s.enterWorker(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	var payload cleanTaskPayload
+	if err := decodeTaskPayload(task.PayloadJSON, &payload); err != nil {
+		return err
+	}
+	spaceID, err := s.validateTaskEnvelope(ctx, task, TaskTypeCacheClean, "clean", payload.SpaceID)
+	if err != nil {
+		return err
+	}
+	kinds, err := normalizeKinds(payload.Kinds)
+	if err != nil {
+		return err
+	}
+	slices.Sort(kinds)
+	if err := s.updateTaskProgress(ctx, task.ID, 5, "已校验清理任务"); err != nil {
+		return err
+	}
+	return s.executeCleanTask(ctx, task.ID, spaceID, kinds)
+}
+
+func (s *Service) enterWorker(ctx context.Context) (func(), error) {
+	select {
+	case s.workerGate <- struct{}{}:
+		return func() { <-s.workerGate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *Service) validateTaskEnvelope(ctx context.Context, task models.Task, taskType, resourceID, payloadSpaceID string) (string, error) {
+	if task.Type != taskType {
+		return "", fmt.Errorf("缓存任务类型不匹配: %s", task.Type)
+	}
+	if task.Scope != models.TaskScopeSpace || task.SpaceID == nil {
+		return "", errors.New("缓存任务必须归属 Space")
+	}
+	spaceID := strings.TrimSpace(*task.SpaceID)
+	if strings.TrimSpace(payloadSpaceID) == "" || payloadSpaceID != spaceID {
+		return "", errors.New("缓存任务 payload 与 Space 不匹配")
+	}
+	if task.ResourceType != "cache" || task.ResourceID != resourceID {
+		return "", errors.New("缓存任务资源信息无效")
+	}
+	if err := s.validateSpace(ctx, spaceID); err != nil {
+		return "", err
+	}
+	return spaceID, nil
+}
+
+func (s *Service) enqueueCacheTask(ctx context.Context, taskType, spaceID string, payload any, resourceID, key string) (*models.Task, error) {
+	if s.tasks == nil {
+		return nil, errors.New("缓存任务服务未配置")
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("编码缓存任务 payload 失败: %w", err)
+	}
+	return s.tasks.Enqueue(ctx, tasksvc.EnqueueInput{
+		Scope:          models.TaskScopeSpace,
+		SpaceID:        spaceID,
+		Type:           taskType,
+		MaxAttempts:    cacheTaskMaxAttempts,
+		IdempotencyKey: key,
+		PayloadJSON:    string(data),
+		ResourceType:   "cache",
+		ResourceID:     resourceID,
+	})
+}
+
+func (s *Service) updateTaskProgress(ctx context.Context, taskID int64, progress int, checkpoint string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.tasks.UpdateProgress(ctx, taskID, tasksvc.ProgressInput{Progress: progress, Checkpoint: checkpoint})
+}
+
+func (s *Service) validateSpace(ctx context.Context, spaceID string) error {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&models.Space{}).Where("id = ?", spaceID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return fmt.Errorf("Space 不存在: %s", spaceID)
+	}
+	return nil
+}
+
+func decodeTaskPayload(raw string, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("缓存任务 payload 无效: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("缓存任务 payload 包含多余内容")
+	}
+	return nil
 }
 
 // RegisterFile 登记单个缓存文件。
@@ -236,72 +410,83 @@ func (s *Service) ListAssets(ctx context.Context, query AssetQuery) (AssetPage, 
 	return AssetPage{Items: items, Page: page, PageSize: size, Total: total}, nil
 }
 
-// Inventory 扫描缓存目录并同步资产状态。
+// Inventory 将缓存盘点任务写入通用任务队列。
 func (s *Service) Inventory(ctx context.Context, input InventoryInput) (InventoryResult, error) {
-	taskID, err := s.createTask(ctx, TaskTypeCacheInventory, normalizeSpace(input.SpaceID), `{"operation":"inventory"}`)
+	spaceID := normalizeSpace(input.SpaceID)
+	if err := s.validateSpace(ctx, spaceID); err != nil {
+		return InventoryResult{}, err
+	}
+	task, err := s.enqueueCacheTask(ctx, TaskTypeCacheInventory, spaceID, inventoryTaskPayload{SpaceID: spaceID}, "inventory", "cache:inventory:"+spaceID)
 	if err != nil {
 		return InventoryResult{}, err
 	}
-	result := InventoryResult{TaskID: taskID}
-	discovered, err := s.scanInventoryKinds(ctx, input.SpaceID)
-	if err != nil {
-		return result, s.finishTask(ctx, taskID, err)
-	}
-	result.Discovered = discovered
-	missing, err := s.markMissing(ctx, input.SpaceID)
-	if err != nil {
-		return result, s.finishTask(ctx, taskID, err)
-	}
-	result.Missing = missing
-	if err := s.recordAudit(ctx, normalizeSpace(input.SpaceID), "cache.inventory", result); err != nil {
-		return result, s.finishTask(ctx, taskID, err)
-	}
-	return result, s.finishTask(ctx, taskID, nil)
+	return InventoryResult{TaskID: task.ID}, nil
 }
 
-func (s *Service) scanInventoryKinds(ctx context.Context, spaceID string) (int64, error) {
+func (s *Service) scanInventoryKinds(ctx context.Context, spaceID string, taskID int64) (int64, error) {
 	var discovered int64
-	for kind, dir := range kindDirs() {
-		root := filepath.Join(s.data, dir)
-		if kind == CacheKindHLS {
-			n, err := s.inventoryHLS(ctx, spaceID, root)
-			if err != nil {
-				return discovered, err
-			}
-			discovered += n
-			continue
+	for index, kind := range orderedKinds() {
+		if err := ctx.Err(); err != nil {
+			return discovered, err
 		}
-		n, err := s.inventoryFiles(ctx, spaceID, kind, root)
+		root := filepath.Join(s.data, kindDirs()[kind])
+		n, err := s.inventoryKind(ctx, spaceID, kind, root)
 		if err != nil {
 			return discovered, err
 		}
 		discovered += n
+		progress := 10 + (index+1)*10
+		if err := s.updateTaskProgress(ctx, taskID, progress, "已盘点 "+kind); err != nil {
+			return discovered, err
+		}
 	}
 	return discovered, nil
 }
 
-// Clean 清理或预览可重建缓存资产。
+func (s *Service) inventoryKind(ctx context.Context, spaceID, kind, root string) (int64, error) {
+	if kind == CacheKindHLS {
+		return s.inventoryHLS(ctx, spaceID, root)
+	}
+	return s.inventoryFiles(ctx, spaceID, kind, root)
+}
+
+// Clean 同步预览清理范围，真实清理则写入通用任务队列。
 func (s *Service) Clean(ctx context.Context, input CleanInput) (CleanResult, error) {
+	spaceID := normalizeSpace(input.SpaceID)
+	if err := s.validateSpace(ctx, spaceID); err != nil {
+		return CleanResult{}, err
+	}
 	kinds, err := normalizeKinds(input.Kinds)
 	if err != nil {
 		return CleanResult{}, err
 	}
-	result := CleanResult{DryRun: input.DryRun}
-	assets, err := s.cleanCandidates(ctx, input.SpaceID, kinds)
+	slices.Sort(kinds)
+	if input.DryRun {
+		return s.cleanPreview(ctx, spaceID, kinds)
+	}
+	payload := cleanTaskPayload{SpaceID: spaceID, Kinds: kinds}
+	key := "cache:clean:" + spaceID + ":" + strings.Join(kinds, ",")
+	task, err := s.enqueueCacheTask(ctx, TaskTypeCacheClean, spaceID, payload, "clean", key)
+	if err != nil {
+		return CleanResult{}, err
+	}
+	return CleanResult{TaskID: task.ID}, nil
+}
+
+func (s *Service) cleanPreview(ctx context.Context, spaceID string, kinds []string) (CleanResult, error) {
+	result := CleanResult{DryRun: true}
+	assets, err := s.cleanCandidates(ctx, spaceID, kinds)
 	if err != nil {
 		return result, err
 	}
 	result.addCandidates(assets)
-	if input.DryRun {
-		return s.previewClean(ctx, input.SpaceID, result)
-	}
-	return s.executeClean(ctx, input.SpaceID, kinds, assets, result)
+	return s.previewClean(ctx, spaceID, result)
 }
 
 func (s *Service) cleanCandidates(ctx context.Context, spaceID string, kinds []string) ([]models.CacheAsset, error) {
 	var assets []models.CacheAsset
 	err := s.db.WithContext(ctx).
-		Where("space_id = ? AND kind IN ? AND missing_at IS NULL", normalizeSpace(spaceID), kinds).
+		Where("space_id = ? AND kind IN ? AND missing_at IS NULL AND rebuildable = ?", normalizeSpace(spaceID), kinds, true).
 		Order("kind ASC, relative_path ASC").
 		Find(&assets).Error
 	return assets, err
@@ -320,44 +505,61 @@ func (s *Service) previewClean(ctx context.Context, spaceID string, result Clean
 	return result, err
 }
 
-func (s *Service) executeClean(ctx context.Context, spaceID string, kinds []string, assets []models.CacheAsset, result CleanResult) (CleanResult, error) {
-	taskID, err := s.createTask(ctx, TaskTypeCacheClean, normalizeSpace(spaceID), fmt.Sprintf(`{"kinds":%q}`, strings.Join(kinds, ",")))
+func (s *Service) executeCleanTask(ctx context.Context, taskID int64, spaceID string, kinds []string) error {
+	assets, err := s.cleanCandidates(ctx, spaceID, kinds)
 	if err != nil {
-		return result, err
+		return err
 	}
-	result.TaskID = taskID
-	for _, asset := range assets {
-		size, deleted, failed := s.deleteRegisteredAsset(ctx, asset)
-		if deleted {
-			result.DeletedCount++
-			result.DeletedSizeBytes += size
-		}
-		if failed {
-			result.FailedCount++
-		}
+	result := CleanResult{TaskID: taskID}
+	result.addCandidates(assets)
+	if err := s.updateTaskProgress(ctx, taskID, 10, "已确认清理候选"); err != nil {
+		return err
+	}
+	libraryRoots, err := s.libraryRoots(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.deleteRegisteredAssets(ctx, assets, libraryRoots, &result); err != nil {
+		return err
+	}
+	if err := s.updateTaskProgress(ctx, taskID, 90, "已删除缓存文件"); err != nil {
+		return err
 	}
 	if result.FailedCount > 0 {
 		result.Error = "部分缓存删除失败"
 	}
-	if err := s.recordAudit(ctx, normalizeSpace(spaceID), "cache.clean.executed", result); err != nil {
-		return result, s.finishTask(ctx, taskID, err)
+	if err := s.recordAudit(ctx, spaceID, "cache.clean.executed", result); err != nil {
+		return err
 	}
 	if result.FailedCount > 0 {
-		return result, s.finishTask(ctx, taskID, errors.New(result.Error))
+		return errors.New(result.Error)
 	}
-	return result, s.finishTask(ctx, taskID, nil)
+	return s.updateTaskProgress(ctx, taskID, 95, "已写入清理审计")
 }
 
-func (s *Service) deleteRegisteredAsset(ctx context.Context, asset models.CacheAsset) (int64, bool, bool) {
-	absPath, err := s.safeAbsFromRelative(asset.RelativePath, asset.Kind)
-	if err != nil {
-		return 0, false, true
+func (s *Service) deleteRegisteredAssets(ctx context.Context, assets []models.CacheAsset, libraryRoots []string, result *CleanResult) error {
+	deletedIDs := make([]int64, 0, len(assets))
+	for _, asset := range assets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		absPath, err := s.validateDeleteTarget(asset, libraryRoots)
+		if err != nil {
+			result.FailedCount++
+			continue
+		}
+		if err := deleteAssetPath(absPath, asset.AssetLevel); err != nil && !os.IsNotExist(err) {
+			result.FailedCount++
+			continue
+		}
+		deletedIDs = append(deletedIDs, asset.ID)
+		result.DeletedCount++
+		result.DeletedSizeBytes += asset.SizeBytes
 	}
-	if err := deleteAssetPath(absPath, asset.AssetLevel); err != nil && !os.IsNotExist(err) {
-		return 0, false, true
+	if len(deletedIDs) == 0 {
+		return nil
 	}
-	err = s.db.WithContext(ctx).Delete(&models.CacheAsset{}, asset.ID).Error
-	return asset.SizeBytes, true, err != nil
+	return s.db.WithContext(ctx).Where("id IN ?", deletedIDs).Delete(&models.CacheAsset{}).Error
 }
 
 func (s *Service) register(ctx context.Context, input RegisterInput, level string) (*models.CacheAsset, error) {
@@ -423,6 +625,9 @@ func (s *Service) inventoryFiles(ctx context.Context, spaceID, kind, root string
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if d.IsDir() {
 			return nil
 		}
@@ -445,6 +650,9 @@ func (s *Service) inventoryHLS(ctx context.Context, spaceID, root string) (int64
 	}
 	var count int64
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -466,6 +674,9 @@ func (s *Service) markMissing(ctx context.Context, spaceID string) (int64, error
 	now := s.now().UTC()
 	var count int64
 	for _, asset := range assets {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
 		absPath, err := s.safeAbsFromRelative(asset.RelativePath, asset.Kind)
 		if err != nil {
 			continue
@@ -494,6 +705,53 @@ func (s *Service) applySummaryQuery(db *gorm.DB, query SummaryQuery) *gorm.DB {
 	return db
 }
 
+func (s *Service) libraryRoots(ctx context.Context) ([]string, error) {
+	var paths []models.LibraryPath
+	if err := s.db.WithContext(ctx).Select("path", "type").Find(&paths).Error; err != nil {
+		return nil, err
+	}
+	roots := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if strings.Contains(path.Path, "://") {
+			continue
+		}
+		roots = append(roots, cleanAbs(path.Path))
+	}
+	return roots, nil
+}
+
+func (s *Service) validateDeleteTarget(asset models.CacheAsset, libraryRoots []string) (string, error) {
+	if !isKnownKind(asset.Kind) {
+		return "", ErrInvalidKind
+	}
+	if asset.AssetLevel != CacheAssetLevelFile && asset.AssetLevel != CacheAssetLevelDirectory {
+		return "", ErrUnsafeCachePath
+	}
+	absPath, err := s.safeAbsFromRelative(asset.RelativePath, asset.Kind)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		if _, _, err := s.safePath(resolved, asset.Kind); err != nil {
+			return "", err
+		}
+	}
+	for _, root := range libraryRoots {
+		if pathWithin(root, absPath) || asset.AssetLevel == CacheAssetLevelDirectory && pathWithin(absPath, root) {
+			return "", ErrUnsafeCachePath
+		}
+	}
+	return absPath, nil
+}
+
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(cleanAbs(root), cleanAbs(path))
+	if err != nil || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (s *Service) safePath(path, kind string) (string, string, error) {
 	absPath := cleanAbs(path)
 	rel, err := filepath.Rel(s.data, absPath)
@@ -508,7 +766,7 @@ func (s *Service) safePath(path, kind string) (string, string, error) {
 	if first != kindDirs()[kind] {
 		return "", "", ErrUnsafeCachePath
 	}
-	if isProtectedName(filepath.Base(absPath)) {
+	if hasProtectedPath(rel) {
 		return "", "", ErrUnsafeCachePath
 	}
 	return absPath, filepath.ToSlash(rel), nil
@@ -517,56 +775,6 @@ func (s *Service) safePath(path, kind string) (string, string, error) {
 func (s *Service) safeAbsFromRelative(relPath, kind string) (string, error) {
 	returnValue, _, err := s.safePath(filepath.Join(s.data, filepath.FromSlash(relPath)), kind)
 	return returnValue, err
-}
-
-func (s *Service) createTask(ctx context.Context, taskType, spaceID, payload string) (int64, error) {
-	if s.tasks == nil {
-		return 0, nil
-	}
-	now := s.now().UTC()
-	task := models.Task{
-		Scope:        models.TaskScopeSpace,
-		SpaceID:      &spaceID,
-		Type:         taskType,
-		Status:       models.TaskStatusRunning,
-		Priority:     0,
-		Attempts:     1,
-		MaxAttempts:  1,
-		Progress:     0,
-		PayloadJSON:  payload,
-		ResourceType: "cache",
-		ResourceID:   strings.TrimPrefix(taskType, "cache."),
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		StartedAt:    &now,
-	}
-	if err := s.db.WithContext(ctx).Create(&task).Error; err != nil {
-		return 0, err
-	}
-	return task.ID, nil
-}
-
-func (s *Service) finishTask(ctx context.Context, taskID int64, err error) error {
-	if s.tasks == nil || taskID == 0 {
-		return err
-	}
-	now := s.now().UTC()
-	if err != nil {
-		_ = s.db.WithContext(ctx).Model(&models.Task{}).Where("id = ?", taskID).Updates(map[string]any{
-			"status":      models.TaskStatusFailed,
-			"error":       err.Error(),
-			"progress":    100,
-			"updated_at":  now,
-			"finished_at": now,
-		}).Error
-		return err
-	}
-	return s.db.WithContext(ctx).Model(&models.Task{}).Where("id = ?", taskID).Updates(map[string]any{
-		"status":      models.TaskStatusSucceeded,
-		"progress":    100,
-		"updated_at":  now,
-		"finished_at": now,
-	}).Error
 }
 
 func (s *Service) recordAudit(ctx context.Context, spaceID string, action string, metadata any) error {
@@ -662,6 +870,16 @@ func orderedKinds() []string {
 func isKnownKind(kind string) bool {
 	_, ok := kindDirs()[kind]
 	return ok
+}
+
+func hasProtectedPath(relPath string) bool {
+	for _, part := range strings.FieldsFunc(filepath.ToSlash(relPath), func(char rune) bool { return char == '/' }) {
+		name := strings.ToLower(strings.TrimSpace(part))
+		if isProtectedName(name) || name == "audit" || name == "audits" || name == "backup" || name == "backups" {
+			return true
+		}
+	}
+	return false
 }
 
 func isProtectedName(name string) bool {

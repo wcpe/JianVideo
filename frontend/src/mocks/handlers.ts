@@ -479,7 +479,12 @@ const unifiedTasks: TaskItem[] = [
 
 const cacheKinds = ['thumbnail', 'hls', 'image_proxy', 'cover', 'metadata_temp'] as const;
 type MockCacheKind = (typeof cacheKinds)[number];
-type MockCacheRow = { kind: MockCacheKind; size_bytes: number; file_count: number; asset_count: number };
+type MockCacheRow = {
+  kind: MockCacheKind;
+  size_bytes: number;
+  file_count: number;
+  asset_count: number;
+};
 
 const cacheRows: Record<MockCacheKind, MockCacheRow> = {
   thumbnail: { kind: 'thumbnail', size_bytes: 280_000_000, file_count: 860, asset_count: 860 },
@@ -488,6 +493,8 @@ const cacheRows: Record<MockCacheKind, MockCacheRow> = {
   cover: { kind: 'cover', size_bytes: 32_000_000, file_count: 26, asset_count: 26 },
   metadata_temp: { kind: 'metadata_temp', size_bytes: 8_000_000, file_count: 18, asset_count: 18 },
 };
+let nextCacheTaskID = 10_000;
+const cacheInventoryPolls = new Map<string, number>();
 
 // 公开分享（FR-43/FR-78）内存数据
 let shares: Share[] = [];
@@ -503,6 +510,18 @@ const KNOWN_TRANSCODE_CODECS: TranscodeCodec[] = ['h264', 'h265', 'av1', 'vp9'];
 
 function addUnifiedTask(task: TaskItem) {
   unifiedTasks.unshift(task);
+}
+
+function pollCacheInventoryTask(task: TaskItem): void {
+  if (task.type !== 'cache.inventory' || task.status !== 'running') return;
+  const polls = (cacheInventoryPolls.get(task.id) ?? 0) + 1;
+  cacheInventoryPolls.set(task.id, polls);
+  if (polls < 2) return;
+  task.status = 'succeeded';
+  task.progress = 1;
+  task.updated_at = new Date().toISOString();
+  task.finished_at = task.updated_at;
+  cacheInventoryPolls.delete(task.id);
 }
 
 function currentSpaceID(request: Request): string {
@@ -1704,6 +1723,7 @@ export const handlers = [
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') || '1');
     const pageSize = Number(url.searchParams.get('page_size') || '20');
+    visibleUnifiedTasks(request).forEach(pollCacheInventoryTask);
     const items = visibleUnifiedTasks(request);
     const start = (page - 1) * pageSize;
     return HttpResponse.json({
@@ -1731,6 +1751,7 @@ export const handlers = [
     if (!item) {
       return HttpResponse.json({ code: 'TASK_NOT_FOUND', message: '任务不存在' }, { status: 404 });
     }
+    pollCacheInventoryTask(item);
     return HttpResponse.json(item);
   }),
 
@@ -1752,25 +1773,28 @@ export const handlers = [
 
   http.post('*/api/storage/cache/inventory', async () => {
     await delay(120);
+    const taskID = nextCacheTaskID++;
+    const id = String(taskID);
     const now = new Date().toISOString();
+    cacheInventoryPolls.set(id, 0);
     addUnifiedTask({
-      id: `cache-inventory-${Date.now()}`,
+      id,
       scope: 'space',
       space_id: 'space-default',
       type: 'cache.inventory',
-      status: 'succeeded',
+      status: 'running',
       priority: 0,
       attempts: 0,
-      max_attempts: 1,
-      progress: 1,
+      max_attempts: 3,
+      progress: 0,
       resource_type: 'cache',
       resource_id: 'inventory',
       error: null,
       created_at: now,
       updated_at: now,
-      finished_at: now,
+      started_at: now,
     });
-    return HttpResponse.json({ discovered: 5, missing: 0, task_id: Date.now() });
+    return HttpResponse.json({ task_id: taskID }, { status: 202 });
   }),
 
   http.post('*/api/storage/cache/clean', async ({ request }) => {
@@ -1778,9 +1802,10 @@ export const handlers = [
     const body = (await request.json()) as { dry_run?: boolean; kinds?: MockCacheKind[] };
     const kinds = body.kinds?.length ? body.kinds : [...cacheKinds];
     const selected = kinds.map((kind) => cacheRows[kind]).filter(Boolean);
+    const taskID = body.dry_run ? undefined : nextCacheTaskID++;
     const result = {
       dry_run: Boolean(body.dry_run),
-      task_id: body.dry_run ? undefined : Date.now(),
+      task_id: taskID,
       candidate_count: selected.reduce((sum, row) => sum + row.asset_count, 0),
       total_size_bytes: selected.reduce((sum, row) => sum + row.size_bytes, 0),
       total_file_count: selected.reduce((sum, row) => sum + row.file_count, 0),
@@ -1796,7 +1821,7 @@ export const handlers = [
       result.deleted_size_bytes = result.total_size_bytes;
       const now = new Date().toISOString();
       addUnifiedTask({
-        id: `cache-clean-${Date.now()}`,
+        id: String(taskID),
         scope: 'space',
         space_id: 'space-default',
         type: 'cache.clean',

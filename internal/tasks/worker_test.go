@@ -179,6 +179,157 @@ func TestWorkerRegistryWakeCoalescesConcurrentSignals(t *testing.T) {
 	t.Fatal("合并唤醒执行完成后未回到空闲状态")
 }
 
+func TestWorkerRegistryCancelStopsHandlerAndKeepsCanceledStatus(t *testing.T) {
+	svc, _ := newTaskTestService(t)
+	ctx := context.Background()
+	task := mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        "cache.clean",
+		MaxAttempts: 1,
+	})
+	started := make(chan struct{})
+	registry := NewWorkerRegistry(svc)
+	if err := registry.Register(task.Type, 1, func(ctx context.Context, _ models.Task) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatalf("注册可取消 worker 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- registry.RunPending(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker 未开始执行")
+	}
+	if err := svc.Cancel(ctx, task.ID, Query{SpaceID: models.DefaultSpaceID}); err != nil {
+		t.Fatalf("取消 running 任务失败: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("取消任务不应让 worker 返回失败: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("取消后 worker 未及时退出")
+	}
+	got := mustGetTask(t, svc, task.ID, Query{SpaceID: models.DefaultSpaceID})
+	if got.Status != models.TaskStatusCanceled || got.FinishedAt == nil {
+		t.Fatalf("worker 不得覆盖 canceled 终态: %+v", got)
+	}
+}
+
+func TestWorkerRegistryCancelThenImmediateRetryDoesNotAffectNewRun(t *testing.T) {
+	svc, _ := newTaskTestService(t)
+	task := mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        "cache.inventory",
+		MaxAttempts: 1,
+	})
+	firstStarted := make(chan struct{})
+	firstCanceled := make(chan struct{})
+	releaseFirst := make(chan struct{}, 1)
+	secondStarted := make(chan struct{})
+	releaseSecond := make(chan struct{}, 1)
+	continuedRun := make(chan struct{})
+	var taskCalls int64
+
+	defer func() {
+		select {
+		case releaseFirst <- struct{}{}:
+		default:
+		}
+		select {
+		case releaseSecond <- struct{}{}:
+		default:
+		}
+	}()
+
+	registry := NewWorkerRegistry(svc)
+	var continuedTaskID int64
+	if err := registry.Register(task.Type, 1, func(ctx context.Context, current models.Task) error {
+		if current.ID == continuedTaskID {
+			close(continuedRun)
+			return nil
+		}
+		switch atomic.AddInt64(&taskCalls, 1) {
+		case 1:
+			close(firstStarted)
+			<-ctx.Done()
+			close(firstCanceled)
+			<-releaseFirst
+			return errors.New("旧执行取消后返回失败")
+		case 2:
+			close(secondStarted)
+			<-releaseSecond
+			return nil
+		default:
+			return errors.New("任务被意外重复执行")
+		}
+	}); err != nil {
+		t.Fatalf("注册可重试 worker 失败: %v", err)
+	}
+
+	runCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- registry.Run(runCtx, time.Millisecond) }()
+	waitWorkerSignal(t, firstStarted, "首轮 worker 未开始执行")
+	if err := svc.Cancel(context.Background(), task.ID, Query{SpaceID: models.DefaultSpaceID}); err != nil {
+		t.Fatalf("取消首轮任务失败: %v", err)
+	}
+	waitWorkerSignal(t, firstCanceled, "首轮 worker 未收到取消信号")
+	if err := svc.Retry(context.Background(), task.ID, Query{SpaceID: models.DefaultSpaceID}); err != nil {
+		t.Fatalf("立即重试任务失败: %v", err)
+	}
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- registry.RunPending(context.Background()) }()
+	waitWorkerSignal(t, secondStarted, "新一轮 worker 未执行")
+	continuedTask := mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        task.Type,
+		MaxAttempts: 1,
+	})
+	continuedTaskID = continuedTask.ID
+	releaseFirst <- struct{}{}
+	waitWorkerSignal(t, continuedRun, "旧执行返回后 Run 未继续领取任务")
+	waitTaskStatus(t, svc, continuedTask.ID, models.TaskStatusSucceeded)
+
+	got := mustGetTask(t, svc, task.ID, Query{SpaceID: models.DefaultSpaceID})
+	if got.Status != models.TaskStatusRunning || got.FinishedAt != nil {
+		t.Fatalf("旧执行不得写入新执行终态: %+v", got)
+	}
+	svc.cancelMu.Lock()
+	_, cancellationBound := svc.runningCancels[task.ID]
+	svc.cancelMu.Unlock()
+	if !cancellationBound {
+		t.Fatal("旧执行解绑不得移除同 ID 新执行的取消函数")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("旧执行取消不应终止 Run 循环: %v", err)
+	default:
+	}
+
+	releaseSecond <- struct{}{}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("同 ID 新执行不应受旧执行干扰: %v", err)
+	}
+	waitTaskStatus(t, svc, task.ID, models.TaskStatusSucceeded)
+	stop()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("停止 Run 循环应返回 context canceled，实际 %v", err)
+	}
+	if got := atomic.LoadInt64(&taskCalls); got != 2 {
+		t.Fatalf("任务应恰好执行两轮，实际 %d", got)
+	}
+}
+
 func TestWorkerRegistryMarksFailedAndRetries(t *testing.T) {
 	svc, _ := newTaskTestService(t)
 	ctx := context.Background()
@@ -273,6 +424,28 @@ func TestDefaultConcurrencyByTaskType(t *testing.T) {
 			t.Fatalf("%s 默认并发上限 got=%d want=%d", taskType, got, want)
 		}
 	}
+}
+
+func waitWorkerSignal(t *testing.T, signal <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatal(message)
+	}
+}
+
+func waitTaskStatus(t *testing.T, svc *Service, taskID int64, status string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		task := mustGetTask(t, svc, taskID, Query{SpaceID: models.DefaultSpaceID})
+		if task.Status == status {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("任务未进入期望状态 %s", status)
 }
 
 func updatePeak(peak *int64, current int64) {

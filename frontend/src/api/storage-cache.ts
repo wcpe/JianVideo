@@ -18,9 +18,7 @@ export type StorageCacheSummary = {
 };
 
 export type StorageCacheInventoryResult = {
-  discovered: number;
-  missing: number;
-  task_id?: number;
+  task_id: number;
 };
 
 export type StorageCacheCleanRequest = {

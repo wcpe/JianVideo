@@ -23,6 +23,7 @@ import {
   type StorageCacheCleanResult,
   type StorageCacheSummary,
 } from '@/api/storage-cache';
+import { getTask } from '@/api/tasks';
 import { extractErrorMessage } from '@/utils/error';
 import { formatBytes } from '@/utils/format';
 
@@ -35,6 +36,19 @@ const KIND_OPTIONS: { kind: CacheKind; label: string; tone: string }[] = [
 ];
 
 const ALL_KINDS = KIND_OPTIONS.map((item) => item.kind);
+const TASK_POLL_INTERVAL_MS = 200;
+const TASK_POLL_LIMIT = 75;
+
+async function waitForCacheTask(taskID: number): Promise<void> {
+  for (let attempt = 0; attempt < TASK_POLL_LIMIT; attempt += 1) {
+    const task = await getTask(String(taskID));
+    if (task.status === 'succeeded') return;
+    if (task.status === 'failed') throw new Error(task.error || '缓存任务执行失败');
+    if (task.status === 'canceled') throw new Error('缓存任务已取消');
+    await new Promise((resolve) => window.setTimeout(resolve, TASK_POLL_INTERVAL_MS));
+  }
+  throw new Error('缓存任务等待超时');
+}
 
 export default function StorageCachePage() {
   const [summary, setSummary] = useState<StorageCacheSummary | null>(null);
@@ -70,8 +84,14 @@ export default function StorageCachePage() {
     try {
       const result = await inventoryStorageCache();
       notifications.show({
+        title: '盘点任务已提交',
+        message: `任务 #${result.task_id} 正在后台执行`,
+        color: 'blue',
+      });
+      await waitForCacheTask(result.task_id);
+      notifications.show({
         title: '盘点完成',
-        message: `发现 ${result.discovered} 项，缺失 ${result.missing} 项`,
+        message: '缓存统计已刷新',
         color: 'green',
       });
       await load();
@@ -91,10 +111,24 @@ export default function StorageCachePage() {
       setBusy(true);
       try {
         const result = await cleanStorageCache({ dry_run: dryRun, kinds: selectedKinds });
-        setCleanResult(result);
-        if (!dryRun) {
-          await load();
+        if (dryRun) {
+          setCleanResult(result);
+          return;
         }
+        if (!result.task_id) throw new Error('清理响应缺少任务 ID');
+        setCleanResult(null);
+        notifications.show({
+          title: '清理任务已提交',
+          message: `任务 #${result.task_id} 正在后台执行`,
+          color: 'blue',
+        });
+        await waitForCacheTask(result.task_id);
+        notifications.show({
+          title: '清理完成',
+          message: '缓存统计已刷新',
+          color: 'green',
+        });
+        await load();
       } catch (err) {
         notifications.show({
           title: dryRun ? '预览清理失败' : '清理失败',
@@ -121,7 +155,12 @@ export default function StorageCachePage() {
           <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={load}>
             刷新
           </Button>
-          <Button variant="light" leftSection={<IconSearch size={16} />} loading={busy} onClick={runInventory}>
+          <Button
+            variant="light"
+            leftSection={<IconSearch size={16} />}
+            loading={busy}
+            onClick={runInventory}
+          >
             盘点
           </Button>
         </Group>
@@ -245,9 +284,8 @@ export default function StorageCachePage() {
 
       {cleanResult && (
         <Alert color={cleanResult.failed_count > 0 ? 'yellow' : 'blue'} title="清理预览">
-          {cleanResult.dry_run
-            ? `预计影响 ${cleanResult.candidate_count} 项，占用 ${formatBytes(cleanResult.total_size_bytes)}`
-            : `已清理 ${cleanResult.deleted_count} 项，释放 ${formatBytes(cleanResult.deleted_size_bytes)}`}
+          预计影响 {cleanResult.candidate_count} 项，占用{' '}
+          {formatBytes(cleanResult.total_size_bytes)}
         </Alert>
       )}
     </Stack>

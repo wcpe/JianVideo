@@ -8,9 +8,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
+
+const defaultWorkerPollInterval = 200 * time.Millisecond
 
 // Handler 是通用任务 worker 的业务执行函数。
 type Handler func(context.Context, models.Task) error
@@ -119,6 +122,28 @@ func (r *WorkerRegistry) RunPending(ctx context.Context) error {
 	return firstWorkerError(errs)
 }
 
+// Run 持续轮询并执行新入队任务，直到上下文取消。
+func (r *WorkerRegistry) Run(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		interval = defaultWorkerPollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := r.RunPending(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // DefaultConcurrency 返回首批任务类型的默认并发上限。
 func DefaultConcurrency(taskType string) int {
 	taskType = strings.TrimSpace(taskType)
@@ -185,36 +210,42 @@ func (r *WorkerRegistry) workerLoop(ctx context.Context, spec workerSpec) error 
 }
 
 func (r *WorkerRegistry) finishTask(ctx context.Context, spec workerSpec, task *models.Task) error {
-	taskCtx, release := r.service.bindRunningContext(ctx, task.ID)
-	defer release()
-	if canceled, err := r.taskCanceled(ctx, task.ID); err != nil || canceled {
+	taskCtx, cancel := context.WithCancel(ctx)
+	unbind := r.service.bindCancellation(task.ID, cancel)
+	defer func() {
+		unbind()
+		cancel()
+	}()
+	if canceled, err := r.service.isCanceled(ctx, task.ID); err != nil || canceled {
 		return err
 	}
-	handlerErr := spec.handler(taskCtx, *task)
-	if canceled, err := r.taskCanceled(ctx, task.ID); err != nil || canceled {
+	taskErr := spec.handler(taskCtx, *task)
+	if taskCtx.Err() != nil {
+		return nil
+	}
+	if taskErr != nil {
+		return r.finishFailedTask(ctx, task.ID, taskErr)
+	}
+	if err := r.service.MarkSucceeded(ctx, task.ID); err != nil {
+		if canceled, checkErr := r.service.isCanceled(ctx, task.ID); checkErr == nil && canceled {
+			return nil
+		}
 		return err
 	}
-	var err error
-	if handlerErr != nil {
-		err = r.service.MarkFailed(ctx, task.ID, handlerErr.Error())
-	} else {
-		err = r.service.MarkSucceeded(ctx, task.ID)
-	}
-	if err == nil {
-		return nil
-	}
-	if canceled, statusErr := r.taskCanceled(ctx, task.ID); statusErr == nil && canceled {
-		return nil
-	}
-	return err
+	return nil
 }
 
-func (r *WorkerRegistry) taskCanceled(ctx context.Context, taskID int64) (bool, error) {
-	task, err := r.service.getByID(ctx, taskID)
-	if err != nil {
-		return false, err
+func (r *WorkerRegistry) finishFailedTask(ctx context.Context, taskID int64, taskErr error) error {
+	if canceled, err := r.service.isCanceled(ctx, taskID); err != nil || canceled {
+		return err
 	}
-	return task.Status == models.TaskStatusCanceled, nil
+	if err := r.service.MarkFailed(ctx, taskID, taskErr.Error()); err != nil {
+		if canceled, checkErr := r.service.isCanceled(ctx, taskID); checkErr == nil && canceled {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func firstWorkerError(errs <-chan error) error {
