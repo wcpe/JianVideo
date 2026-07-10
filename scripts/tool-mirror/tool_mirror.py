@@ -291,9 +291,9 @@ def extract_armored_key(content: bytes, key_format: str) -> bytes:
     return block.encode("ascii")
 
 
-def imported_fingerprints(home: Path) -> set[str]:
+def key_fingerprints(key: Path) -> set[str]:
     result = subprocess.run(
-        ["gpg", "--homedir", str(home), "--batch", "--with-colons", "--fingerprint"],
+        ["gpg", "--batch", "--show-keys", "--with-colons", "--fingerprint", str(key)],
         check=True,
         text=True,
         capture_output=True,
@@ -311,14 +311,21 @@ def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     download(verification["signature_url"], signature)
     download(verification["key_url"], key_source)
     key.write_bytes(extract_armored_key(key_source.read_bytes(), verification["key_format"]))
-    home = work / "gnupg"
-    home.mkdir(mode=0o700)
-    subprocess.run(["gpg", "--homedir", str(home), "--batch", "--import", str(key)], check=True)
     fingerprint = verification["key_fingerprint"]
-    if fingerprint not in imported_fingerprints(home):
-        raise MirrorError(f"{package['name']}: 导入公钥指纹与锁文件不符")
+    if fingerprint not in key_fingerprints(key):
+        raise MirrorError(f"{package['name']}: 公钥指纹与锁文件不符")
+    keyring = work / "trustedkeys.gpg"
+    subprocess.run(
+        ["gpg", "--batch", "--yes", "--dearmor", "--output", str(keyring), str(key)],
+        check=True,
+    )
     result = subprocess.run(
-        ["gpg", "--homedir", str(home), "--batch", "--no-auto-key-retrieve", "--status-fd", "1", "--verify", str(signature), str(archive)],
+        [
+            "gpg", "--batch", "--no-options", "--no-default-keyring",
+            "--keyring", str(keyring), "--trust-model", "always",
+            "--no-auto-key-retrieve", "--status-fd", "1",
+            "--verify", str(signature), str(archive),
+        ],
         check=True,
         text=True,
         capture_output=True,
