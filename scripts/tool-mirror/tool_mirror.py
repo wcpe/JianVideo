@@ -25,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 DEFAULT_LOCK = ROOT / "lock.json"
 MSYS_BASH = Path(r"C:\msys64\usr\bin\bash.exe")
+MSYS_PREFIXES = {"UCRT64": "/ucrt64", "CLANGARM64": "/clangarm64"}
 SHA256_LENGTH = 64
 GIT_COMMIT_LENGTH = 40
 ZIP_MIN_EPOCH = 315532800
@@ -446,18 +447,32 @@ def capture_tool(name: str, command: list[str]) -> dict:
     return {"path": path, "version": first_output_line(result), "status": result.returncode}
 
 
+def windows_msys_bash() -> Path:
+    location = os.environ.get("MSYS2_LOCATION", "").strip()
+    if location:
+        return Path(location) / "usr" / "bin" / "bash.exe"
+    return MSYS_BASH
+
+
 def msys_environment(msystem: str) -> dict[str, str]:
     environment = os.environ.copy()
-    environment.update({"MSYSTEM": msystem, "CHERE_INVOKING": "1", "MSYS2_PATH_TYPE": "inherit"})
+    environment.update({"MSYSTEM": msystem, "CHERE_INVOKING": "1", "MSYS2_PATH_TYPE": "minimal"})
     return environment
+
+
+def msys_script(msystem: str, command: str) -> str:
+    prefix = MSYS_PREFIXES.get(msystem)
+    if not prefix:
+        raise MirrorError(f"不支持的 MSYS2 环境：{msystem}")
+    return f'export PATH="{prefix}/bin:/usr/local/bin:/usr/bin:/bin"; {command}'
 
 
 def capture_msys_tool(bash: Path, msystem: str, name: str, command: str) -> dict:
     if not bash.is_file():
         return {"path": "", "version": "", "status": 127}
-    script = f"command -v {name}; {command}"
+    script = msys_script(msystem, f"command -v {name}; {command}")
     result = subprocess.run(
-        [str(bash), "-lc", script],
+        [str(bash), "--noprofile", "--norc", "-lc", script],
         env=msys_environment(msystem),
         text=True,
         capture_output=True,
@@ -492,7 +507,8 @@ def windows_tools(runner: dict) -> dict[str, dict]:
         "libtoolize": ("libtoolize", "libtoolize --version"), "tar": ("tar", "tar --version"),
         "python": ("python", "python --version"),
     }
-    tools = {name: capture_msys_tool(MSYS_BASH, msystem, executable, command) for name, (executable, command) in commands.items()}
+    bash = windows_msys_bash()
+    tools = {name: capture_msys_tool(bash, msystem, executable, command) for name, (executable, command) in commands.items()}
     tools["host:gpg"] = capture_tool("gpg", ["gpg", "--version"])
     tools["host:gh"] = capture_tool("gh", ["gh", "--version"])
     tools["host:python"] = capture_tool("python", ["python", "--version"])
@@ -511,10 +527,17 @@ def parse_packages(output: str, separator: str = " ") -> dict[str, str]:
 
 def collect_packages(runner: dict) -> tuple[str, dict[str, str]]:
     if runner["platform"] == "windows":
-        if not MSYS_BASH.is_file():
+        bash = windows_msys_bash()
+        if not bash.is_file():
             return "unavailable", {}
         msystem = runner["toolchain"]["shell"]["msystem"]
-        result = subprocess.run([str(MSYS_BASH), "-lc", "pacman -Q"], env=msys_environment(msystem), text=True, capture_output=True, check=False)
+        result = subprocess.run(
+            [str(bash), "--noprofile", "--norc", "-lc", msys_script(msystem, "pacman -Q")],
+            env=msys_environment(msystem),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
         return "pacman", parse_packages(result.stdout)
     if platform.system() == "Darwin" and shutil.which("brew"):
         result = subprocess.run(["brew", "list", "--versions"], text=True, capture_output=True, check=False)

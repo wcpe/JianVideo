@@ -136,6 +136,17 @@ class ToolMirrorTest(unittest.TestCase):
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.assert_runner_identity(data, runner["label"], "Linux", "X64")
 
+    def test_setup_msys_location_and_prefix_are_explicit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.dict(os.environ, {"MSYS2_LOCATION": temp}):
+                self.assertEqual(
+                    Path(temp) / "usr" / "bin" / "bash.exe",
+                    tool_mirror.windows_msys_bash(),
+                )
+        script = tool_mirror.msys_script("CLANGARM64", "command -v cc")
+        self.assertIn('/clangarm64/bin:', script)
+        self.assertEqual("minimal", tool_mirror.msys_environment("CLANGARM64")["MSYS2_PATH_TYPE"])
+
     def test_missing_msys_bash_is_observable_without_crashing(self):
         runner = {
             "label": "windows-11-arm",

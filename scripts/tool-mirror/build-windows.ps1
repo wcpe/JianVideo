@@ -8,9 +8,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$bash = "C:\msys64\usr\bin\bash.exe"
+$msysRoot = if ($env:MSYS2_LOCATION) { $env:MSYS2_LOCATION } else { "C:\msys64" }
+$bash = Join-Path $msysRoot "usr\bin\bash.exe"
 if (-not (Test-Path $bash)) {
-    throw "错误：官方 runner 未提供预期的 MSYS2，拒绝静默安装未锁定工具链。"
+    throw "错误：未找到由固定版本安装步骤提供的 MSYS2：$bash"
 }
 
 $lockData = Get-Content -Raw -Encoding UTF8 $Lock | ConvertFrom-Json
@@ -51,10 +52,11 @@ $lockPath = Convert-ToMsysPath (Resolve-Path $Lock).Path
 $heicArgument = if ($EnableHeicWrite) { "--enable-heic-write" } else { "" }
 $env:MSYSTEM = $msystem
 $env:CHERE_INVOKING = "1"
-$env:MSYS2_PATH_TYPE = "inherit"
+$env:MSYS2_PATH_TYPE = "minimal"
 
 $guard = @'
 test "$MSYSTEM" = "$1" || { echo "错误：MSYSTEM 与锁文件不匹配" >&2; exit 1; }
+export PATH="$2/bin:/usr/local/bin:/usr/bin:/bin"
 compiler="$(command -v cc)"
 case "$compiler" in
   "$2"/bin/*) ;;
@@ -62,7 +64,7 @@ case "$compiler" in
 esac
 TOOLCHAIN_VERIFIED=1 exec "$3" "$4" "$5" "$6" "$7" "$8"
 '@
-& $bash -lc $guard "tool-mirror" $msystem $prefix $script $cachePath $outputPath $heicArgument $lockPath $Runner
+& $bash --noprofile --norc -lc $guard "tool-mirror" $msystem $prefix $script $cachePath $outputPath $heicArgument $lockPath $Runner
 if ($LASTEXITCODE -ne 0) {
     throw "错误：Windows 静态构建失败，退出码 $LASTEXITCODE。"
 }

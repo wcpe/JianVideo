@@ -51,14 +51,28 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置固定入口的 Windows MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: minimal
+          update: true
+          install: ${{ matrix.msys_packages }}
+          cache: false
+      - name: 导出 MSYS2 安装位置
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
       - name: 断言 runner 身份并采集环境
         shell: bash
         env:
@@ -88,14 +102,28 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置已锁定的 Windows MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: minimal
+          update: true
+          install: ${{ matrix.msys_packages }}
+          cache: false
+      - name: 导出 MSYS2 安装位置
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
       - name: 校验 runner 和可信锁
         shell: bash
         env:
@@ -117,8 +145,8 @@ jobs:
         include:
           - {runner: ubuntu-24.04, id: linux-x86_64, expected_os: Linux, expected_arch: X64}
           - {runner: ubuntu-24.04-arm, id: linux-aarch64, expected_os: Linux, expected_arch: ARM64}
-          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64}
-          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64}
+          - {runner: windows-2025, id: windows-x86_64, expected_os: Windows, expected_arch: X64, msystem: UCRT64, msys_packages: "base-devel mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-nasm"}
+          - {runner: windows-11-arm, id: windows-aarch64, expected_os: Windows, expected_arch: ARM64, msystem: CLANGARM64, msys_packages: "base-devel mingw-w64-clang-aarch64-toolchain mingw-w64-clang-aarch64-cmake"}
           - {runner: macos-15-intel, id: macos-x86_64, expected_os: macOS, expected_arch: X64}
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
@@ -129,6 +157,20 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置已锁定的 Windows MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: minimal
+          update: true
+          install: ${{ matrix.msys_packages }}
+          cache: false
+      - name: 导出 MSYS2 安装位置
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"MSYS2_LOCATION=${{ steps.msys2.outputs.msys2-location }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append'
       - name: 断言 runner 身份
         shell: bash
         run: python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
