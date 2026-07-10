@@ -16,7 +16,7 @@ if [ "${TOOLCHAIN_VERIFIED:-}" != "1" ]; then
   python "$script_root/tool_mirror.py" --lock "$lock" verify-toolchain --runner "$runner"
 fi
 
-required=(cc cmake make pkg-config tar autoreconf automake python)
+required=(cc c++ cmake make pkg-config tar autoreconf automake python)
 if [ "${RUNNER_OS:-}" = "macOS" ]; then
   required+=(glibtoolize)
 else

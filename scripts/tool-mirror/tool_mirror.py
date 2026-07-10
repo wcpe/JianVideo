@@ -486,7 +486,7 @@ def capture_msys_tool(bash: Path, msystem: str, name: str, command: str) -> dict
 
 def unix_tools() -> dict[str, dict]:
     commands = {
-        "cc": ["cc", "--version"], "cmake": ["cmake", "--version"],
+        "cc": ["cc", "--version"], "c++": ["c++", "--version"], "cmake": ["cmake", "--version"],
         "make": ["make", "--version"], "pkg-config": ["pkg-config", "--version"],
         "autoconf": ["autoconf", "--version"], "automake": ["automake", "--version"],
         "libtoolize": ["libtoolize", "--version"], "tar": ["tar", "--version"],
@@ -501,7 +501,7 @@ def unix_tools() -> dict[str, dict]:
 def windows_tools(runner: dict) -> dict[str, dict]:
     msystem = runner["toolchain"]["shell"]["msystem"]
     commands = {
-        "cc": ("cc", "cc --version"), "cmake": ("cmake", "cmake --version"),
+        "cc": ("cc", "cc --version"), "c++": ("c++", "c++ --version"), "cmake": ("cmake", "cmake --version"),
         "make": ("make", "make --version"), "pkg-config": ("pkg-config", "pkg-config --version"),
         "autoconf": ("autoconf", "autoconf --version"), "automake": ("automake", "automake --version"),
         "libtoolize": ("libtoolize", "libtoolize --version"), "tar": ("tar", "tar --version"),

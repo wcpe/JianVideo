@@ -178,7 +178,7 @@ class ToolMirrorTest(unittest.TestCase):
             environment = {"RUNNER_OS": "Windows", "RUNNER_ARCH": "ARM64"}
             with patch.object(tool_mirror, "MSYS_BASH", missing_bash), patch.dict(os.environ, environment):
                 evidence = tool_mirror.collect_discovery({"runners": [runner]}, runner["label"])
-        for name in ("cc", "cmake", "make", "pkg-config", "autoconf", "automake", "libtoolize", "tar", "python"):
+        for name in ("cc", "c++", "cmake", "make", "pkg-config", "autoconf", "automake", "libtoolize", "tar", "python"):
             self.assertEqual({"path": "", "version": "", "status": 127}, evidence["tool_versions"][name])
         self.assertEqual("CLANGARM64", evidence["environment"]["MSYSTEM"])
         self.assertEqual("minimal", evidence["environment"]["MSYS2_PATH_TYPE"])
