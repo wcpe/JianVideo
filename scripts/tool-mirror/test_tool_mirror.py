@@ -219,11 +219,12 @@ class ToolMirrorTest(unittest.TestCase):
         with patch.object(tool_mirror.os, "name", "posix"):
             self.assertEqual(str(path), tool_mirror.gpgv_path(path))
 
-    def test_libraw_build_disables_examples_and_loads_local_macros(self):
+    def test_libraw_build_disables_optional_windows_openmp(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
-        self.assertIn('m4_include([m4/ax_openmp.m4])', script)
+        self.assertIn('re.subn(r"if test x\\$openmp = xtrue ; then.*?\\nfi", "openmp=false"', script)
+        self.assertIn('libraw_args+=(--disable-openmp)', script)
         self.assertIn("autoreconf -fi -I m4", script)
-        self.assertIn("./configure --prefix=\"$prefix\" --enable-static --disable-shared --disable-examples", script)
+        self.assertIn("--disable-examples", script)
 
     def test_x264_and_ffmpeg_disable_x86_asm_when_nasm_is_missing(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
