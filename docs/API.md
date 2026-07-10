@@ -489,12 +489,12 @@
   ```json
   {"library_id": 1}
   ```
-- **响应**（200）：
+- **响应**（202）：
   ```json
-  {"status": "succeeded", "task_id": 12, "updated": 8}
+  {"status": "pending", "task_id": 12}
   ```
-- **说明**：批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务跳过 `home_video`、关闭的库和已有人工纠正的媒体。若通用任务服务可用，会以 `library.inference.backfill` 入队并执行。
-- **错误**：`500` 入队或回填失败
+- **说明**：批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务以当前 Space、`library_id` 和固定幂等键入队为 `library.inference.backfill`，跳过 `home_video`、关闭的库和已有人工纠正的媒体。客户端须使用 `GET /api/tasks/:task_id` 轮询 `pending` / `running`，直到 `succeeded` / `failed` / `canceled` 终态；`progress` 按逐媒体完成比例更新，`checkpoint` 为最近处理的媒体 ID。取消 `running` 任务会向 worker 处理器传递 context 取消信号。
+- **错误**：`503` 通用任务服务或 worker 未启用，`500` 入队失败
 
 ### 编辑备注（FR-137）
 

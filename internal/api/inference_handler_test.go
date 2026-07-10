@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,12 @@ func setupInferenceRouter(t *testing.T) (*gin.Engine, *library.Service, *gorm.DB
 	}
 	auditSvc := audit.NewRecorder(db)
 	libSvc := library.NewService(db).WithAudit(auditSvc)
-	handler := NewHandler(libSvc).WithTasks(tasksvc.NewService(db).WithAudit(auditSvc))
+	taskSvc := tasksvc.NewService(db).WithAudit(auditSvc)
+	workers := tasksvc.NewWorkerRegistry(taskSvc)
+	if err := RegisterInferenceBackfillWorker(workers, libSvc); err != nil {
+		t.Fatalf("注册推断回填 worker 失败: %v", err)
+	}
+	handler := NewHandler(libSvc).WithTasks(taskSvc).WithTaskWorkers(workers)
 	r := gin.New()
 	RegisterRoutes(r, handler)
 	return r, libSvc, db
@@ -73,7 +79,7 @@ func TestMediaInferenceAPIManualCorrectionAndBackfill(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp = httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
-	if resp.Code != http.StatusOK {
+	if resp.Code != http.StatusAccepted {
 		t.Fatalf("backfill 状态码 got=%d body=%s", resp.Code, resp.Body.String())
 	}
 	var backfill struct {
@@ -83,9 +89,10 @@ func TestMediaInferenceAPIManualCorrectionAndBackfill(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &backfill); err != nil {
 		t.Fatalf("解析 backfill 响应失败: %v", err)
 	}
-	if backfill.Status != "succeeded" || backfill.TaskID == 0 {
-		t.Fatalf("backfill 应返回成功任务: %+v", backfill)
+	if backfill.Status != models.TaskStatusPending || backfill.TaskID == 0 {
+		t.Fatalf("backfill 应返回待执行任务: %+v", backfill)
 	}
+	waitInferenceTaskTerminal(t, r, backfill.TaskID, models.TaskStatusSucceeded)
 
 	got, _ := libSvc.GetMediaInferenceInSpace(models.DefaultSpaceID, mf.ID)
 	if got.Title != "人工片名" || !got.Manual {
@@ -112,12 +119,75 @@ func TestMediaInferenceAPIHonorsGlobalSwitch(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/library/inference/backfill", nil)
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
-	if resp.Code != http.StatusOK {
+	if resp.Code != http.StatusAccepted {
 		t.Fatalf("backfill 状态码 got=%d body=%s", resp.Code, resp.Body.String())
 	}
+	var backfill struct {
+		TaskID int64 `json:"task_id"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &backfill); err != nil {
+		t.Fatalf("解析 backfill 响应失败: %v", err)
+	}
+	waitInferenceTaskTerminal(t, r, backfill.TaskID, models.TaskStatusSucceeded)
 	if _, err := libSvc.GetMediaInferenceInSpace(models.DefaultSpaceID, mf.ID); err == nil {
 		t.Fatal("全局关闭后 backfill 不应产生推断")
 	}
+}
+
+func TestInferenceBackfillTaskSpacePayloadAndIdempotency(t *testing.T) {
+	db := setupTestDB(t)
+	if err := db.AutoMigrate(&models.Task{}); err != nil {
+		t.Fatalf("迁移任务表失败: %v", err)
+	}
+	taskSvc := tasksvc.NewService(db)
+	handler := NewHandler(library.NewService(db)).WithTasks(taskSvc)
+
+	first, err := handler.enqueueInferenceBackfillTask(context.Background(), "space-a", 9)
+	if err != nil {
+		t.Fatalf("首次入队失败: %v", err)
+	}
+	second, err := handler.enqueueInferenceBackfillTask(context.Background(), "space-a", 9)
+	if err != nil {
+		t.Fatalf("重复入队失败: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("未完成的相同回填应复用任务: first=%d second=%d", first.ID, second.ID)
+	}
+	if first.SpaceID == nil || *first.SpaceID != "space-a" {
+		t.Fatalf("任务 Space 不正确: %+v", first)
+	}
+	var payload inferenceBackfillPayload
+	if err := json.Unmarshal([]byte(first.PayloadJSON), &payload); err != nil {
+		t.Fatalf("解析任务参数失败: %v", err)
+	}
+	if payload.SpaceID != "space-a" || payload.LibraryID != 9 {
+		t.Fatalf("任务参数不正确: %+v", payload)
+	}
+}
+
+func waitInferenceTaskTerminal(t *testing.T, r http.Handler, taskID int64, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+strconvID(taskID), nil)
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("查询任务失败: status=%d body=%s", resp.Code, resp.Body.String())
+		}
+		var task taskResponse
+		if err := json.Unmarshal(resp.Body.Bytes(), &task); err != nil {
+			t.Fatalf("解析任务详情失败: %v", err)
+		}
+		if task.Status == want {
+			return
+		}
+		if task.Status == models.TaskStatusFailed || task.Status == models.TaskStatusCanceled {
+			t.Fatalf("任务提前进入异常终态: %+v", task)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("等待任务 %d 进入终态 %s 超时", taskID, want)
 }
 
 func strconvID(id int64) string {

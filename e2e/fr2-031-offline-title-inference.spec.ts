@@ -101,7 +101,14 @@ test("本地离线推断可人工纠正且 backfill 不覆盖人工值", async (
         data: { library_id: libraryID },
       },
     );
-    expect(backfill.ok()).toBeTruthy();
+    expect(backfill.status()).toBe(202);
+    const backfillBody = (await backfill.json()) as {
+      status: string;
+      task_id: number;
+    };
+    expect(backfillBody.status).toBe("pending");
+    expect(backfillBody.task_id).toBeGreaterThan(0);
+    await pollTaskTerminal(page, backfillBody.task_id, "succeeded");
     const inference = await (
       await page.request.get(`/api/library/media/${mediaID}/inference`)
     ).json();
@@ -121,6 +128,32 @@ test("本地离线推断可人工纠正且 backfill 不覆盖人工值", async (
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+async function pollTaskTerminal(
+  page: Page,
+  taskID: number,
+  expected: "succeeded",
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`/api/tasks/${taskID}`);
+        expect(res.ok()).toBeTruthy();
+        const task = (await res.json()) as {
+          status: string;
+          error?: string | null;
+        };
+        if (task.status === "failed" || task.status === "canceled") {
+          throw new Error(
+            `回填任务异常终止: ${task.status} ${task.error ?? ""}`,
+          );
+        }
+        return task.status;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(expected);
+}
 
 async function pollMediaID(
   page: Page,

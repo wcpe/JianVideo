@@ -15,8 +15,15 @@ export async function listTasks(query: TaskListQuery = {}): Promise<TaskListPage
   return res.data;
 }
 
-export async function getTaskStats(query: Pick<TaskListQuery, 'scope' | 'status' | 'type'> = {}): Promise<TaskStats> {
+export async function getTaskStats(
+  query: Pick<TaskListQuery, 'scope' | 'status' | 'type'> = {},
+): Promise<TaskStats> {
   const res = await client.get<TaskStats>('/api/tasks/stats', { params: cleanQuery(query) });
+  return res.data;
+}
+
+export async function getTask(id: string): Promise<TaskItem> {
+  const res = await client.get<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`);
   return res.data;
 }
 

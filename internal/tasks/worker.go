@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -22,9 +23,13 @@ type workerSpec struct {
 
 // WorkerRegistry 按任务类型注册处理器，并按各类型并发上限领取执行 pending 任务。
 type WorkerRegistry struct {
-	service *Service
-	mu      sync.Mutex
-	specs   map[string]workerSpec
+	service     *Service
+	mu          sync.Mutex
+	runMu       sync.Mutex
+	wakeMu      sync.Mutex
+	wakeRunning bool
+	wakePending bool
+	specs       map[string]workerSpec
 }
 
 // NewWorkerRegistry 创建通用任务 worker 注册表。
@@ -53,8 +58,52 @@ func (r *WorkerRegistry) Register(taskType string, concurrency int, handler Hand
 	return nil
 }
 
+// UpdateProgress 更新当前 worker 任务的进度和检查点。
+func (r *WorkerRegistry) UpdateProgress(ctx context.Context, taskID int64, input ProgressInput) error {
+	if r == nil || r.service == nil {
+		return errors.New("worker 注册表未初始化")
+	}
+	return r.service.UpdateProgress(ctx, taskID, input)
+}
+
+// Wake 异步唤醒注册表；并发信号只合并为一次补跑，不堆积等待 goroutine。
+func (r *WorkerRegistry) Wake() {
+	if r == nil {
+		return
+	}
+	r.wakeMu.Lock()
+	if r.wakeRunning {
+		r.wakePending = true
+		r.wakeMu.Unlock()
+		return
+	}
+	r.wakeRunning = true
+	r.wakeMu.Unlock()
+	go r.wakeLoop()
+}
+
+func (r *WorkerRegistry) wakeLoop() {
+	for {
+		if err := r.RunPending(context.Background()); err != nil {
+			log.Printf("[ERROR] 通用任务 worker 执行失败: %v", err)
+		}
+		r.wakeMu.Lock()
+		if r.wakePending {
+			r.wakePending = false
+			r.wakeMu.Unlock()
+			continue
+		}
+		r.wakeRunning = false
+		r.wakeMu.Unlock()
+		return
+	}
+}
+
 // RunPending 领取并执行当前所有已到期的 pending 任务。
 func (r *WorkerRegistry) RunPending(ctx context.Context) error {
+	r.runMu.Lock()
+	defer r.runMu.Unlock()
+
 	specs := r.snapshot()
 	errs := make(chan error, len(specs))
 	var wg sync.WaitGroup
@@ -136,27 +185,36 @@ func (r *WorkerRegistry) workerLoop(ctx context.Context, spec workerSpec) error 
 }
 
 func (r *WorkerRegistry) finishTask(ctx context.Context, spec workerSpec, task *models.Task) error {
-	if err := spec.handler(ctx, *task); err != nil {
-		if r.taskCanceled(ctx, task.ID) {
-			return nil
-		}
-		if markErr := r.service.MarkFailed(ctx, task.ID, err.Error()); markErr != nil {
-			return markErr
-		}
-		return nil
-	}
-	if err := r.service.MarkSucceeded(ctx, task.ID); err != nil {
-		if r.taskCanceled(ctx, task.ID) {
-			return nil
-		}
+	taskCtx, release := r.service.bindRunningContext(ctx, task.ID)
+	defer release()
+	if canceled, err := r.taskCanceled(ctx, task.ID); err != nil || canceled {
 		return err
 	}
-	return nil
+	handlerErr := spec.handler(taskCtx, *task)
+	if canceled, err := r.taskCanceled(ctx, task.ID); err != nil || canceled {
+		return err
+	}
+	var err error
+	if handlerErr != nil {
+		err = r.service.MarkFailed(ctx, task.ID, handlerErr.Error())
+	} else {
+		err = r.service.MarkSucceeded(ctx, task.ID)
+	}
+	if err == nil {
+		return nil
+	}
+	if canceled, statusErr := r.taskCanceled(ctx, task.ID); statusErr == nil && canceled {
+		return nil
+	}
+	return err
 }
 
-func (r *WorkerRegistry) taskCanceled(ctx context.Context, id int64) bool {
-	task, err := r.service.getByID(ctx, id)
-	return err == nil && task.Status == models.TaskStatusCanceled
+func (r *WorkerRegistry) taskCanceled(ctx context.Context, taskID int64) (bool, error) {
+	task, err := r.service.getByID(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return task.Status == models.TaskStatusCanceled, nil
 }
 
 func firstWorkerError(errs <-chan error) error {

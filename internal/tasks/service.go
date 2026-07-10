@@ -27,6 +27,10 @@ var (
 	ErrNoPendingTask = errors.New("没有可领取的任务")
 )
 
+type runningTaskContext struct {
+	cancel context.CancelFunc
+}
+
 // Service 管理通用异步任务的入队、领取、状态流转与审计。
 type Service struct {
 	db             *gorm.DB
@@ -34,6 +38,8 @@ type Service struct {
 	now            func() time.Time
 	mu             sync.Mutex
 	priorityStreak map[string]int
+	runningMu      sync.Mutex
+	runningCancels map[int64]*runningTaskContext
 }
 
 // EnqueueInput 描述创建通用异步任务所需的字段。
@@ -114,6 +120,7 @@ func NewService(db *gorm.DB) *Service {
 		db:             db,
 		now:            time.Now,
 		priorityStreak: map[string]int{},
+		runningCancels: map[int64]*runningTaskContext{},
 	}
 }
 
@@ -446,7 +453,7 @@ func (s *Service) Cancel(ctx context.Context, id int64, query Query) error {
 	task.Status = models.TaskStatusCanceled
 	task.FinishedAt = &now
 	task.UpdatedAt = now
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Task{}).Where("id = ?", id).Updates(map[string]any{
 			"status":      models.TaskStatusCanceled,
 			"finished_at": now,
@@ -456,6 +463,11 @@ func (s *Service) Cancel(ctx context.Context, id int64, query Query) error {
 		}
 		return s.recordAuditTx(ctx, tx, task, "task.canceled", "")
 	})
+	if err != nil {
+		return err
+	}
+	s.cancelRunning(id)
+	return nil
 }
 
 // Retry 将 failed 或 canceled 任务重置为 pending。
@@ -621,6 +633,34 @@ func (s *Service) RecoverRunning(ctx context.Context) error {
 			"next_run_at": nil,
 			"updated_at":  now,
 		}).Error
+}
+
+func (s *Service) bindRunningContext(parent context.Context, taskID int64) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	running := &runningTaskContext{cancel: cancel}
+	s.runningMu.Lock()
+	s.runningCancels[taskID] = running
+	s.runningMu.Unlock()
+	if task, err := s.getByID(parent, taskID); err == nil && task.Status == models.TaskStatusCanceled {
+		cancel()
+	}
+	return ctx, func() {
+		s.runningMu.Lock()
+		if s.runningCancels[taskID] == running {
+			delete(s.runningCancels, taskID)
+		}
+		s.runningMu.Unlock()
+		cancel()
+	}
+}
+
+func (s *Service) cancelRunning(taskID int64) {
+	s.runningMu.Lock()
+	running := s.runningCancels[taskID]
+	s.runningMu.Unlock()
+	if running != nil {
+		running.cancel()
+	}
 }
 
 func (s *Service) findUnfinishedByKey(ctx context.Context, key string) (models.Task, bool, error) {

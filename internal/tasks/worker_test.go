@@ -94,6 +94,91 @@ func TestWorkerRegistryRunsTasksWithTypeConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestWorkerRegistryRunPendingIsExclusive(t *testing.T) {
+	svc, _ := newTaskTestService(t)
+	mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        "metadata.backfill",
+		MaxAttempts: 1,
+	})
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	registry := NewWorkerRegistry(svc)
+	if err := registry.Register("metadata.backfill", 1, func(context.Context, models.Task) error {
+		close(entered)
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatalf("注册 worker 失败: %v", err)
+	}
+
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() { firstDone <- registry.RunPending(context.Background()) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("首个 RunPending 未开始执行任务")
+	}
+	go func() { secondDone <- registry.RunPending(context.Background()) }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("第二个 RunPending 不应在首个执行完成前返回: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("首个 RunPending 执行失败: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("第二个 RunPending 执行失败: %v", err)
+	}
+}
+
+func TestWorkerRegistryWakeCoalescesConcurrentSignals(t *testing.T) {
+	svc, _ := newTaskTestService(t)
+	mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        "metadata.backfill",
+		MaxAttempts: 1,
+	})
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	registry := NewWorkerRegistry(svc)
+	if err := registry.Register("metadata.backfill", 1, func(context.Context, models.Task) error {
+		close(entered)
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatalf("注册 worker 失败: %v", err)
+	}
+	registry.Wake()
+	<-entered
+	for i := 0; i < 1000; i++ {
+		registry.Wake()
+	}
+	registry.wakeMu.Lock()
+	running, pending := registry.wakeRunning, registry.wakePending
+	registry.wakeMu.Unlock()
+	if !running || !pending {
+		t.Fatalf("并发唤醒应合并为一个补跑信号: running=%v pending=%v", running, pending)
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		registry.wakeMu.Lock()
+		idle := !registry.wakeRunning && !registry.wakePending
+		registry.wakeMu.Unlock()
+		if idle {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("合并唤醒执行完成后未回到空闲状态")
+}
+
 func TestWorkerRegistryMarksFailedAndRetries(t *testing.T) {
 	svc, _ := newTaskTestService(t)
 	ctx := context.Background()
@@ -136,6 +221,43 @@ func TestWorkerRegistryMarksFailedAndRetries(t *testing.T) {
 	failed := mustGetTask(t, svc, finalTask.ID, Query{SpaceID: models.DefaultSpaceID})
 	if failed.Status != models.TaskStatusFailed || failed.Attempts != 1 || failed.Error != "最终失败" {
 		t.Fatalf("重试耗尽后应失败: %+v", failed)
+	}
+}
+
+func TestWorkerRegistryKeepsCanceledTerminalState(t *testing.T) {
+	svc, _ := newTaskTestService(t)
+	task := mustEnqueueTask(t, svc, EnqueueInput{
+		Scope:       models.TaskScopeSpace,
+		SpaceID:     models.DefaultSpaceID,
+		Type:        "metadata.backfill",
+		MaxAttempts: 1,
+	})
+	entered := make(chan struct{})
+	registry := NewWorkerRegistry(svc)
+	if err := registry.Register(task.Type, 1, func(ctx context.Context, _ models.Task) error {
+		close(entered)
+		<-ctx.Done()
+		return ctx.Err()
+	}); err != nil {
+		t.Fatalf("注册 worker 失败: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- registry.RunPending(context.Background()) }()
+	<-entered
+	if err := svc.Cancel(context.Background(), task.ID, Query{SpaceID: models.DefaultSpaceID}); err != nil {
+		t.Fatalf("取消运行中任务失败: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("取消后的 worker 不应失败: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("取消 running 任务后处理器未收到 context 取消信号")
+	}
+	got := mustGetTask(t, svc, task.ID, Query{SpaceID: models.DefaultSpaceID})
+	if got.Status != models.TaskStatusCanceled {
+		t.Fatalf("worker 不得覆盖取消终态: %+v", got)
 	}
 }
 

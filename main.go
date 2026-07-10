@@ -68,6 +68,9 @@ func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Servi
 	}); err != nil {
 		log.Printf("[WARN] 内容哈希回填 worker 注册失败: %v", err)
 	}
+	if err := api.RegisterInferenceBackfillWorker(workers, libSvc); err != nil {
+		log.Fatalf("[ERROR] 注册离线推断回填 worker 失败: %v", err)
+	}
 }
 
 func applyInstalledTool(result toolsvc.InstallResult) error {

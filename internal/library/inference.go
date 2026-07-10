@@ -1,6 +1,7 @@
 package library
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +101,9 @@ func InferMediaTitle(input InferenceInput) InferenceResult {
 	}
 	base := stripExtension(name)
 	if parsed, ok := parseSeries(base, kind); ok {
+		if parsed.Title == "" {
+			parsed.Title = parentDirectoryTitle(input.FilePath)
+		}
 		return parsed
 	}
 	if parsed, ok := parseMovie(base, input.FilePath, kind); ok {
@@ -135,32 +139,46 @@ func (s *Service) GetMediaInferenceInSpace(spaceID string, mediaID int64) (*mode
 
 // InferAndStoreMediaInSpace 对单个媒体执行自动推断；人工值和关闭开关不会被覆盖。
 func (s *Service) InferAndStoreMediaInSpace(spaceID string, mediaID int64) (*models.MediaInference, error) {
+	inf, _, err := s.inferAndStoreMediaInSpace(spaceID, mediaID)
+	return inf, err
+}
+
+func (s *Service) inferAndStoreMediaInSpace(spaceID string, mediaID int64) (*models.MediaInference, bool, error) {
 	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
-		return nil, nil
+		return nil, false, nil
 	}
 	mf, lp, err := s.mediaWithLibrary(spaceID, mediaID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !s.inferenceEnabled(lp.SpaceID, lp.ID) || lp.LibraryKind == models.LibraryKindHomeVideo {
-		return nil, nil
+		return nil, false, nil
 	}
 	existing, err := s.GetMediaInferenceInSpace(lp.SpaceID, mediaID)
 	if err == nil && existing.Manual {
-		return existing, nil
+		return existing, false, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
+		return nil, false, err
 	}
 	result := InferMediaTitle(InferenceInput{FilePath: mf.FilePath, FileName: mf.FileName, LibraryKind: lp.LibraryKind})
 	if strings.TrimSpace(result.Title) == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	inf := inferenceFromResult(mediaID, lp.SpaceID, result)
-	if err := s.upsertInference(&inf); err != nil {
-		return nil, err
+	before := existing
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		before = nil
 	}
-	return s.GetMediaInferenceInSpace(lp.SpaceID, mediaID)
+	if s.beforeAutoInferenceSave != nil {
+		s.beforeAutoInferenceSave()
+	}
+	changed, err := s.saveAutoInference(&inf, before)
+	if err != nil {
+		return nil, false, err
+	}
+	stored, err := s.GetMediaInferenceInSpace(lp.SpaceID, mediaID)
+	return stored, changed && err == nil, err
 }
 
 // UpsertManualInferenceInSpace 保存人工纠正结果，并与审计事件同事务提交。
@@ -178,7 +196,7 @@ func (s *Service) UpsertManualInferenceInSpace(spaceID string, mediaID int64, in
 	}
 	inf := manualInferenceFromInput(mf, lp, kind, input)
 	before := s.inferenceBeforeAudit(lp.SpaceID, mf.ID)
-	if err := s.saveManualInference(&inf, before); err != nil {
+	if err := s.saveInference(&inf, before); err != nil {
 		return nil, err
 	}
 	return s.GetMediaInferenceInSpace(lp.SpaceID, mf.ID)
@@ -219,7 +237,7 @@ func (s *Service) inferenceBeforeAudit(spaceID string, mediaID int64) *models.Me
 	return nil
 }
 
-func (s *Service) saveManualInference(inf *models.MediaInference, before *models.MediaInference) error {
+func (s *Service) saveInference(inf *models.MediaInference, before *models.MediaInference) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := upsertInferenceTx(tx, inf); err != nil {
 			return err
@@ -237,8 +255,36 @@ func (s *Service) saveManualInference(inf *models.MediaInference, before *models
 	})
 }
 
-func (s *Service) upsertInference(inf *models.MediaInference) error {
-	return upsertInferenceTx(s.db, inf)
+func (s *Service) saveAutoInference(inf *models.MediaInference, before *models.MediaInference) (bool, error) {
+	changed := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(autoInferenceConflict()).Create(inf)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		changed = true
+		return s.recordAuditTx(tx, audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      inf.SpaceID,
+			ActorType:    audit.ActorSystem,
+			Action:       "media.inference.updated",
+			ResourceType: "media",
+			ResourceID:   fmt.Sprintf("%d", inf.MediaID),
+			Before:       inferenceAuditPayload(before),
+			After:        inferenceAuditPayload(inf),
+		})
+	})
+	return changed, err
+}
+
+func autoInferenceConflict() clause.OnConflict {
+	return clause.OnConflict{
+		Columns:   []clause.Column{{Name: "media_id"}},
+		DoUpdates: clause.AssignmentColumns(inferenceUpsertColumns()),
+		Where: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Table: "media_inferences", Name: "manual"}, Value: false},
+		}},
+	}
 }
 
 func upsertInferenceTx(db *gorm.DB, inf *models.MediaInference) error {
@@ -255,30 +301,66 @@ func inferenceUpsertColumns() []string {
 	}
 }
 
+// InferenceBackfillProgress 是批量推断的逐媒体进度回调。
+type InferenceBackfillProgress func(completed, total int, mediaID int64) error
+
 // BackfillMediaInferencesInSpace 批量重跑自动推断，跳过人工值和关闭的库。
 func (s *Service) BackfillMediaInferencesInSpace(spaceID string, libraryID int64) (int, error) {
-	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
-		return 0, nil
+	return s.BackfillMediaInferencesWithProgressInSpace(context.Background(), spaceID, libraryID, nil)
+}
+
+// BackfillMediaInferencesWithProgressInSpace 支持逐媒体进度和协作取消的批量推断。
+func (s *Service) BackfillMediaInferencesWithProgressInSpace(
+	ctx context.Context,
+	spaceID string,
+	libraryID int64,
+	onProgress InferenceBackfillProgress,
+) (int, error) {
+	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID)
+	if err != nil {
+		return 0, err
 	}
-	query := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID))
+	updated := 0
+	for i := range files {
+		if err := ctx.Err(); err != nil {
+			return updated, err
+		}
+		_, stored, err := s.inferAndStoreMediaInSpace(files[i].SpaceID, files[i].ID)
+		if err != nil {
+			return updated, err
+		}
+		if stored {
+			updated++
+		}
+		if onProgress != nil {
+			if err := onProgress(i+1, len(files), files[i].ID); err != nil {
+				return updated, err
+			}
+		}
+	}
+	return updated, nil
+}
+
+func (s *Service) listInferenceBackfillFiles(ctx context.Context, spaceID string, libraryID int64) ([]models.MediaFile, error) {
+	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
+		return nil, nil
+	}
+	query := s.db.WithContext(ctx).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID))
 	if libraryID > 0 {
 		query = query.Where("library_id = ?", libraryID)
 	}
 	var files []models.MediaFile
 	if err := query.Order("id ASC").Find(&files).Error; err != nil {
-		return 0, err
+		return nil, err
 	}
-	updated := 0
-	for i := range files {
-		inf, err := s.InferAndStoreMediaInSpace(files[i].SpaceID, files[i].ID)
-		if err != nil {
-			return updated, err
-		}
-		if inf != nil {
-			updated++
-		}
+	return files, nil
+}
+
+func parentDirectoryTitle(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
 	}
-	return updated, nil
+	return cleanupTitle(filepath.Base(filepath.Dir(path)))
 }
 
 func parseSeries(base, kind string) (InferenceResult, bool) {

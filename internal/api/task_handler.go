@@ -171,6 +171,9 @@ func (h *Handler) changeTask(c *gin.Context, action string, change func(int64, t
 		writeTaskError(c, err)
 		return
 	}
+	if !handled && action == "retry" && h.taskWorkers != nil {
+		h.taskWorkers.Wake()
+	}
 	task, err = h.tasks.Get(c.Request.Context(), id, query)
 	if err != nil {
 		writeTaskError(c, err)

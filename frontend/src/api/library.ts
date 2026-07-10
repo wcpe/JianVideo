@@ -313,10 +313,13 @@ async function realUpdateMediaInference(
   return res.data;
 }
 
-async function realBackfillMediaInferences(
-  libraryID?: number,
-): Promise<{ task_id?: number; updated: number; status: string }> {
-  const res = await client.post<{ task_id?: number; updated: number; status: string }>(
+export interface InferenceBackfillAccepted {
+  status: 'pending' | 'running';
+  task_id: number;
+}
+
+async function realBackfillMediaInferences(libraryID?: number): Promise<InferenceBackfillAccepted> {
+  const res = await client.post<InferenceBackfillAccepted>(
     '/api/library/inference/backfill',
     libraryID ? { library_id: libraryID } : {},
   );
@@ -773,13 +776,9 @@ async function mockUpdateMediaInference(
   return inference;
 }
 
-async function mockBackfillMediaInferences(): Promise<{
-  task_id?: number;
-  updated: number;
-  status: string;
-}> {
+async function mockBackfillMediaInferences(): Promise<InferenceBackfillAccepted> {
   await mockDelay(200);
-  return { task_id: nextMockTaskId++, updated: 0, status: 'succeeded' };
+  return { task_id: nextMockTaskId++, status: 'pending' };
 }
 
 async function mockDeleteMediaFile(id: number): Promise<void> {

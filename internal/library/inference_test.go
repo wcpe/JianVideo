@@ -166,6 +166,78 @@ func TestInferAndStoreRespectsSwitchesAndManualValue(t *testing.T) {
 	}
 }
 
+func TestAutoInferenceDoesNotOverwriteConcurrentManualValue(t *testing.T) {
+	svc, _ := newInferenceTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	media, err := svc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, "Auto.Movie.2024.mkv"), 10)
+	if err != nil {
+		t.Fatalf("创建媒体失败: %v", err)
+	}
+
+	beforeSave := make(chan struct{})
+	releaseSave := make(chan struct{})
+	svc.beforeAutoInferenceSave = func() {
+		close(beforeSave)
+		<-releaseSave
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.InferAndStoreMediaInSpace(models.DefaultSpaceID, media.ID)
+		done <- err
+	}()
+	<-beforeSave
+	if _, err := svc.UpsertManualInferenceInSpace(models.DefaultSpaceID, media.ID, InferenceManualInput{Title: "并发人工片名"}); err != nil {
+		t.Fatalf("并发写入人工值失败: %v", err)
+	}
+	close(releaseSave)
+	if err := <-done; err != nil {
+		t.Fatalf("自动推断失败: %v", err)
+	}
+	got, err := svc.GetMediaInferenceInSpace(models.DefaultSpaceID, media.ID)
+	if err != nil {
+		t.Fatalf("读取最终推断失败: %v", err)
+	}
+	if !got.Manual || got.Title != "并发人工片名" {
+		t.Fatalf("自动推断不得覆盖并发人工值: %+v", got)
+	}
+}
+
+func TestBackfillMediaInferencesReportsProgressAndCancels(t *testing.T) {
+	svc, _ := newInferenceTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	for _, name := range []string{"First.Movie.2024.mkv", "Second.Movie.2025.mkv"} {
+		if _, err := svc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, name), 10); err != nil {
+			t.Fatalf("创建媒体失败: %v", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var completed []int
+	updated, err := svc.BackfillMediaInferencesWithProgressInSpace(ctx, models.DefaultSpaceID, lp.ID, func(done, total int, _ int64) error {
+		if total != 2 {
+			t.Fatalf("进度总数不正确: %d", total)
+		}
+		completed = append(completed, done)
+		if done == 1 {
+			cancel()
+		}
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("取消后应返回 context.Canceled，实际 %v", err)
+	}
+	if updated != 1 || len(completed) != 1 || completed[0] != 1 {
+		t.Fatalf("应逐媒体报告进度并在取消后停止: updated=%d progress=%v", updated, completed)
+	}
+}
+
 func TestManualInferenceRecordsAuditAndRollsBackOnAuditFailure(t *testing.T) {
 	svc, db := newInferenceTestService(t)
 	media := models.MediaFile{

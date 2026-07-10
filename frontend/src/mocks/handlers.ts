@@ -1013,9 +1013,37 @@ export const handlers = [
     return HttpResponse.json(inference);
   }),
 
-  http.post('*/api/library/inference/backfill', async () => {
+  http.post('*/api/library/inference/backfill', async ({ request }) => {
     await delay(120);
-    return HttpResponse.json({ status: 'succeeded', task_id: Date.now(), updated: 0 });
+    const body = (await request.json()) as { library_id?: number };
+    const now = new Date().toISOString();
+    const taskID = String(Date.now());
+    const task: TaskItem = {
+      id: taskID,
+      scope: 'space',
+      space_id: currentSpaceID(request),
+      type: 'library.inference.backfill',
+      status: 'pending',
+      priority: 0,
+      attempts: 0,
+      max_attempts: 1,
+      progress: 0,
+      resource_type: 'library',
+      resource_id: String(body.library_id ?? 0),
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    addUnifiedTask(task);
+    setTimeout(() => {
+      const finishedAt = new Date().toISOString();
+      task.status = 'succeeded';
+      task.progress = 1;
+      task.updated_at = finishedAt;
+      task.started_at = now;
+      task.finished_at = finishedAt;
+    }, 150);
+    return HttpResponse.json({ status: 'pending', task_id: Number(taskID) }, { status: 202 });
   }),
 
   http.get('*/api/media-types', async ({ request }) => {

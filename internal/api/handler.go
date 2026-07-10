@@ -153,7 +153,7 @@ func (h *Handler) WithTasks(svc *tasksvc.Service) *Handler {
 	return h
 }
 
-// WithTaskWorkers 注入通用任务 worker 注册表，供新任务入队后即时触发执行。
+// WithTaskWorkers 注入通用任务 worker 注册表，供业务入队后唤醒后台处理。
 func (h *Handler) WithTaskWorkers(workers *tasksvc.WorkerRegistry) *Handler {
 	h.taskWorkers = workers
 	return h
