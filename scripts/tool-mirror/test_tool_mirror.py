@@ -25,6 +25,13 @@ verify_fixtures = importlib.util.module_from_spec(FIXTURE_SPEC)
 if FIXTURE_SPEC and FIXTURE_SPEC.loader:
     FIXTURE_SPEC.loader.exec_module(verify_fixtures)
 
+DNG_SPEC = importlib.util.spec_from_file_location(
+    "generate_dng", SCRIPT_ROOT / "fixtures" / "generate_dng.py"
+)
+generate_dng = importlib.util.module_from_spec(DNG_SPEC)
+if DNG_SPEC and DNG_SPEC.loader:
+    DNG_SPEC.loader.exec_module(generate_dng)
+
 
 class ToolMirrorTest(unittest.TestCase):
     def locked_toolchain(self):
@@ -253,6 +260,10 @@ class ToolMirrorTest(unittest.TestCase):
                 output.addfile(info, BytesIO(b"x"))
             with self.assertRaises(tool_mirror.MirrorError):
                 tool_mirror.extract_archive(archive, root / "out")
+
+    def test_generated_dng_matches_committed_fixture(self):
+        fixture = SCRIPT_ROOT / "fixtures" / "jianvideo-gradient.dng"
+        self.assertEqual(generate_dng.build_dng(), fixture.read_bytes())
 
     def test_fixture_manifest_requires_real_heic_and_raw_sources(self):
         valid = {
