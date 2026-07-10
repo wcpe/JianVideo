@@ -66,7 +66,7 @@ zlib="$(source_dir 'zlib-*')"
 cmake_build "$(source_dir 'libpng-*')" libpng -DPNG_SHARED=OFF -DPNG_TESTS=OFF
 cmake_build "$(source_dir 'libjpeg-turbo-*')" jpeg -DENABLE_SHARED=OFF -DWITH_TURBOJPEG=OFF
 cmake_build "$(source_dir 'libwebp-*')" webp -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_EXTRAS=OFF
-cmake_build "$(source_dir 'libtiff-*')" tiff -Dtiff-tools=OFF -Dtiff-tests=OFF -Dtiff-contrib=OFF
+cmake_build "$(source_dir 'libtiff-*')" tiff -Dtiff-tools=OFF -Dtiff-tests=OFF -Dtiff-contrib=OFF -Dzstd=OFF -Dlzma=OFF -Dwebp=OFF -Djbig=OFF -Dlibdeflate=OFF
 cmake_build "$(source_dir 'libde265-*')" libde265 -DENABLE_SDL=OFF -DENABLE_DEC265=OFF
 if [ "$heic_write" = "--enable-heic-write" ]; then
   cmake_build "$(source_dir 'x265-*')/source" x265 -DENABLE_SHARED=OFF -DENABLE_CLI=OFF
