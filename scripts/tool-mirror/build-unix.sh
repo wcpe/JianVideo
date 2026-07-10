@@ -75,7 +75,7 @@ cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_L
 
 libraw="$(source_dir 'LibRaw-*')"
 if [ "${RUNNER_OS:-}" = "Windows" ]; then
-  (cd "$libraw" && make -f Makefile.mingw -j"$jobs" library CFLAGS="-O2 -fPIC -I. -DUSE_JPEG -DUSE_JPEG8 -I$prefix/include" LDADD="-L$prefix/lib -ljpeg")
+  (cd "$libraw" && make -f Makefile.mingw -j"$jobs" library CC=cc CXX=c++ CFLAGS="-O2 -fPIC -I. -DUSE_JPEG -DUSE_JPEG8 -I$prefix/include" LDADD="-L$prefix/lib -ljpeg")
   mkdir -p "$prefix/include" "$prefix/lib/pkgconfig"
   cp -R "$libraw/libraw" "$prefix/include/"
   cp "$libraw/lib/libraw.a" "$prefix/lib/"
