@@ -34,6 +34,14 @@ if DNG_SPEC and DNG_SPEC.loader:
 
 
 class ToolMirrorTest(unittest.TestCase):
+    def test_request_headers_only_forward_token_to_github(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "secret", "GITHUB_TOKEN": ""}, clear=False):
+            self.assertNotIn("Authorization", tool_mirror.request_headers("https://madler.net/madler/pgp.html"))
+            self.assertEqual(
+                tool_mirror.request_headers("https://api.github.com/repos/example/project")["Authorization"],
+                "Bearer secret",
+            )
+
     def locked_toolchain(self):
         return {
             "status": "locked",

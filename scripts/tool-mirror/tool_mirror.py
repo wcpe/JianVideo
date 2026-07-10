@@ -254,23 +254,24 @@ def require_trusted_lock(data: dict, include_optional: bool = False) -> None:
         raise MirrorError("可信构建预检失败：\n- " + "\n- ".join(errors))
 
 
-def request_headers() -> dict[str, str]:
+def request_headers(url: str) -> dict[str, str]:
     headers = {"User-Agent": "JianVideo-tool-mirror/1"}
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
+    hostname = urllib.parse.urlparse(url).hostname
+    if token and hostname in {"github.com", "api.github.com"}:
         headers["Authorization"] = f"Bearer {token}"
     return headers
 
 
 def download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers=request_headers())
+    request = urllib.request.Request(url, headers=request_headers(url))
     with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
 
 
 def download_json(url: str) -> dict:
-    request = urllib.request.Request(url, headers=request_headers())
+    request = urllib.request.Request(url, headers=request_headers(url))
     with urllib.request.urlopen(request, timeout=120) as response:
         return json.load(response)
 
