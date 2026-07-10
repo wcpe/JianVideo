@@ -147,6 +147,22 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('/clangarm64/bin:', script)
         self.assertEqual("minimal", tool_mirror.msys_environment("CLANGARM64")["MSYS2_PATH_TYPE"])
 
+    def test_missing_msys_command_does_not_become_a_tool_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bash = Path(temp) / "bash.exe"
+            bash.touch()
+            result = type("Result", (), {
+                "stdout": "",
+                "stderr": "/usr/bin/bash: line 1: autoconf: command not found\n",
+                "returncode": 127,
+            })()
+            with patch.object(tool_mirror.subprocess, "run", return_value=result):
+                evidence = tool_mirror.capture_msys_tool(
+                    bash, "UCRT64", "autoconf", "autoconf --version"
+                )
+        self.assertEqual("", evidence["path"])
+        self.assertEqual(127, evidence["status"])
+
     def test_missing_msys_bash_is_observable_without_crashing(self):
         runner = {
             "label": "windows-11-arm",
@@ -164,6 +180,8 @@ class ToolMirrorTest(unittest.TestCase):
                 evidence = tool_mirror.collect_discovery({"runners": [runner]}, runner["label"])
         for name in ("cc", "cmake", "make", "pkg-config", "autoconf", "automake", "libtoolize", "tar", "python"):
             self.assertEqual({"path": "", "version": "", "status": 127}, evidence["tool_versions"][name])
+        self.assertEqual("CLANGARM64", evidence["environment"]["MSYSTEM"])
+        self.assertEqual("minimal", evidence["environment"]["MSYS2_PATH_TYPE"])
         self.assertEqual("unavailable", evidence["package_manager"])
         self.assertEqual({}, evidence["packages"])
 

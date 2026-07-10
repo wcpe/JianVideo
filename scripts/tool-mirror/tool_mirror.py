@@ -479,8 +479,8 @@ def capture_msys_tool(bash: Path, msystem: str, name: str, command: str) -> dict
         check=False,
     )
     lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if line.strip()]
-    path = lines[0] if lines and lines[0].startswith("/") else ""
-    version = lines[1] if path and len(lines) > 1 else (lines[0] if lines else "")
+    path = lines[0] if lines and re.fullmatch(r"/\S+", lines[0]) else ""
+    version = lines[1] if path and len(lines) > 1 else (lines[-1] if lines else "")
     return {"path": path, "version": version, "status": result.returncode}
 
 
@@ -553,13 +553,19 @@ def collect_discovery(data: dict, label: str) -> dict:
     assert_runner_identity(data, label, os.environ.get("RUNNER_OS", ""), os.environ.get("RUNNER_ARCH", ""))
     tools = windows_tools(runner) if runner["platform"] == "windows" else unix_tools()
     manager, packages = collect_packages(runner)
+    environment = {key: os.environ.get(key, "") for key in ("RUNNER_OS", "RUNNER_ARCH", "MSYSTEM", "MSYS2_PATH_TYPE")}
+    if runner["platform"] == "windows":
+        environment.update({
+            "MSYSTEM": runner["toolchain"]["shell"]["msystem"],
+            "MSYS2_PATH_TYPE": "minimal",
+        })
     return {
         "schema_version": 1,
         "runner": {key: runner[key] for key in ("label", "id", "platform", "arch", "runner_os", "runner_arch")},
         "github": {key: os.environ.get(key, "") for key in ("GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")},
         "image": {key: os.environ.get(key, "") for key in ("ImageOS", "ImageVersion", "ImageLabel", "ImageVersionIncludedSoftware")},
         "system": {"platform": platform.platform(), "python": sys.version, "machine": platform.machine()},
-        "environment": {key: os.environ.get(key, "") for key in ("RUNNER_OS", "RUNNER_ARCH", "MSYSTEM", "MSYS2_PATH_TYPE")},
+        "environment": environment,
         "tool_versions": tools,
         "package_manager": manager,
         "packages": packages,
