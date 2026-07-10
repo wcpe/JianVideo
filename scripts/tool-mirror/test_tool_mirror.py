@@ -223,6 +223,24 @@ class ToolMirrorTest(unittest.TestCase):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn("./configure --prefix=\"$prefix\" --enable-static --disable-shared --disable-examples", script)
 
+    def test_x264_only_disables_asm_when_x86_nasm_is_missing(self):
+        script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
+        self.assertIn("command -v nasm >/dev/null || x264_args+=(--disable-asm)", script)
+        self.assertIn('case "$(uname -m)" in', script)
+
+    def test_imagemagick_expands_static_delegate_dependencies(self):
+        script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
+        self.assertIn("pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux", script)
+        self.assertIn("--without-zstd", script)
+
+    def test_windows_build_converts_runner_temp_for_msys(self):
+        script = (SCRIPT_ROOT / "build-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("Convert-ToMsysPath $env:RUNNER_TEMP", script)
+        self.assertIn('export RUNNER_TEMP="$9"', script)
+        self.assertIn("$lockPath $Runner $runnerTempPath", script)
+        self.assertNotIn("MSYS_NO_PATHCONV", script)
+        self.assertNotIn("MSYS2_ARG_CONV_EXCL", script)
+
     def test_manifest_is_stable_and_verifiable(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

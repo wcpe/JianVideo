@@ -77,13 +77,18 @@ libraw="$(source_dir 'LibRaw-*')"
 (cd "$libraw" && autoreconf -fi && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 
 x264="$(source_dir 'x264-*')"
-(cd "$x264" && ./configure --prefix="$prefix" --enable-static --disable-cli --disable-opencl && make -j"$jobs" && make install)
+x264_args=(--prefix="$prefix" --enable-static --disable-cli --disable-opencl)
+case "$(uname -m)" in
+  x86_64|amd64) command -v nasm >/dev/null || x264_args+=(--disable-asm) ;;
+esac
+(cd "$x264" && ./configure "${x264_args[@]}" && make -j"$jobs" && make install)
 
 ffmpeg="$(source_dir 'ffmpeg-*')"
 (cd "$ffmpeg" && ./configure --prefix="$prefix" --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" --enable-gpl --enable-libx264 --disable-doc --disable-debug --disable-ffplay --enable-static --disable-shared && make -j"$jobs" && make install)
 
 magick="$(source_dir 'ImageMagick-*')"
-(cd "$magick" && ./configure --prefix="$prefix" --disable-shared --enable-static --without-perl --without-x --with-heic=yes --with-raw=yes --with-jpeg=yes --with-png=yes --with-tiff=yes --with-webp=yes && make -j"$jobs" && make install)
+delegate_libs="$(pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux)"
+(cd "$magick" && LIBS="$delegate_libs ${LIBS:-}" ./configure --prefix="$prefix" --disable-shared --enable-static --without-perl --without-x --without-zstd --with-heic=yes --with-raw=yes --with-jpeg=yes --with-png=yes --with-tiff=yes --with-webp=yes && make -j"$jobs" && make install)
 
 extension=""
 [ "${RUNNER_OS:-}" = "Windows" ] && extension=".exe"
