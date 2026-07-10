@@ -74,7 +74,7 @@ fi
 cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265=ON -DWITH_X265=$([ "$heic_write" = "--enable-heic-write" ] && printf ON || printf OFF) -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PNG=TRUE
 
 libraw="$(source_dir 'LibRaw-*')"
-(cd "$libraw" && autoreconf -fi && ./configure --prefix="$prefix" --enable-static --disable-shared && make -j"$jobs" && make install)
+(cd "$libraw" && autoreconf -fi && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 
 x264="$(source_dir 'x264-*')"
 (cd "$x264" && ./configure --prefix="$prefix" --enable-static --disable-cli --disable-opencl && make -j"$jobs" && make install)

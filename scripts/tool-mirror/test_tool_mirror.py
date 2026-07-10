@@ -212,6 +212,17 @@ class ToolMirrorTest(unittest.TestCase):
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.extract_armored_key(page + page, "html_armored_block")
 
+    def test_windows_gpgv_paths_use_msys_format(self):
+        path = Path(r"C:\Users\runner\trustedkeys.gpg")
+        with patch.object(tool_mirror.os, "name", "nt"):
+            self.assertEqual("/c/Users/runner/trustedkeys.gpg", tool_mirror.gpgv_path(path))
+        with patch.object(tool_mirror.os, "name", "posix"):
+            self.assertEqual(str(path), tool_mirror.gpgv_path(path))
+
+    def test_libraw_build_disables_unneeded_examples(self):
+        script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
+        self.assertIn("./configure --prefix=\"$prefix\" --enable-static --disable-shared --disable-examples", script)
+
     def test_manifest_is_stable_and_verifiable(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

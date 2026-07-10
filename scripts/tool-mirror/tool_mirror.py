@@ -301,6 +301,16 @@ def key_fingerprints(key: Path) -> set[str]:
     return {line.split(":")[9] for line in result.stdout.splitlines() if line.startswith("fpr:")}
 
 
+def gpgv_path(path: Path) -> str:
+    value = str(path)
+    if os.name != "nt":
+        return value
+    match = re.fullmatch(r"([A-Za-z]):[\\/](.*)", value)
+    if not match:
+        raise MirrorError(f"gpgv 无法转换 Windows 路径：{value}")
+    return f"/{match.group(1).lower()}/{match.group(2).replace(chr(92), '/')}"
+
+
 def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     verification = package["verification"]
     if not shutil.which("gpg") or not shutil.which("gpgv"):
@@ -321,8 +331,8 @@ def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     )
     result = subprocess.run(
         [
-            "gpgv", "--keyring", str(keyring), "--status-fd", "1",
-            str(signature), str(archive),
+            "gpgv", "--keyring", gpgv_path(keyring), "--status-fd", "1",
+            gpgv_path(signature), gpgv_path(archive),
         ],
         check=True,
         text=True,
