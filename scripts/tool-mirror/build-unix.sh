@@ -83,6 +83,14 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
+legacy = "\n".join((
+    "AC_PROG_LIBTOOL", "AC_ENABLE_SHARED", "AC_ENABLE_STATIC",
+    "AC_LIBTOOL_WIN32_DLL", "AC_LIBTOOL_SETUP", "AC_SUBST(LIBTOOL_DEPS)",
+))
+replacement = "LT_INIT([win32-dll])"
+if text.count(legacy) != 1:
+    raise SystemExit("错误：LibRaw 旧版 Libtool 配置块不存在或不唯一")
+text = text.replace(legacy, replacement, 1)
 text, count = re.subn(r"if test x\$openmp = xtrue ; then.*?\nfi", "openmp=false", text, count=1, flags=re.DOTALL)
 if count != 1:
     raise SystemExit("错误：LibRaw OpenMP 配置块不存在或不唯一")
