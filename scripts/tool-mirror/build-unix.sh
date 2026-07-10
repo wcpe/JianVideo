@@ -61,7 +61,8 @@ configure_build() {
   (cd "$source" && ./configure --prefix="$prefix" --enable-static --disable-shared "$@" && make -j"$jobs" && make install)
 }
 
-configure_build "$(source_dir 'zlib-*')" zlib
+zlib="$(source_dir 'zlib-*')"
+(cd "$zlib" && ./configure --prefix="$prefix" --static && make -j"$jobs" && make install)
 cmake_build "$(source_dir 'libpng-*')" libpng -DPNG_SHARED=OFF -DPNG_TESTS=OFF
 cmake_build "$(source_dir 'libjpeg-turbo-*')" jpeg -DENABLE_SHARED=OFF -DWITH_TURBOJPEG=OFF
 cmake_build "$(source_dir 'libwebp-*')" webp -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_EXTRAS=OFF
