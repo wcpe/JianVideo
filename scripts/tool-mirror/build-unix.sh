@@ -74,7 +74,7 @@ fi
 cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265=ON -DWITH_X265=$([ "$heic_write" = "--enable-heic-write" ] && printf ON || printf OFF) -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PNG=TRUE
 
 libraw="$(source_dir 'LibRaw-*')"
-(cd "$libraw" && autoreconf -fi && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
+(cd "$libraw" && autoreconf -fi -I m4 && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 
 x264="$(source_dir 'x264-*')"
 x264_args=(--prefix="$prefix" --enable-static --disable-cli --disable-opencl)
@@ -84,7 +84,11 @@ esac
 (cd "$x264" && ./configure "${x264_args[@]}" && make -j"$jobs" && make install)
 
 ffmpeg="$(source_dir 'ffmpeg-*')"
-(cd "$ffmpeg" && ./configure --prefix="$prefix" --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" --enable-gpl --enable-libx264 --disable-doc --disable-debug --disable-ffplay --enable-static --disable-shared && make -j"$jobs" && make install)
+ffmpeg_args=(--prefix="$prefix" --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib" --enable-gpl --enable-libx264 --disable-doc --disable-debug --disable-ffplay --enable-static --disable-shared)
+case "$(uname -m)" in
+  x86_64|amd64) command -v nasm >/dev/null || ffmpeg_args+=(--disable-x86asm) ;;
+esac
+(cd "$ffmpeg" && ./configure "${ffmpeg_args[@]}" && make -j"$jobs" && make install)
 
 magick="$(source_dir 'ImageMagick-*')"
 delegate_libs="$(pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux)"

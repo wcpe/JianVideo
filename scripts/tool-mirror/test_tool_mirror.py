@@ -219,13 +219,15 @@ class ToolMirrorTest(unittest.TestCase):
         with patch.object(tool_mirror.os, "name", "posix"):
             self.assertEqual(str(path), tool_mirror.gpgv_path(path))
 
-    def test_libraw_build_disables_unneeded_examples(self):
+    def test_libraw_build_disables_examples_and_loads_local_macros(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
+        self.assertIn("autoreconf -fi -I m4", script)
         self.assertIn("./configure --prefix=\"$prefix\" --enable-static --disable-shared --disable-examples", script)
 
-    def test_x264_only_disables_asm_when_x86_nasm_is_missing(self):
+    def test_x264_and_ffmpeg_disable_x86_asm_when_nasm_is_missing(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn("command -v nasm >/dev/null || x264_args+=(--disable-asm)", script)
+        self.assertIn("command -v nasm >/dev/null || ffmpeg_args+=(--disable-x86asm)", script)
         self.assertIn('case "$(uname -m)" in', script)
 
     def test_imagemagick_expands_static_delegate_dependencies(self):
