@@ -222,6 +222,8 @@ class ToolMirrorTest(unittest.TestCase):
     def test_libraw_build_disables_optional_windows_openmp(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn('replacement = "LT_INIT([win32-dll])"', script)
+        self.assertIn('"AC_MSG_WARN([no jpeg headers found])",', script)
+        self.assertIn('"AC_MSG_WARN([zlib support cannot be enabled])",', script)
         self.assertIn('re.subn(r"if test x\\$openmp = xtrue ; then.*?\\nfi", "openmp=false"', script)
         self.assertIn('libraw_args+=(--disable-openmp)', script)
         self.assertIn("autoreconf -fi -I m4", script)
