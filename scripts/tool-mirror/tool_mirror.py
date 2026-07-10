@@ -122,6 +122,9 @@ def validate_pgp(name: str, verification: dict) -> list[str]:
         errors.append(f"{name}: PGP 完整公钥指纹格式无效")
     if verification.get("key_format") not in (None, "armored_file", "html_armored_block"):
         errors.append(f"{name}: 不支持的 PGP key_format")
+    key_file = verification.get("key_file")
+    if key_file and (Path(key_file).is_absolute() or ".." in Path(key_file).parts):
+        errors.append(f"{name}: PGP key_file 必须位于工具镜像目录内")
     return errors
 
 
@@ -315,6 +318,17 @@ def download_armored_key(url: str, destination: Path, key_format: str) -> bytes:
     raise MirrorError("官方公钥下载重试失败")
 
 
+def load_armored_key(verification: dict, key_source: Path) -> bytes:
+    key_file = verification.get("key_file")
+    if not key_file:
+        return download_armored_key(verification["key_url"], key_source, verification["key_format"])
+    root = ROOT.resolve()
+    source = (ROOT / key_file).resolve()
+    if root not in source.parents or not source.is_file():
+        raise MirrorError("锁定公钥文件不存在或越出工具镜像目录")
+    return extract_armored_key(source.read_bytes(), "armored_file")
+
+
 def key_fingerprints(key: Path) -> set[str]:
     result = subprocess.run(
         ["gpg", "--batch", "--show-keys", "--with-colons", "--fingerprint", str(key)],
@@ -343,7 +357,7 @@ def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     key_source = work / "key-source"
     key = work / "key.asc"
     download(verification["signature_url"], signature)
-    key.write_bytes(download_armored_key(verification["key_url"], key_source, verification["key_format"]))
+    key.write_bytes(load_armored_key(verification, key_source))
     fingerprint = verification["key_fingerprint"]
     if fingerprint not in key_fingerprints(key):
         raise MirrorError(f"{package['name']}: 公钥指纹与锁文件不符")

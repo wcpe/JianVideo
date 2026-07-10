@@ -230,6 +230,19 @@ class ToolMirrorTest(unittest.TestCase):
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.extract_armored_key(page + page, "html_armored_block")
 
+    def test_local_pgp_key_avoids_network_page(self):
+        armor = b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nabc\n-----END PGP PUBLIC KEY BLOCK-----\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            key = root / "keys" / "signer.asc"
+            key.parent.mkdir()
+            key.write_bytes(armor)
+            verification = {"key_file": "keys/signer.asc", "key_url": "https://example.com/key", "key_format": "html_armored_block"}
+            with patch.object(tool_mirror, "ROOT", root):
+                with patch.object(tool_mirror, "download_armored_key") as mocked_download:
+                    self.assertEqual(tool_mirror.load_armored_key(verification, root / "key-source"), armor)
+            mocked_download.assert_not_called()
+
     def test_armored_key_download_retries_transient_invalid_page(self):
         armor = b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nabc\n-----END PGP PUBLIC KEY BLOCK-----\n"
         responses = iter((b"<html>busy</html>", b"<html><pre>" + armor + b"</pre></html>"))
