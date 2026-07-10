@@ -11,8 +11,77 @@
       "runner_os": "Linux",
       "runner_arch": "X64",
       "toolchain": {
-        "status": "blocked",
-        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 ubuntu-24.04 的不可变 runner image、编译器、构建工具和包版本证据。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "ubuntu24",
+          "ImageVersion": "20260705.232.1"
+        },
+        "tools": {
+          "cc": {
+            "path": "/usr/bin/cc",
+            "version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+          },
+          "c++": {
+            "path": "/usr/bin/c++",
+            "version": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+          },
+          "cmake": {
+            "path": "/usr/local/bin/cmake",
+            "version": "cmake version 3.31.6"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 4.3"
+          },
+          "pkg-config": {
+            "path": "/usr/bin/pkg-config",
+            "version": "1.8.1"
+          },
+          "autoconf": {
+            "path": "/usr/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.71"
+          },
+          "automake": {
+            "path": "/usr/bin/automake",
+            "version": "automake (GNU automake) 1.16.5"
+          },
+          "libtoolize": {
+            "path": "/usr/bin/libtoolize",
+            "version": "libtoolize (GNU libtool) 2.4.7"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "tar (GNU tar) 1.35"
+          },
+          "python": {
+            "path": "/usr/bin/python",
+            "version": "Python 3.12.3"
+          },
+          "gpg": {
+            "path": "/usr/bin/gpg",
+            "version": "gpg (GnuPG) 2.4.4"
+          },
+          "gh": {
+            "path": "/usr/bin/gh",
+            "version": "gh version 2.96.0 (2026-07-02)"
+          }
+        },
+        "packages": {
+          "gcc-13": "13.3.0-6ubuntu2~24.04.1",
+          "g++-13": "13.3.0-6ubuntu2~24.04.1",
+          "binutils": "2.42-4ubuntu2.10",
+          "make": "4.3-4.1build2",
+          "autoconf": "2.71-3",
+          "automake": "1:1.16.5-1.3ubuntu1",
+          "libtool": "2.4.7-7build1",
+          "pkg-config": "1.8.1-2build1",
+          "python3": "3.12.3-0ubuntu2.1",
+          "tar": "1.35+dfsg-3ubuntu0.1"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "622c7604d3165877c6e7d9b70f35f50ffc0f522f725e61fe945490b1644be519"
+        }
       }
     },
     {
@@ -23,8 +92,77 @@
       "runner_os": "Linux",
       "runner_arch": "ARM64",
       "toolchain": {
-        "status": "blocked",
-        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 ubuntu-24.04-arm 的不可变 runner image、编译器、构建工具和包版本证据。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "ubuntu24-arm64",
+          "ImageVersion": "20260706.52.2"
+        },
+        "tools": {
+          "cc": {
+            "path": "/usr/bin/cc",
+            "version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+          },
+          "c++": {
+            "path": "/usr/bin/c++",
+            "version": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+          },
+          "cmake": {
+            "path": "/usr/local/bin/cmake",
+            "version": "cmake version 3.31.6"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 4.3"
+          },
+          "pkg-config": {
+            "path": "/usr/bin/pkg-config",
+            "version": "1.8.1"
+          },
+          "autoconf": {
+            "path": "/usr/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.71"
+          },
+          "automake": {
+            "path": "/usr/bin/automake",
+            "version": "automake (GNU automake) 1.16.5"
+          },
+          "libtoolize": {
+            "path": "/usr/bin/libtoolize",
+            "version": "libtoolize (GNU libtool) 2.4.7"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "tar (GNU tar) 1.35"
+          },
+          "python": {
+            "path": "/usr/bin/python",
+            "version": "Python 3.12.3"
+          },
+          "gpg": {
+            "path": "/usr/bin/gpg",
+            "version": "gpg (GnuPG) 2.4.4"
+          },
+          "gh": {
+            "path": "/usr/bin/gh",
+            "version": "gh version 2.96.0 (2026-07-02)"
+          }
+        },
+        "packages": {
+          "gcc-13": "13.3.0-6ubuntu2~24.04.1",
+          "g++-13": "13.3.0-6ubuntu2~24.04.1",
+          "binutils": "2.42-4ubuntu2.10",
+          "make": "4.3-4.1build2",
+          "autoconf": "2.71-3",
+          "automake": "1:1.16.5-1.3ubuntu1",
+          "libtool": "2.4.7-7build1",
+          "pkg-config": "1.8.1-2build1",
+          "python3": "3.12.3-0ubuntu2.1",
+          "tar": "1.35+dfsg-3ubuntu0.1"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "8f9ed115faf340b2d53bea9197e2f4aac24416dfe5ee89caae18fbd79173394a"
+        }
       }
     },
     {
@@ -35,9 +173,91 @@
       "runner_os": "Windows",
       "runner_arch": "X64",
       "toolchain": {
-        "status": "blocked",
-        "shell": {"msystem": "UCRT64", "prefix": "/ucrt64"},
-        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 windows-2025 的 UCRT64 runner image、编译器、构建工具和 pacman 包版本证据。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "win25-vs2026",
+          "ImageVersion": "20260628.158.1"
+        },
+        "tools": {
+          "cc": {
+            "path": "/ucrt64/bin/cc",
+            "version": "cc.exe (Rev5, Built by MSYS2 project) 16.1.0"
+          },
+          "c++": {
+            "path": "/ucrt64/bin/c++",
+            "version": "c++.exe (Rev5, Built by MSYS2 project) 16.1.0"
+          },
+          "cmake": {
+            "path": "/ucrt64/bin/cmake",
+            "version": "cmake version 4.3.4"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 4.4.1"
+          },
+          "pkg-config": {
+            "path": "/ucrt64/bin/pkg-config",
+            "version": "2.5.1"
+          },
+          "autoconf": {
+            "path": "/usr/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.73"
+          },
+          "automake": {
+            "path": "/usr/bin/automake",
+            "version": "automake (GNU automake) 1.18.1"
+          },
+          "libtoolize": {
+            "path": "/usr/bin/libtoolize",
+            "version": "libtoolize (GNU libtool) 2.5.4"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "tar (GNU tar) 1.35"
+          },
+          "python": {
+            "path": "/ucrt64/bin/python",
+            "version": "Python 3.14.6"
+          },
+          "host:gpg": {
+            "path": "C:\\Program Files\\Git\\usr\\bin\\gpg.EXE",
+            "version": "gpg (GnuPG) 2.4.9"
+          },
+          "host:gh": {
+            "path": "C:\\Program Files\\GitHub CLI\\gh.EXE",
+            "version": "gh version 2.95.0 (2026-06-17)"
+          }
+        },
+        "packages": {
+          "bash": "5.3.015-1",
+          "pacman": "6.1.0-25",
+          "msys2-runtime": "3.6.9-2",
+          "autoconf-wrapper": "20260320-1",
+          "autoconf2.73": "2.73-1",
+          "automake-wrapper": "20260320-1",
+          "automake1.18": "1.18.1-1",
+          "libtool": "2.5.4-5",
+          "make": "4.4.1-3",
+          "tar": "1.35-3",
+          "mingw-w64-ucrt-x86_64-binutils": "2.46.1-2",
+          "mingw-w64-ucrt-x86_64-crt": "14.0.0.r179.g24aaa6147-1",
+          "mingw-w64-ucrt-x86_64-headers": "14.0.0.r179.g24aaa6147-1",
+          "mingw-w64-ucrt-x86_64-gcc": "16.1.0-5",
+          "mingw-w64-ucrt-x86_64-gcc-libs": "16.1.0-5",
+          "mingw-w64-ucrt-x86_64-cmake": "4.3.4-1",
+          "mingw-w64-ucrt-x86_64-make": "4.4.1-5",
+          "mingw-w64-ucrt-x86_64-pkgconf": "1~2.5.1-2",
+          "mingw-w64-ucrt-x86_64-python": "3.14.6-1",
+          "mingw-w64-ucrt-x86_64-nasm": "3.02-1"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "5789b6bd554e2c7bb7c31bcf66df4349143f040265ce8ecac1b6c0b26f5854e0"
+        },
+        "shell": {
+          "msystem": "UCRT64",
+          "prefix": "/ucrt64"
+        }
       }
     },
     {
@@ -48,9 +268,92 @@
       "runner_os": "Windows",
       "runner_arch": "ARM64",
       "toolchain": {
-        "status": "blocked",
-        "shell": {"msystem": "CLANGARM64", "prefix": "/clangarm64"},
-        "blocking_reason": "尚未通过 tool-mirror discovery 证明 windows-11-arm 的 CLANGARM64 环境可用并回填 runner image、编译器、构建工具和 pacman 包版本；在此之前预检必须阻断。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "win11-arm64",
+          "ImageVersion": "20260706.102.1"
+        },
+        "tools": {
+          "cc": {
+            "path": "/clangarm64/bin/cc",
+            "version": "clang version 22.1.8 (https://github.com/msys2/MINGW-packages 0e49d538be8f77422f9f2fbff025394903669d26)"
+          },
+          "c++": {
+            "path": "/clangarm64/bin/c++",
+            "version": "clang version 22.1.8 (https://github.com/msys2/MINGW-packages 0e49d538be8f77422f9f2fbff025394903669d26)"
+          },
+          "cmake": {
+            "path": "/clangarm64/bin/cmake",
+            "version": "cmake version 4.3.4"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 4.4.1"
+          },
+          "pkg-config": {
+            "path": "/clangarm64/bin/pkg-config",
+            "version": "2.5.1"
+          },
+          "autoconf": {
+            "path": "/usr/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.73"
+          },
+          "automake": {
+            "path": "/usr/bin/automake",
+            "version": "automake (GNU automake) 1.18.1"
+          },
+          "libtoolize": {
+            "path": "/usr/bin/libtoolize",
+            "version": "libtoolize (GNU libtool) 2.5.4"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "tar (GNU tar) 1.35"
+          },
+          "python": {
+            "path": "/clangarm64/bin/python",
+            "version": "Python 3.14.6"
+          },
+          "host:gpg": {
+            "path": "C:\\Program Files\\Git\\usr\\bin\\gpg.EXE",
+            "version": "gpg (GnuPG) 2.4.9"
+          },
+          "host:gh": {
+            "path": "C:\\Program Files\\GitHub CLI\\gh.EXE",
+            "version": "gh version 2.96.0 (2026-07-02)"
+          }
+        },
+        "packages": {
+          "bash": "5.3.015-1",
+          "pacman": "6.1.0-25",
+          "msys2-runtime": "3.6.9-2",
+          "autoconf-wrapper": "20260320-1",
+          "autoconf2.73": "2.73-1",
+          "automake-wrapper": "20260320-1",
+          "automake1.18": "1.18.1-1",
+          "libtool": "2.5.4-5",
+          "make": "4.4.1-3",
+          "tar": "1.35-3",
+          "mingw-w64-clang-aarch64-clang": "22.1.8-1",
+          "mingw-w64-clang-aarch64-clang-libs": "22.1.8-1",
+          "mingw-w64-clang-aarch64-compiler-rt": "22.1.8-1",
+          "mingw-w64-clang-aarch64-lld": "22.1.8-1",
+          "mingw-w64-clang-aarch64-llvm": "22.1.8-1",
+          "mingw-w64-clang-aarch64-crt": "14.0.0.r179.g24aaa6147-1",
+          "mingw-w64-clang-aarch64-headers": "14.0.0.r179.g24aaa6147-1",
+          "mingw-w64-clang-aarch64-cmake": "4.3.4-1",
+          "mingw-w64-clang-aarch64-make": "4.4.1-5",
+          "mingw-w64-clang-aarch64-pkgconf": "1~2.5.1-2",
+          "mingw-w64-clang-aarch64-python": "3.14.6-1"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "3fd0844db3fb649f66d622141d9284b773837639f9d38ccdb58d16567f970df0"
+        },
+        "shell": {
+          "msystem": "CLANGARM64",
+          "prefix": "/clangarm64"
+        }
       }
     },
     {
@@ -61,8 +364,75 @@
       "runner_os": "macOS",
       "runner_arch": "X64",
       "toolchain": {
-        "status": "blocked",
-        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 macos-15-intel 的不可变 runner image、Apple Clang、构建工具和 Homebrew 包版本证据。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "macos15",
+          "ImageVersion": "20260629.0276.1"
+        },
+        "tools": {
+          "cc": {
+            "path": "/usr/bin/cc",
+            "version": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
+          },
+          "c++": {
+            "path": "/usr/bin/c++",
+            "version": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
+          },
+          "cmake": {
+            "path": "/usr/local/bin/cmake",
+            "version": "cmake version 4.3.4"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 3.81"
+          },
+          "pkg-config": {
+            "path": "/usr/local/bin/pkg-config",
+            "version": "2.5.1"
+          },
+          "autoconf": {
+            "path": "/usr/local/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.73"
+          },
+          "automake": {
+            "path": "/usr/local/bin/automake",
+            "version": "automake (GNU automake) 1.18.1"
+          },
+          "libtoolize": {
+            "path": "/usr/local/bin/glibtoolize",
+            "version": "glibtoolize (GNU libtool) 2.5.4"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8"
+          },
+          "python": {
+            "path": "/Library/Frameworks/Python.framework/Versions/Current/bin/python",
+            "version": "Python 3.14.6"
+          },
+          "gpg": {
+            "path": "/usr/local/bin/gpg",
+            "version": "gpg (GnuPG) 2.5.20"
+          },
+          "gh": {
+            "path": "/usr/local/bin/gh",
+            "version": "gh version 2.95.0 (2026-06-17)"
+          }
+        },
+        "packages": {
+          "autoconf": "2.73",
+          "automake": "1.18.1_1",
+          "libtool": "2.5.4",
+          "cmake": "4.3.4",
+          "pkgconf": "2.5.1",
+          "python@3.14": "3.14.6",
+          "gnupg": "2.5.20",
+          "gh": "2.95.0"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "52ebd226245a9bb783b38ea657f8387310d38c0713b3755a7fd3e59aed41c7ad"
+        }
       }
     },
     {
@@ -73,15 +443,81 @@
       "runner_os": "macOS",
       "runner_arch": "ARM64",
       "toolchain": {
-        "status": "blocked",
-        "blocking_reason": "尚未通过 tool-mirror discovery 采集并回填 macos-15 的不可变 runner image、Apple Clang、构建工具和 Homebrew 包版本证据。"
+        "status": "locked",
+        "image": {
+          "ImageOS": "macos15",
+          "ImageVersion": "20260706.0213.1"
+        },
+        "tools": {
+          "cc": {
+            "path": "/usr/bin/cc",
+            "version": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
+          },
+          "c++": {
+            "path": "/usr/bin/c++",
+            "version": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
+          },
+          "cmake": {
+            "path": "/opt/homebrew/bin/cmake",
+            "version": "cmake version 4.3.4"
+          },
+          "make": {
+            "path": "/usr/bin/make",
+            "version": "GNU Make 3.81"
+          },
+          "pkg-config": {
+            "path": "/opt/homebrew/bin/pkg-config",
+            "version": "2.5.1"
+          },
+          "autoconf": {
+            "path": "/opt/homebrew/bin/autoconf",
+            "version": "autoconf (GNU Autoconf) 2.73"
+          },
+          "automake": {
+            "path": "/opt/homebrew/bin/automake",
+            "version": "automake (GNU automake) 1.18.1"
+          },
+          "libtoolize": {
+            "path": "/opt/homebrew/bin/glibtoolize",
+            "version": "glibtoolize (GNU libtool) 2.5.4"
+          },
+          "tar": {
+            "path": "/usr/bin/tar",
+            "version": "bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8"
+          },
+          "python": {
+            "path": "/Library/Frameworks/Python.framework/Versions/Current/bin/python",
+            "version": "Python 3.14.6"
+          },
+          "gpg": {
+            "path": "/opt/homebrew/bin/gpg",
+            "version": "gpg (GnuPG) 2.5.21"
+          },
+          "gh": {
+            "path": "/opt/homebrew/bin/gh",
+            "version": "gh version 2.96.0 (2026-07-02)"
+          }
+        },
+        "packages": {
+          "autoconf": "2.73",
+          "automake": "1.18.1_1",
+          "libtool": "2.5.4",
+          "cmake": "4.3.4",
+          "pkgconf": "2.5.1",
+          "python@3.14": "3.14.6",
+          "gnupg": "2.5.21",
+          "gh": "2.96.0"
+        },
+        "evidence": {
+          "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
+          "sha256": "6a609c69eb0acb7b11cd4251402d865a9d85a19eb43c06e8f1335f8281bff7fa"
+        }
       }
     }
   ],
   "delegate_fixtures": {
-    "status": "blocked",
-    "manifest": "fixtures/manifest.json",
-    "blocking_reason": "仓库尚无带许可证与来源元数据的可再分发 HEIC/RAW fixture；禁止仅检查格式列表冒充真实 JPEG 转换通过。"
+    "status": "locked",
+    "manifest": "fixtures/manifest.json"
   },
   "packages": [
     {
@@ -264,7 +700,11 @@
       "archive_name": "",
       "url": "",
       "sha256": "",
-      "verification": {"method": "immutable_git_commit", "repository": "https://code.videolan.org/videolan/x265.git", "commit": ""},
+      "verification": {
+        "method": "immutable_git_commit",
+        "repository": "https://code.videolan.org/videolan/x265.git",
+        "commit": ""
+      },
       "blocking_reason": "VideoLAN 官方仓库尚未核实 4.1 对应的不可变源码 commit；启用 HEIC 写入前必须经 discovery/上游核实后回填。"
     }
   ]

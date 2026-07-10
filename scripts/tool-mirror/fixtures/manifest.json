@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "libheif-rainbow-451x461",
+      "kind": "heic",
+      "path": "libheif-rainbow-451x461.heic",
+      "bytes": 7080,
+      "sha256": "4b2ce727f093944975f143ba2b39c4c64511b766d94552f8d51a755916e7f983",
+      "source_url": "https://raw.githubusercontent.com/strukturag/libheif/f1fd74a3a72c324c421005f896d5c87e3b976215/tests/data/rainbow-451x461.heic",
+      "source_commit": "f1fd74a3a72c324c421005f896d5c87e3b976215",
+      "license": "MIT",
+      "license_url": "https://raw.githubusercontent.com/strukturag/libheif/f1fd74a3a72c324c421005f896d5c87e3b976215/tests/component_descriptions.cc",
+      "license_notice": "THIRD_PARTY_NOTICES.txt"
+    },
+    {
+      "id": "jianvideo-gradient-dng",
+      "kind": "raw",
+      "path": "jianvideo-gradient.dng",
+      "bytes": 131710,
+      "sha256": "ca13e4421607db8bb2eabc6afd7f4f1ce6db724172d0eb0a54404f5f28ee2f1f",
+      "source_url": "https://raw.githubusercontent.com/wcpe/JianVideo/b5d610eaa44a2e788d3b0c73171fbf4cc34b752a/scripts/tool-mirror/fixtures/jianvideo-gradient.dng",
+      "source_commit": "b5d610eaa44a2e788d3b0c73171fbf4cc34b752a",
+      "generator_url": "https://raw.githubusercontent.com/wcpe/JianVideo/b5d610eaa44a2e788d3b0c73171fbf4cc34b752a/scripts/tool-mirror/fixtures/generate_dng.py",
+      "license": "MIT",
+      "license_url": "https://raw.githubusercontent.com/wcpe/JianVideo/b5d610eaa44a2e788d3b0c73171fbf4cc34b752a/LICENSE"
+    }
+  ]
+}

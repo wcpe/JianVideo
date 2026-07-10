@@ -99,17 +99,20 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertEqual("github_attestation", methods["imagemagick"])
         self.assertNotIn("", methods.values())
 
-    def test_real_lock_records_evidence_blockers_without_invented_values(self):
+    def test_real_lock_contains_six_verified_toolchains_and_fixtures(self):
         data = tool_mirror.load_lock(tool_mirror.DEFAULT_LOCK)
         self.assertEqual(6, len(data["runners"]))
         for runner in data["runners"]:
-            self.assertEqual("blocked", runner["toolchain"]["status"])
-            self.assertIn("discovery", runner["toolchain"]["blocking_reason"])
-            self.assertNotIn("image", runner["toolchain"])
+            toolchain = runner["toolchain"]
+            self.assertEqual("locked", toolchain["status"])
+            self.assertTrue(toolchain["image"])
+            self.assertTrue(toolchain["tools"])
+            self.assertTrue(toolchain["packages"])
+            self.assertTrue(toolchain["evidence"]["sha256"])
         windows = {item["id"]: item for item in data["runners"] if item["platform"] == "windows"}
         self.assertEqual("UCRT64", windows["windows-x86_64"]["toolchain"]["shell"]["msystem"])
         self.assertEqual("CLANGARM64", windows["windows-aarch64"]["toolchain"]["shell"]["msystem"])
-        self.assertEqual("blocked", data["delegate_fixtures"]["status"])
+        self.assertEqual("locked", data["delegate_fixtures"]["status"])
 
     def test_missing_verification_method_fails_closed(self):
         data = self.valid_lock()
