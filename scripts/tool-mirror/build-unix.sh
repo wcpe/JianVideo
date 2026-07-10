@@ -37,6 +37,8 @@ done
 
 jobs="${NUMBER_OF_PROCESSORS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')}"
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/share/pkgconfig"
+export CC=cc
+export CXX=c++
 export CFLAGS="-O2 -fPIC"
 export CXXFLAGS="$CFLAGS"
 export LDFLAGS="-L$prefix/lib"

@@ -271,6 +271,8 @@ class ToolMirrorTest(unittest.TestCase):
     def test_libraw_windows_build_uses_mingw_makefile(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn('make -f Makefile.mingw -j"$jobs" library', script)
+        self.assertIn('export CC=cc', script)
+        self.assertIn('export CXX=c++', script)
         self.assertIn('CC=cc CXX=c++', script)
         self.assertIn('-DUSE_JPEG -DUSE_JPEG8 -I$prefix/include', script)
         self.assertIn('Libs.private: -ljpeg -lws2_32', script)
