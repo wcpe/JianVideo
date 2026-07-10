@@ -20,6 +20,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: tool-mirror-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false

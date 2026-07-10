@@ -24,6 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_LOCK = ROOT / "lock.json"
+MSYS_BASH = Path(r"C:\msys64\usr\bin\bash.exe")
 SHA256_LENGTH = 64
 GIT_COMMIT_LENGTH = 40
 ZIP_MIN_EPOCH = 315532800
@@ -452,6 +453,8 @@ def msys_environment(msystem: str) -> dict[str, str]:
 
 
 def capture_msys_tool(bash: Path, msystem: str, name: str, command: str) -> dict:
+    if not bash.is_file():
+        return {"path": "", "version": "", "status": 127}
     script = f"command -v {name}; {command}"
     result = subprocess.run(
         [str(bash), "-lc", script],
@@ -481,7 +484,6 @@ def unix_tools() -> dict[str, dict]:
 
 
 def windows_tools(runner: dict) -> dict[str, dict]:
-    bash = Path(r"C:\msys64\usr\bin\bash.exe")
     msystem = runner["toolchain"]["shell"]["msystem"]
     commands = {
         "cc": ("cc", "cc --version"), "cmake": ("cmake", "cmake --version"),
@@ -490,7 +492,7 @@ def windows_tools(runner: dict) -> dict[str, dict]:
         "libtoolize": ("libtoolize", "libtoolize --version"), "tar": ("tar", "tar --version"),
         "python": ("python", "python --version"),
     }
-    tools = {name: capture_msys_tool(bash, msystem, executable, command) for name, (executable, command) in commands.items()}
+    tools = {name: capture_msys_tool(MSYS_BASH, msystem, executable, command) for name, (executable, command) in commands.items()}
     tools["host:gpg"] = capture_tool("gpg", ["gpg", "--version"])
     tools["host:gh"] = capture_tool("gh", ["gh", "--version"])
     tools["host:python"] = capture_tool("python", ["python", "--version"])
@@ -509,9 +511,10 @@ def parse_packages(output: str, separator: str = " ") -> dict[str, str]:
 
 def collect_packages(runner: dict) -> tuple[str, dict[str, str]]:
     if runner["platform"] == "windows":
-        bash = Path(r"C:\msys64\usr\bin\bash.exe")
+        if not MSYS_BASH.is_file():
+            return "unavailable", {}
         msystem = runner["toolchain"]["shell"]["msystem"]
-        result = subprocess.run([str(bash), "-lc", "pacman -Q"], env=msys_environment(msystem), text=True, capture_output=True, check=False)
+        result = subprocess.run([str(MSYS_BASH), "-lc", "pacman -Q"], env=msys_environment(msystem), text=True, capture_output=True, check=False)
         return "pacman", parse_packages(result.stdout)
     if platform.system() == "Darwin" and shutil.which("brew"):
         result = subprocess.run(["brew", "list", "--versions"], text=True, capture_output=True, check=False)

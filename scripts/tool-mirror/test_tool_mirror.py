@@ -4,6 +4,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import tarfile
 import tempfile
@@ -11,6 +12,7 @@ import unittest
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_ROOT))
@@ -133,6 +135,26 @@ class ToolMirrorTest(unittest.TestCase):
         tool_mirror.assert_runner_identity(data, runner["label"], "Test", "TEST")
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.assert_runner_identity(data, runner["label"], "Linux", "X64")
+
+    def test_missing_msys_bash_is_observable_without_crashing(self):
+        runner = {
+            "label": "windows-11-arm",
+            "id": "windows-aarch64",
+            "platform": "windows",
+            "arch": "aarch64",
+            "runner_os": "Windows",
+            "runner_arch": "ARM64",
+            "toolchain": {"shell": {"msystem": "CLANGARM64"}},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            missing_bash = Path(temp) / "missing-bash.exe"
+            environment = {"RUNNER_OS": "Windows", "RUNNER_ARCH": "ARM64"}
+            with patch.object(tool_mirror, "MSYS_BASH", missing_bash), patch.dict(os.environ, environment):
+                evidence = tool_mirror.collect_discovery({"runners": [runner]}, runner["label"])
+        for name in ("cc", "cmake", "make", "pkg-config", "autoconf", "automake", "libtoolize", "tar", "python"):
+            self.assertEqual({"path": "", "version": "", "status": 127}, evidence["tool_versions"][name])
+        self.assertEqual("unavailable", evidence["package_manager"])
+        self.assertEqual({}, evidence["packages"])
 
     def test_html_key_extraction_requires_exactly_one_armor_block(self):
         armor = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nabc\n-----END PGP PUBLIC KEY BLOCK-----"
