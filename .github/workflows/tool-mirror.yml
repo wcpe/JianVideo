@@ -44,7 +44,7 @@ jobs:
   discovery:
     name: 发现 ${{ matrix.id }} 工具链
     needs: static_validate
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/tool-mirror/build/')
     strategy:
       fail-fast: false
       matrix:
