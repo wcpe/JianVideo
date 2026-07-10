@@ -143,9 +143,9 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
-          args=()
-          [ "$ENABLE_HEIC_WRITE" = "true" ] && args+=(--enable-heic-write)
-          python scripts/tool-mirror/tool_mirror.py "${args[@]}" preflight --runner "${{ matrix.runner }}"
+          set --
+          [ "$ENABLE_HEIC_WRITE" = "true" ] && set -- --enable-heic-write
+          python scripts/tool-mirror/tool_mirror.py "$@" preflight --runner "${{ matrix.runner }}"
 
   build:
     name: 构建 ${{ matrix.id }}
@@ -199,11 +199,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          args=()
-          [ "$ENABLE_HEIC_WRITE" = "true" ] && args+=(--enable-heic-write)
-          python scripts/tool-mirror/tool_mirror.py "${args[@]}" build "$RUNNER_TEMP/sources" "$RUNNER_TEMP/payload" --runner "${{ matrix.runner }}"
-          python scripts/tool-mirror/tool_mirror.py "${args[@]}" licenses "$RUNNER_TEMP/jianvideo-tool-build/sources" "$RUNNER_TEMP/payload/licenses"
-          python scripts/tool-mirror/tool_mirror.py "${args[@]}" sbom "$RUNNER_TEMP/payload/sbom.cdx.json"
+          set --
+          [ "$ENABLE_HEIC_WRITE" = "true" ] && set -- --enable-heic-write
+          python scripts/tool-mirror/tool_mirror.py "$@" build "$RUNNER_TEMP/sources" "$RUNNER_TEMP/payload" --runner "${{ matrix.runner }}"
+          python scripts/tool-mirror/tool_mirror.py "$@" licenses "$RUNNER_TEMP/jianvideo-tool-build/sources" "$RUNNER_TEMP/payload/licenses"
+          python scripts/tool-mirror/tool_mirror.py "$@" sbom "$RUNNER_TEMP/payload/sbom.cdx.json"
           python scripts/tool-mirror/tool_mirror.py verify-binaries "$RUNNER_TEMP/payload/bin"
           magick="$RUNNER_TEMP/payload/bin/magick"
           [ "$RUNNER_OS" = "Windows" ] && magick="$magick.exe"
