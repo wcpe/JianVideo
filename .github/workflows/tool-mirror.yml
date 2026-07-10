@@ -59,6 +59,12 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置 macOS Autotools
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install autoconf automake libtool
       - name: 配置固定入口的 Windows MSYS2
         if: runner.os == 'Windows'
         id: msys2
@@ -110,6 +116,12 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置已锁定的 macOS Autotools
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install autoconf automake libtool
       - name: 配置已锁定的 Windows MSYS2
         if: runner.os == 'Windows'
         id: msys2
@@ -157,6 +169,12 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 配置已锁定的 macOS Autotools
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install autoconf automake libtool
       - name: 配置已锁定的 Windows MSYS2
         if: runner.os == 'Windows'
         id: msys2
