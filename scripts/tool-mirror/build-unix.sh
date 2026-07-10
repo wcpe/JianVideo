@@ -74,40 +74,28 @@ fi
 cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265=ON -DWITH_X265=$([ "$heic_write" = "--enable-heic-write" ] && printf ON || printf OFF) -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PNG=TRUE
 
 libraw="$(source_dir 'LibRaw-*')"
-libraw_args=(--prefix="$prefix" --enable-static --disable-shared --disable-examples)
 if [ "${RUNNER_OS:-}" = "Windows" ]; then
-  python - "$libraw/configure.ac" <<'PY'
-from pathlib import Path
-import re
-import sys
+  (cd "$libraw" && make -f Makefile.mingw -j"$jobs" library CFLAGS="-O2 -fPIC -I. -DUSE_JPEG -DUSE_JPEG8 -I$prefix/include" LDADD="-L$prefix/lib -ljpeg")
+  mkdir -p "$prefix/include" "$prefix/lib/pkgconfig"
+  cp -R "$libraw/libraw" "$prefix/include/"
+  cp "$libraw/lib/libraw.a" "$prefix/lib/"
+  libraw_version="$(cd "$libraw" && ./version.sh)"
+  cat > "$prefix/lib/pkgconfig/libraw.pc" <<EOF
+prefix=$prefix
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
 
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-legacy = "\n".join((
-    "AC_PROG_LIBTOOL", "AC_ENABLE_SHARED", "AC_ENABLE_STATIC",
-    "AC_LIBTOOL_WIN32_DLL", "AC_LIBTOOL_SETUP", "AC_SUBST(LIBTOOL_DEPS)",
-))
-replacement = "LT_INIT([win32-dll])"
-if text.count(legacy) != 1:
-    raise SystemExit("错误：LibRaw 旧版 Libtool 配置块不存在或不唯一")
-text = text.replace(legacy, replacement, 1)
-jpeg_config = "\n".join((
-    "CPPFLAGS=\"$CPPFLAGS -DUSE_JPEG -DUSE_JPEG8\"",
-    "LIBS=\"$LIBS -ljpeg\"",
-    "AC_SUBST([PACKAGE_LIBS_PRIVATE],[-ljpeg $PACKAGE_LIBS_PRIVATE])",
-))
-text, jpeg_count = re.subn(r"if test x\$jpeg = xtrue; then.*?\nfi", jpeg_config, text, count=1, flags=re.DOTALL)
-text, jasper_count = re.subn(r"if test x\$jasper = xtrue; then.*?\nfi", "jasper=false", text, count=1, flags=re.DOTALL)
-if jpeg_count != 1 or jasper_count != 1:
-    raise SystemExit("错误：LibRaw JPEG 或 Jasper 配置块不存在或不唯一")
-text, count = re.subn(r"if test x\$openmp = xtrue ; then.*?\nfi", "openmp=false", text, count=1, flags=re.DOTALL)
-if count != 1:
-    raise SystemExit("错误：LibRaw OpenMP 配置块不存在或不唯一")
-path.write_text(text, encoding="utf-8")
-PY
-  libraw_args+=(--disable-openmp)
+Name: libraw
+Description: Raw image decoder library (non-thread-safe)
+Version: $libraw_version
+Libs: -L\${libdir} -lraw -lstdc++
+Libs.private: -ljpeg -lws2_32
+Cflags: -I\${includedir}/libraw -I\${includedir}
+EOF
+else
+  (cd "$libraw" && autoreconf -fi -I m4 && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 fi
-(cd "$libraw" && autoreconf -fi -I m4 && ./configure "${libraw_args[@]}" && make -j"$jobs" && make install)
 
 x264="$(source_dir 'x264-*')"
 x264_args=(--prefix="$prefix" --enable-static --disable-cli --disable-opencl)
