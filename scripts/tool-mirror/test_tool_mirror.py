@@ -220,6 +220,24 @@ class ToolMirrorTest(unittest.TestCase):
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.extract_armored_key(page + page, "html_armored_block")
 
+    def test_armored_key_download_retries_transient_invalid_page(self):
+        armor = b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nabc\n-----END PGP PUBLIC KEY BLOCK-----\n"
+        responses = iter((b"<html>busy</html>", b"<html><pre>" + armor + b"</pre></html>"))
+
+        def fake_download(_url, destination):
+            destination.write_bytes(next(responses))
+
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "key-source"
+            with patch.object(tool_mirror, "download", side_effect=fake_download) as mocked_download:
+                with patch.object(tool_mirror.time, "sleep") as mocked_sleep:
+                    self.assertEqual(
+                        tool_mirror.download_armored_key("https://example.com/key", destination, "html_armored_block"),
+                        armor,
+                    )
+            self.assertEqual(mocked_download.call_count, 2)
+            mocked_sleep.assert_called_once_with(1)
+
     def test_windows_gpgv_paths_use_msys_format(self):
         path = Path(r"C:\Users\runner\trustedkeys.gpg")
         with patch.object(tool_mirror.os, "name", "nt"):

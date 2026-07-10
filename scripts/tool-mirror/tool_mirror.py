@@ -292,6 +292,18 @@ def extract_armored_key(content: bytes, key_format: str) -> bytes:
     return block.encode("ascii")
 
 
+def download_armored_key(url: str, destination: Path, key_format: str) -> bytes:
+    for attempt in range(3):
+        download(url, destination)
+        try:
+            return extract_armored_key(destination.read_bytes(), key_format)
+        except MirrorError:
+            if attempt == 2:
+                raise
+            time.sleep(attempt + 1)
+    raise MirrorError("官方公钥下载重试失败")
+
+
 def key_fingerprints(key: Path) -> set[str]:
     result = subprocess.run(
         ["gpg", "--batch", "--show-keys", "--with-colons", "--fingerprint", str(key)],
@@ -320,8 +332,7 @@ def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     key_source = work / "key-source"
     key = work / "key.asc"
     download(verification["signature_url"], signature)
-    download(verification["key_url"], key_source)
-    key.write_bytes(extract_armored_key(key_source.read_bytes(), verification["key_format"]))
+    key.write_bytes(download_armored_key(verification["key_url"], key_source, verification["key_format"]))
     fingerprint = verification["key_fingerprint"]
     if fingerprint not in key_fingerprints(key):
         raise MirrorError(f"{package['name']}: 公钥指纹与锁文件不符")
