@@ -5,6 +5,54 @@ import (
 	"log"
 )
 
+// vaapiDevice 默认 VAAPI 渲染设备路径（Linux）。
+const vaapiDevice = "/dev/dri/renderD128"
+
+// hardwareUploadRule 描述需要显式设备初始化与硬件帧上传的编码家族参数。
+type hardwareUploadRule struct {
+	initDevice   string
+	filterDevice string
+	uploadFilter string
+}
+
+var hardwareUploadRules = map[string]hardwareUploadRule{
+	"vaapi": {
+		initDevice:   "vaapi=va:" + vaapiDevice,
+		filterDevice: "va",
+		uploadFilter: "format=nv12,hwupload",
+	},
+	"vulkan": {
+		initDevice:   "vulkan=vk:0",
+		filterDevice: "vk",
+		uploadFilter: "format=nv12,hwupload",
+	},
+}
+
+// hardwareUploadRuleFor 返回设备类型对应的显式硬件帧上传规则。
+func hardwareUploadRuleFor(deviceType string) (hardwareUploadRule, bool) {
+	rule, ok := hardwareUploadRules[deviceType]
+	return rule, ok
+}
+
+// appendHardwareInputArgs 追加输入前的硬件设备参数；普通家族保持原有 -hwaccel 行为。
+func appendHardwareInputArgs(args []string, deviceType string) []string {
+	if rule, ok := hardwareUploadRuleFor(deviceType); ok {
+		return append(args, "-init_hw_device", rule.initDevice, "-filter_hw_device", rule.filterDevice)
+	}
+	if deviceType != "" {
+		return append(args, "-hwaccel", deviceType)
+	}
+	return args
+}
+
+// appendHardwareUploadArgs 为需要软件帧上传的家族追加视频滤镜参数。
+func appendHardwareUploadArgs(args []string, deviceType string) []string {
+	if rule, ok := hardwareUploadRuleFor(deviceType); ok {
+		return append(args, "-vf", rule.uploadFilter)
+	}
+	return args
+}
+
 // HwAccelInfo 描述一种硬件加速能力。
 type HwAccelInfo struct {
 	// Name 为硬件加速显示名称，如 "NVIDIA NVENC"。

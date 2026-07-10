@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -215,11 +214,11 @@ var resPattern = regexp.MustCompile(`Video:[^,]+,\s*[^,]+,\s*(\d{2,5})x(\d{2,5})
 // probeResolution 用 ffmpeg 探测源媒体分辨率（宽高）。
 // 只跑一次，不实际转码，所以很快；10 秒硬上限防卡死。
 func probeResolution(ctx context.Context, inputPath string) (int, int, error) {
-	log.Printf("[DEBUG] probeResolution: inputPath=%s, ffmpegPath=%s", inputPath, ffmpegPath)
+	log.Printf("[DEBUG] probeResolution: inputPath=%s, ffmpegPath=%s", inputPath, GetFFmpegPath())
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(probeCtx, ffmpegPath, "-hide_banner", "-i", inputPath)
+	cmd := ffmpegCommandContext(probeCtx, "-hide_banner", "-i", inputPath)
 	// ffmpeg 探测会 exit 1；忽略 exit 错误，从 stderr 抓尺寸
 	out, _ := cmd.CombinedOutput()
 	matches := resPattern.FindStringSubmatch(string(out))

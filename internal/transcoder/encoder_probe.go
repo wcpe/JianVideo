@@ -42,9 +42,6 @@ type EncoderProbeResult struct {
 // probeEncodeTimeout 单个试编码的超时上限。
 const probeEncodeTimeout = 20 * time.Second
 
-// vaapiDevice 默认 VAAPI 渲染设备路径（Linux）。
-const vaapiDevice = "/dev/dri/renderD128"
-
 // candidateEncoders 返回所有待实测的编码器候选（顺序即展示顺序）。
 // hevc 编码器的 codec 字段统一记为 "h265"（与现有约定一致）。
 func candidateEncoders() []EncoderCandidate {
@@ -112,40 +109,17 @@ func parseCompiledEncoders(out string) map[string]bool {
 }
 
 // buildProbeArgs 按家族构建一次试编码的 ffmpeg 参数（试编码 5 帧到 null）。
-// VAAPI、Vulkan 需显式初始化硬件设备并 hwupload，其余家族通用模板即可。
+// VAAPI、Vulkan 复用生产管道的设备初始化与上传规则，其余家族保持通用模板。
 func buildProbeArgs(c EncoderCandidate) []string {
 	const src = "color=c=black:s=256x256:r=5"
-	if c.Family == familyVAAPI {
-		return []string{
-			"-hide_banner", "-loglevel", "error",
-			"-init_hw_device", "vaapi=va:" + vaapiDevice,
-			"-filter_hw_device", "va",
-			"-f", "lavfi", "-i", src,
-			"-frames:v", "5", "-an",
-			"-vf", "format=nv12,hwupload",
-			"-c:v", c.Encoder,
-			"-f", "null", "-",
-		}
+	deviceType := string(c.Family)
+	args := []string{"-hide_banner", "-loglevel", "error"}
+	if rule, ok := hardwareUploadRuleFor(deviceType); ok {
+		args = append(args, "-init_hw_device", rule.initDevice, "-filter_hw_device", rule.filterDevice)
 	}
-	if c.Family == familyVulkan {
-		return []string{
-			"-hide_banner", "-loglevel", "error",
-			"-init_hw_device", "vulkan=vk:0",
-			"-filter_hw_device", "vk",
-			"-f", "lavfi", "-i", src,
-			"-frames:v", "5", "-an",
-			"-vf", "format=nv12,hwupload",
-			"-c:v", c.Encoder,
-			"-f", "null", "-",
-		}
-	}
-	return []string{
-		"-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", src,
-		"-frames:v", "5", "-an",
-		"-c:v", c.Encoder,
-		"-f", "null", "-",
-	}
+	args = append(args, "-f", "lavfi", "-i", src, "-frames:v", "5", "-an")
+	args = appendHardwareUploadArgs(args, deviceType)
+	return append(args, "-c:v", c.Encoder, "-f", "null", "-")
 }
 
 // tailString 返回字符串末尾至多 n 个字符（用于截断 stderr）。
@@ -159,7 +133,12 @@ func tailString(s string, n int) string {
 
 // runProbe 执行一次试编码，返回是否成功与失败时的 stderr 尾部。
 func runProbe(ctx context.Context, args []string) (bool, string) {
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	return runProbeWithPath(ctx, GetFFmpegPath(), args)
+}
+
+// runProbeWithPath 使用指定路径执行一次试编码。
+func runProbeWithPath(ctx context.Context, path string, args []string) (bool, string) {
+	cmd := exec.CommandContext(ctx, path, args...)
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -177,9 +156,14 @@ func runProbe(ctx context.Context, args []string) (bool, string) {
 
 // listCompiledEncoders 运行 `ffmpeg -encoders` 并解析编入集合；失败返回空集。
 func listCompiledEncoders(ctx context.Context) map[string]bool {
+	return listCompiledEncodersWithPath(ctx, GetFFmpegPath())
+}
+
+// listCompiledEncodersWithPath 使用指定路径查询编入的编码器集合。
+func listCompiledEncodersWithPath(ctx context.Context, path string) map[string]bool {
 	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(listCtx, ffmpegPath, "-hide_banner", "-encoders")
+	cmd := exec.CommandContext(listCtx, path, "-hide_banner", "-encoders")
 	out, err := cmd.Output()
 	if err != nil {
 		return map[string]bool{}
@@ -190,12 +174,18 @@ func listCompiledEncoders(ctx context.Context) map[string]bool {
 // ProbeEncoders 实测所有候选编码器：先查编入集合，再对编入者逐个带超时试编码。
 // 顺序执行避免并发抢占同一硬件编码器；ffmpeg 不可用时全部标记未编入。
 func ProbeEncoders(ctx context.Context) []EncoderProbeResult {
+	path, _ := ffmpegPathSnapshot()
+	return probeEncodersWithPath(ctx, path)
+}
+
+// probeEncodersWithPath 使用同一路径完成编码器列表查询与真实试编码。
+func probeEncodersWithPath(ctx context.Context, path string) []EncoderProbeResult {
 	candidates := candidateEncoders()
 	results := make([]EncoderProbeResult, 0, len(candidates))
 
 	compiled := map[string]bool{}
-	if IsFFmpegAvailable() {
-		compiled = listCompiledEncoders(ctx)
+	if isFFmpegPathAvailable(path) {
+		compiled = listCompiledEncodersWithPath(ctx, path)
 	}
 
 	for _, c := range candidates {
@@ -207,7 +197,7 @@ func ProbeEncoders(ctx context.Context) []EncoderProbeResult {
 		}
 		res.Compiled = true
 		encCtx, cancel := context.WithTimeout(ctx, probeEncodeTimeout)
-		ok, detail := runProbe(encCtx, buildProbeArgs(c))
+		ok, detail := runProbeWithPath(encCtx, path, buildProbeArgs(c))
 		cancel()
 		res.TestedOK = ok
 		res.Detail = detail
@@ -218,17 +208,31 @@ func ProbeEncoders(ctx context.Context) []EncoderProbeResult {
 
 // FFmpegVersion 返回 `ffmpeg -version` 首行；不可用时返回空串。
 func FFmpegVersion(ctx context.Context) string {
-	if !IsFFmpegAvailable() {
-		return ""
+	version, _ := ffmpegVersionWithGeneration(ctx)
+	return version
+}
+
+// ffmpegVersionWithGeneration 返回同一路径快照对应的版本与路径代次。
+func ffmpegVersionWithGeneration(ctx context.Context) (string, uint64) {
+	version, _, generation := ffmpegVersionWithPathGeneration(ctx)
+	return version, generation
+}
+
+// ffmpegVersionWithPathGeneration 返回同一路径快照对应的版本、路径与路径代次。
+func ffmpegVersionWithPathGeneration(ctx context.Context) (string, string, uint64) {
+	path, generation := ffmpegPathSnapshot()
+	if !isFFmpegPathAvailable(path) {
+		return "", path, generation
 	}
 	verCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(verCtx, ffmpegPath, "-hide_banner", "-version")
+	cmd := exec.CommandContext(verCtx, path, "-hide_banner", "-version")
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "", path, generation
 	}
-	return strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+	version := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+	return version, path, generation
 }
 
 // CheckFFmpegPath 检测指定路径的 ffmpeg 是否可用（FR-56）：跑 `path -version`，
@@ -237,7 +241,7 @@ func FFmpegVersion(ctx context.Context) string {
 func CheckFFmpegPath(ctx context.Context, path string) (bool, string) {
 	bin := strings.TrimSpace(path)
 	if bin == "" {
-		bin = ffmpegPath
+		bin = GetFFmpegPath()
 	}
 	if bin == "" {
 		return false, ""

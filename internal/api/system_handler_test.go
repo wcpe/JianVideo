@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,6 +227,63 @@ func TestCodecTest_CacheHit_FromCacheTrue(t *testing.T) {
 	}
 	if len(resp.Results) != 1 || resp.Results[0].Encoder != "sentinel-encoder" {
 		t.Errorf("应返回缓存中的哨兵结果，证明未重跑，实际 %+v", resp.Results)
+	}
+}
+
+// TestCodecTest_PathSwitchReturnsNonOK 验证能力请求代次失效时系统接口不返回成功。
+func TestCodecTest_PathSwitchReturnsNonOK(t *testing.T) {
+	if !transcoder.IsFFmpegAvailable() {
+		t.Skip("ffmpeg 不可用，跳过路径切换端点测试")
+	}
+	gin.SetMode(gin.TestMode)
+
+	oldPath := transcoder.GetFFmpegPath()
+	version := transcoder.FFmpegVersion(httptest.NewRequest(http.MethodGet, "/", nil).Context())
+	t.Cleanup(func() { transcoder.SetFFmpegPath(oldPath) })
+
+	db := newCapabilityDB(t)
+	raw, _ := json.Marshal([]transcoder.EncoderProbeResult{{Encoder: "sentinel-encoder"}})
+	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
+		t.Fatalf("写入缓存失败: %v", err)
+	}
+	queryStarted := make(chan struct{})
+	releaseQuery := make(chan struct{})
+	var once sync.Once
+	if err := db.Callback().Query().Before("gorm:query").Register("test:block_codec_test_cache_query", func(*gorm.DB) {
+		once.Do(func() {
+			close(queryStarted)
+			<-releaseQuery
+		})
+	}); err != nil {
+		t.Fatalf("注册缓存查询阻塞点失败: %v", err)
+	}
+
+	h := NewHandler(nil).WithCapabilityService(transcoder.NewCapabilityService(db))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/system/codec-test", nil)
+	done := make(chan struct{})
+	go func() {
+		h.CodecTest(c)
+		close(done)
+	}()
+
+	select {
+	case <-queryStarted:
+	case <-time.After(2 * time.Second):
+		close(releaseQuery)
+		t.Fatal("编码器缓存读取未进入可控阻塞点")
+	}
+	transcoder.SetFFmpegPath(oldPath + ".switched")
+	close(releaseQuery)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("编码器测试接口未在释放阻塞点后完成")
+	}
+
+	if w.Code == http.StatusOK {
+		t.Fatalf("FFmpeg 路径切换后接口不得返回 200，body=%s", w.Body.String())
 	}
 }
 

@@ -186,3 +186,32 @@ func TestBuildFMP4Args_NoTSArtifacts(t *testing.T) {
 	assert.NotContains(t, joined, "mpegts")
 	assert.NotContains(t, joined, ".ts")
 }
+
+func TestBuildFMP4Args_VAAPIAndVulkanUseUploadParameters(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		encoder    string
+		deviceType string
+		initValue  string
+		filterName string
+	}{
+		{name: "VAAPI", encoder: "hevc_vaapi", deviceType: "vaapi", initValue: "vaapi=va:" + vaapiDevice, filterName: "va"},
+		{name: "Vulkan", encoder: "hevc_vulkan", deviceType: "vulkan", initValue: "vulkan=vk:0", filterName: "vk"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args := BuildFMP4Args("/tmp/in.mkv", tt.encoder, "h265", tt.deviceType)
+			assert.Equal(t, tt.initValue, argValueAfter(args, "-init_hw_device"))
+			assert.Equal(t, tt.filterName, argValueAfter(args, "-filter_hw_device"))
+			assert.Equal(t, "format=nv12,hwupload", argValueAfter(args, "-vf"))
+			assert.Equal(t, tt.encoder, argValueAfter(args, "-c:v"))
+		})
+	}
+}
+
+func TestBuildFMP4Args_AMFKeepsWindowsProductionPath(t *testing.T) {
+	args := BuildFMP4Args("D:/media/input.mkv", "hevc_amf", "h265", "d3d11va")
+	assert.Equal(t, "d3d11va", argValueAfter(args, "-hwaccel"))
+	assert.Equal(t, "hevc_amf", argValueAfter(args, "-c:v"))
+	assert.Empty(t, argValueAfter(args, "-init_hw_device"))
+	assert.Empty(t, argValueAfter(args, "-vf"))
+}

@@ -191,6 +191,88 @@ func TestBuildMultiArgs_H264Unchanged(t *testing.T) {
 	}
 }
 
+func TestBuildArgs_VAAPIAndVulkanUseUploadParameters(t *testing.T) {
+	tests := []struct {
+		name       string
+		encoder    string
+		deviceType string
+		initValue  string
+		filterName string
+	}{
+		{name: "VAAPI", encoder: "h264_vaapi", deviceType: "vaapi", initValue: "vaapi=va:" + vaapiDevice, filterName: "va"},
+		{name: "Vulkan", encoder: "h264_vulkan", deviceType: "vulkan", initValue: "vulkan=vk:0", filterName: "vk"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newPipelineForEncoder("h264", tt.encoder, tt.deviceType)
+			args := p.buildArgs("/tmp/a.mp4", 0)
+			if !argHasPair(args, "-init_hw_device", tt.initValue) {
+				t.Fatalf("生产管道应初始化硬件设备，args=%v", args)
+			}
+			if !argHasPair(args, "-filter_hw_device", tt.filterName) {
+				t.Fatalf("生产管道应指定滤镜硬件设备，args=%v", args)
+			}
+			if !argHasPair(args, "-vf", "format=nv12,hwupload") {
+				t.Fatalf("生产管道应上传硬件帧，args=%v", args)
+			}
+			if argValueAfter(args, "-c:v") != tt.encoder {
+				t.Fatalf("生产管道编码器错误，args=%v", args)
+			}
+		})
+	}
+}
+
+func TestBuildMultiArgs_VAAPIAndVulkanUseUploadParameters(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		encoder    string
+		deviceType string
+		initValue  string
+		filterName string
+	}{
+		{name: "VAAPI", encoder: "h264_vaapi", deviceType: "vaapi", initValue: "vaapi=va:" + vaapiDevice, filterName: "va"},
+		{name: "Vulkan", encoder: "h264_vulkan", deviceType: "vulkan", initValue: "vulkan=vk:0", filterName: "vk"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args := NewMultiPipeline(newPipelineForEncoder("h264", tt.encoder, tt.deviceType)).BuildArgs("/tmp/a.mp4", []string{"480p"})
+			joined := ""
+			for _, arg := range args {
+				joined += arg + " "
+			}
+			if !argHasPair(args, "-init_hw_device", tt.initValue) || !argHasPair(args, "-filter_hw_device", tt.filterName) {
+				t.Fatalf("多码率生产管道缺少硬件设备参数，args=%v", args)
+			}
+			if !containsSub(joined, "format=nv12,hwupload") {
+				t.Fatalf("多码率生产管道应上传硬件帧，args=%v", args)
+			}
+			if argValueAfter(args, "-c:v") != tt.encoder {
+				t.Fatalf("多码率生产管道编码器错误，args=%v", args)
+			}
+		})
+	}
+}
+
+func TestBuildArgs_AMFKeepsWindowsProductionPath(t *testing.T) {
+	p := newPipelineForEncoder("h264", "h264_amf", "d3d11va")
+	args := p.buildArgs("D:/media/input.mp4", 0)
+	if !argHasPair(args, "-hwaccel", "d3d11va") {
+		t.Fatalf("AMF 生产管道应保留 d3d11va 解码路径，args=%v", args)
+	}
+	if argValueAfter(args, "-c:v") != "h264_amf" {
+		t.Fatalf("AMF 生产管道应使用 h264_amf，args=%v", args)
+	}
+	if argHasPair(args, "-vf", "format=nv12,hwupload") || argValueAfter(args, "-init_hw_device") != "" {
+		t.Fatalf("AMF 不应误用 VAAPI/Vulkan 上传参数，args=%v", args)
+	}
+}
+
+func TestBuildMultiArgs_AMFKeepsWindowsProductionPath(t *testing.T) {
+	args := NewMultiPipeline(newPipelineForEncoder("h264", "h264_amf", "d3d11va")).BuildArgs("D:/media/input.mp4", []string{"480p"})
+	if !argHasPair(args, "-hwaccel", "d3d11va") || argValueAfter(args, "-c:v") != "h264_amf" {
+		t.Fatalf("AMF 多码率生产参数应保留真实 Windows 路径，args=%v", args)
+	}
+}
+
 // containsSub 简单子串判断（避免引入 strings 仅为测试）。
 func containsSub(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {

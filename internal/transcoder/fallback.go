@@ -157,9 +157,26 @@ func SelectEncoderForCodec(results []EncoderProbeResult, codec string) (encoder,
 // probeSnapshot 实测结果的进程级快照，供 SelectBestEncoder 选码使用。
 var probeSnapshot atomic.Pointer[[]EncoderProbeResult]
 
-// setProbeSnapshot 更新实测结果快照（每次实测后调用）。
+// setProbeSnapshot 更新实测结果快照（每次实测或缓存命中后调用）。
 func setProbeSnapshot(r []EncoderProbeResult) {
 	probeSnapshot.Store(&r)
+}
+
+// clearProbeSnapshot 清除已失效的进程级实测快照。
+func clearProbeSnapshot() {
+	probeSnapshot.Store(nil)
+}
+
+// storeProbeSnapshotForGeneration 仅在路径代次仍匹配时发布快照。
+// 调用方可持有 CapabilityService.mu；SetFFmpegPath 不获取该锁，避免形成反向锁序。
+func storeProbeSnapshotForGeneration(generation uint64, snapshot *[]EncoderProbeResult) bool {
+	ffmpegPathMu.RLock()
+	defer ffmpegPathMu.RUnlock()
+	if generation != ffmpegPathGeneration {
+		return false
+	}
+	probeSnapshot.Store(snapshot)
+	return true
 }
 
 // SelectBestEncoder 选择最优的 H.264 编码器（保持签名不变，pipeline 不动）。

@@ -1,6 +1,9 @@
 package transcoder
 
 import (
+	"context"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -185,6 +188,44 @@ func TestSelectBestEncoder_SnapshotNoH264(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "libx264", enc)
 	assert.Equal(t, "", dev)
+}
+
+func TestSetFFmpegPathClearsOldProbeSnapshot(t *testing.T) {
+	oldPath := GetFFmpegPath()
+	t.Cleanup(func() {
+		SetFFmpegPath(oldPath)
+		probeSnapshot.Store(nil)
+	})
+	setProbeSnapshot([]EncoderProbeResult{
+		{Encoder: "h264_amf", Family: "amf", Codec: "h264", TestedOK: true},
+	})
+
+	SetFFmpegPath("jianvideo-new-ffmpeg-path-for-test")
+
+	enc, dev, err := SelectBestEncoder()
+	require.NoError(t, err)
+	assert.Equal(t, "libx264", enc, "FFmpeg 路径变化后不得继续使用旧能力快照")
+	assert.Empty(t, dev)
+}
+
+func TestFFmpegPathConcurrentAccess(t *testing.T) {
+	oldPath := GetFFmpegPath()
+	t.Cleanup(func() { SetFFmpegPath(oldPath) })
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(2)
+		go func(index int) {
+			defer wg.Done()
+			SetFFmpegPath("ffmpeg-" + strconv.Itoa(index))
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = GetFFmpegPath()
+			_ = ffmpegCommandContext(context.Background(), "-version")
+		}()
+	}
+	wg.Wait()
 }
 
 func TestSelectEncoderForCodecWithPolicy_AutoNoHardwareFallsBackSoftware(t *testing.T) {

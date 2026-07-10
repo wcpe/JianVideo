@@ -107,14 +107,14 @@ func TestCandidateEncoders_FullFamilies(t *testing.T) {
 func TestBuildProbeArgs_Vulkan(t *testing.T) {
 	args := buildProbeArgs(EncoderCandidate{Encoder: "h264_vulkan", Family: familyVulkan, Codec: "h264"})
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-init_hw_device vulkan") {
-		t.Errorf("Vulkan 应初始化硬件设备，实际: %s", joined)
+	if !strings.Contains(joined, "-init_hw_device vulkan=vk:0") {
+		t.Errorf("Vulkan 应初始化与生产一致的硬件设备，实际: %s", joined)
 	}
 	if !strings.Contains(joined, "-filter_hw_device vk") {
 		t.Errorf("Vulkan 应指定 filter_hw_device，实际: %s", joined)
 	}
-	if !strings.Contains(joined, "hwupload") {
-		t.Errorf("Vulkan 应包含 hwupload 滤镜，实际: %s", joined)
+	if !strings.Contains(joined, "-vf format=nv12,hwupload") {
+		t.Errorf("Vulkan 应包含与生产一致的 hwupload 滤镜，实际: %s", joined)
 	}
 	if !strings.Contains(joined, "-c:v h264_vulkan") {
 		t.Errorf("应包含 Vulkan 编码器名，实际: %s", joined)

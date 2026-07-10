@@ -1,6 +1,11 @@
 package transcoder
 
 import (
+	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,6 +93,75 @@ func TestNewPipeline(t *testing.T) {
 	p := NewPipeline()
 	assert.NotNil(t, p)
 	assert.Equal(t, "libx264", p.encoderName)
+}
+
+func TestConfiguredFFmpegPathSharedByAllExecutionPaths(t *testing.T) {
+	binaryPath, recordPath := buildFFmpegPathRecorder(t)
+	oldPath := GetFFmpegPath()
+	SetFFmpegPath(binaryPath)
+	t.Cleanup(func() { SetFFmpegPath(oldPath) })
+	t.Setenv("JIANVIDEO_FFMPEG_RECORD", recordPath)
+	ctx := context.Background()
+
+	requireNoError(t, newPipelineForEncoder("h264", "libx264", "").Run(ctx, "普通 TS 输入.mp4", io.Discard))
+	if ok, detail := runProbe(ctx, []string{"probe-marker"}); !ok {
+		t.Fatalf("探测路径执行失败: %s", detail)
+	}
+	requireNoError(t, NewMultiPipeline(newPipelineForEncoder("h264", "libx264", "")).runFFmpeg(ctx, []string{"multi-marker"}, ""))
+	requireNoError(t, runFMP4FFmpeg(ctx, []string{"fmp4-marker"}, ""))
+
+	raw, err := os.ReadFile(recordPath)
+	requireNoError(t, err)
+	records := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(records) != 4 {
+		t.Fatalf("四条执行路径应使用同一配置二进制，实际记录 %d 条: %q", len(records), string(raw))
+	}
+	for _, marker := range []string{"普通 TS 输入.mp4", "probe-marker", "multi-marker", "fmp4-marker"} {
+		if !strings.Contains(string(raw), marker) {
+			t.Fatalf("配置路径执行记录缺少 %q: %q", marker, string(raw))
+		}
+	}
+}
+
+func buildFFmpegPathRecorder(t *testing.T) (string, string) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "带空格的 ffmpeg 目录")
+	requireNoError(t, os.MkdirAll(dir, 0o750))
+	sourcePath := filepath.Join(dir, "main.go")
+	binaryPath := filepath.Join(dir, "fake ffmpeg.exe")
+	recordPath := filepath.Join(dir, "执行记录.txt")
+	source := `package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	path := os.Getenv("JIANVIDEO_FFMPEG_RECORD")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	fmt.Fprintln(file, strings.Join(os.Args[1:], "\\x1f"))
+}
+`
+	requireNoError(t, os.WriteFile(sourcePath, []byte(source), 0o600))
+	cmd := exec.Command("go", "build", "-o", binaryPath, sourcePath)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("构建带空格路径的 ffmpeg 记录器失败: %v, 输出: %s", err, output)
+	}
+	return binaryPath, recordPath
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // indexOf 返回切片中指定元素的索引，不存在时返回 -1。

@@ -8,24 +8,50 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 // FFmpegPath 全局可执行文件路径，可由 SetFFmpegPath 注入。
 // 默认通过 exec.LookPath("ffmpeg") 解析；找不到则 RunMulti 系列会返回错误。
-var ffmpegPath = "ffmpeg"
+var (
+	ffmpegPath           = "ffmpeg"
+	ffmpegPathGeneration uint64
+	ffmpegPathMu         sync.RWMutex
+)
 
 // SetFFmpegPath 显式设置 ffmpeg 可执行文件路径（绝对或相对路径均可）。
 // 通常由 main.go 从环境变量 JIANVIDEO_FFMPEG_PATH 注入。
 func SetFFmpegPath(path string) {
-	if path != "" {
-		ffmpegPath = path
+	if path == "" {
+		return
 	}
+	ffmpegPathMu.Lock()
+	defer ffmpegPathMu.Unlock()
+	if path == ffmpegPath {
+		return
+	}
+	ffmpegPath = path
+	ffmpegPathGeneration++
+	clearProbeSnapshot()
+}
+
+// ffmpegPathSnapshot 原子读取当前路径与路径代次。
+func ffmpegPathSnapshot() (string, uint64) {
+	ffmpegPathMu.RLock()
+	defer ffmpegPathMu.RUnlock()
+	return ffmpegPath, ffmpegPathGeneration
 }
 
 // GetFFmpegPath 返回当前 ffmpeg 可执行文件路径。
 func GetFFmpegPath() string {
-	return ffmpegPath
+	path, _ := ffmpegPathSnapshot()
+	return path
+}
+
+// ffmpegCommandContext 使用当前配置路径创建 ffmpeg 命令，路径可包含空格。
+func ffmpegCommandContext(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, GetFFmpegPath(), args...)
 }
 
 // ffprobePath 全局 ffprobe 可执行文件路径，可由 SetFFprobePath 注入。
@@ -47,14 +73,20 @@ func GetFFprobePath() string {
 
 // IsFFmpegAvailable 检查当前配置的 ffmpeg 是否可执行。
 func IsFFmpegAvailable() bool {
-	if ffmpegPath == "" {
+	path, _ := ffmpegPathSnapshot()
+	return isFFmpegPathAvailable(path)
+}
+
+// isFFmpegPathAvailable 检查指定路径是否可执行。
+func isFFmpegPathAvailable(path string) bool {
+	if path == "" {
 		return false
 	}
-	if _, err := os.Stat(ffmpegPath); err == nil {
+	if _, err := os.Stat(path); err == nil {
 		return true
 	}
 	// 退化到 PATH 查找
-	_, err := exec.LookPath(ffmpegPath)
+	_, err := exec.LookPath(path)
 	return err == nil
 }
 
@@ -144,10 +176,10 @@ func (mp *MultiPipeline) RunMultiToDir(ctx context.Context, inputPath string, qu
 // dir 为 ffmpeg 的工作目录（影响相对路径输出文件位置）。
 func (mp *MultiPipeline) runFFmpeg(ctx context.Context, args []string, dir string) error {
 	if !IsFFmpegAvailable() {
-		return fmt.Errorf("ffmpeg 不可用（路径: %s）", ffmpegPath)
+		return fmt.Errorf("ffmpeg 不可用（路径: %s）", GetFFmpegPath())
 	}
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &logWriter{prefix: "[ffmpeg-multi]"}
 	cmd.WaitDelay = 5 * time.Second
@@ -200,11 +232,8 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 		"-loglevel", "warning",
 	}
 
-	// 硬件加速
-	if mp.pipeline.hwAccel != "" {
-		args = append(args, "-hwaccel", mp.pipeline.hwAccel)
-	}
-
+	deviceType := mp.pipeline.hardwareDeviceType()
+	args = appendHardwareInputArgs(args, deviceType)
 	args = append(args, "-i", inputPath)
 
 	// 按目标编码取输出参数（编码器名来自 pipeline，像素格式 + 关键参数来自映射），默认 h264 行为不变。
@@ -220,10 +249,13 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 	splitPart += strings.Join(outLabels, "")
 
 	scaleParts := make([]string, n)
+	outputFilter := "format=" + params.PixFmt
+	if rule, ok := hardwareUploadRuleFor(deviceType); ok {
+		outputFilter = rule.uploadFilter
+	}
 	for i, q := range qualities {
-		// 强制 8-bit yuv420p：10-bit（如 HEVC Main 10）源若不转换，会编出 10-bit High/Main 10，
-		// 浏览器与 mpegts.js 均无法解码播放（见 HEVC/AAC 720p 不可播放问题）。
-		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d,format=%s[v%dout]", i+1, q.Width, q.Height, params.PixFmt, i+1)
+		// 普通编码保持 8-bit yuv420p；VAAPI/Vulkan 转为 nv12 后上传硬件帧。
+		scaleParts[i] = fmt.Sprintf("[v%d]scale=%d:%d,%s[v%dout]", i+1, q.Width, q.Height, outputFilter, i+1)
 	}
 
 	filterComplex := splitPart + "; " + strings.Join(scaleParts, "; ")

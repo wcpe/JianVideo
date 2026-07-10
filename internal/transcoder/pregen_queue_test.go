@@ -1,6 +1,7 @@
 package transcoder
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -162,6 +163,60 @@ func TestPregenQueue_SerialExecution(t *testing.T) {
 }
 
 // TestPregenQueue_RecoverRunning 重启恢复：残留 running 被重置为 pending 并重新执行。
+func TestPregenQueue_ExistingCapabilityCacheLoadedBeforeRecoveredTask(t *testing.T) {
+	if !IsFFmpegAvailable() {
+		t.Skip("ffmpeg 不可用，跳过启动缓存加载测试")
+	}
+	db := newPregenTestDB(t)
+	if err := db.AutoMigrate(&models.CodecProbeCache{}); err != nil {
+		t.Fatalf("迁移能力缓存表失败: %v", err)
+	}
+	version := FFmpegVersion(context.Background())
+	writeCacheForCurrentVersion(t, db, version, []EncoderProbeResult{
+		{Encoder: "h264_amf", Family: "amf", Codec: "h264", Compiled: true, TestedOK: true},
+	})
+	setProbeSnapshot(nil)
+	t.Cleanup(func() { probeSnapshot.Store(nil) })
+
+	started := time.Now().Add(-time.Minute)
+	stale := &models.TranscodeTask{
+		MediaID:   6,
+		PresetID:  1,
+		Codec:     "h264",
+		Status:    models.TranscodeTaskStatusRunning,
+		StartedAt: &started,
+	}
+	if err := db.Create(stale).Error; err != nil {
+		t.Fatalf("预置残留任务失败: %v", err)
+	}
+
+	svc := NewCapabilityService(db)
+	if err := svc.LoadCachedSnapshot(context.Background()); err != nil {
+		t.Fatalf("同步加载能力缓存失败: %v", err)
+	}
+	var selected atomic.Value
+	q := NewPregenQueue(db, func(_ int64, codec string) error {
+		pipeline, err := NewPipelineForCodecWithPolicy(codec, DefaultHardwarePolicy())
+		if err == nil {
+			selected.Store(pipeline.encoderName)
+		}
+		return err
+	})
+	if err := q.RecoverRunning(); err != nil {
+		t.Fatalf("恢复残留任务失败: %v", err)
+	}
+	q.Start()
+	defer q.Stop()
+
+	waitForPregen(t, 2*time.Second, func() bool {
+		var task models.TranscodeTask
+		return db.First(&task, stale.ID).Error == nil && task.Status == models.TranscodeTaskStatusCompleted
+	})
+	if got, _ := selected.Load().(string); got != "h264_amf" {
+		t.Fatalf("恢复任务启动前应已加载缓存能力，实际编码器 %q", got)
+	}
+}
+
 func TestPregenQueue_RecoverRunning(t *testing.T) {
 	db := newPregenTestDB(t)
 

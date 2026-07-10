@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -108,16 +107,15 @@ func SelectFMP4EncoderWithPolicy(results []EncoderProbeResult, codec string, pol
 
 // BuildFMP4Args 构建 fMP4/CMAF 输出的 ffmpeg 命令行参数（纯函数）。
 // 产出 HLS-fMP4（CMAF）：init.mp4 + seg_NNN.m4s + index.m3u8（VOD，含 EXT-X-MAP/ENDLIST）。
-// deviceType 非空时加 -hwaccel 设备初始化（与现有管道同风格）。
+// VAAPI/Vulkan 使用显式设备初始化与上传规则，其余设备保持原有 -hwaccel 行为。
 func BuildFMP4Args(inputPath, encoder, codec, deviceType string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "warning",
 	}
-	if deviceType != "" {
-		args = append(args, "-hwaccel", deviceType)
-	}
+	args = appendHardwareInputArgs(args, deviceType)
 	args = append(args, "-i", inputPath)
+	args = appendHardwareUploadArgs(args, deviceType)
 
 	args = append(args,
 		"-map", "0:v:0",
@@ -228,7 +226,7 @@ func RunFMP4ToDirWithPolicy(ctx context.Context, mediaID int64, inputPath, codec
 
 // runFMP4FFmpeg 在指定工作目录执行 fMP4 转码命令（进程组/取消语义与现有管道一致）。
 func runFMP4FFmpeg(ctx context.Context, args []string, dir string) error {
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	cmd.Stderr = &logWriter{prefix: "[ffmpeg-fmp4]"}
 	cmd.WaitDelay = 5 * time.Second
 	if dir != "" {

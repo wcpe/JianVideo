@@ -288,6 +288,9 @@ func main() {
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，后台预热。
 	capSvc := transcoder.NewCapabilityService(gormDB)
+	if err := capSvc.LoadCachedSnapshot(context.Background()); err != nil {
+		log.Printf("[WARN] 启动时加载硬件加速能力缓存失败: %v", err)
+	}
 
 	// 媒体健康巡检服务（FR-73）：后台只读巡检全部未软删媒体，问题落 media_health_issues 表。
 	healthSvc := library.NewDefaultHealthService(gormDB)

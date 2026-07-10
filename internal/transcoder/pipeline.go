@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -115,6 +114,14 @@ func (p *Pipeline) pipelineCodec() string {
 	return p.codec
 }
 
+// hardwareDeviceType 返回管道的有效硬件设备类型，并兼容旧代码直接设置 hwAccel。
+func (p *Pipeline) hardwareDeviceType() string {
+	if p.deviceType != "" {
+		return p.deviceType
+	}
+	return p.hwAccel
+}
+
 // Run 启动转码管道，将 ffmpeg stdout 写入 dst。
 // ctx 取消时自动终止 ffmpeg 进程。
 func (p *Pipeline) Run(ctx context.Context, inputPath string, dst io.Writer) error {
@@ -125,7 +132,7 @@ func (p *Pipeline) Run(ctx context.Context, inputPath string, dst io.Writer) err
 func (p *Pipeline) RunWithSeek(ctx context.Context, inputPath string, dst io.Writer, seekPosition float64) error {
 	args := p.buildArgs(inputPath, seekPosition)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	cmd.Stdout = dst
 	cmd.Stderr = &logWriter{prefix: "[ffmpeg]"}
 	cmd.WaitDelay = 5 * time.Second
@@ -167,16 +174,15 @@ func (p *Pipeline) buildArgs(inputPath string, seekPosition float64) []string {
 		args = append(args, "-ss", fmt.Sprintf("%.2f", seekPosition))
 	}
 
-	// 硬件加速设备初始化
-	if p.hwAccel != "" {
-		args = append(args, "-hwaccel", p.hwAccel)
-	}
+	deviceType := p.hardwareDeviceType()
+	args = appendHardwareInputArgs(args, deviceType)
 
 	// 按目标编码取输出参数（编码器名 + 像素格式 + 关键参数），默认 h264 行为不变。
 	params, _ := CodecOutputParams(p.pipelineCodec())
 
+	args = append(args, "-i", inputPath)
+	args = appendHardwareUploadArgs(args, deviceType)
 	args = append(args,
-		"-i", inputPath,
 		"-c:v", p.encoderName,
 		// 强制 8-bit yuv420p：10-bit 源（如 HEVC Main 10）否则编出 10-bit High/Main 10，
 		// 浏览器与 mpegts.js 无法解码播放。
