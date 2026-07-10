@@ -149,6 +149,13 @@ class ToolMirrorTest(unittest.TestCase):
         with self.assertRaises(tool_mirror.MirrorError):
             tool_mirror.assert_runner_identity(data, runner["label"], "Linux", "X64")
 
+    def test_verification_tools_only_require_a_working_executable(self):
+        expected = {"path": "/old/gpg", "version": "gpg 1"}
+        actual = {"path": "/new/gpg", "version": "gpg 2", "status": 0}
+        self.assertTrue(tool_mirror.tool_matches_lock("gpg", expected, actual))
+        self.assertFalse(tool_mirror.tool_matches_lock("gpg", expected, {**actual, "status": 1}))
+        self.assertFalse(tool_mirror.tool_matches_lock("cc", expected, actual))
+
     def test_setup_msys_location_and_prefix_are_explicit(self):
         with tempfile.TemporaryDirectory() as temp:
             with patch.dict(os.environ, {"MSYS2_LOCATION": temp}):

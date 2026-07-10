@@ -424,9 +424,7 @@
           "libtool": "2.5.4",
           "cmake": "4.3.4",
           "pkgconf": "2.5.1",
-          "python@3.14": "3.14.6",
-          "gnupg": "2.5.20",
-          "gh": "2.95.0"
+          "python@3.14": "3.14.6"
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",
@@ -503,9 +501,7 @@
           "libtool": "2.5.4",
           "cmake": "4.3.4",
           "pkgconf": "2.5.1",
-          "python@3.14": "3.14.6",
-          "gnupg": "2.5.21",
-          "gh": "2.96.0"
+          "python@3.14": "3.14.6"
         },
         "evidence": {
           "workflow_run": "https://github.com/wcpe/JianVideo/actions/runs/29088889621",

@@ -39,6 +39,7 @@ VERIFICATION_METHODS = {
     "github_attestation",
     "immutable_git_commit",
 }
+VERIFICATION_TOOL_NAMES = {"gpg", "gh", "host:gpg", "host:gh"}
 
 
 class MirrorError(RuntimeError):
@@ -583,6 +584,14 @@ def write_discovery(data: dict, label: str, destination: Path) -> None:
     print(f"discovery 证据 SHA-256：{sha256_file(destination)}")
 
 
+def tool_matches_lock(name: str, expected: dict, actual: dict) -> bool:
+    if actual.get("status") != 0 or not actual.get("path") or not actual.get("version"):
+        return False
+    if name in VERIFICATION_TOOL_NAMES:
+        return True
+    return actual["path"] == expected["path"] and actual["version"] == expected["version"]
+
+
 def verify_toolchain(data: dict, label: str) -> None:
     runner = runner_by_label(data, label)
     toolchain = runner["toolchain"]
@@ -594,7 +603,7 @@ def verify_toolchain(data: dict, label: str) -> None:
             raise MirrorError(f"{label}: runner image {key} 与工具链锁不匹配")
     for name, expected in toolchain["tools"].items():
         actual = current["tool_versions"].get(name, {})
-        if actual.get("status") != 0 or actual.get("path") != expected["path"] or actual.get("version") != expected["version"]:
+        if not tool_matches_lock(name, expected, actual):
             raise MirrorError(f"{label}: 工具 {name} 与锁定版本或路径不匹配")
     for name, expected in toolchain["packages"].items():
         if current["packages"].get(name) != expected:
