@@ -91,17 +91,15 @@ replacement = "LT_INIT([win32-dll])"
 if text.count(legacy) != 1:
     raise SystemExit("错误：LibRaw 旧版 Libtool 配置块不存在或不唯一")
 text = text.replace(legacy, replacement, 1)
-warnings = (
-    "AC_MSG_WARN([no jpeg headers found])",
-    "AC_MSG_WARN([libjpeg not found])",
-    "AC_MSG_WARN([no jasper headers found])",
-    "AC_MSG_WARN([libjasper not found])",
-    "AC_MSG_WARN([zlib support cannot be enabled])",
-)
-for warning in warnings:
-    if text.count(warning) != 1:
-        raise SystemExit(f"错误：LibRaw 警告动作不存在或不唯一：{warning}")
-    text = text.replace(warning, f"[{warning}]", 1)
+jpeg_config = "\n".join((
+    "CPPFLAGS=\"$CPPFLAGS -DUSE_JPEG -DUSE_JPEG8\"",
+    "LIBS=\"$LIBS -ljpeg\"",
+    "AC_SUBST([PACKAGE_LIBS_PRIVATE],[-ljpeg $PACKAGE_LIBS_PRIVATE])",
+))
+text, jpeg_count = re.subn(r"if test x\$jpeg = xtrue; then.*?\nfi", jpeg_config, text, count=1, flags=re.DOTALL)
+text, jasper_count = re.subn(r"if test x\$jasper = xtrue; then.*?\nfi", "jasper=false", text, count=1, flags=re.DOTALL)
+if jpeg_count != 1 or jasper_count != 1:
+    raise SystemExit("错误：LibRaw JPEG 或 Jasper 配置块不存在或不唯一")
 text, count = re.subn(r"if test x\$openmp = xtrue ; then.*?\nfi", "openmp=false", text, count=1, flags=re.DOTALL)
 if count != 1:
     raise SystemExit("错误：LibRaw OpenMP 配置块不存在或不唯一")
