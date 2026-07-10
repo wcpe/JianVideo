@@ -303,8 +303,8 @@ def key_fingerprints(key: Path) -> set[str]:
 
 def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     verification = package["verification"]
-    if not shutil.which("gpg"):
-        raise MirrorError(f"{package['name']}: 需要 gpg 验证上游签名")
+    if not shutil.which("gpg") or not shutil.which("gpgv"):
+        raise MirrorError(f"{package['name']}: 需要 gpg 和 gpgv 验证上游签名")
     signature = work / f"{archive.name}.asc"
     key_source = work / "key-source"
     key = work / "key.asc"
@@ -321,10 +321,8 @@ def verify_pgp(package: dict, archive: Path, work: Path) -> None:
     )
     result = subprocess.run(
         [
-            "gpg", "--batch", "--no-options", "--no-default-keyring",
-            "--keyring", str(keyring), "--trust-model", "always",
-            "--no-auto-key-retrieve", "--status-fd", "1",
-            "--verify", str(signature), str(archive),
+            "gpgv", "--keyring", str(keyring), "--status-fd", "1",
+            str(signature), str(archive),
         ],
         check=True,
         text=True,
