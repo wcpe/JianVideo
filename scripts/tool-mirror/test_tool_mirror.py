@@ -278,7 +278,7 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('Libs.private: -ljpeg -lws2_32', script)
         self.assertIn('--host=aarch64-w64-mingw32 --disable-asm', script)
         self.assertIn('--cc="$CC" --cxx="$CXX"', script)
-        self.assertIn('--arch=aarch64 --target-os=mingw32 --enable-cross-compile --disable-asm', script)
+        self.assertIn('--arch=aarch64 --target-os=mingw32 --disable-asm', script)
         self.assertIn("autoreconf -fi -I m4", script)
         self.assertIn("--disable-examples", script)
 
