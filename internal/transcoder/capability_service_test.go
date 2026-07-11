@@ -40,7 +40,7 @@ func writeCacheForCurrentVersion(t *testing.T, db *gorm.DB, version string, resu
 	raw, err := json.Marshal(results)
 	require.NoError(t, err)
 	require.NoError(t, db.Create(&models.CodecProbeCache{
-		FFmpegVersion: version,
+		FFmpegVersion: ffmpegCacheKey(version, GetFFmpegPath()),
 		Results:       string(raw),
 		TestedAt:      time.Now(),
 	}).Error)
@@ -81,6 +81,55 @@ func TestCapabilityService_CacheHit(t *testing.T) {
 	assert.Equal(t, "sentinel-encoder", results[0].Encoder, "应返回缓存中的哨兵值，证明未重跑实测")
 }
 
+func TestCapabilityService_SameVersionDifferentPathDoesNotReuseCache(t *testing.T) {
+	oldGlobalPath := GetFFmpegPath()
+	oldBinary, newBinary := buildSameVersionCapabilityFFmpegPair(t)
+	SetFFmpegPath(oldBinary)
+	t.Cleanup(func() {
+		SetFFmpegPath(oldGlobalPath)
+		clearProbeSnapshot()
+	})
+
+	version := FFmpegVersion(context.Background())
+	require.NotEmpty(t, version)
+	db := newCapabilityTestDB(t)
+	writeCacheForCurrentVersion(t, db, version, []EncoderProbeResult{
+		{Encoder: "h264_amf", Family: "amf", Codec: "h264", Compiled: true, TestedOK: true},
+	})
+
+	SetFFmpegPath(newBinary)
+	info := NewCapabilityService(db).Capabilities(context.Background())
+
+	assert.False(t, info.FromCache, "同版本但不同路径的 FFmpeg 不得复用旧能力缓存")
+	assert.Equal(t, "libx264", info.Preferred)
+}
+
+func buildSameVersionCapabilityFFmpegPair(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "fake_ffmpeg.go")
+	oldBinary := filepath.Join(dir, "old-ffmpeg.exe")
+	newBinary := filepath.Join(dir, "new-ffmpeg.exe")
+	require.NoError(t, os.WriteFile(sourcePath, []byte(sameVersionCapabilityFFmpegSource), 0o600))
+	cmd := exec.Command("go", "build", "-o", oldBinary, sourcePath)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	output, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "构建同版本假 ffmpeg 失败: %s", output)
+	binary, err := os.ReadFile(oldBinary)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(newBinary, binary, 0o700))
+	return oldBinary, newBinary
+}
+
+const sameVersionCapabilityFFmpegSource = `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("ffmpeg version same-capability-test")
+}
+`
+
 func TestCapabilityService_LoadCachedSnapshot(t *testing.T) {
 	version := FFmpegVersion(context.Background())
 	if version == "" {
@@ -108,7 +157,7 @@ func TestCapabilityService_LoadCachedSnapshotCorruptedCacheClearsSnapshot(t *tes
 	}
 	db := newCapabilityTestDB(t)
 	require.NoError(t, db.Create(&models.CodecProbeCache{
-		FFmpegVersion: version,
+		FFmpegVersion: ffmpegCacheKey(version, GetFFmpegPath()),
 		Results:       "{损坏的缓存",
 		TestedAt:      time.Now(),
 	}).Error)
@@ -359,7 +408,7 @@ func assertCapabilityProbePathSwitch(t *testing.T, blockPoint string, expectProb
 	} else {
 		assertProbeStoppedBeforeEncoderProbe(t, stateDir)
 	}
-	assertStaleProbeDidNotWriteCache(t, db, oldVersion, force)
+	assertStaleProbeDidNotWriteCache(t, db, oldVersion, oldBinary, force)
 }
 
 type capabilityProbeOutcome struct {
@@ -405,10 +454,10 @@ func assertProbeStoppedBeforeEncoderProbe(t *testing.T, stateDir string) {
 	assert.Empty(t, readCapabilityProbeRecords(t, filepath.Join(stateDir, "new.log")), "新路径不得参与旧代次请求")
 }
 
-func assertStaleProbeDidNotWriteCache(t *testing.T, db *gorm.DB, version string, force bool) {
+func assertStaleProbeDidNotWriteCache(t *testing.T, db *gorm.DB, version, path string, force bool) {
 	t.Helper()
 	var rows []models.CodecProbeCache
-	require.NoError(t, db.Where("ffmpeg_version = ?", version).Find(&rows).Error)
+	require.NoError(t, db.Where("ffmpeg_version = ?", ffmpegCacheKey(version, path)).Find(&rows).Error)
 	if !force {
 		assert.Empty(t, rows, "冷缓存旧代次实测结果不得落库")
 		return

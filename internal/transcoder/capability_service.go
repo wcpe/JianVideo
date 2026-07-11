@@ -2,10 +2,14 @@ package transcoder
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,7 +27,7 @@ const warmCacheTimeout = 5 * time.Minute
 var ErrFFmpegPathChanged = errors.New("FFmpeg 路径已变更，请重试")
 
 // CapabilityService 硬件加速能力服务：以编码器实测为唯一真源，
-// 结果按 ffmpeg 版本持久化于 SQLite，副作用（实测 + 读写库）隔离于此层。
+// 结果按 FFmpeg 可执行文件身份持久化于 SQLite，副作用（实测 + 读写库）隔离于此层。
 type CapabilityService struct {
 	db *gorm.DB
 	mu sync.Mutex // 串行化实测，防并发重复实测
@@ -35,7 +39,7 @@ func NewCapabilityService(db *gorm.DB) *CapabilityService {
 }
 
 // CodecResults 返回当前 ffmpeg 版本的编码器实测结果。
-// force=false 时命中当前版本缓存即返回；未命中或 force 则实测并持久化（按版本 upsert）。
+// force=false 时命中当前可执行文件缓存即返回；未命中或 force 则实测并持久化（按身份摘要 upsert）。
 // 每次实测后刷新进程级快照供选码使用。
 func (s *CapabilityService) CodecResults(ctx context.Context, force bool) (results []EncoderProbeResult, fromCache bool, version string, testedAt time.Time, err error) {
 	return s.CodecResultsWithAudit(ctx, force, nil)
@@ -45,13 +49,14 @@ func (s *CapabilityService) CodecResults(ctx context.Context, force bool) (resul
 // 请求期间 FFmpeg 路径切换时返回 ErrFFmpegPathChanged，不返回旧代次结果。
 func (s *CapabilityService) CodecResultsWithAudit(ctx context.Context, force bool, rec audit.Recorder) (results []EncoderProbeResult, fromCache bool, version string, testedAt time.Time, err error) {
 	version, path, generation := ffmpegVersionWithPathGeneration(ctx)
+	cacheKey := ffmpegCacheKey(version, path)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// 非强制：先查缓存，命中即返回，不触发实测
 	if !force {
-		if cached, ok, lookupErr := s.loadCache(version); lookupErr != nil {
+		if cached, ok, lookupErr := s.loadCache(cacheKey); lookupErr != nil {
 			if !storeProbeSnapshotForGeneration(generation, nil) {
 				return nil, false, version, time.Time{}, ErrFFmpegPathChanged
 			}
@@ -73,7 +78,7 @@ func (s *CapabilityService) CodecResultsWithAudit(ctx context.Context, force boo
 	// 未命中或强制：使用版本探测时捕获的路径完成实测并持久化
 	results = probeEncodersWithPath(ctx, path)
 	testedAt = time.Now()
-	current, saveErr := s.saveCacheWithAuditForGeneration(ctx, generation, version, results, testedAt, force, rec)
+	current, saveErr := s.saveCacheWithAuditForGeneration(ctx, generation, cacheKey, version, results, testedAt, force, rec)
 	if !current {
 		return nil, false, version, time.Time{}, ErrFFmpegPathChanged
 	}
@@ -93,14 +98,15 @@ func (s *CapabilityService) CodecResultsWithAudit(ctx context.Context, force boo
 	return results, false, version, testedAt, nil
 }
 
-// Capabilities 只读缓存（当前 ffmpeg 版本）派生 per-codec 能力，绝不触发实测。
+// Capabilities 只读缓存（当前 FFmpeg 可执行文件）派生 per-codec 能力，绝不触发实测。
 // 命中：BuildCapabilities + 填 FromCache/版本/实测时间，并刷新选码快照。
 // 未命中（冷态）：清除旧快照并返回 BuildCapabilities(nil) 的「未测」结果。
 func (s *CapabilityService) Capabilities(ctx context.Context) *HWAccelInfo {
-	version, generation := ffmpegVersionWithGeneration(ctx)
+	version, path, generation := ffmpegVersionWithPathGeneration(ctx)
+	cacheKey := ffmpegCacheKey(version, path)
 
 	s.mu.Lock()
-	cached, ok, err := s.loadCache(version)
+	cached, ok, err := s.loadCache(cacheKey)
 	if err != nil || !ok {
 		storeProbeSnapshotForGeneration(generation, nil)
 	} else {
@@ -124,14 +130,15 @@ func (s *CapabilityService) Capabilities(ctx context.Context) *HWAccelInfo {
 	return info
 }
 
-// LoadCachedSnapshot 同步只读加载当前 ffmpeg 版本缓存，供启动恢复任务前初始化选码快照。
+// LoadCachedSnapshot 同步只读加载当前 FFmpeg 可执行文件缓存，供启动恢复任务前初始化选码快照。
 // 未命中、缓存损坏或读取失败时清除旧快照；本方法绝不触发实测或写库。
 func (s *CapabilityService) LoadCachedSnapshot(ctx context.Context) error {
-	version, generation := ffmpegVersionWithGeneration(ctx)
+	version, path, generation := ffmpegVersionWithPathGeneration(ctx)
+	cacheKey := ffmpegCacheKey(version, path)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cached, ok, err := s.loadCache(version)
+	cached, ok, err := s.loadCache(cacheKey)
 	if err != nil || !ok {
 		storeProbeSnapshotForGeneration(generation, nil)
 		return err
@@ -192,13 +199,39 @@ type cacheEntry struct {
 	testedAt time.Time
 }
 
-// loadCache 按 ffmpeg 版本读取缓存；版本为空或无记录返回 ok=false。
-func (s *CapabilityService) loadCache(version string) (cacheEntry, bool, error) {
-	if version == "" || s == nil || s.db == nil {
+// FFmpegCacheIdentity 返回当前 FFmpeg 可执行文件的持久化缓存身份。
+func FFmpegCacheIdentity(ctx context.Context) string {
+	version, path, _ := ffmpegVersionWithPathGeneration(ctx)
+	return ffmpegCacheKey(version, path)
+}
+
+// ffmpegCacheKey 以版本、解析后的路径和文件元数据生成稳定缓存键。
+// 同版本的不同构建或同路径替换不得复用旧硬件能力结果。
+func ffmpegCacheKey(version, path string) string {
+	if version == "" || path == "" {
+		return ""
+	}
+	resolved := path
+	if found, err := exec.LookPath(path); err == nil {
+		resolved = found
+	}
+	if absolute, err := filepath.Abs(resolved); err == nil {
+		resolved = absolute
+	}
+	identity := version + "\n" + filepath.Clean(resolved)
+	if info, err := os.Stat(resolved); err == nil {
+		identity += fmt.Sprintf("\n%d\n%d", info.Size(), info.ModTime().UnixNano())
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+}
+
+// loadCache 按 ffmpeg 可执行文件身份读取缓存；缓存键为空或无记录返回 ok=false。
+func (s *CapabilityService) loadCache(cacheKey string) (cacheEntry, bool, error) {
+	if cacheKey == "" || s == nil || s.db == nil {
 		return cacheEntry{}, false, nil
 	}
 	var row models.CodecProbeCache
-	err := s.db.Where("ffmpeg_version = ?", version).First(&row).Error
+	err := s.db.Where("ffmpeg_version = ?", cacheKey).First(&row).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return cacheEntry{}, false, nil
@@ -208,7 +241,7 @@ func (s *CapabilityService) loadCache(version string) (cacheEntry, bool, error) 
 	var results []EncoderProbeResult
 	if err := json.Unmarshal([]byte(row.Results), &results); err != nil {
 		// 缓存损坏视为未命中，下次将重测覆盖
-		log.Printf("[WARN] 编码器实测缓存解码失败，将重测: version=%q, err=%v", version, err)
+		log.Printf("[WARN] 编码器实测缓存解码失败，将重测: cache_key=%q, err=%v", cacheKey, err)
 		return cacheEntry{}, false, nil
 	}
 	return cacheEntry{results: results, testedAt: row.TestedAt}, true, nil
@@ -216,11 +249,11 @@ func (s *CapabilityService) loadCache(version string) (cacheEntry, bool, error) 
 
 // saveCacheWithAuditForGeneration 仅在路径代次仍匹配时提交缓存事务。
 // 路径切换可在写库与审计期间继续进行，提交前核对代次并在过期时回滚。
-func (s *CapabilityService) saveCacheWithAuditForGeneration(ctx context.Context, generation uint64, version string, results []EncoderProbeResult, testedAt time.Time, force bool, rec audit.Recorder) (bool, error) {
-	if version == "" {
+func (s *CapabilityService) saveCacheWithAuditForGeneration(ctx context.Context, generation uint64, cacheKey, version string, results []EncoderProbeResult, testedAt time.Time, force bool, rec audit.Recorder) (bool, error) {
+	if cacheKey == "" {
 		return ffmpegGenerationMatches(generation), nil
 	}
-	tx, err := s.prepareCacheWrite(ctx, version, results, testedAt, force, rec)
+	tx, err := s.prepareCacheWrite(ctx, cacheKey, version, results, testedAt, force, rec)
 	if err != nil {
 		return ffmpegGenerationMatches(generation), err
 	}
@@ -233,7 +266,7 @@ func ffmpegGenerationMatches(generation uint64) bool {
 	return generation == ffmpegPathGeneration
 }
 
-func (s *CapabilityService) prepareCacheWrite(ctx context.Context, version string, results []EncoderProbeResult, testedAt time.Time, force bool, rec audit.Recorder) (*gorm.DB, error) {
+func (s *CapabilityService) prepareCacheWrite(ctx context.Context, cacheKey, version string, results []EncoderProbeResult, testedAt time.Time, force bool, rec audit.Recorder) (*gorm.DB, error) {
 	raw, err := json.Marshal(results)
 	if err != nil {
 		return nil, err
@@ -242,7 +275,7 @@ func (s *CapabilityService) prepareCacheWrite(ctx context.Context, version strin
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
-	row := models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: testedAt}
+	row := models.CodecProbeCache{FFmpegVersion: cacheKey, Results: string(raw), TestedAt: testedAt}
 	if err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "ffmpeg_version"}},
 		DoUpdates: clause.AssignmentColumns([]string{"results", "tested_at"}),

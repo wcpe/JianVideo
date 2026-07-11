@@ -1268,7 +1268,7 @@
     "tested_at": "2026-06-23T10:00:00Z"
   }
   ```
-- **说明**：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。**默认读按 ffmpeg 版本持久化的缓存即时返回**（`from_cache:true`），`?force=true` 强制重测覆盖缓存（`from_cache:false`，逐个试编码可能耗时数分钟）并写系统级 `codec_probe.retested` 审计事件。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。结果与 `GET /api/transcode/hwaccel` 同源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
+- **说明**：对候选编码器（软件 + QSV/VAAPI/NVENC/AMF/VideoToolbox/Vulkan 的 H.264/H.265/AV1/VP9）用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`）。`compiled` 表示是否编入当前 ffmpeg，`tested_ok` 表示试编码是否成功。**默认读按 FFmpeg 可执行文件身份（版本、实际路径与文件元数据）持久化的缓存即时返回**（`from_cache:true`），`?force=true` 强制重测覆盖缓存（`from_cache:false`，逐个试编码可能耗时数分钟）并写系统级 `codec_probe.retested` 审计事件。ffmpeg 不可用时返回 `ffmpeg_available:false` 且 `results` 为空。结果与 `GET /api/transcode/hwaccel` 同源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
 
 ### 查看环境变量（FR-56）
 

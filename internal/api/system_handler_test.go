@@ -189,11 +189,13 @@ func TestCodecTest_CacheHit_FromCacheTrue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	db := newCapabilityDB(t)
-	version := transcoder.FFmpegVersion(httptest.NewRequest(http.MethodGet, "/", nil).Context())
+	ctx := httptest.NewRequest(http.MethodGet, "/", nil).Context()
+	version := transcoder.FFmpegVersion(ctx)
+	cacheIdentity := transcoder.FFmpegCacheIdentity(ctx)
 	raw, _ := json.Marshal([]transcoder.EncoderProbeResult{
 		{Encoder: "sentinel-encoder", Family: "software", Codec: "h264", Compiled: true, TestedOK: true},
 	})
-	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
+	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: cacheIdentity, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
 		t.Fatalf("写入缓存失败: %v", err)
 	}
 
@@ -238,12 +240,13 @@ func TestCodecTest_PathSwitchReturnsNonOK(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	oldPath := transcoder.GetFFmpegPath()
-	version := transcoder.FFmpegVersion(httptest.NewRequest(http.MethodGet, "/", nil).Context())
+	ctx := httptest.NewRequest(http.MethodGet, "/", nil).Context()
+	cacheIdentity := transcoder.FFmpegCacheIdentity(ctx)
 	t.Cleanup(func() { transcoder.SetFFmpegPath(oldPath) })
 
 	db := newCapabilityDB(t)
 	raw, _ := json.Marshal([]transcoder.EncoderProbeResult{{Encoder: "sentinel-encoder"}})
-	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
+	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: cacheIdentity, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
 		t.Fatalf("写入缓存失败: %v", err)
 	}
 	queryStarted := make(chan struct{})
@@ -295,11 +298,12 @@ func TestHWAccelAndSystemInfo_SameSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	db := newCapabilityDB(t)
-	version := transcoder.FFmpegVersion(httptest.NewRequest(http.MethodGet, "/", nil).Context())
+	ctx := httptest.NewRequest(http.MethodGet, "/", nil).Context()
+	cacheIdentity := transcoder.FFmpegCacheIdentity(ctx)
 	raw, _ := json.Marshal([]transcoder.EncoderProbeResult{
 		{Encoder: "h264_amf", Family: "amf", Codec: "h264", Compiled: true, TestedOK: true},
 	})
-	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: version, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
+	if err := db.Create(&models.CodecProbeCache{FFmpegVersion: cacheIdentity, Results: string(raw), TestedAt: time.Now()}).Error; err != nil {
 		t.Fatalf("写入缓存失败: %v", err)
 	}
 
