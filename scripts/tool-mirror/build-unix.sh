@@ -148,6 +148,11 @@ for binary in ffmpeg ffprobe magick; do
   cp "$prefix/bin/$binary$extension" "$output/bin/"
 done
 if [ "${RUNNER_OS:-}" = "Windows" ]; then
+  runtime_root="$(dirname "$(command -v c++)")"
+  runtime_dlls=(libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libc++.dll libc++abi.dll libunwind.dll)
+  for runtime_dll in "${runtime_dlls[@]}"; do
+    [ ! -f "$runtime_root/$runtime_dll" ] || cp "$runtime_root/$runtime_dll" "$output/bin/"
+  done
   echo "Windows magick 可执行文件导入表："
   objdump -p "$output/bin/magick$extension"
 fi

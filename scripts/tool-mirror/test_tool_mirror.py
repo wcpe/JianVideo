@@ -307,6 +307,8 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn("--disable-openmp", script)
         self.assertIn("--without-magick-plus-plus", script)
         self.assertIn("magick_args+=(--without-bzlib --without-lzma --without-threads --without-xml)", script)
+        self.assertIn('runtime_dlls=(libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll libc++.dll libc++abi.dll libunwind.dll)', script)
+        self.assertIn('cp "$runtime_root/$runtime_dll" "$output/bin/"', script)
         self.assertIn('objdump -p "$output/bin/magick$extension"', script)
         self.assertIn("--without-zstd", script)
 
