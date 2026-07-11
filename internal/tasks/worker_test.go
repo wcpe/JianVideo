@@ -94,7 +94,7 @@ func TestWorkerRegistryRunsTasksWithTypeConcurrencyLimit(t *testing.T) {
 	}
 }
 
-func TestWorkerRegistryRunPendingIsExclusive(t *testing.T) {
+func TestWorkerRegistryConcurrentRunPendingDoesNotDuplicateTask(t *testing.T) {
 	svc, _ := newTaskTestService(t)
 	mustEnqueueTask(t, svc, EnqueueInput{
 		Scope:       models.TaskScopeSpace,
@@ -104,8 +104,10 @@ func TestWorkerRegistryRunPendingIsExclusive(t *testing.T) {
 	})
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	var calls int64
 	registry := NewWorkerRegistry(svc)
 	if err := registry.Register("metadata.backfill", 1, func(context.Context, models.Task) error {
+		atomic.AddInt64(&calls, 1)
 		close(entered)
 		<-release
 		return nil
@@ -114,25 +116,17 @@ func TestWorkerRegistryRunPendingIsExclusive(t *testing.T) {
 	}
 
 	firstDone := make(chan error, 1)
-	secondDone := make(chan error, 1)
 	go func() { firstDone <- registry.RunPending(context.Background()) }()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("首个 RunPending 未开始执行任务")
+	waitWorkerSignal(t, entered, "首个 RunPending 未开始执行任务")
+	if err := registry.RunPending(context.Background()); err != nil {
+		t.Fatalf("并发 RunPending 扫描失败: %v", err)
 	}
-	go func() { secondDone <- registry.RunPending(context.Background()) }()
-	select {
-	case err := <-secondDone:
-		t.Fatalf("第二个 RunPending 不应在首个执行完成前返回: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	if got := atomic.LoadInt64(&calls); got != 1 {
+		t.Fatalf("同一任务不得被并发重复执行，实际 %d 次", got)
 	}
 	close(release)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("首个 RunPending 执行失败: %v", err)
-	}
-	if err := <-secondDone; err != nil {
-		t.Fatalf("第二个 RunPending 执行失败: %v", err)
 	}
 }
 

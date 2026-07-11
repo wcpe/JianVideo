@@ -28,7 +28,6 @@ type workerSpec struct {
 type WorkerRegistry struct {
 	service     *Service
 	mu          sync.Mutex
-	runMu       sync.Mutex
 	wakeMu      sync.Mutex
 	wakeRunning bool
 	wakePending bool
@@ -104,9 +103,6 @@ func (r *WorkerRegistry) wakeLoop() {
 
 // RunPending 领取并执行当前所有已到期的 pending 任务。
 func (r *WorkerRegistry) RunPending(ctx context.Context) error {
-	r.runMu.Lock()
-	defer r.runMu.Unlock()
-
 	specs := r.snapshot()
 	errs := make(chan error, len(specs))
 	var wg sync.WaitGroup
