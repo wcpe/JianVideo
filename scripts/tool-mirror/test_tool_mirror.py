@@ -297,9 +297,13 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('CXXFLAGS="$libheif_cxxflags" cmake_build "$(source_dir \'libheif-*\')"', script)
         self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
         self.assertIn('magick_ldflags="$magick_ldflags -static"', script)
+        self.assertIn('delegate_libs="${delegate_libs// -lstdc++ / }"', script)
+        self.assertIn('Libs: -L\\${libdir} -lraw', script)
+        self.assertNotIn('Libs: -L\\${libdir} -lraw -lstdc++', script)
         self.assertIn('CPPFLAGS="$magick_cppflags" LDFLAGS="$magick_ldflags" LIBS="$delegate_libs ${LIBS:-}"', script)
         self.assertIn("--disable-openmp", script)
         self.assertIn("--without-magick-plus-plus", script)
+        self.assertIn("magick_args+=(--without-bzlib --without-lzma --without-threads --without-xml)", script)
         self.assertIn('objdump -p "$output/bin/magick$extension"', script)
         self.assertIn("--without-zstd", script)
 
