@@ -93,19 +93,21 @@ if [ "${RUNNER_OS:-}" = "Windows" ]; then
   cp -R "$libraw/libraw" "$prefix/include/"
   cp "$libraw/lib/libraw.a" "$prefix/lib/"
   libraw_version="$(cd "$libraw" && ./version.sh)"
-  cat > "$prefix/lib/pkgconfig/libraw.pc" <<EOF
+  for pc_name in libraw libraw_r; do
+    cat > "$prefix/lib/pkgconfig/$pc_name.pc" <<EOF
 prefix=$prefix
 exec_prefix=\${prefix}
 libdir=\${prefix}/lib
 includedir=\${prefix}/include
 
-Name: libraw
+Name: $pc_name
 Description: Raw image decoder library (non-thread-safe)
 Version: $libraw_version
 Libs: -L\${libdir} -lraw
 Libs.private: -ljpeg -lws2_32
-Cflags: -I\${includedir}/libraw -I\${includedir}
+Cflags: -I\${includedir}/libraw -I\${includedir} -DLIBRAW_NOTHREADS
 EOF
+  done
 else
   (cd "$libraw" && autoreconf -fi -I m4 && ./configure --prefix="$prefix" --enable-static --disable-shared --disable-examples && make -j"$jobs" && make install)
 fi
