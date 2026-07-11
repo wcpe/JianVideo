@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -34,6 +35,34 @@ if DNG_SPEC and DNG_SPEC.loader:
 
 
 class ToolMirrorTest(unittest.TestCase):
+    def run_release_assets(self, assets):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT_ROOT / "release_assets.py")],
+            input=json.dumps(assets),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_release_assets_outputs_id_and_name(self):
+        result = self.run_release_assets([
+            {"id": 123, "name": "jianvideo-tools-linux.zip"},
+            {"id": 456, "name": "SHA256SUMS"},
+        ])
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(
+            "123\tjianvideo-tools-linux.zip\n456\tSHA256SUMS\n",
+            result.stdout,
+        )
+        self.assertEqual("", result.stderr)
+
+    def test_release_assets_rejects_invalid_names(self):
+        for name in ("", "dir/file.zip", "dir\\file.zip", "bad\tname", "bad\nname", 123):
+            with self.subTest(name=name):
+                result = self.run_release_assets([{"id": 123, "name": name}])
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("错误", result.stderr)
+
     def test_download_retries_transient_connection_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / "archive.tar"

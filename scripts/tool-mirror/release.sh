@@ -94,7 +94,7 @@ assets="$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")"
 while IFS=$'\t' read -r asset_id name; do
   case "$name" in */*|*\\*) echo "错误：release asset 名称越界：$name" >&2; exit 1 ;; esac
   curl -fsSL "${auth[@]}" -H "Accept: application/octet-stream" "$api/releases/assets/$asset_id" -o "redownload/$name"
-done < <(python -c 'import json,sys; [print(f"{x[\"id\"]}\t{x[\"name\"]}") for x in json.load(sys.stdin)]' <<<"$assets")
+done < <(python scripts/tool-mirror/release_assets.py <<<"$assets")
 
 [ "$(find redownload -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')" = "6" ] || { echo "错误：回下载 ZIP 数量不是六个" >&2; exit 1; }
 (cd redownload && sha256sum -c SHA256SUMS)
