@@ -297,6 +297,8 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('CXXFLAGS="$libheif_cxxflags" cmake_build "$(source_dir \'libheif-*\')"', script)
         self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
         self.assertIn('magick_ldflags="$magick_ldflags -static"', script)
+        self.assertIn('magick_cxx="$magick_cxx -static"', script)
+        self.assertIn('CXX="$magick_cxx" CPPFLAGS="$magick_cppflags"', script)
         self.assertIn('delegate_libs="${delegate_libs// -lstdc++ / }"', script)
         self.assertIn('.replace(" -lstdc++", "")', script)
         self.assertIn('Libs: -L\\${libdir} -lraw', script)

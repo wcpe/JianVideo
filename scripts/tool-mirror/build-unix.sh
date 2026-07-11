@@ -129,16 +129,18 @@ esac
 magick="$(source_dir 'ImageMagick-*')"
 delegate_libs="$(pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux)"
 magick_args=(--prefix="$prefix" --disable-shared --enable-static --disable-openmp --without-magick-plus-plus --without-perl --without-x --without-zstd --with-heic=yes --with-raw=yes --with-jpeg=yes --with-png=yes --with-tiff=yes --with-webp=yes)
+magick_cxx="$CXX"
 magick_cppflags="$CPPFLAGS"
 magick_ldflags="$LDFLAGS"
 if [ "${RUNNER_OS:-}" = "Windows" ]; then
   delegate_libs=" $delegate_libs "
   delegate_libs="${delegate_libs// -lstdc++ / }"
+  magick_cxx="$magick_cxx -static"
   magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"
   magick_ldflags="$magick_ldflags -static"
   magick_args+=(--without-bzlib --without-lzma --without-threads --without-xml)
 fi
-(cd "$magick" && CPPFLAGS="$magick_cppflags" LDFLAGS="$magick_ldflags" LIBS="$delegate_libs ${LIBS:-}" ./configure "${magick_args[@]}" && make -j"$jobs" && make install)
+(cd "$magick" && CXX="$magick_cxx" CPPFLAGS="$magick_cppflags" LDFLAGS="$magick_ldflags" LIBS="$delegate_libs ${LIBS:-}" ./configure "${magick_args[@]}" && make -j"$jobs" && make install)
 
 extension=""
 [ "${RUNNER_OS:-}" = "Windows" ] && extension=".exe"
