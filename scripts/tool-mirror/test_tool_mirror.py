@@ -298,6 +298,7 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
         self.assertIn('magick_ldflags="$magick_ldflags -static"', script)
         self.assertIn('delegate_libs="${delegate_libs// -lstdc++ / }"', script)
+        self.assertIn('.replace(" -lstdc++", "")', script)
         self.assertIn('Libs: -L\\${libdir} -lraw', script)
         self.assertNotIn('Libs: -L\\${libdir} -lraw -lstdc++', script)
         self.assertIn('CPPFLAGS="$magick_cppflags" LDFLAGS="$magick_ldflags" LIBS="$delegate_libs ${LIBS:-}"', script)

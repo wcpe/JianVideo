@@ -76,6 +76,15 @@ fi
 libheif_cxxflags="$CXXFLAGS"
 [ "${RUNNER_OS:-}" = "Windows" ] && libheif_cxxflags="$libheif_cxxflags -DLIBDE265_STATIC_BUILD"
 CXXFLAGS="$libheif_cxxflags" cmake_build "$(source_dir 'libheif-*')" libheif -DBUILD_SHARED_LIBS=OFF -DWITH_LIBDE265=ON -DWITH_X265=$([ "$heic_write" = "--enable-heic-write" ] && printf ON || printf OFF) -DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_PNG=TRUE
+if [ "${RUNNER_OS:-}" = "Windows" ]; then
+  python - "$prefix/lib/pkgconfig/libheif.pc" <<'PY'
+from pathlib import Path
+import sys
+
+libheif_pc = Path(sys.argv[1])
+libheif_pc.write_text(libheif_pc.read_text(encoding="utf-8").replace(" -lstdc++", ""), encoding="utf-8")
+PY
+fi
 
 libraw="$(source_dir 'LibRaw-*')"
 if [ "${RUNNER_OS:-}" = "Windows" ]; then
