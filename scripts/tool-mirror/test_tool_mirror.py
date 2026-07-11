@@ -291,6 +291,8 @@ class ToolMirrorTest(unittest.TestCase):
     def test_imagemagick_expands_static_delegate_dependencies(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn("pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux", script)
+        self.assertIn('libheif_cxxflags="$libheif_cxxflags -DLIBDE265_STATIC_BUILD"', script)
+        self.assertIn('CXXFLAGS="$libheif_cxxflags" cmake_build "$(source_dir \'libheif-*\')"', script)
         self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
         self.assertIn('CPPFLAGS="$magick_cppflags" LIBS="$delegate_libs ${LIBS:-}"', script)
         self.assertIn("--without-zstd", script)
