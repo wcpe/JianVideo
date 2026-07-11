@@ -132,6 +132,10 @@ extension=""
 for binary in ffmpeg ffprobe magick; do
   cp "$prefix/bin/$binary$extension" "$output/bin/"
 done
+if [ "${RUNNER_OS:-}" = "Windows" ]; then
+  echo "Windows magick 可执行文件导入表："
+  objdump -p "$output/bin/magick$extension"
+fi
 "$output/bin/ffmpeg$extension" -version
 "$output/bin/ffprobe$extension" -version
 "$output/bin/magick$extension" -version
