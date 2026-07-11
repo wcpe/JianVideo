@@ -28,9 +28,11 @@ const warmCacheTimeout = 5 * time.Minute
 var ErrFFmpegPathChanged = errors.New("FFmpeg 路径已变更，请重试")
 
 var (
-	ffmpegDigestMu   sync.Mutex
-	ffmpegDigestPath string
-	ffmpegDigest     string
+	ffmpegDigestMu      sync.Mutex
+	ffmpegDigestPath    string
+	ffmpegDigest        string
+	ffmpegDigestSize    int64
+	ffmpegDigestModTime int64
 )
 
 // CapabilityService 硬件加速能力服务：以编码器实测为唯一真源，
@@ -114,12 +116,17 @@ func (s *CapabilityService) Capabilities(ctx context.Context) *HWAccelInfo {
 
 	s.mu.Lock()
 	cached, ok, err := s.loadCache(cacheKey)
+	current := false
 	if err != nil || !ok {
-		storeProbeSnapshotForGeneration(generation, nil)
+		current = storeProbeSnapshotForGeneration(generation, nil)
 	} else {
-		storeProbeSnapshotForGeneration(generation, &cached.results)
+		current = storeProbeSnapshotForGeneration(generation, &cached.results)
 	}
 	s.mu.Unlock()
+	if !current {
+		version = FFmpegVersion(ctx)
+		ok = false
+	}
 	if err != nil {
 		log.Printf("[WARN] 读取编码器实测缓存失败: version=%q, err=%v", version, err)
 	}
@@ -236,7 +243,8 @@ func ffmpegCacheKey(version, path string) string {
 func ffmpegContentDigest(path string) string {
 	ffmpegDigestMu.Lock()
 	defer ffmpegDigestMu.Unlock()
-	if path == ffmpegDigestPath && ffmpegDigest != "" {
+	info, statErr := os.Stat(path)
+	if statErr == nil && path == ffmpegDigestPath && ffmpegDigest != "" && info.Size() == ffmpegDigestSize && info.ModTime().UnixNano() == ffmpegDigestModTime {
 		return ffmpegDigest
 	}
 	file, err := os.Open(path)
@@ -250,6 +258,13 @@ func ffmpegContentDigest(path string) string {
 	}
 	ffmpegDigestPath = path
 	ffmpegDigest = fmt.Sprintf("%x", hash.Sum(nil))
+	if statErr == nil {
+		ffmpegDigestSize = info.Size()
+		ffmpegDigestModTime = info.ModTime().UnixNano()
+	} else {
+		ffmpegDigestSize = 0
+		ffmpegDigestModTime = 0
+	}
 	return ffmpegDigest
 }
 
@@ -257,6 +272,8 @@ func invalidateFFmpegContentDigest() {
 	ffmpegDigestMu.Lock()
 	ffmpegDigestPath = ""
 	ffmpegDigest = ""
+	ffmpegDigestSize = 0
+	ffmpegDigestModTime = 0
 	ffmpegDigestMu.Unlock()
 }
 

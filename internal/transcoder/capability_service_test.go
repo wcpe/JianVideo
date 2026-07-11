@@ -122,6 +122,18 @@ func TestFFmpegCacheKey_SamePathMetadataButDifferentContentChangesIdentity(t *te
 	assert.NotEqual(t, first, second, "内容变化必须使缓存身份失效")
 }
 
+func TestFFmpegCacheKey_ExternalMetadataChangeRefreshesContentDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ffmpeg.exe")
+	require.NoError(t, os.WriteFile(path, []byte("AAAA"), 0o700))
+	invalidateFFmpegContentDigest()
+
+	first := ffmpegCacheKey("ffmpeg version same", path)
+	require.NoError(t, os.WriteFile(path, []byte("BBBBB"), 0o700))
+	second := ffmpegCacheKey("ffmpeg version same", path)
+
+	assert.NotEqual(t, first, second, "外部替换导致元数据变化时必须刷新内容摘要")
+}
+
 func buildSameVersionCapabilityFFmpegPair(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -292,8 +304,8 @@ func TestCapabilityService_PathSwitchRejectsStaleSnapshotPublish(t *testing.T) {
 			return results, err
 		}},
 		{name: "Capabilities", call: func(svc *CapabilityService) ([]EncoderProbeResult, error) {
-			svc.Capabilities(context.Background())
-			return nil, nil
+			info := svc.Capabilities(context.Background())
+			return []EncoderProbeResult{{Encoder: info.Preferred}}, nil
 		}},
 		{name: "LoadCachedSnapshot", call: func(svc *CapabilityService) ([]EncoderProbeResult, error) {
 			return nil, svc.LoadCachedSnapshot(context.Background())
@@ -357,6 +369,9 @@ func assertPathSwitchRejectsStaleSnapshotPublish(t *testing.T, expectRetry bool,
 			assert.Empty(t, outcome.results, "路径切换后不得返回旧缓存结果")
 		} else {
 			require.NoError(t, outcome.err)
+			if len(outcome.results) > 0 {
+				assert.Equal(t, "libx264", outcome.results[0].Encoder, "路径切换后不得向调用方返回旧缓存能力")
+			}
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("能力缓存读取未在释放阻塞点后完成")
