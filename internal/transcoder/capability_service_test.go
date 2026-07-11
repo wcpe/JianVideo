@@ -104,6 +104,24 @@ func TestCapabilityService_SameVersionDifferentPathDoesNotReuseCache(t *testing.
 	assert.Equal(t, "libx264", info.Preferred)
 }
 
+func TestFFmpegCacheKey_SamePathMetadataButDifferentContentChangesIdentity(t *testing.T) {
+	oldGlobalPath := GetFFmpegPath()
+	path := filepath.Join(t.TempDir(), "ffmpeg.exe")
+	fixedTime := time.Unix(1_700_000_000, 0)
+	require.NoError(t, os.WriteFile(path, []byte("AAAA"), 0o700))
+	require.NoError(t, os.Chtimes(path, fixedTime, fixedTime))
+	SetFFmpegPath(path)
+	t.Cleanup(func() { SetFFmpegPath(oldGlobalPath) })
+
+	first := ffmpegCacheKey("ffmpeg version same", path)
+	require.NoError(t, os.WriteFile(path, []byte("BBBB"), 0o700))
+	require.NoError(t, os.Chtimes(path, fixedTime, fixedTime))
+	SetFFmpegPath(path)
+	second := ffmpegCacheKey("ffmpeg version same", path)
+
+	assert.NotEqual(t, first, second, "内容变化必须使缓存身份失效")
+}
+
 func buildSameVersionCapabilityFFmpegPair(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()

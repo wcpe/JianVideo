@@ -28,11 +28,9 @@ func SetFFmpegPath(path string) {
 	}
 	ffmpegPathMu.Lock()
 	defer ffmpegPathMu.Unlock()
-	if path == ffmpegPath {
-		return
-	}
 	ffmpegPath = path
 	ffmpegPathGeneration++
+	invalidateFFmpegContentDigest()
 	clearProbeSnapshot()
 }
 

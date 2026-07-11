@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -25,6 +26,12 @@ const warmCacheTimeout = 5 * time.Minute
 
 // ErrFFmpegPathChanged 表示能力请求期间 FFmpeg 路径已切换，调用方可重试。
 var ErrFFmpegPathChanged = errors.New("FFmpeg 路径已变更，请重试")
+
+var (
+	ffmpegDigestMu   sync.Mutex
+	ffmpegDigestPath string
+	ffmpegDigest     string
+)
 
 // CapabilityService 硬件加速能力服务：以编码器实测为唯一真源，
 // 结果按 FFmpeg 可执行文件身份持久化于 SQLite，副作用（实测 + 读写库）隔离于此层。
@@ -222,7 +229,35 @@ func ffmpegCacheKey(version, path string) string {
 	if info, err := os.Stat(resolved); err == nil {
 		identity += fmt.Sprintf("\n%d\n%d", info.Size(), info.ModTime().UnixNano())
 	}
+	identity += "\n" + ffmpegContentDigest(resolved)
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+}
+
+func ffmpegContentDigest(path string) string {
+	ffmpegDigestMu.Lock()
+	defer ffmpegDigestMu.Unlock()
+	if path == ffmpegDigestPath && ffmpegDigest != "" {
+		return ffmpegDigest
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return ""
+	}
+	ffmpegDigestPath = path
+	ffmpegDigest = fmt.Sprintf("%x", hash.Sum(nil))
+	return ffmpegDigest
+}
+
+func invalidateFFmpegContentDigest() {
+	ffmpegDigestMu.Lock()
+	ffmpegDigestPath = ""
+	ffmpegDigest = ""
+	ffmpegDigestMu.Unlock()
 }
 
 // loadCache 按 ffmpeg 可执行文件身份读取缓存；缓存键为空或无记录返回 ok=false。

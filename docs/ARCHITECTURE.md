@@ -13,7 +13,7 @@
 - 不依赖外部消息队列、缓存或容器编排。
 - FFmpeg / FFprobe 作为**外部进程**调用（`os/exec`），转码与探测本身不经 CGO、不内嵌编解码逻辑（见 §5.3）；CGO 仅用于 SQLite 驱动（`mattn/go-sqlite3`）与 `-tags ffmpeg` 构建下可选的硬件编码器检测（`avcodec_find_encoder_by_name`，见 §5.6）。
 - 支持全部硬件加速编码器（NVIDIA NVENC、Intel QSV、AMD AMF、VAAPI、VideoToolbox、Vulkan）与软件编码，按 per-codec（H.264/H.265/AV1/VP9）逐编码实测能力（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)）。
-- 硬件加速能力以编码器实测为单一真源，结果按 FFmpeg 可执行文件身份（版本、实际路径与文件元数据）持久化于 SQLite（启动后台预热、可手动重测），通过 `GET /api/transcode/hwaccel` 接口暴露；同版本不同构建不得复用旧能力缓存。
+- 硬件加速能力以编码器实测为单一真源，结果按 FFmpeg 可执行文件身份（版本、实际路径、文件元数据与内容摘要）持久化于 SQLite（启动后台预热、可手动重测），通过 `GET /api/transcode/hwaccel` 接口暴露；同版本不同构建不得复用旧能力缓存。
 
 ## 2. 模块与依赖
 
