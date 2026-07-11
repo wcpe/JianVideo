@@ -291,6 +291,8 @@ class ToolMirrorTest(unittest.TestCase):
     def test_imagemagick_expands_static_delegate_dependencies(self):
         script = (SCRIPT_ROOT / "build-unix.sh").read_text(encoding="utf-8")
         self.assertIn("pkg-config --static --libs libheif libwebp libwebpmux libwebpdemux", script)
+        self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
+        self.assertIn('CPPFLAGS="$magick_cppflags" LIBS="$delegate_libs ${LIBS:-}"', script)
         self.assertIn("--without-zstd", script)
 
     def test_windows_build_converts_runner_temp_for_msys(self):
