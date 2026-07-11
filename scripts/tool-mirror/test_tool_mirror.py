@@ -133,6 +133,8 @@ class ToolMirrorTest(unittest.TestCase):
         windows = {item["id"]: item for item in data["runners"] if item["platform"] == "windows"}
         self.assertEqual("UCRT64", windows["windows-x86_64"]["toolchain"]["shell"]["msystem"])
         self.assertEqual("CLANGARM64", windows["windows-aarch64"]["toolchain"]["shell"]["msystem"])
+        for runner in windows.values():
+            self.assertEqual("cmake version 4.4.0", runner["toolchain"]["tools"]["cmake"]["version"])
         self.assertEqual("locked", data["delegate_fixtures"]["status"])
 
     def test_missing_verification_method_fails_closed(self):
