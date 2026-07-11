@@ -297,6 +297,8 @@ class ToolMirrorTest(unittest.TestCase):
         self.assertIn('CXXFLAGS="$libheif_cxxflags" cmake_build "$(source_dir \'libheif-*\')"', script)
         self.assertIn('magick_cppflags="$magick_cppflags -DLIBHEIF_STATIC_BUILD"', script)
         self.assertIn('CPPFLAGS="$magick_cppflags" LIBS="$delegate_libs ${LIBS:-}"', script)
+        self.assertIn("--disable-openmp", script)
+        self.assertIn("--without-magick-plus-plus", script)
         self.assertIn("--without-zstd", script)
 
     def test_windows_build_converts_runner_temp_for_msys(self):
