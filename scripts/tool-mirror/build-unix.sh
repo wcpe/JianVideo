@@ -103,8 +103,7 @@ includedir=\${prefix}/include
 Name: $pc_name
 Description: Raw image decoder library (non-thread-safe)
 Version: $libraw_version
-Libs: -L\${libdir} -lraw
-Libs.private: -ljpeg -lws2_32
+Libs: -L\${libdir} -lraw -ljpeg -lws2_32
 Cflags: -I\${includedir}/libraw -I\${includedir} -DLIBRAW_NOTHREADS
 EOF
   done
