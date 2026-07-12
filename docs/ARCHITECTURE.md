@@ -217,7 +217,7 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 
 > 注：本表列出 `media_files` 与当前已实现能力相关的字段。
 >
-> FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、cursor 分页与组合索引使用边界。关键索引包括 `idx_media_files_space_added_id`、`idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_deleted_id`、`idx_media_files_space_format_added_id`、`idx_media_files_space_size_content_hash`、`idx_media_files_space_content_hash_stale`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
+> FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、tuple cursor 分页与组合索引使用边界。活跃媒体分页使用 `idx_media_files_space_added_id`、`idx_media_files_space_library_added` 与 `idx_media_files_active_space_format_added_id` 避免临时排序；删除态使用 `idx_media_files_deleted_space_deleted_at` partial index，避免宽泛 `deleted_at` 索引干扰活跃列表规划。其他关键索引包括 `idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_size_content_hash`、`idx_media_files_space_content_hash_stale`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
 >
 > 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
 >

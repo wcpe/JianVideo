@@ -1,6 +1,6 @@
 # 功能规格：存储库、Space 归属与数据库索引基线
 
-> 状态：验收阻塞　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-007-complete`
+> 状态：已交付@v0.23.0　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-007-complete`
 
 ## 1. 背景与目标
 
@@ -83,7 +83,7 @@ Benchmark：
 - [x] 补集成测试：默认 Space 创建、跨 Space 隔离、索引存在、旧 page 兼容。
 - [x] 补 owner-only 权限测试：owner 正常，非 owner 读/写/列举拒绝，未认证与非法 Space 拒绝。
 - [x] 补 Web 设置闭环：展示存储目录、索引库、当前 Space，并复用媒体库管理页维护目录。
-- [ ] 补 Benchmark 验收：当前真实 1m/5m/10m 报告未达到 FR2-003 后端门槛，保持阻塞。
+- [x] 补 Benchmark 验收：真实 1m/5m/10m 多 Space 报告全部达到 FR2-003 后端门槛。
 - [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
@@ -104,13 +104,13 @@ Benchmark：
 
 - 小规模命令 `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go -rows=1000,5000,10000 -output-dir=.tmp/benchmark/fr2-007/regression-small-current` 通过，验证多 Space 数据生成、目标 Space 结果隔离、真实查询计划与报告输出。
 - 阻断门回归使用更严格且不可放宽阈值的 `-threshold-scale=0.000001`，进程以非零退出并输出中文“基准未达阈值，阻断交付”。
-- 正式命令 `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go` 已真实完成 1m/5m/10m 九组查询，报告位于 `.tmp/benchmark/fr2-007/final-current/`；10m 四个 Space 各 250 万行，九组查询的结果隔离均通过。
-- 正式门禁未通过：10m 的 Space + 时间分页、路径前缀、筛选组合 p95 分别为 7864.747ms、7362.836ms、9292.577ms，高于 500ms/800ms/800ms 门槛；进程非零退出。
-- 真实 `EXPLAIN QUERY PLAN` 显示三类查询均选择 `idx_media_files_space_deleted_id`，并使用临时 B-Tree 排序；在未强制索引的生产等价 SQL 下形成当前性能阻塞。
-- 因新报告未达标，FR2-007 不保留“已交付”状态；后续必须按 FR2-003 要求修正查询/索引策略并重新生成全绿报告，方可恢复已交付。
+- 正式命令 `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go` 已基于提交 `3e06359` 从空库真实完成 1m/5m/10m 九组查询，报告位于 `.tmp/benchmark/fr2-007/formal-3e06359/`；10m 四个 Space 各 250 万行，九组查询的结果隔离均通过。
+- 10m 的 Space + 时间分页、路径前缀、筛选组合 p95 分别为 5.297ms、8.119ms、0.551ms，低于 500ms/800ms/800ms 门槛；九组查询全部达标。
+- 真实 `EXPLAIN QUERY PLAN` 无临时 B-Tree：时间分页使用 `idx_media_files_space_added_id`，路径前缀使用 `idx_media_files_space_library_added`，格式筛选使用 `idx_media_files_active_space_format_added_id`。
+- 迁移移除会误导活跃列表规划的宽泛删除索引，并以 `idx_media_files_deleted_space_deleted_at` partial index 单独保障回收站删除态查询；正式报告 SHA 与实现提交一致。
 
 ## 7. 风险 / 待定
 
 - 已确认：默认 Space ID 使用稳定字符串，便于 mock/client 对齐；默认 owner 使用 `spaces.owner_user_id`。
 - 已确认：旧 page API 返回 cursor 字段，但不要求旧前端消费。
-- 若 10m 查询无法达 FR2-003 门槛，必须按 FR2-003 要求追加 ADR 决定索引策略，不得静默降低目标。
+- 已确认：10m 查询通过 tuple cursor、排序复合索引和删除态专用 partial index 达标；后续不得重新引入会导致临时排序的宽泛删除索引。
