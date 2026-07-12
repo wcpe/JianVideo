@@ -14,6 +14,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/settings"
 )
 
 func newInferenceTestService(t *testing.T) (*Service, *gorm.DB) {
@@ -353,6 +354,122 @@ func TestBackfillGenerationChangeStopsStaleTaskAndAllowsCompensation(t *testing.
 	)
 	if err != nil || updated != 2 {
 		t.Fatalf("新 generation 补偿任务应补齐全部缺失项: updated=%d err=%v", updated, err)
+	}
+}
+
+func TestBackfillGenerationZeroStopsAfterSettingsChangeAndNewGenerationCompensates(t *testing.T) {
+	tests := []struct {
+		name              string
+		initialGeneration string
+		disable           func(*settings.Service, int64) error
+		enable            func(*settings.Service) error
+	}{
+		{
+			name: "代次键缺失时全局关闭",
+			disable: func(s *settings.Service, _ int64) error {
+				return s.Set(settings.KeyMediaInferenceEnabled, "0")
+			},
+			enable: func(s *settings.Service) error {
+				return s.Set(settings.KeyMediaInferenceEnabled, "1")
+			},
+		},
+		{
+			name:              "非法代次解析为零时按库关闭",
+			initialGeneration: "-1",
+			disable: func(s *settings.Service, libraryID int64) error {
+				return s.Set(settings.KeyMediaInferenceDisabledLibraries, fmt.Sprintf("[%d]", libraryID))
+			},
+			enable: func(s *settings.Service) error {
+				return s.Set(settings.KeyMediaInferenceDisabledLibraries, "[]")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, db := newInferenceTestService(t)
+			if err := db.AutoMigrate(&models.Setting{}); err != nil {
+				t.Fatalf("迁移设置表失败: %v", err)
+			}
+			settingsSvc := settings.NewService(db)
+			setGeneration := func(value string) error {
+				return db.Save(&models.Setting{Key: settings.KeyMediaInferenceGeneration, Value: value, UpdatedAt: time.Now()}).Error
+			}
+			if tt.initialGeneration != "" {
+				if err := setGeneration(tt.initialGeneration); err != nil {
+					t.Fatalf("预置初始代次失败: %v", err)
+				}
+			}
+			dir := t.TempDir()
+			lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+			if err != nil {
+				t.Fatalf("创建媒体库失败: %v", err)
+			}
+			for i := 1; i <= inferenceBackfillBatchSize+1; i++ {
+				name := fmt.Sprintf("Movie.%03d.2024.mkv", i)
+				media := models.MediaFile{SpaceID: models.DefaultSpaceID, LibraryID: lp.ID, FilePath: filepath.Join(dir, name), FileName: name, Format: "mkv", AddedAt: time.Now(), ModifiedAt: time.Now()}
+				if err := db.Create(&media).Error; err != nil {
+					t.Fatalf("创建第 %d 条媒体失败: %v", i, err)
+				}
+			}
+			provider := func(string, int64) InferenceConfig {
+				enabled, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+				disabled, _ := settingsSvc.Get(settings.KeyMediaInferenceDisabledLibraries)
+				generation, _ := settingsSvc.Get(settings.KeyMediaInferenceGeneration)
+				return InferenceConfig{Enabled: settings.ParseBoolSetting(enabled, true), DisabledLibraries: ParseDisabledInferenceLibraries(disabled), Generation: settings.ParseInt64Setting(generation)}
+			}
+			svc.WithInferenceConfigProvider(provider)
+			initialCfg := provider(models.DefaultSpaceID, 0)
+			if initialCfg.Generation != 0 {
+				t.Fatalf("初始代次应解析为零: %+v", initialCfg)
+			}
+			batch := 0
+			svc.inferenceBackfillBatchHook = func(int) {
+				batch++
+				if batch == 2 {
+					if err := tt.disable(settingsSvc, lp.ID); err != nil {
+						t.Fatalf("关闭推断失败: %v", err)
+					}
+					if err := setGeneration("1"); err != nil {
+						t.Fatalf("递增代次失败: %v", err)
+					}
+				}
+			}
+			updated, err := svc.BackfillMissingMediaInferencesWithConfigInSpace(context.Background(), models.DefaultSpaceID, 0, initialCfg, nil)
+			if err != nil || updated != inferenceBackfillBatchSize {
+				t.Fatalf("旧任务应在第二批写入前停止: updated=%d err=%v", updated, err)
+			}
+			var count int64
+			if err := db.Model(&models.MediaInference{}).Count(&count).Error; err != nil || count != inferenceBackfillBatchSize {
+				t.Fatalf("旧任务不得写入第二批: count=%d err=%v", count, err)
+			}
+			svc.inferenceBackfillBatchHook = nil
+			if err := tt.enable(settingsSvc); err != nil {
+				t.Fatalf("重新启用推断失败: %v", err)
+			}
+			if err := setGeneration("2"); err != nil {
+				t.Fatalf("设置新代次失败: %v", err)
+			}
+			updated, err = svc.BackfillMissingMediaInferencesWithConfigInSpace(context.Background(), models.DefaultSpaceID, 0, provider(models.DefaultSpaceID, 0), nil)
+			if err != nil || updated != 1 {
+				t.Fatalf("新代次补偿应接管剩余缺失项: updated=%d err=%v", updated, err)
+			}
+		})
+	}
+}
+
+func TestInferenceGenerationChangedComparesNonPositiveExpectedValues(t *testing.T) {
+	svc, _ := newInferenceTestService(t)
+	if svc.inferenceGenerationChanged(models.DefaultSpaceID, 0) {
+		t.Fatal("未注入 provider 时应保留兼容保护")
+	}
+	svc.WithInferenceConfigProvider(func(string, int64) InferenceConfig {
+		return InferenceConfig{Generation: 0}
+	})
+	if svc.inferenceGenerationChanged(models.DefaultSpaceID, 0) {
+		t.Fatal("当前与预期代次均为零时不应误判变化")
+	}
+	if !svc.inferenceGenerationChanged(models.DefaultSpaceID, -1) {
+		t.Fatal("非法负代次不得绕过当前代次比较")
 	}
 }
 

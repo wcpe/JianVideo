@@ -420,7 +420,7 @@ func (s *Service) inferenceConfigSnapshot(spaceID string) InferenceConfig {
 }
 
 func (s *Service) inferenceGenerationChanged(spaceID string, expected int64) bool {
-	if expected <= 0 || s.inferenceConfig == nil {
+	if s.inferenceConfig == nil {
 		return false
 	}
 	return s.inferenceConfig(normalizeSpaceID(spaceID), 0).Generation != expected
