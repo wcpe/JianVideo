@@ -80,9 +80,19 @@ type InferenceConfig struct {
 // InferenceConfigProvider 按 Space 与库读取推断开关。
 type InferenceConfigProvider func(spaceID string, libraryID int64) InferenceConfig
 
+// InferenceCompensationEnqueuer 持久化单媒体即时推断失败后的补偿任务。
+type InferenceCompensationEnqueuer func(ctx context.Context, spaceID string, libraryID, mediaID int64) error
+
 // WithInferenceConfigProvider 注入影视推断配置读取函数。
 func (s *Service) WithInferenceConfigProvider(provider InferenceConfigProvider) *Service {
 	s.inferenceConfig = provider
+	return s
+}
+
+// WithInferenceCompensation 注入补偿任务持久化与 worker 唤醒回调。
+func (s *Service) WithInferenceCompensation(enqueue InferenceCompensationEnqueuer, wake func()) *Service {
+	s.inferenceCompensationEnqueue = enqueue
+	s.inferenceCompensationWake = wake
 	return s
 }
 

@@ -273,7 +273,7 @@
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
   - 结构化筛选（可选，FR-35，显式参数优先于 `search` 表达式同名约束）：`type`（`image`/`video`）、`size_min`/`size_max`（字节）、`time_from`/`time_to`（媒体时间范围，`RFC3339` 或 `YYYY-MM-DD`，按 `COALESCE(media_time, added_at)` 比较）、`path`（目录前缀）。以上全部走参数化查询，无 SQL 注入面。
   - `has_gps`：传 `true` 时仅返回带 GPS 坐标（`gps_lat != 0 OR gps_lon != 0`）的媒体（可选，FR-39 照片地图）。
-  - `inference`：传 `auto` 时仅返回自动推断媒体，传 `manual` 时仅返回人工纠正媒体，传 `missing` 时仅返回尚无推断记录的媒体（可选，FR2-031）。
+  - `inference`：传 `inferred` 时返回自动推断与人工纠正的并集，传 `auto` 时仅返回自动推断媒体，传 `manual` 时仅返回人工纠正媒体，传 `missing` 时仅返回尚无推断记录的媒体（可选，FR2-031）。
 - **响应**（200）：
   ```json
   {
@@ -501,7 +501,7 @@
   ```json
   {"status": "pending", "task_id": 12}
   ```
-- **说明**：手工发起时批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务以当前 Space、`library_id` 和执行模式组成的幂等键入队为 `library.inference.backfill`，跳过 `home_video`、关闭的库和已有人工纠正的媒体。保存推断总开关或按库关闭配置时，若保存后总开关开启，后端自动入队 `missing` 模式，仅为尚无推断记录的已有媒体补齐结果，不重算已有自动结果且不覆盖人工结果。客户端须使用 `GET /api/tasks/:task_id` 轮询 `pending` / `running`，直到 `succeeded` / `failed` / `canceled` 终态；`progress` 按逐媒体完成比例更新，`checkpoint` 为最近处理的媒体 ID。取消 `running` 任务会向 worker 处理器传递 context 取消信号。
+- **说明**：手工发起时批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务以当前 Space、`library_id` 和执行模式组成的幂等键入队为 `library.inference.backfill`，跳过 `home_video`、关闭的库和已有人工纠正的媒体。保存推断总开关或按库关闭配置时，若保存后总开关开启，后端自动入队 `missing` 模式，仅为尚无推断记录的已有媒体补齐结果，不重算已有自动结果且不覆盖人工结果。媒体记录落库后若即时推断失败，后端会为该媒体持久化同类型 `media` 补偿任务并唤醒 worker；worker 重读当前开关与人工值，关闭或按库禁用时仍不产生自动推断。客户端须使用 `GET /api/tasks/:task_id` 轮询 `pending` / `running`，直到 `succeeded` / `failed` / `canceled` 终态；批量任务的 `progress` 按逐媒体完成比例更新，`checkpoint` 为最近处理的媒体 ID。取消 `running` 任务会向 worker 处理器传递 context 取消信号。
 - **错误**：`503` 通用任务服务或 worker 未启用，`500` 入队失败
 
 ### 编辑备注（FR-137）

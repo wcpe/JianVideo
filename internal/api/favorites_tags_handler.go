@@ -227,7 +227,7 @@ func parseMediaFilter(c *gin.Context, libraryID int64, sort, search string) libr
 		filter.HasGPS = true
 	}
 	switch c.Query("inference") {
-	case library.InferenceStatusAuto, library.InferenceStatusManual, library.InferenceStatusMissing:
+	case library.InferenceStatusInferred, library.InferenceStatusAuto, library.InferenceStatusManual, library.InferenceStatusMissing:
 		filter.InferenceStatus = c.Query("inference")
 	}
 	return filter

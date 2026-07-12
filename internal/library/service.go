@@ -39,15 +39,17 @@ var (
 
 // Service 媒体库业务逻辑。
 type Service struct {
-	db                         *gorm.DB
-	mediaRepo                  MediaQueryRepository
-	audit                      audit.Recorder
-	changeHook                 func(ScanChange)
-	inferenceConfig            InferenceConfigProvider
-	beforeAutoInferenceSave    func()
-	inferenceBackfillBatchHook func(int)
-	smbCreds                   *smb.CredentialStore
-	smbCredsMu                 sync.RWMutex
+	db                           *gorm.DB
+	mediaRepo                    MediaQueryRepository
+	audit                        audit.Recorder
+	changeHook                   func(ScanChange)
+	inferenceConfig              InferenceConfigProvider
+	inferenceCompensationEnqueue InferenceCompensationEnqueuer
+	inferenceCompensationWake    func()
+	beforeAutoInferenceSave      func()
+	inferenceBackfillBatchHook   func(int)
+	smbCreds                     *smb.CredentialStore
+	smbCredsMu                   sync.RWMutex
 }
 
 // 媒体类型常量。
@@ -463,9 +465,25 @@ func (s *Service) CreateMediaFileInSpace(spaceID string, libraryID int64, filePa
 		return nil, err
 	}
 	if _, err := s.InferAndStoreMediaInSpace(mf.SpaceID, mf.ID); err != nil {
-		return nil, err
+		if compensationErr := s.compensateImmediateInferenceFailure(mf, err); compensationErr != nil {
+			return mf, compensationErr
+		}
 	}
 	return mf, nil
+}
+
+func (s *Service) compensateImmediateInferenceFailure(mf *models.MediaFile, inferenceErr error) error {
+	if s.inferenceCompensationEnqueue == nil {
+		return inferenceErr
+	}
+	if err := s.inferenceCompensationEnqueue(context.Background(), mf.SpaceID, mf.LibraryID, mf.ID); err != nil {
+		return fmt.Errorf("即时推断失败且补偿任务入队失败: inference=%v: %w", inferenceErr, err)
+	}
+	log.Printf("[WARN] 媒体即时推断失败，已持久化补偿任务: mediaID=%d, err=%v", mf.ID, inferenceErr)
+	if s.inferenceCompensationWake != nil {
+		s.inferenceCompensationWake()
+	}
+	return nil
 }
 
 // ListMediaFiles 分页查询媒体文件列表。

@@ -78,11 +78,13 @@ const (
 	inferenceBackfillTaskType    = "library.inference.backfill"
 	inferenceBackfillModeFull    = "full"
 	inferenceBackfillModeMissing = "missing"
+	inferenceBackfillModeMedia   = "media"
 )
 
 type inferenceBackfillPayload struct {
 	SpaceID           string  `json:"space_id"`
 	LibraryID         int64   `json:"library_id"`
+	MediaID           int64   `json:"media_id,omitempty"`
 	Mode              string  `json:"mode"`
 	Generation        int64   `json:"generation,omitempty"`
 	Enabled           bool    `json:"enabled,omitempty"`
@@ -122,23 +124,49 @@ func (h *Handler) enqueueInferenceBackfillTaskWithMode(ctx context.Context, spac
 }
 
 func (h *Handler) enqueueInferenceTask(ctx context.Context, tx *gorm.DB, payload inferenceBackfillPayload) (*models.Task, error) {
+	return enqueueInferenceTask(ctx, h.tasks, tx, payload)
+}
+
+// NewInferenceCompensationEnqueuer 创建媒体即时推断失败后的持久化补偿回调。
+func NewInferenceCompensationEnqueuer(tasks *tasksvc.Service) library.InferenceCompensationEnqueuer {
+	return func(ctx context.Context, spaceID string, libraryID, mediaID int64) error {
+		payload := inferenceBackfillPayload{
+			SpaceID: spaceID, LibraryID: libraryID, MediaID: mediaID, Mode: inferenceBackfillModeMedia,
+		}
+		_, err := enqueueInferenceTask(ctx, tasks, nil, payload)
+		return err
+	}
+}
+
+func enqueueInferenceTask(ctx context.Context, tasks *tasksvc.Service, tx *gorm.DB, payload inferenceBackfillPayload) (*models.Task, error) {
+	if tasks == nil {
+		return nil, errors.New("推断回填任务服务未启用")
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
+	input := inferenceTaskInput(payload, string(encoded))
+	if tx != nil {
+		return tasks.EnqueueTx(ctx, tx, input)
+	}
+	return tasks.Enqueue(ctx, input)
+}
+
+func inferenceTaskInput(payload inferenceBackfillPayload, encoded string) tasksvc.EnqueueInput {
 	key := fmt.Sprintf("inference-backfill:%s:%d:%s", payload.SpaceID, payload.LibraryID, payload.Mode)
-	if payload.Generation > 0 {
+	resourceType, resourceID, maxAttempts := "library", fmt.Sprintf("%d", payload.LibraryID), 1
+	if payload.Mode == inferenceBackfillModeMedia {
+		key = fmt.Sprintf("inference-media:%s:%d", payload.SpaceID, payload.MediaID)
+		resourceType, resourceID, maxAttempts = "media", fmt.Sprintf("%d", payload.MediaID), 3
+	} else if payload.Generation > 0 {
 		key = fmt.Sprintf("%s:%d", key, payload.Generation)
 	}
-	input := tasksvc.EnqueueInput{
+	return tasksvc.EnqueueInput{
 		Scope: models.TaskScopeSpace, SpaceID: payload.SpaceID, Type: inferenceBackfillTaskType,
-		Priority: 0, MaxAttempts: 1, IdempotencyKey: key, PayloadJSON: string(encoded),
-		ResourceType: "library", ResourceID: fmt.Sprintf("%d", payload.LibraryID),
+		Priority: 0, MaxAttempts: maxAttempts, IdempotencyKey: key, PayloadJSON: encoded,
+		ResourceType: resourceType, ResourceID: resourceID,
 	}
-	if tx != nil {
-		return h.tasks.EnqueueTx(ctx, tx, input)
-	}
-	return h.tasks.Enqueue(ctx, input)
 }
 
 // RegisterInferenceBackfillWorker 注册离线推断回填处理器。
@@ -166,7 +194,9 @@ func inferenceBackfillHandler(lib *library.Service, registry *tasksvc.WorkerRegi
 				Checkpoint: fmt.Sprintf("media:%d", mediaID),
 			})
 		}
-		if payload.Mode == inferenceBackfillModeMissing && payload.Generation > 0 {
+		if payload.Mode == inferenceBackfillModeMedia {
+			_, err = lib.InferAndStoreMediaInSpace(payload.SpaceID, payload.MediaID)
+		} else if payload.Mode == inferenceBackfillModeMissing && payload.Generation > 0 {
 			cfg := library.InferenceConfig{
 				Enabled: payload.Enabled, Generation: payload.Generation,
 				DisabledLibraries: inferenceDisabledLibrarySet(payload.DisabledLibraries),
@@ -209,8 +239,11 @@ func parseInferenceBackfillTask(task models.Task) (inferenceBackfillPayload, err
 	if payload.Mode == "" {
 		payload.Mode = inferenceBackfillModeFull
 	}
-	if payload.Mode != inferenceBackfillModeFull && payload.Mode != inferenceBackfillModeMissing {
+	if payload.Mode != inferenceBackfillModeFull && payload.Mode != inferenceBackfillModeMissing && payload.Mode != inferenceBackfillModeMedia {
 		return payload, errors.New("推断回填任务模式无效")
+	}
+	if payload.Mode == inferenceBackfillModeMedia && payload.MediaID <= 0 {
+		return payload, errors.New("推断补偿任务参数缺少媒体 ID")
 	}
 	return payload, nil
 }

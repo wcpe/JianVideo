@@ -257,6 +257,7 @@ func main() {
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
 	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
 		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)
 	}
