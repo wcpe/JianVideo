@@ -63,6 +63,13 @@ class ToolMirrorTest(unittest.TestCase):
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn("错误", result.stderr)
 
+    def test_release_asset_download_does_not_mix_json_accept_header(self):
+        script = (SCRIPT_ROOT / "release.sh").read_text(encoding="utf-8")
+        auth_line = next(line for line in script.splitlines() if line.startswith("auth=("))
+        self.assertNotIn("application/vnd.github+json", auth_line)
+        self.assertIn('json_accept=(-H "Accept: application/vnd.github+json")', script)
+        self.assertIn('asset_accept=(-H "Accept: application/octet-stream")', script)
+
     def test_download_retries_transient_connection_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp) / "archive.tar"

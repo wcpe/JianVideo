@@ -9,14 +9,16 @@ tag="${2:?用法：release.sh <产物目录> <固定 tag>}"
 : "${TARGET_SHA:?缺少 TARGET_SHA}"
 
 api="https://api.github.com/repos/$REPOSITORY"
-auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+auth=(-H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28")
+json_accept=(-H "Accept: application/vnd.github+json")
+asset_accept=(-H "Accept: application/octet-stream")
 release_id=""
 release_created=0
 api_output="${RUNNER_TEMP:-/tmp}/jianvideo-release-api.json"
 
 api_status() {
   local url="$1"
-  curl -sS -o "$api_output" -w '%{http_code}' "${auth[@]}" "$url"
+  curl -sS -o "$api_output" -w '%{http_code}' "${auth[@]}" "${json_accept[@]}" "$url"
 }
 
 require_absent() {
@@ -90,10 +92,10 @@ done
 
 rm -rf redownload
 mkdir redownload
-assets="$(curl -fsS "${auth[@]}" "$api/releases/$release_id/assets")"
+assets="$(curl -fsS "${auth[@]}" "${json_accept[@]}" "$api/releases/$release_id/assets")"
 while IFS=$'\t' read -r asset_id name; do
   case "$name" in */*|*\\*) echo "错误：release asset 名称越界：$name" >&2; exit 1 ;; esac
-  curl -fsSL "${auth[@]}" -H "Accept: application/octet-stream" "$api/releases/assets/$asset_id" -o "redownload/$name"
+  curl -fsSL "${auth[@]}" "${asset_accept[@]}" "$api/releases/assets/$asset_id" -o "redownload/$name"
 done < <(python scripts/tool-mirror/release_assets.py <<<"$assets")
 
 [ "$(find redownload -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')" = "6" ] || { echo "错误：回下载 ZIP 数量不是六个" >&2; exit 1; }
