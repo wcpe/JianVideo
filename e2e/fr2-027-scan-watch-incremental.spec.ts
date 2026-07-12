@@ -36,7 +36,7 @@ test('全量扫描将丢失文件标记为 missing 并从常规列表隐藏', as
       .poll(async () => mediaTotal(page.request, libraryID), { timeout: 10000 })
       .toBe(1);
 
-    rmSync(mediaPath);
+    await removePathWithRetry(mediaPath, false);
     const secondScan = await page.request.post(`/api/library/scan/${libraryID}`, {
       params: { mode: 'full' },
     });
@@ -59,9 +59,22 @@ test('全量扫描将丢失文件标记为 missing 并从常规列表隐藏', as
     await page.screenshot({ path: `${screenshotDir}/scan-task-queue.png`, fullPage: true });
   } finally {
     if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
-    if (existsSync(mediaDir)) rmSync(mediaDir, { recursive: true, force: true });
+    await removePathWithRetry(mediaDir, true);
   }
 });
+
+async function removePathWithRetry(path: string, recursive: boolean) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (!existsSync(path)) return;
+    try {
+      rmSync(path, { recursive, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 19) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
 
 async function mediaTotal(request: APIRequestContext, libraryID: number) {
   const res = await request.get(`/api/library/media?library_id=${libraryID}&page_size=100`);

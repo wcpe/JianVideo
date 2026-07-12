@@ -1104,22 +1104,37 @@
   - 支持 `Content-Range` 响应头
 - **错误**：`404` 媒体文件不存在，`500` 转码启动失败
 
-### 获取 HLS 索引
+### 查询 HLS 预览状态（FR2-008）
 
-- **方法 / 路径**：`GET /api/play/hls/:id/index.m3u8`
-- **响应**（200）：`Content-Type: application/vnd.apple.mpegurl`
+- **方法 / 路径**：`GET /api/play/:id/hls-status`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **查询参数**：`profile_id` 可选；缺省为兼容 profile `h264`
+- **响应**（200）：
+  ```json
+  {
+    "available": true,
+    "profile_id": "h264",
+    "url": "/api/play/hls/42/master.m3u8",
+    "task": {
+      "id": 7,
+      "type": "transcode.hls.preview",
+      "status": "succeeded",
+      "priority": 10,
+      "progress": 1
+    }
+  }
+  ```
+- **说明**：`available` 只按当前 Space、媒体与 profile 的目标清单判定；`task` 是该 profile 最近一条统一任务，无任务时为 `null`。默认 H.264/TS profile 返回兼容 URL `master.m3u8`；非默认 profile 返回 `/api/play/hls/:id/profiles/:profile_id/:manifest`。服务未启用返回 `503`，媒体不存在返回 `404`，非法 profile 返回 `400`。
 
-### 获取 HLS 切片
+### 获取 HLS 清单与切片
 
-- **方法 / 路径**：`GET /api/play/hls/:id/:quality_segment_001.ts`
-  - `:quality` 为码率档位：`1080p` / `720p` / `480p`
-- **响应**（200）：`Content-Type: video/mp2t`
-
-### 获取 ABR Master Playlist
-
-- **方法 / 路径**：`GET /api/play/hls/:id/master.m3u8`
-- **响应**（200）：`Content-Type: application/vnd.apple.mpegurl`
-- **说明**：返回包含多码率 `EXT-X-STREAM-INF` 标签的 master playlist，供 hls.js 自适应切换
+- **默认兼容路径**：
+  - `GET /api/play/hls/:id/master` 或 `GET /api/play/hls/:id/master.m3u8`：默认 `h264` profile 的 TS master 清单；FR2-008 单档任务只含一个 `EXT-X-STREAM-INF`，不等同于 FR2-026 多码率 ABR。
+  - `GET /api/play/hls/:id/index.m3u8`：默认 profile 的 fMP4/CMAF 清单兼容路径。
+- **显式 profile 路径**：`GET /api/play/hls/:id/profiles/:profile_id/:file`
+- **旧文件布局兼容**：若 Space/profile 新目录中不存在目标文件，默认路径继续回退读取历史 `hls/:media_id/:file` 产物。
+- **响应类型**：`.m3u8` 为 `application/vnd.apple.mpegurl`，`.ts` 为 `video/mp2t`，`.m4s` 为 `video/iso.segment`，fMP4 初始化段 `.mp4` 为 `video/mp4`。
+- **安全边界**：请求必须通过当前 Space owner 校验，且媒体必须属于该 Space；路径必须位于受控 HLS 根目录内。
 
 ### 上报观看位置（FR-44）
 
@@ -1191,7 +1206,7 @@
 ### 列出转码预设（FR-77）
 
 - **方法 / 路径**：`GET /api/transcode/presets`
-- **响应**（200）：`{ "items": [ { "id", "name", "codec", "width", "height", "created_at", "updated_at" } ] }`，按创建时间倒序。`width`/`height` 为 `0` 表示沿用源分辨率。未注入预设服务返回 `503`。
+- **响应**（200）：`{ "items": [ { "id", "name", "codec", "width", "height", "created_at", "updated_at" } ] }`，按创建时间倒序。`width`/`height` 为 `0` 表示沿用源分辨率；FR2-008 HLS 任务会把两者快照到统一任务 payload，并在 H.264 单档输出时用其选择目标质量档。未注入预设服务返回 `503`。
 
 ### 创建转码预设（FR-77）
 
@@ -1209,19 +1224,30 @@
 - **方法 / 路径**：`DELETE /api/transcode/presets/:id`
 - **响应**：`204`；预设不存在 `404`。已预生成的切片缓存不受影响。
 
-### 加入预生成队列（FR-77）
+### 加入 HLS 预览任务队列（FR2-008；兼容旧转码入口）
 
 - **方法 / 路径**：`POST /api/transcode/tasks`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
-- **请求体**：`{ "media_id": 42, "preset_id": 1 }`。
-- **响应**（200）：`{ "status": "queued", "task_id": 7 }`。按预设快照编码入当前 Space 的预生成队列、单 worker 串行预转码切片预热首播。媒体或预设不存在返回 `404`；未注入预生成服务返回 `503`。
+- **请求体**：
+  ```json
+  {
+    "media_id": 42,
+    "preset_id": 1,
+    "profile_id": "h264",
+    "priority": 10,
+    "force_rebuild": false
+  }
+  ```
+- **说明**：`profile_id` 缺省时使用预设 codec；`priority` 进入通用队列优先级；`force_rebuild=true` 时先通过缓存安全边界仅清理目标 Space/media/profile，再重建。任务类型固定为 `transcode.hls.preview`，最大尝试次数为 3，worker 默认单并发。H.264 生成单档 TS HLS，非 H.264 生成单档 fMP4/CMAF；**FR2-008 不生成 1080p/720p/480p 多码率阶梯，ABR 属 FR2-026**。
+- **响应**（200）：`{ "status": "queued", "task_id": 7 }`。相同 Space/media/profile 存在未完成任务时按统一任务幂等键复用。媒体或预设不存在返回 `404`，参数或入队失败返回 `400`。
+- **取消 / 重试 / 详情**：使用通用任务端点 `GET /api/tasks/:id`、`POST /api/tasks/:id/cancel`、`POST /api/tasks/:id/retry`；取消会传播到 ffmpeg context，重试复用同一任务记录并重新调度。
 
-### 列出预生成任务（FR-77）
+### 列出 HLS 预览任务（旧响应形状兼容）
 
 - **方法 / 路径**：`GET /api/transcode/tasks?status=`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
-- **查询参数**：`status`（可选）取 `pending`/`running`/`completed`/`error`，非空时仅返回该状态任务。
-- **响应**（200）：`{ "tasks": [ { "id", "space_id", "media_id", "preset_id", "codec", "width", "height", "status", "error", "created_at", "started_at", "completed_at" } ] }`，当前 Space 内按入队时间倒序。
+- **查询参数**：`status` 可使用通用状态 `pending`/`running`/`succeeded`/`failed`/`canceled`；响应为兼容旧前端，仍把 `succeeded` 映射为 `completed`、`failed` 映射为 `error`。
+- **响应**（200）：`{ "tasks": [ { "id", "space_id", "media_id", "preset_id", "profile_id", "codec", "width", "height", "status", "priority", "progress", "error", "created_at", "started_at", "completed_at" } ] }`。`progress` 为 0–1，列表仅返回当前 Space 的 `transcode.hls.preview` 任务。
 
 ### 系统信息
 

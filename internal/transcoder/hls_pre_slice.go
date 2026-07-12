@@ -114,78 +114,116 @@ func PreSliceWithPolicy(
 	hlsMgr *player.HLSManager,
 	hlsDir string,
 ) (*PreSliceResult, error) {
-	if !IsFFmpegAvailable() {
-		return nil, fmt.Errorf("ffmpeg 不可用，无法预切片")
-	}
-	if hlsDir == "" {
-		return nil, fmt.Errorf("hlsDir 不能为空")
-	}
 	if hlsMgr == nil {
 		return nil, fmt.Errorf("hlsMgr 不能为空")
 	}
+	outputDir := filepath.Join(hlsDir, fmt.Sprintf("%d", mediaID))
+	return preSliceTSWithPolicyToDir(ctx, mediaID, inputPath, srcWidth, srcHeight, policy, outputDir)
+}
 
-	// 源分辨率缺失时探测一次
-	if srcWidth <= 0 || srcHeight <= 0 {
-		w, h, err := probeResolution(ctx, inputPath)
-		if err != nil {
-			log.Printf("[WARN] 探测分辨率失败，使用默认档位: mediaID=%d, err=%v", mediaID, err)
-		} else {
-			srcWidth, srcHeight = w, h
-		}
+// PreSliceWithCodecAndPolicyToDir 把单个编码 profile 产出到调用方给定的隔离目录。
+func PreSliceWithCodecAndPolicyToDir(
+	ctx context.Context,
+	mediaID int64,
+	inputPath string,
+	srcWidth int,
+	srcHeight int,
+	codec string,
+	policy HardwarePolicy,
+	outputDir string,
+) (*PreSliceResult, error) {
+	if SelectOutputPath(codec) == OutputPathTS {
+		return preSliceTSPreviewWithPolicyToDir(ctx, mediaID, inputPath, srcWidth, srcHeight, policy, outputDir)
 	}
+	var results []EncoderProbeResult
+	if snap := probeSnapshot.Load(); snap != nil {
+		results = *snap
+	}
+	res, err := RunFMP4ToDirWithPolicy(ctx, mediaID, inputPath, codec, outputDir, results, policy)
+	if err != nil {
+		return nil, err
+	}
+	return &PreSliceResult{MediaID: mediaID, OutputDir: res.OutputDir, Qualities: []string{res.Codec}, MasterPath: res.ManifestPath}, nil
+}
 
-	// 选档位：源分辨率未知时退到最低档。
-	qualityNames := QualitiesForResolution(srcWidth, srcHeight)
+func preSliceTSWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, srcWidth, srcHeight int, policy HardwarePolicy, outputDir string) (*PreSliceResult, error) {
+	srcWidth, srcHeight = resolveSourceResolution(ctx, mediaID, inputPath, srcWidth, srcHeight)
+	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, QualitiesForResolution(srcWidth, srcHeight))
+}
+
+func preSliceTSPreviewWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, srcWidth, srcHeight int, policy HardwarePolicy, outputDir string) (*PreSliceResult, error) {
+	srcWidth, srcHeight = resolveSourceResolution(ctx, mediaID, inputPath, srcWidth, srcHeight)
+	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, previewQualityForResolution(srcWidth, srcHeight))
+}
+
+func previewQualityForResolution(width, height int) []string {
+	qualityNames := QualitiesForResolution(width, height)
+	if len(qualityNames) > 1 {
+		return qualityNames[:1]
+	}
+	return qualityNames
+}
+
+func preSliceTSQualitiesWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, policy HardwarePolicy, outputDir string, qualityNames []string) (*PreSliceResult, error) {
+	if !IsFFmpegAvailable() {
+		return nil, fmt.Errorf("ffmpeg 不可用，无法预切片")
+	}
+	if strings.TrimSpace(outputDir) == "" {
+		return nil, fmt.Errorf("HLS 输出目录不能为空")
+	}
 	if len(qualityNames) == 0 {
 		qualityNames = []string{"480p"}
 	}
-
-	// 为本次预切片创建独立子目录（避免与追播模式并行写同一目录）
-	outputDir := filepath.Join(hlsDir, fmt.Sprintf("%d", mediaID))
-	if err := os.RemoveAll(outputDir); err != nil {
-		return nil, fmt.Errorf("清理旧切片失败: %w", err)
-	}
-	if err := os.MkdirAll(outputDir, 0o750); err != nil {
-		return nil, fmt.Errorf("创建切片目录失败: %w", err)
-	}
-
-	// 给切片过程加个硬上限，避免卡死 ScanLibrary 响应
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-
-	if err := runMultiToDirWithPolicy(runCtx, inputPath, qualityNames, outputDir, policy); err != nil {
-		// 失败清理；与成功日志对称，记录 mediaID/输出目录/档位上下文便于排查
-		_ = os.RemoveAll(outputDir)
-		log.Printf("[ERROR] HLS 预切片失败（ffmpeg 切片）: mediaID=%d, outputDir=%s, qualities=%v, err=%v",
-			mediaID, outputDir, qualityNames, err)
-		return nil, fmt.Errorf("ffmpeg 切片失败: %w", err)
-	}
-
-	// 校验 ffmpeg 真的产出了 m3u8
-	if err := verifySliceOutputs(outputDir, qualityNames); err != nil {
-		_ = os.RemoveAll(outputDir)
-		log.Printf("[ERROR] HLS 预切片失败（m3u8 校验）: mediaID=%d, outputDir=%s, qualities=%v, err=%v",
-			mediaID, outputDir, qualityNames, err)
+	if err := resetHLSOutputDir(outputDir); err != nil {
 		return nil, err
 	}
-
-	// 拼 master.m3u8
-	masterContent := buildMasterM3U8(qualityNames, qualityLadders)
-	if err := hlsMgr.SaveMasterM3U8(mediaID, masterContent); err != nil {
+	if err := runHLSProfile(ctx, mediaID, inputPath, outputDir, qualityNames, policy); err != nil {
+		return nil, err
+	}
+	masterPath := filepath.Join(outputDir, "master.m3u8")
+	if err := os.WriteFile(masterPath, []byte(buildMasterM3U8(qualityNames, qualityLadders)), 0o640); err != nil {
 		_ = os.RemoveAll(outputDir)
-		log.Printf("[ERROR] HLS 预切片失败（保存 master.m3u8）: mediaID=%d, outputDir=%s, err=%v",
-			mediaID, outputDir, err)
 		return nil, fmt.Errorf("保存 master.m3u8 失败: %w", err)
 	}
+	log.Printf("[INFO] HLS 预切片完成: mediaID=%d, outputDir=%s, qualities=%v", mediaID, outputDir, qualityNames)
+	return &PreSliceResult{MediaID: mediaID, OutputDir: outputDir, Qualities: qualityNames, MasterPath: masterPath}, nil
+}
 
-	log.Printf("[INFO] HLS 预切片完成: mediaID=%d, outputDir=%s, qualities=%v",
-		mediaID, outputDir, qualityNames)
-	return &PreSliceResult{
-		MediaID:    mediaID,
-		OutputDir:  outputDir,
-		Qualities:  qualityNames,
-		MasterPath: filepath.Join(outputDir, "master.m3u8"),
-	}, nil
+func resolveSourceResolution(ctx context.Context, mediaID int64, inputPath string, width, height int) (int, int) {
+	if width > 0 && height > 0 {
+		return width, height
+	}
+	probedWidth, probedHeight, err := probeResolution(ctx, inputPath)
+	if err != nil {
+		log.Printf("[WARN] 探测分辨率失败，使用默认档位: mediaID=%d, err=%v", mediaID, err)
+		return width, height
+	}
+	return probedWidth, probedHeight
+}
+
+func resetHLSOutputDir(outputDir string) error {
+	if err := os.RemoveAll(outputDir); err != nil {
+		return fmt.Errorf("清理旧切片失败: %w", err)
+	}
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+		return fmt.Errorf("创建切片目录失败: %w", err)
+	}
+	return nil
+}
+
+func runHLSProfile(ctx context.Context, mediaID int64, inputPath, outputDir string, qualityNames []string, policy HardwarePolicy) error {
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	if err := runMultiToDirWithPolicy(runCtx, inputPath, qualityNames, outputDir, policy); err != nil {
+		_ = os.RemoveAll(outputDir)
+		log.Printf("[ERROR] HLS 预切片失败（ffmpeg 切片）: mediaID=%d, outputDir=%s, qualities=%v, err=%v", mediaID, outputDir, qualityNames, err)
+		return fmt.Errorf("ffmpeg 切片失败: %w", err)
+	}
+	if err := verifySliceOutputs(outputDir, qualityNames); err != nil {
+		_ = os.RemoveAll(outputDir)
+		return err
+	}
+	return nil
 }
 
 func runMultiToDirWithPolicy(ctx context.Context, inputPath string, qualityNames []string, outputDir string, policy HardwarePolicy) error {

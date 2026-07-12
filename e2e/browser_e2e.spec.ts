@@ -66,7 +66,7 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     await page.getByRole('link', { name: '时间轴' }).click();
     await expect(page).toHaveURL(/\/timeline/);
     await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
-    await expect(page.getByPlaceholder(/搜索：文件名/)).toBeVisible();
+    await expect(page.getByRole('textbox', { name: '全局搜索' })).toBeVisible();
   });
 
   test('设置页展示存储与 Space 并进入媒体库管理', async ({ page }) => {
@@ -138,7 +138,7 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     // 搜索框在时间轴页（FR-117 后迁至 /timeline）
     await page.getByRole('link', { name: '时间轴' }).click();
     await expect(page).toHaveURL(/\/timeline/);
-    const searchInput = page.getByPlaceholder(/搜索：文件名/);
+    const searchInput = page.getByRole('textbox', { name: '全局搜索' });
     await expect(searchInput).toBeVisible();
     await searchInput.fill('test');
     await expect(searchInput).toHaveValue('test');

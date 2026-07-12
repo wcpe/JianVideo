@@ -359,36 +359,46 @@ func main() {
 	// 媒体健康巡检服务（FR-73）：后台只读巡检全部未软删媒体，问题落 media_health_issues 表。
 	healthSvc := library.NewDefaultHealthService(gormDB)
 
-	// 转码预设与预生成队列（FR-77）：预设存储 + 单 worker 串行预生成队列。
-	// exec 闭包反查媒体路径并按预设编码调 PreSliceWithCodec 预热切片到 hlsDir/{mediaID}/。
-	// 复用 FR-29 任务队列范式（见 ADR-0039），重启先恢复残留 running 再启动。
+	// HLS preview 统一任务（FR2-008）：执行真源只使用通用 tasks，旧转码 API 作为兼容适配层。
 	presetStore := transcoder.NewPresetStore(gormDB)
-	pregenQueue := transcoder.NewPregenQueue(gormDB, func(spaceID string, mediaID int64, codec string) error {
-		mf, err := libSvc.GetMediaFileByIDInSpace(spaceID, mediaID)
+	hlsPreview := transcoder.NewHLSPreviewService(taskSvc, taskWorkers, hlsDir, func(ctx context.Context, _ int64, payload transcoder.HLSPreviewPayload) error {
+		mf, err := libSvc.GetMediaFileByIDInSpace(payload.SpaceID, payload.MediaID)
 		if err != nil {
-			return fmt.Errorf("预生成反查媒体失败: mediaID=%d: %w", mediaID, err)
+			return fmt.Errorf("HLS 预览反查媒体失败: mediaID=%d: %w", payload.MediaID, err)
 		}
-		policy := hardwarePolicyFromSettings(settingsSvc)
-		result, err := transcoder.PreSliceWithCodecAndPolicy(context.Background(), mf.ID, mf.FilePath, mf.Width, mf.Height, codec, policy, hlsMgr, hlsDir)
-		if err == nil && result != nil {
-			_, err = cacheSvc.RegisterDirectory(context.Background(), storage.RegisterInput{
-				SpaceID:   mf.SpaceID,
-				LibraryID: mf.LibraryID,
-				MediaID:   mf.ID,
-				Kind:      storage.CacheKindHLS,
-				ProfileID: codec,
-				Path:      result.OutputDir,
-			})
+		outputDir, err := transcoder.HLSProfileDir(hlsDir, payload.SpaceID, payload.MediaID, payload.ProfileID)
+		if err != nil {
+			return err
 		}
+		manifest := "index.m3u8"
+		if transcoder.SelectOutputPath(payload.Codec) == transcoder.OutputPathTS {
+			manifest = "master.m3u8"
+		}
+		if !payload.ForceRebuild {
+			if _, statErr := os.Stat(filepath.Join(outputDir, manifest)); statErr == nil {
+				_, err = cacheSvc.RegisterDirectory(ctx, storage.RegisterInput{SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, MediaID: mf.ID, Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Path: outputDir})
+				return err
+			}
+		}
+		if err := cacheSvc.PrepareHLSRebuild(ctx, payload.SpaceID, payload.MediaID, payload.ProfileID, outputDir); err != nil {
+			return fmt.Errorf("安全清理旧 HLS profile 失败: %w", err)
+		}
+		previewWidth, previewHeight := transcoder.HLSPreviewResolution(payload, mf.Width, mf.Height)
+		result, err := transcoder.PreSliceWithCodecAndPolicyToDir(ctx, mf.ID, mf.FilePath, previewWidth, previewHeight, payload.Codec, hardwarePolicyFromSettings(settingsSvc), outputDir)
+		if err != nil {
+			return err
+		}
+		_, err = cacheSvc.RegisterDirectory(ctx, storage.RegisterInput{
+			SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, MediaID: mf.ID,
+			Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Path: result.OutputDir,
+		})
 		return err
-	}).WithAudit(auditSvc).WithTasks(taskSvc)
-	if err := pregenQueue.RecoverRunning(); err != nil {
-		log.Printf("[WARN] 预生成队列重启恢复失败: %v", err)
+	})
+	if err := hlsPreview.RegisterWorker(); err != nil {
+		log.Fatalf("[ERROR] 注册 HLS preview worker 失败: %v", err)
 	}
-	pregenQueue.Start()
-	defer pregenQueue.Stop()
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, pregenQueue).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

@@ -10,6 +10,13 @@ import type { PlaybackDescriptor } from '@/types';
  */
 
 /** 后端协商响应（snake_case）；前端转为 PlaybackDescriptor。 */
+export interface HLSPreviewStatus {
+  available: boolean;
+  profile_id: string;
+  url: string;
+  task: { id: string; status: string; progress: number } | null;
+}
+
 interface NegotiateResponse {
   codec: string;
   path: 'ts' | 'fmp4' | 'mp4';
@@ -22,6 +29,13 @@ interface NegotiateResponse {
  * 请求后端协商，返回播放描述符。
  * 后端 url 为相对路径，此处绝对化以兼容 mpegts.js/hls.js 在 Web Worker 中的 fetch。
  */
+export async function getHLSStatus(mediaID: number, profileID = 'h264'): Promise<HLSPreviewStatus> {
+  const res = await client.get<HLSPreviewStatus>(`/api/play/${mediaID}/hls-status`, {
+    params: { profile_id: profileID },
+  });
+  return { ...res.data, url: new URL(res.data.url, window.location.href).toString() };
+}
+
 export async function negotiate(
   mediaID: number,
   caps: ClientCapabilities,

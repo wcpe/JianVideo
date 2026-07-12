@@ -12,6 +12,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // parseMediaID 解析并校验路由中的 media ID 参数。
@@ -160,6 +161,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// 续播与观看状态（FR-44）：用户观看位置，区别于 playback 的转码/缓冲进度
 		sub.PUT("/:id/position", h.UpdateWatchPosition)
 		sub.PUT("/:id/watched", h.MarkWatched)
+
+		// HLS preview 状态（FR2-008）：默认 profile 可用性与统一任务状态。
+		sub.GET("/:id/hls-status", h.HLSStatus)
 
 		// 端到端编码协商（FR-53）：客户端上报能力，后端协商实际编码与播放路径
 		sub.POST("/:id/negotiate", h.Negotiate)
@@ -325,53 +329,91 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 // hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。
 func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service) {
 	r.GET("/api/play/hls/*path", func(c *gin.Context) {
-		relPath := c.Param("path")
-		// 去掉前导 /
-		relPath = strings.TrimPrefix(relPath, "/")
-
-		// 提取 mediaID（第一段）
-		parts := strings.SplitN(relPath, "/", 2)
-		if len(parts) == 0 || parts[0] == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的路径"})
+		mediaID, rest, ok := parseHLSRequestPath(c)
+		if !ok || !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
 			return
 		}
-		mediaID, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		spaceID := c.GetString("space_id")
+		if spaceID == "" {
+			spaceID = models.DefaultSpaceID
+		}
+		fullPath, servedPath, err := resolveHLSFile(hlsDir, spaceID, mediaID, rest)
+		if err == nil {
+			c.Header("Content-Type", detectHLSMimeType(servedPath))
+			c.File(fullPath)
 			return
 		}
-		if !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
-			return
-		}
-		rest := ""
-		if len(parts) > 1 {
-			rest = parts[1]
-		}
-
-		// master playlist 走动态读取
 		if rest == "master" || rest == "master.m3u8" {
-			content, err := hlsMgr.GetMasterM3U8(mediaID)
-			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
-				return
-			}
-			c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
+			serveLegacyMaster(c, hlsMgr, mediaID)
 			return
 		}
-
-		// 其余路径必须先做 canonical/Rel containment，再交给静态文件服务。
-		fullPath, err := player.ResolveContainedPath(hlsDir, relPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的 HLS 路径"})
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
 			return
 		}
-		c.Header("Content-Type", detectHLSMimeType(relPath))
-		c.File(fullPath)
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的 HLS 路径"})
 	})
+}
+
+func parseHLSRequestPath(c *gin.Context) (int64, string, bool) {
+	relPath := strings.TrimPrefix(c.Param("path"), "/")
+	parts := strings.SplitN(relPath, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的路径"})
+		return 0, "", false
+	}
+	mediaID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || mediaID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+		return 0, "", false
+	}
+	return mediaID, parts[1], true
+}
+
+func resolveHLSFile(root, spaceID string, mediaID int64, rest string) (string, string, error) {
+	candidates, err := hlsRelativeCandidates(spaceID, mediaID, rest)
+	if err != nil {
+		return "", "", err
+	}
+	var lastErr error
+	for _, candidate := range candidates {
+		fullPath, err := player.ResolveContainedPath(root, candidate)
+		if err == nil {
+			return fullPath, candidate, nil
+		}
+		lastErr = err
+	}
+	return "", "", lastErr
+}
+
+func hlsRelativeCandidates(spaceID string, mediaID int64, rest string) ([]string, error) {
+	media := strconv.FormatInt(mediaID, 10)
+	if strings.HasPrefix(rest, "profiles/") {
+		parts := strings.SplitN(rest, "/", 3)
+		if len(parts) != 3 {
+			return nil, os.ErrNotExist
+		}
+		if _, err := transcoder.HLSProfileDir(".", spaceID, mediaID, parts[1]); err != nil {
+			return nil, err
+		}
+		return []string{strings.Join([]string{spaceID, media, parts[1], parts[2]}, "/")}, nil
+	}
+	if rest == "master" {
+		rest = "master.m3u8"
+	}
+	return []string{
+		strings.Join([]string{spaceID, media, transcoder.DefaultHLSPreviewProfile, rest}, "/"),
+		strings.Join([]string{media, rest}, "/"),
+	}, nil
+}
+
+func serveLegacyMaster(c *gin.Context, hlsMgr *player.HLSManager, mediaID int64) {
+	content, err := hlsMgr.GetMasterM3U8(mediaID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+		return
+	}
+	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
 }
 
 func mediaBelongsToRequestedSpace(c *gin.Context, libraryService *library.Service, mediaID int64) bool {

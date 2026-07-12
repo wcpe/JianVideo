@@ -109,12 +109,8 @@ func (h *Handler) produceFMP4(ctx context.Context, mediaID int64, spaceID string
 	}
 	if h.cache != nil && result != nil {
 		if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
-			SpaceID:   spaceID,
-			LibraryID: libraryID,
-			MediaID:   mediaID,
-			Kind:      storage.CacheKindHLS,
-			ProfileID: codec,
-			Path:      result.OutputDir,
+			SpaceID: spaceID, LibraryID: libraryID, MediaID: mediaID,
+			Kind: storage.CacheKindHLS, ProfileID: codec, Path: result.OutputDir,
 		}); err != nil {
 			log.Printf("[WARN] fMP4 缓存登记失败: mediaID=%d, codec=%s, err=%v", mediaID, codec, err)
 		}

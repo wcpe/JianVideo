@@ -152,6 +152,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateSettingsPreflight,
 			Validate:    validateSettingsPreflight,
 		},
+		{
+			ID:          "20260712_0016_fr2_008_hls_preview_tasks",
+			Description: "统一 HLS preview 任务类型与 profile 载荷",
+			SafeToRetry: true,
+			Estimate:    estimateHLSPreviewTasks,
+			Up:          migrateHLSPreviewTasks,
+			Validate:    validateHLSPreviewTasks,
+		},
 	}
 }
 
@@ -1216,6 +1224,62 @@ func validateSpaceOwnedCollections(_ context.Context, db *gorm.DB) (Validation, 
 		}
 	}
 	return Validation{Summary: "相册、分享与健康问题已具备非空 Space 归属"}, nil
+}
+
+func estimateHLSPreviewTasks(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "tasks") {
+		return StepPlan{}, nil
+	}
+	var count int64
+	if err := db.Table("tasks").Where("type = ?", "transcode.hls").Count(&count).Error; err != nil {
+		return StepPlan{}, err
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateHLSPreviewTasks(_ context.Context, tx *gorm.DB) error {
+	if !tableExists(tx, "tasks") {
+		return nil
+	}
+	return tx.Exec(`
+		UPDATE tasks
+		SET type = 'transcode.hls.preview',
+			max_attempts = CASE WHEN max_attempts < 3 THEN 3 ELSE max_attempts END,
+			payload_json = json_object(
+				'legacy_table', json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.legacy_table'),
+				'legacy_id', json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.legacy_id'),
+				'space_id', COALESCE(NULLIF(space_id, ''), ?),
+				'media_id', COALESCE(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.media_id'), CAST(resource_id AS INTEGER)),
+				'preset_id', COALESCE(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.preset_id'), 0),
+				'profile_id', COALESCE(NULLIF(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.codec'), ''), 'h264'),
+				'codec', COALESCE(NULLIF(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.codec'), ''), 'h264'),
+				'width', COALESCE(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.width'), 0),
+				'height', COALESCE(json_extract(CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.height'), 0),
+				'force_rebuild', 0
+			)
+		WHERE type = 'transcode.hls'
+	`, DefaultSpaceID).Error
+}
+
+func validateHLSPreviewTasks(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "tasks") {
+		return Validation{}, fmt.Errorf("tasks 表不存在")
+	}
+	if count := countTableWhere(db, "tasks", "type = ?", "transcode.hls"); count != 0 {
+		return Validation{}, fmt.Errorf("仍有 %d 条旧 HLS 任务类型", count)
+	}
+	invalid := countTableWhere(db, "tasks", `type = ? AND (
+		json_valid(payload_json) = 0 OR
+		COALESCE(json_extract(payload_json, '$.profile_id'), '') = '' OR
+		COALESCE(json_extract(payload_json, '$.codec'), '') = '' OR
+		COALESCE(json_extract(payload_json, '$.space_id'), '') = '' OR
+		COALESCE(json_extract(payload_json, '$.media_id'), 0) <= 0 OR
+		max_attempts < 3
+	)`, "transcode.hls.preview")
+	if invalid != 0 {
+		return Validation{}, fmt.Errorf("有 %d 条 HLS preview 任务载荷无效", invalid)
+	}
+	return Validation{Summary: "HLS preview 任务类型与 profile 载荷已统一"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

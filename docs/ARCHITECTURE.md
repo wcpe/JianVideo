@@ -50,7 +50,9 @@
 | `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
-| `transcoder` | FFmpeg 转码管道、多码率转码（MultiPipeline）、硬件加速检测/选择、流式输出、字幕转换（SRT/ASS→WebVTT、字幕文件查找）、转码预设存储与预生成队列（持久化 + 单 worker 串行 + 重启恢复，FR-77） | → `db` |
+| `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、字幕转换与转码预设存储 | → `tasks`, `storage`, `db` |
+| `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；承载 `transcode.hls.preview` | → `db`, `audit` |
+| `storage` | 可重建缓存资产登记、Space/profile 路径边界、盘点与异步安全清理；HLS 按 profile 目录登记 | → `tasks`, `db`, `audit` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
@@ -329,7 +331,7 @@ FR2-031 只做本地离线规则解析，不联网刮削、不下载海报、不
 | name | TEXT | Space 名称 |
 | created_at | DATETIME | 创建时间 |
 
-FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转码任务及相册、分享、健康问题等历史资源补齐 `space_id`，统一回填到默认 Space；默认 owner 取旧库首个用户。迁移同时创建 FR2-007 的 Space/媒体/任务组合索引。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。旧 `scan_tasks` / `transcode_tasks` 继续保留为兼容执行真源，并通过稳定幂等键 `scan:<legacy_id>` / `transcode:<legacy_id>` 映射到通用 `tasks`；重复执行映射不会重复插入。
+FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转码任务及相册、分享、健康问题等历史资源补齐 `space_id`，统一回填到默认 Space；默认 owner 取旧库首个用户。迁移同时创建 FR2-007 的 Space/媒体/任务组合索引。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。迁移 `20260708_0006_fr2_037_tasks_center` 保持原有旧任务镜像语义，不改历史 migration ID；FR2-008 另由新增迁移 `20260712_0016_fr2_008_hls_preview_tasks` 把旧 `transcode_tasks` 镜像转换为 `transcode.hls.preview` payload，并保留稳定幂等键 `transcode:<legacy_id>`。运行期旧扫描表仍是兼容执行真源；旧转码 HTTP 入口则已改为直接读写通用 HLS preview 任务，重复迁移或入队不会制造并发重复项。
 
 **审计事件（audit_events）** — FR2-040
 
@@ -366,7 +368,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | rebuildable | BOOLEAN | 是否可按需重建；首批缓存均为可重建 |
 | created_at / accessed_at / missing_at / updated_at | DATETIME | 创建、访问、磁盘缺失和更新时间 |
 
-FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；HLS 按媒体目录登记聚合 `size_bytes` 与 `file_count`，segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。
+FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记并聚合 `size_bytes` 与 `file_count`，segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过 `PrepareHLSRebuild` 仅删除目标 Space/media/profile 的受控目录与资产行，不影响同媒体其他 profile 或原媒体。
 
 **相册（albums）** — FR-40
 
@@ -416,7 +418,7 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | id | INTEGER PK | 自增主键 |
 | scope | TEXT, INDEX | `space` / `system`；Space 任务必须有 `space_id`，系统任务 `space_id` 为空 |
 | space_id | TEXT NULL, INDEX | 所属 Space，系统级任务为空 |
-| type | TEXT, INDEX | 任务类型，如 `library.scan`、`transcode.hls`、`thumbnail.generate` |
+| type | TEXT, INDEX | 任务类型，如 `library.scan`、`transcode.hls.preview`、`thumbnail.generate` |
 | status | TEXT, INDEX | `pending` / `running` / `succeeded` / `failed` / `canceled` |
 | priority | INTEGER | 优先级，领取时按高优先级优先并带公平策略 |
 | attempts / max_attempts | INTEGER | 已尝试次数 / 最大尝试次数 |
@@ -489,9 +491,9 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | height | INTEGER | 目标高度，`0` 表示沿用源高 |
 | created_at / updated_at | DATETIME | 创建 / 更新时间 |
 
-预设为可复用的转码模板。MVP 仅含编码与分辨率维度，不含 bitrate / 多码率档位。注意：本期 `width/height` 仅作预设定义元数据落库与展示，预生成执行只按 `codec` 预热切片、不进 ffmpeg 缩放参数（现有 `PreSliceWithCodec` 不支持任意缩放，见 §5、[ADR-0039](adr/0039-transcode-pregeneration-queue.md)）。
+预设为可复用的转码模板，仅含编码与目标尺寸，不含 bitrate / 多码率档位。FR2-008 入队时把 `codec/width/height` 快照到统一任务 payload；H.264 单档输出用该尺寸选择一个质量档并由 ffmpeg 缩放，高级编码 fMP4 继续按其既有输出规则执行。预设不表达 ABR 阶梯，避免与 FR2-026 混淆。
 
-**转码预生成任务（transcode_tasks）（FR-77）**
+**历史转码预生成任务（transcode_tasks）（FR-77 兼容表）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -506,7 +508,7 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | started_at | DATETIME NULL | 开始执行时间 |
 | completed_at | DATETIME NULL | 结束时间 |
 
-预生成队列以本表为持久化真源、单 worker 串行执行；任务列表与入队媒体校验按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending` 重新入队（见 §5.1）。
+该表保留用于历史数据与降级兼容，不再是生产 HLS preview 的运行期真源。新增 `POST /api/transcode/tasks` 直接创建通用 `tasks` 中的 `transcode.hls.preview`；启动迁移把历史行转换为带 `legacy_table/legacy_id`、Space/media/preset/profile/codec/尺寸快照的统一 payload。旧列表 API 从统一任务反投影旧字段与 `completed/error` 状态，取消和重试统一走 `/api/tasks/:id/*`。
 
 ## 4. 接口
 
@@ -521,8 +523,8 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | 媒体类型 | `/api/media-types` | 媒体类型定义、全局/每库后缀规则、内置规则禁用与自定义规则增删改（FR2-025） |
 | 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
-| 播放 | `/api/play` | 视频流播放、Seek、转码控制、观看位置上报与已看标记（FR-44） |
-| 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD 与预生成队列入队/列任务（FR-77） |
+| 播放 | `/api/play` | 视频流播放、Seek、HLS profile 文件服务与预览状态、直连失败回退、观看位置上报与已看标记（FR2-008 / FR-44） |
+| 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD，以及兼容旧路径的统一 HLS preview 任务入队/列表（FR2-008） |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期设置读取、definitions 元数据与已登记 key 批量写入 |
 | 分享管理 | `/api/shares` | 创建/列出/撤销分享链接（鉴权后，FR-43） |
@@ -563,7 +565,7 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 - `internal/tasks.Service` 负责通用任务入队、幂等键查重、领取、取消、重试、进度更新、成功 / 失败终态和 `running` 恢复。状态真源只使用 `pending` / `running` / `succeeded` / `failed` / `canceled`；旧 `completed` / `error` 仅在扫描 / 转码适配层映射。
 - `ClaimNext` 按类型、状态、`next_run_at`、优先级与创建时间领取任务；连续高优先级领取达到上限后会让较低优先级任务获得机会，避免饥饿。失败且仍有剩余次数时按退避写入 `next_run_at` 并回到 `pending`。
 - `WorkerRegistry` 按任务类型注册处理器和并发上限，默认扫描 1、转码 1、缩略图 4、内容哈希回填 1、轻任务 2；这些默认值也登记到 FR2-024 设置 registry（`task_worker_*_concurrency`），供运行期配置层暴露。
-- 旧 `scan_tasks` 与 `transcode_tasks` 仍服务既有页面；入队、状态变化、取消和重试会同步到通用 `tasks` 表。统一 `/api/tasks/:id/cancel|retry` 命中旧队列镜像时，会先调用旧队列动作，再刷新通用镜像，避免只改监控表不改执行真源。
+- 旧 `scan_tasks` 仍服务既有扫描页面并与通用任务镜像双向同步；统一 `/api/tasks/:id/cancel|retry` 命中扫描镜像时先操作旧执行真源再刷新镜像。FR2-008 起，旧转码 HTTP 入口直接创建和查询 `transcode.hls.preview` 通用任务，不再新建 `transcode_tasks` 行；历史转码行由独立迁移转换，旧列表状态仅在响应边界映射。
 - 任务创建、取消、重试、失败终态写入 FR2-040 审计事件；Space scoped 查询默认只返回当前 Space 任务，系统级任务使用 `scope=system + space_id NULL`。
 
 ### 5.1.2.2 存储与缓存管理（FR2-048）
@@ -646,14 +648,18 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 - **追播边界**：本路径仅 **VOD（转码完成后整段播放）**，**不**实现实时追播/边下边播（实时 fMP4 追播复杂度高、属前端协同与后续阶段，不在本期）。H.264 路径追播能力不受影响。
 - **与 FR-50 重叠点**：本路径接收一个「目标编码」入参产出对应 fMP4；目标编码优先级的持久化设置属 FR-50，整合时由 FR-50 设置层产出目标编码喂入。
 
-### 5.5 多码率自适应（ABR）
+#### 5.4.2 单档 HLS preview 与统一任务队列（FR2-008）
 
-- `MultiPipeline` 使用 FFmpeg filter_complex split 单进程多输出，同时生成 1080p/720p/480p 三档 HLS。
-- 码率阶梯根据源分辨率自动裁剪（<720p 只输出 480p+720p，<1080p 不输出 1080p）。
-- 所有码率共享同一 GOP（-g 48 -keyint_min 48 -sc_threshold 0），确保切换时画面连续。
-- 切片文件名包含码率标识（如 `1080p_segment_000.ts`），m3u8 命名为 `{quality}.m3u8`。
-- `master.m3u8` 包含 `EXT-X-STREAM-INF` 标签，描述各码率流的 BANDWIDTH/RESOLUTION。
-- 前端 hls.js 动态 import，自动选择最佳码率；不支持 hls.js 时回退 mpegts.js。
+- `HLSPreviewService` 把每个 Space/media/profile 建模为通用任务 `transcode.hls.preview`，payload 快照 `preset_id/profile_id/codec/width/height/force_rebuild`，优先级交 `tasks.Service` 领取，最大尝试 3 次、默认单 worker；取消通过 context 终止 ffmpeg，失败或取消可从通用任务 API 重试。
+- 产物目录固定为 `hls/{space_id}/{media_id}/{profile_id}/`。默认 profile 为 `h264`：TS 路径只从分辨率档位中选择**一个**质量，生成一个 variant 与只含一个 `EXT-X-STREAM-INF` 的 `master.m3u8`；高级编码生成单档 `index.m3u8 + init.mp4 + .m4s`。这一定义故意不包含 FR2-026 的多码率阶梯。
+- HLS 目录生成成功后登记一条 `cache_assets(kind=hls, asset_level=directory, profile_id=...)`；`force_rebuild` 先经 `storage.PrepareHLSRebuild` 校验并只删除目标 profile，再原子重建和重新登记。通用缓存清理删除产物后，`GET /api/play/:id/hls-status` 返回不可用，重新入队即可重建。
+- 默认 H.264 profile 对外继续兼容 `/api/play/hls/:id/master`、`master.m3u8` 和历史 `hls/{media_id}/` 文件布局；显式 profile 使用 `/api/play/hls/:id/profiles/:profile_id/:file`。状态端点同时返回 `available/profile_id/url/task`，前端先尝试原文件直连，仅在直连加载失败且 HLS preview 已可用时切到该 URL；FR-53 高级编码协商仍保留原契约。
+
+### 5.5 多码率自适应（ABR，FR2-026 边界）
+
+- 仓库保留 `MultiPipeline` 的 FFmpeg `filter_complex split` 多输出能力，可同时生成 1080p/720p/480p 三档 HLS；这是历史播放能力与 FR2-026 的实现基础，**FR2-008 HLS preview worker 不调用三档入口**。
+- 码率阶梯根据源分辨率裁剪，所有档位共享 GOP，切片文件带质量标识，`master.m3u8` 为每档写一个 `EXT-X-STREAM-INF`。
+- 前端 `VideoPlayer` 保留 hls.js ABR 分支及 mpegts.js 回退，不因 FR2-008 的单档默认路径删除；真正的“入库自动多档、弱网平滑降档、手动锁档”验收仍归 FR2-026。
 - 详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
 
 #### 5.5.1 前端客户端能力探测 + 自适应播放器（FR-52）
@@ -670,20 +676,19 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 
 - **协商纯函数**（`transcoder.ChosenCodec(priority, clientCaps, producible)`）：返回首选优先级里第一个同时满足「客户端支持」`clientCaps[c]` 且「实测可产出」`producible[c]` 的编码；都不满足兜底 `h264`（恒可用底座，现有 mpegts.js+TS 路径保证可播）。编码标识大小写无关、`hevc`→`h265`。可穷举单测。
 - **协商端点**（`POST /api/play/:id/negotiate`）：请求体携带客户端能力 `{h265,av1,vp9}`（来自 §5.5.1 探测）。读 FR-50 优先级（`settings.TranscodeCodecPriority`）+ FR-49 可产出并集（`capability.Capabilities().Codecs`）+ 客户端能力 → `ChosenCodec`。非 `h264` 同步调 §5.4.1 `PreSliceWithCodec` 产 fMP4，**产出失败降级回 `h264`/TS**（不报错，保证可播）。返回播放描述符 `{codec,path(ts/fmp4),url,mime,fallback_url}`（`BuildNegotiationDescriptor`，URL 相对路径，前端绝对化）。
-- **前端接线**（`PlayPage`）：加载媒体后 `probeClientCapabilities()`（§5.5.1）→ `negotiate` → 协商出 fMP4 则把描述符交 §5.5.1 自适应播放器（hls.js 原生 MSE 播 AV1/HEVC/VP9）；协商出 `h264` / 协商失败则沿用既有 master 探测 → mpegts/mp4 路径（H.264 回退，不报错）。
+- **前端接线**（`PlayPage`）：加载媒体后 `probeClientCapabilities()`（§5.5.1）→ `negotiate` → 协商出 fMP4 则把描述符交 §5.5.1 自适应播放器（hls.js 原生 MSE 播 AV1/HEVC/VP9）；协商出 `h264` / 协商失败时优先直连 `/api/play/:id/stream`，仅在播放器报告直连加载错误后查询 FR2-008 `hls-status`，已有单档 preview 才切换到 HLS URL。这样保留高级编码协商原契约，同时避免 H.264 默认路径无条件走转码。
 - **会话记录实际编码与路径**：`playback.Service.RecordNegotiation` 把协商结果记到内存播放会话（`PlaybackSession.TargetCodec`/`OutputPath` 两字段）。**注**：本项目当前播放会话仅在内存（FR-12 Range 跟踪），不持久化；ARCHITECTURE §3 历史描述的 `transcode_sessions` 持久表代码从未落地，本 FR 不新建该表（避免镀金）。
 - **复用 ADR**：复用 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)（实测真源）、[ADR-0034](adr/0034-configurable-target-codec.md)（可配置目标编码）、[ADR-0035](adr/0035-fmp4-mse-playback-path.md)（fMP4/MSE 路径）、[ADR-0026](adr/0026-abr-adaptive-bitrate.md)（hls.js）；协商点 + 端点契约为本 FR 新增决策。
 - **真机验证**：软件 AV1 端到端——设首选 `["av1","h264"]` + Chrome（支持 AV1）→ 协商出 av1 → 后端 `libsvtav1` 产 fMP4 → hls.js + 原生 MSE 实播（`videoWidth=640` 解码出帧、`readyState=4`、无 error）；H.264 客户端 → 协商出 `h264`/TS 走 mpegts.js。硬件 AV1/QSV/NVENC 端到端待对应硬件。
 
-#### 5.5.3 转码预设与预生成队列（FR-77）
+#### 5.5.3 转码预设与旧 API 兼容层（FR2-008 承接 FR-77）
 
-把「按需首播切片」前移为「手动预热」：用户定义可复用预设（编码 + 分辨率），把媒体加入预生成队列后台串行预转码，产出切片缓存到 `hlsDir/{mediaID}/`，消除首播冷启动等待。决策见 [ADR-0039](adr/0039-transcode-pregeneration-queue.md)。
+FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，但执行真源已切到 §5.4.2 通用 HLS preview 任务，不再维护第二套转码 worker。
 
-- **预设存储**（`transcoder.PresetStore`，`preset_store.go`）：`transcode_presets` 表的 CRUD + 校验。编码白名单复用 §5.3 `CodecOutputParams`（h264/h265/av1/vp9，`hevc` 归一化为 `h265`）；空名 / 不支持编码 / 负分辨率整体拒绝不落库。职责单一，不承载队列/转码。
-- **预生成队列**（`transcoder.PregenQueue`，`pregen_queue.go`）：**完整复用 FR-29 任务队列范式**——以 `transcode_tasks` 表为持久化真源、单 worker goroutine 串行执行、条件信号唤醒不空转、`RecoverRunning()` 重启把残留 `running` 重置为 `pending` 重新入队。落 transcoder 包以保持依赖单向（exec 直接调本包 `PreSliceWithCodec`，无需反向依赖 library）。任务入队时记录 `space_id` 并快照预设 `codec/width/height`，使执行不强依赖预设此后是否被改/删。
-- **执行**：exec 函数经注入（便于单测替身）。`main.go` 生产实现为闭包：按 `media_id` 经 `library.GetMediaFileByID` 反查媒体路径，再调 §5.4.1 `PreSliceWithCodec(ctx, mediaID, path, w, h, codec, hlsMgr, hlsDir)` 同步切片（已存在切片则复用）。
-- **`width/height` 局限**：现有 `PreSliceWithCodec` 不支持任意分辨率缩放（TS 路径按源分辨率选码率档位、fMP4 路径不缩放），故本期预设 `width/height` 仅落库为元数据、不进 ffmpeg 缩放参数。真正缩放需扩 `PreSliceWithCodec`，另立 FR（见 ADR-0039 后果）。
-- **接线**：预设 CRUD `GET/POST/PUT/DELETE /api/transcode/presets`、入队 `POST /api/transcode/tasks{media_id,preset_id}`、列任务 `GET /api/transcode/tasks?status=`（见 §4）。任务端点读取 `X-JianVideo-Space-Id`，跨 Space 媒体不能入队，列表仅返回当前 Space。前端转码预设页 `/transcode`（列/建/改/删 + 轮询任务列表）+ 播放页「加入预生成」入口（`PregenDialog` 选预设入队）。
+- **预设存储**（`transcoder.PresetStore`）：`transcode_presets` 表负责 CRUD 与校验；编码白名单为 h264/h265/av1/vp9（`hevc` 归一化为 `h265`），空名、不支持编码或负尺寸整体拒绝。
+- **入队兼容**：`POST /api/transcode/tasks` 仍接受 `media_id/preset_id`，并新增可选 `profile_id/priority/force_rebuild`；handler 校验 Space 媒体和预设后，构造 `HLSPreviewRequest` 写入通用任务。默认 profile 取预设 codec，未完成幂等键为 `hls-preview:{space}:{media}:{profile}`。
+- **列表兼容**：`GET /api/transcode/tasks` 从通用任务反投影旧响应，补回 `profile_id/priority/progress`，并只在该边界把 `succeeded/failed` 映射为 `completed/error`。任务详情、取消、重试与队列监控统一使用 `/api/tasks`。
+- **执行装配**：`main.go` 注册 `transcode.hls.preview` worker，按 Space 反查媒体路径、选择硬件策略、可选安全清理目标 profile、调用 `PreSliceWithCodecAndPolicyToDir`，成功后目录级登记缓存。历史 `PregenQueue` 仅保留未注入 HLS preview 服务时的测试/兼容降级路径。
 
 ### 5.6 硬件加速管理
 

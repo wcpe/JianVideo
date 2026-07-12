@@ -39,7 +39,7 @@ import ExternalPlayerDialog from '@/components/ExternalPlayerDialog';
 import PregenDialog from '@/components/PregenDialog';
 import { parseWebVTT } from '@/utils/subtitle';
 import { mediaDisplayName } from '@/utils/media';
-import { mediaStreamUrl, mediaHlsMasterUrl } from '@/utils/media-url';
+import { mediaStreamUrl } from '@/utils/media-url';
 import { probeClientCapabilities } from '@/utils/codec-capability';
 import { useCinemaMode } from '@/hooks/cinema-context';
 import * as libApi from '@/api/library';
@@ -73,11 +73,9 @@ export default function PlayPage() {
   const [subtitleVisible, setSubtitleVisible] = useState(false);
   const [subtitleMenuOpened, setSubtitleMenuOpened] = useState(false);
 
-  // 播放器 URL / ABR 模式：探测 master.m3u8 是否可用；不可用时降级到 /api/play/:id/stream
+  // 播放直连优先；仅在原文件直连失败时查询并切换已生成的 HLS preview。
   const [playerUrl, setPlayerUrl] = useState<string | null>(null);
   const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null);
-  // 编码协商描述符（FR-53）：协商出高级编码（fMP4）时交自适应播放器；
-  // 协商出 h264 / 协商失败则为 null，沿用下方 master 探测的 H.264/TS 路径（不报错）。
   const [descriptor, setDescriptor] = useState<PlaybackDescriptor | null>(null);
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
@@ -143,43 +141,19 @@ export default function PlayPage() {
       .then((tracks) => setSubtitleTracks(tracks))
       .catch(() => setSubtitleTracks([]));
 
-    // 绝对 URL 由共享构造器给出（FR-107），避免 mpegts.js 在 Web Worker 中 fetch 相对 URL 失败。
-    const hlsUrl = mediaHlsMasterUrl(mediaId);
-    const streamUrl = mediaStreamUrl(mediaId);
-
-    // master 探测 → mpegts.js（ABR）或 stream（原生 mp4），既有 H.264/TS 路径不变。
-    const probeMaster = () => {
-      fetch(hlsUrl, { method: 'GET' })
-        .then((resp) => {
-          // master.m3u8 内容若为非 m3u8 文本（如 404 的 JSON 错误体），判定为不可用
-          if (resp.ok && resp.headers.get('content-type')?.includes('mpegurl')) {
-            setPlayerUrl(hlsUrl);
-            setPlayerIsABR(true);
-          } else {
-            setPlayerUrl(streamUrl);
-            setPlayerIsABR(false);
-          }
-        })
-        .catch(() => {
-          setPlayerUrl(streamUrl);
-          setPlayerIsABR(false);
-        });
-    };
-
-    // 端到端编码协商（FR-53）：探测客户端能力 → 请求协商 → 拿描述符。
-    // 协商出高级编码（fMP4）→ 交自适应播放器；协商出 h264 / 协商失败 → 回退既有 master 探测（不报错）。
-    playApi
+    // H.264 默认直连优先；保留 FR-53 高级编码协商，避免破坏既有 fMP4 播放契约。
+    setDescriptor(null);
+    setPlayerUrl(mediaStreamUrl(mediaId));
+    setPlayerIsABR(false);
+    void playApi
       .negotiate(mediaId, probeClientCapabilities())
-      .then((desc) => {
-        if (desc.path === 'fmp4') {
-          setDescriptor(desc);
-          setPlayerUrl(desc.url);
-          setPlayerIsABR(true);
-        } else {
-          probeMaster();
-        }
+      .then((nextDescriptor) => {
+        if (nextDescriptor.path !== 'fmp4') return;
+        setDescriptor(nextDescriptor);
+        setPlayerUrl(nextDescriptor.url);
+        setPlayerIsABR(true);
       })
-      .catch(() => probeMaster());
+      .catch(() => {});
   }, [id]);
 
   // 影院模式（FR-85）：离开播放页（卸载）时自动恢复全站导航，避免影院态泄漏到其它页面
@@ -230,6 +204,18 @@ export default function PlayPage() {
     if (!media) return;
     void libApi.markWatched(media.id).catch(() => {});
   }, [media]);
+
+  const handlePlaybackError = useCallback(() => {
+    if (!media || playerIsABR) return;
+    void playApi
+      .getHLSStatus(media.id)
+      .then((status) => {
+        if (!status.available) return;
+        setPlayerUrl(status.url);
+        setPlayerIsABR(true);
+      })
+      .catch(() => {});
+  }, [media, playerIsABR]);
 
   // 确认改名（FR-30）：display 仅改库内显示名，real 走磁盘改名
   const confirmNameEdit = async (value: string) => {
@@ -476,8 +462,7 @@ export default function PlayPage() {
       {/* 视频区（FR-103）：flex:1 + minHeight:0 吃满头部/控件之外的全部高度，
           VideoPlayer 传 fill 让视频以 object-fit:contain 填满（letterbox 黑边）。 */}
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {/* 播放器：协商出 fMP4 时交描述符给自适应播放器（FR-53）；
-            否则探测到 HLS 不可用时降级到 /api/play/:id/stream（非 ABR，浏览器原生 video）。 */}
+        {/* H.264 先直连原文件，失败时查询 HLS preview；高级编码保留协商描述符播放。 */}
         {playerUrl && playerIsABR !== null && (
           <VideoPlayer
             url={playerUrl}
@@ -491,6 +476,7 @@ export default function PlayPage() {
             initialPosition={media.last_position}
             onPositionReport={handlePositionReport}
             onEnded={handleEnded}
+            onPlaybackError={handlePlaybackError}
           />
         )}
       </Box>

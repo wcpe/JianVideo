@@ -29,7 +29,7 @@ func TestFR2017RealV020UpgradePreservesDataAndIsIdempotent(t *testing.T) {
 
 	assertLegacySnapshot(t, gdb, before)
 	assertCompleteSpaceOwnership(t, gdb)
-	assertLegacyTaskMapping(t, gdb)
+	assertLegacyTaskMapping(t, gdb, "transcode.hls.preview")
 	assertFR2007QuerySmoke(t, gdb)
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -37,7 +37,7 @@ func TestFR2017RealV020UpgradePreservesDataAndIsIdempotent(t *testing.T) {
 			t.Fatalf("旧任务映射第 %d 次重复执行失败: %v", attempt+1, err)
 		}
 	}
-	assertLegacyTaskMapping(t, gdb)
+	assertLegacyTaskMapping(t, gdb, "transcode.hls.preview")
 
 	second, err := runner.Run(context.Background())
 	if err != nil {
@@ -47,7 +47,7 @@ func TestFR2017RealV020UpgradePreservesDataAndIsIdempotent(t *testing.T) {
 		t.Fatalf("无待迁移步骤时不应重复备份或应用: %+v", second)
 	}
 	assertLegacySnapshot(t, gdb, before)
-	assertLegacyTaskMapping(t, gdb)
+	assertLegacyTaskMapping(t, gdb, "transcode.hls.preview")
 }
 
 func TestFR2017V020AlbumCompatIsEstimatedValidatedAndRepeatable(t *testing.T) {
@@ -95,7 +95,7 @@ func TestFR2017LegacyTaskMappingIsIdempotent(t *testing.T) {
 		}
 	}
 	assertLegacySnapshot(t, gdb, before)
-	assertLegacyTaskMapping(t, gdb)
+	assertLegacyTaskMapping(t, gdb, "transcode.hls")
 }
 
 func TestFR2017BackupFailureStopsBeforeAnyMigrationWrite(t *testing.T) {
@@ -216,7 +216,7 @@ type legacyTaskRow struct {
 	PayloadJSON    string
 }
 
-func assertLegacyTaskMapping(t *testing.T, gdb *gorm.DB) {
+func assertLegacyTaskMapping(t *testing.T, gdb *gorm.DB, transcodeType string) {
 	t.Helper()
 	var rows []legacyTaskRow
 	if err := gdb.Raw(`SELECT idempotency_key, space_id, type, status, progress, attempts,
@@ -228,23 +228,23 @@ func assertLegacyTaskMapping(t *testing.T, gdb *gorm.DB) {
 	if len(rows) != 8 {
 		t.Fatalf("每个旧任务应只映射一次: got=%d want=8", len(rows))
 	}
-	expected := legacyTaskExpectations()
+	expected := legacyTaskExpectations(transcodeType)
 	for _, row := range rows {
 		assertLegacyTaskRow(t, row, expected)
 	}
 	assertNoDuplicateTaskKeys(t, gdb)
 }
 
-func legacyTaskExpectations() map[string][]any {
+func legacyTaskExpectations(transcodeType string) map[string][]any {
 	return map[string][]any{
 		"scan:101":      {"library.scan", "succeeded", 100, 0, "library", "1"},
 		"scan:102":      {"library.scan", "failed", 30, 1, "library", "2"},
 		"scan:103":      {"library.scan", "running", 50, 0, "library", "3"},
 		"scan:104":      {"library.scan", "pending", 0, 0, "library", "1"},
-		"transcode:201": {"transcode.hls", "succeeded", 100, 0, "media", "11"},
-		"transcode:202": {"transcode.hls", "failed", 0, 1, "media", "12"},
-		"transcode:203": {"transcode.hls", "running", 0, 0, "media", "21"},
-		"transcode:204": {"transcode.hls", "pending", 0, 0, "media", "31"},
+		"transcode:201": {transcodeType, "succeeded", 100, 0, "media", "11"},
+		"transcode:202": {transcodeType, "failed", 0, 1, "media", "12"},
+		"transcode:203": {transcodeType, "running", 0, 0, "media", "21"},
+		"transcode:204": {transcodeType, "pending", 0, 0, "media", "31"},
 	}
 }
 

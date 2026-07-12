@@ -28,6 +28,8 @@ interface VideoPlayerProps {
   descriptor?: PlaybackDescriptor;
   /** 自动播放 */
   autoPlay?: boolean;
+  /** 当前播放路径发生不可恢复错误时通知调用方切换 fallback。 */
+  onPlaybackError?: () => void;
   /** 解析后的字幕条目列表 */
   subtitleEntries?: SubtitleEntry[];
   /** 是否显示字幕 */
@@ -152,6 +154,7 @@ export default function VideoPlayer({
   initialPosition,
   onPositionReport,
   onEnded,
+  onPlaybackError,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mpegtsPlayerRef = useRef<mpegts.Player | null>(null);
@@ -161,11 +164,13 @@ export default function VideoPlayer({
   const hasSeekedRef = useRef(false);
   const onPositionReportRef = useRef(onPositionReport);
   const onEndedRef = useRef(onEnded);
+  const onPlaybackErrorRef = useRef(onPlaybackError);
   const lastReportRef = useRef(0);
   const endedReportedRef = useRef(false);
   initialPositionRef.current = initialPosition;
   onPositionReportRef.current = onPositionReport;
   onEndedRef.current = onEnded;
+  onPlaybackErrorRef.current = onPlaybackError;
   const [isPlaying, setIsPlaying] = useState(false);
   const [autoPlayBlocked, setAutoPlayBlocked] = useState(false);
   // FR-102：静音自动播。浏览器允许 muted autoplay，进页即出画面；autoMuted 为真时
@@ -720,6 +725,7 @@ export default function VideoPlayer({
           ref={videoRef}
           style={{ width: '100%', height: '100%', backgroundColor: 'black', objectFit: 'contain' }}
           playsInline
+          onError={() => onPlaybackErrorRef.current?.()}
         />
         {/* FR-52：目标编码不受支持且无回退源时的提示（不抛 Network Error） */}
         {resolved.unsupported && (

@@ -165,14 +165,16 @@ func TestValidateSettingsPreflightAllowsWarningButRejectsBlocker(t *testing.T) {
 }
 
 func TestDefaultMigrationsAppendSettingsPreflight(t *testing.T) {
-	migrations := DefaultMigrations()
-	last := migrations[len(migrations)-1]
-	if last.ID != "20260712_0015_fr2_017_settings_preflight" {
-		t.Fatalf("settings 预检 migration 应使用新递增 ID: %s", last.ID)
+	for _, migration := range DefaultMigrations() {
+		if migration.ID != "20260712_0015_fr2_017_settings_preflight" {
+			continue
+		}
+		if migration.Estimate == nil || migration.Up == nil || migration.Validate == nil || !migration.SafeToRetry {
+			t.Fatalf("settings 预检 migration 契约不完整: %+v", migration)
+		}
+		return
 	}
-	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
-		t.Fatalf("settings 预检 migration 契约不完整: %+v", last)
-	}
+	t.Fatal("未找到 settings 预检 migration")
 }
 
 func openSettingsPreflightDB(t *testing.T) *gorm.DB {

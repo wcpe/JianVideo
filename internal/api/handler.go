@@ -75,9 +75,10 @@ type Handler struct {
 	// 媒体健康巡检服务（FR-73）：未注入时健康端点返回 503。
 	health *library.HealthService
 
-	// 转码预设存储与预生成队列（FR-77）：未注入时相关端点返回 503。
+	// 转码预设与 HLS preview 统一任务服务（FR2-008）：旧预生成队列仅保留历史兼容。
 	presets     *transcoder.PresetStore
 	pregenQueue *transcoder.PregenQueue
+	hlsPreview  *transcoder.HLSPreviewService
 
 	// 系统指标采样器（FR-119）：未注入时 /api/system/metrics 返回 503。
 	metrics *metrics.Sampler
@@ -145,6 +146,12 @@ func (h *Handler) WithHealthService(svc *library.HealthService) *Handler {
 func (h *Handler) WithTranscodePresets(store *transcoder.PresetStore, queue *transcoder.PregenQueue) *Handler {
 	h.presets = store
 	h.pregenQueue = queue
+	return h
+}
+
+// WithHLSPreview 注入统一 HLS 预览任务服务。
+func (h *Handler) WithHLSPreview(service *transcoder.HLSPreviewService) *Handler {
+	h.hlsPreview = service
 	return h
 }
 

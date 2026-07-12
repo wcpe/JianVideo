@@ -71,6 +71,27 @@ func TestPreSlice_FFmpegEndToEnd(t *testing.T) {
 }
 
 // TestRateToBps 验证码率字符串解析。
+func TestPreviewQualityForResolutionKeepsSingleVariant(t *testing.T) {
+	tests := []struct {
+		name   string
+		width  int
+		height int
+		want   string
+	}{
+		{name: "1080p 源只取最高档", width: 1920, height: 1080, want: "1080p"},
+		{name: "720p 源只取 720p", width: 1280, height: 720, want: "720p"},
+		{name: "低分辨率仍只取兜底档", width: 320, height: 240, want: "480p"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := previewQualityForResolution(tt.width, tt.height)
+			if len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("preview 档位应为单档 %s，实际 %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestRateToBps(t *testing.T) {
 	tests := []struct {
 		in   string

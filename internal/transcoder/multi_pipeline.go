@@ -187,7 +187,7 @@ func (mp *MultiPipeline) runFFmpeg(ctx context.Context, args []string, dir strin
 
 	setProcessGroup(cmd)
 
-	log.Printf("[INFO] 启动多码率转码: ffmpeg %s", strings.Join(args, " "))
+	log.Printf("[INFO] 启动 HLS 转码: ffmpeg %s", strings.Join(args, " "))
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动多码率 ffmpeg 失败: %w", err)
 	}
@@ -203,7 +203,7 @@ func (mp *MultiPipeline) runFFmpeg(ctx context.Context, args []string, dir strin
 		return fmt.Errorf("多码率 ffmpeg 转码失败: %w", err)
 	}
 
-	log.Printf("[INFO] 多码率转码完成: %s", dir)
+	log.Printf("[INFO] HLS 转码完成: %s", dir)
 	return nil
 }
 

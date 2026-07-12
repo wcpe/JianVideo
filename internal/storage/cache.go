@@ -537,6 +537,30 @@ func (s *Service) executeCleanTask(ctx context.Context, taskID int64, spaceID st
 	return s.updateTaskProgress(ctx, taskID, 95, "已写入清理审计")
 }
 
+// PrepareHLSRebuild 通过缓存资产安全边界清理单个 HLS profile，绝不删除同媒体其他 profile。
+func (s *Service) PrepareHLSRebuild(ctx context.Context, spaceID string, mediaID int64, profileID, path string) error {
+	absPath, relPath, err := s.safePath(path, CacheKindHLS)
+	if err != nil {
+		return err
+	}
+	libraryRoots, err := s.libraryRoots(ctx)
+	if err != nil {
+		return err
+	}
+	asset := models.CacheAsset{
+		SpaceID: normalizeSpace(spaceID), MediaID: mediaID, Kind: CacheKindHLS,
+		AssetLevel: CacheAssetLevelDirectory, ProfileID: strings.TrimSpace(profileID), RelativePath: relPath,
+	}
+	if _, err := s.validateDeleteTarget(asset, libraryRoots); err != nil {
+		return err
+	}
+	if err := deleteAssetPath(absPath, CacheAssetLevelDirectory); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return s.db.WithContext(ctx).Where("space_id = ? AND media_id = ? AND kind = ? AND profile_id = ? AND relative_path = ?",
+		normalizeSpace(spaceID), mediaID, CacheKindHLS, strings.TrimSpace(profileID), relPath).Delete(&models.CacheAsset{}).Error
+}
+
 func (s *Service) deleteRegisteredAssets(ctx context.Context, assets []models.CacheAsset, libraryRoots []string, result *CleanResult) error {
 	deletedIDs := make([]int64, 0, len(assets))
 	for _, asset := range assets {
@@ -641,29 +665,53 @@ func (s *Service) inventoryFiles(ctx context.Context, spaceID, kind, root string
 }
 
 func (s *Service) inventoryHLS(ctx context.Context, spaceID, root string) (int64, error) {
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return 0, nil
 	}
+	profiles := map[string]RegisterInput{}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.Name() != "master.m3u8" && entry.Name() != "index.m3u8" {
+			return nil
+		}
+		input, ok := parseHLSInventoryPath(root, path, spaceID)
+		if ok {
+			profiles[input.Path] = input
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	var count int64
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return count, err
+	for _, input := range profiles {
+		if _, err := s.RegisterDirectory(ctx, input); err != nil {
+			return 0, err
 		}
-		if !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(root, entry.Name())
-		mediaID := parseInt64(entry.Name())
-		if _, err := s.RegisterDirectory(ctx, RegisterInput{SpaceID: spaceID, MediaID: mediaID, Kind: CacheKindHLS, Path: path}); err != nil {
-			return count, err
-		}
-		count++
 	}
-	return count, nil
+	return int64(len(profiles)), nil
+}
+
+func parseHLSInventoryPath(root, manifestPath, requestedSpace string) (RegisterInput, bool) {
+	dir := filepath.Dir(manifestPath)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return RegisterInput{}, false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) == 1 {
+		mediaID := parseInt64(parts[0])
+		return RegisterInput{SpaceID: requestedSpace, MediaID: mediaID, Kind: CacheKindHLS, ProfileID: "h264", Path: dir}, mediaID > 0
+	}
+	if len(parts) != 3 || parts[0] != requestedSpace {
+		return RegisterInput{}, false
+	}
+	mediaID := parseInt64(parts[1])
+	return RegisterInput{SpaceID: parts[0], MediaID: mediaID, Kind: CacheKindHLS, ProfileID: parts[2], Path: dir}, mediaID > 0
 }
 
 func (s *Service) markMissing(ctx context.Context, spaceID string) (int64, error) {

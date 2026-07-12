@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -71,6 +73,52 @@ func TestHLSRoute_RejectsMediaOutsideRequestedSpace(t *testing.T) {
 }
 
 // TestStreamHandler_InvalidID 测试无效的媒体 ID 格式。
+func TestHLSRoute_DefaultProfileAndLegacyFilesRemainCompatible(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupTestDB(t)
+	media := models.MediaFile{SpaceID: models.DefaultSpaceID, LibraryID: 1, FilePath: "D:/video.mp4", FileName: "video.mp4"}
+	if err := db.Create(&media).Error; err != nil {
+		t.Fatalf("创建媒体失败: %v", err)
+	}
+	root := t.TempDir()
+	profileDir := filepath.Join(root, models.DefaultSpaceID, strconv.FormatInt(media.ID, 10), "h264")
+	if err := os.MkdirAll(profileDir, 0o750); err != nil {
+		t.Fatalf("创建默认 profile 目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "master.m3u8"), []byte("#EXTM3U\n720p.m3u8\n"), 0o640); err != nil {
+		t.Fatalf("写默认 profile master 失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "720p.m3u8"), []byte("#EXTM3U\n"), 0o640); err != nil {
+		t.Fatalf("写默认 profile variant 失败: %v", err)
+	}
+	legacyDir := filepath.Join(root, strconv.FormatInt(media.ID, 10))
+	if err := os.MkdirAll(legacyDir, 0o750); err != nil {
+		t.Fatalf("创建旧 HLS 目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "index.m3u8"), []byte("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n"), 0o640); err != nil {
+		t.Fatalf("写旧 fMP4 清单失败: %v", err)
+	}
+
+	router := gin.New()
+	RegisterHLSRoutes(router, player.NewHLSManager(root), root, library.NewService(db))
+	for _, test := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/play/hls/" + strconv.FormatInt(media.ID, 10) + "/master", body: "720p.m3u8"},
+		{path: "/api/play/hls/" + strconv.FormatInt(media.ID, 10) + "/master.m3u8", body: "720p.m3u8"},
+		{path: "/api/play/hls/" + strconv.FormatInt(media.ID, 10) + "/720p.m3u8", body: "#EXTM3U"},
+		{path: "/api/play/hls/" + strconv.FormatInt(media.ID, 10) + "/index.m3u8", body: "#EXT-X-MAP"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, test.path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK || !bytes.Contains(resp.Body.Bytes(), []byte(test.body)) {
+			t.Fatalf("HLS 兼容路径失败: path=%s code=%d body=%q", test.path, resp.Code, resp.Body.String())
+		}
+	}
+}
+
 func TestStreamHandler_InvalidID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router, _, _ := setupPlayTestRouter(t)
