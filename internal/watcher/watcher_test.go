@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -95,6 +96,62 @@ func TestWatcher_StartIncludesNonDefaultSpaceLibraries(t *testing.T) {
 		return getErr == nil && mf.LibraryID == lp.ID && mf.SpaceID == "space-other"
 	}) {
 		t.Fatal("watcher 未监听非默认 Space 媒体库")
+	}
+}
+
+func TestWatcher_FansOutSamePhysicalPathAcrossSpaces(t *testing.T) {
+	w, svc, gdb, cleanup := newTestWatcher(t)
+	defer cleanup()
+	dir := t.TempDir()
+	libA, err := svc.CreateLibraryPathInSpace("space-a", dir, "local", "Space A")
+	if err != nil {
+		t.Fatalf("创建 Space A 媒体库失败: %v", err)
+	}
+	libB, err := svc.CreateLibraryPathInSpace("space-b", dir, "local", "Space B")
+	if err != nil {
+		t.Fatalf("创建 Space B 媒体库失败: %v", err)
+	}
+	if err := w.Start(); err != nil {
+		t.Fatalf("启动监听器失败: %v", err)
+	}
+
+	videoPath := filepath.Join(dir, "shared.mp4")
+	if err := os.WriteFile(videoPath, []byte("v1"), 0o644); err != nil {
+		t.Fatalf("写入共享视频失败: %v", err)
+	}
+	w.handleEvent(fsnotify.Event{Name: videoPath, Op: fsnotify.Create})
+	if !waitForCondition(t, "同路径新增事件 fan-out", func() bool {
+		mediaA, errA := svc.GetMediaFileByPathInSpace("space-a", videoPath)
+		mediaB, errB := svc.GetMediaFileByPathInSpace("space-b", videoPath)
+		return errA == nil && errB == nil && mediaA.LibraryID == libA.ID && mediaB.LibraryID == libB.ID
+	}) {
+		t.Fatal("同一物理路径的新增事件未 fan-out 到全部 Space 绑定")
+	}
+
+	if err := os.WriteFile(videoPath, []byte("version-two"), 0o644); err != nil {
+		t.Fatalf("修改共享视频失败: %v", err)
+	}
+	w.handleEvent(fsnotify.Event{Name: videoPath, Op: fsnotify.Write})
+	if !waitForCondition(t, "同路径修改事件 fan-out", func() bool {
+		mediaA, errA := svc.GetMediaFileByPathInSpace("space-a", videoPath)
+		mediaB, errB := svc.GetMediaFileByPathInSpace("space-b", videoPath)
+		return errA == nil && errB == nil && mediaA.FileSize == int64(len("version-two")) && mediaB.FileSize == int64(len("version-two"))
+	}) {
+		t.Fatal("同一物理路径的修改事件未 fan-out 到全部 Space 绑定")
+	}
+
+	if err := os.Remove(videoPath); err != nil {
+		t.Fatalf("删除共享视频失败: %v", err)
+	}
+	w.handleEvent(fsnotify.Event{Name: videoPath, Op: fsnotify.Remove})
+	if !waitForCondition(t, "同路径删除事件 fan-out", func() bool {
+		var count int64
+		err := gdb.Model(&models.MediaFile{}).
+			Where("file_path = ? AND file_state = ? AND space_id IN ?", filepath.ToSlash(videoPath), models.MediaFileStateMissing, []string{"space-a", "space-b"}).
+			Count(&count).Error
+		return err == nil && count == 2
+	}) {
+		t.Fatal("同一物理路径的删除事件未 fan-out 到全部 Space 绑定")
 	}
 }
 
@@ -315,10 +372,7 @@ func TestWatcher_EnqueuesRemoveWhenQueueInjected(t *testing.T) {
 		return 0, nil
 	})
 	w.WithScanQueue(q)
-	w.mu.Lock()
-	w.pathToLib[filepath.ToSlash(dir)] = libID
-	w.pathToSpace[filepath.ToSlash(dir)] = models.DefaultSpaceID
-	w.mu.Unlock()
+	w.addBinding(filepath.ToSlash(dir), pathBinding{libraryID: libID, spaceID: models.DefaultSpaceID})
 
 	videoPath := filepath.Join(dir, "removed.mp4")
 	w.removeRecord(videoPath)

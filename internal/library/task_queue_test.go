@@ -124,6 +124,70 @@ func TestTaskQueue_ErrorFlow(t *testing.T) {
 	}
 }
 
+func TestTaskQueue_SuccessCallbackRunsOnlyAfterSuccessfulScan(t *testing.T) {
+	gdb := newTaskQueueDB(t)
+	scanFinished := make(chan struct{})
+	callbackCalled := make(chan models.ScanTask, 1)
+	release := make(chan struct{})
+	q := NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		<-release
+		close(scanFinished)
+		return 1, nil
+	}).WithSuccessCallback(func(task models.ScanTask) {
+		select {
+		case <-scanFinished:
+			callbackCalled <- task
+		default:
+			t.Error("扫描成功回调不得早于扫描完成")
+		}
+	})
+	q.Start()
+	defer q.Stop()
+
+	if _, err := q.EnqueueInSpace("space-a", 3, "/data", "local", models.ScanTypeFull); err != nil {
+		t.Fatalf("入队失败: %v", err)
+	}
+	select {
+	case <-callbackCalled:
+		t.Fatal("扫描尚未完成时不应触发成功回调")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+
+	select {
+	case task := <-callbackCalled:
+		if task.SpaceID != "space-a" || task.LibraryID != 3 || task.Status != models.ScanTaskStatusCompleted {
+			t.Fatalf("成功回调任务上下文不正确: %+v", task)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("扫描成功后未触发回调")
+	}
+}
+
+func TestTaskQueue_SuccessCallbackSkipsFailedScan(t *testing.T) {
+	gdb := newTaskQueueDB(t)
+	var callbacks int32
+	q := NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
+		return 0, errTest
+	}).WithSuccessCallback(func(models.ScanTask) {
+		atomic.AddInt32(&callbacks, 1)
+	})
+	q.Start()
+	defer q.Stop()
+
+	id, err := q.Enqueue(4, "/failed", "local", models.ScanTypeFull)
+	if err != nil {
+		t.Fatalf("入队失败: %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		var task models.ScanTask
+		return gdb.First(&task, id).Error == nil && task.Status == models.ScanTaskStatusError
+	})
+	if got := atomic.LoadInt32(&callbacks); got != 0 {
+		t.Fatalf("失败扫描不应触发成功回调，实际 %d 次", got)
+	}
+}
+
 // TestTaskQueue_SerialExecution 多任务排队时 worker 串行执行，任意时刻至多一个 running。
 func TestTaskQueue_SerialExecution(t *testing.T) {
 	gdb := newTaskQueueDB(t)

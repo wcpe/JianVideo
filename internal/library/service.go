@@ -1483,6 +1483,11 @@ func (s *Service) StartAsyncScan(libraryID int64, dirPath, dirType, mode string)
 
 // StartAsyncScanInSpace 按 Space 启动异步扫描，立即返回。
 func (s *Service) StartAsyncScanInSpace(spaceID string, libraryID int64, dirPath, dirType, mode string) {
+	s.StartAsyncScanInSpaceWithSuccess(spaceID, libraryID, dirPath, dirType, mode, nil)
+}
+
+// StartAsyncScanInSpaceWithSuccess 按 Space 启动异步扫描，并在扫描成功后执行回调。
+func (s *Service) StartAsyncScanInSpaceWithSuccess(spaceID string, libraryID int64, dirPath, dirType, mode string, onSuccess func()) {
 	updateScanStatus(func(ss *ScanStatus) {
 		*ss = ScanStatus{
 			Status:       "scanning",
@@ -1514,6 +1519,9 @@ func (s *Service) StartAsyncScanInSpace(spaceID string, libraryID int64, dirPath
 			ss.CompletedAt = time.Now()
 		})
 		log.Printf("[INFO] 异步扫描完成: libraryID=%d, count=%d", libraryID, count)
+		if onSuccess != nil {
+			onSuccess()
+		}
 	}()
 }
 

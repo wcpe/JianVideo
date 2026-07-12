@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Package main 提供 FR2-007 本机 SQLite 查询基准命令。
+// Package main 提供 FR2-007 生产等价 SQLite 查询基准命令。
 package main
 
 import (
@@ -14,42 +14,59 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	"github.com/wcpe/JianVideo/internal/migration"
 )
 
 const (
-	maxRows       int64 = 10_000_000
-	pageSize      int   = 50
-	sampleCount   int   = 12
-	schemaVersion int   = 7003
+	pageSize       = 50
+	queryLimit     = pageSize + 1
+	sampleCount    = 12
+	maxOpenConns   = 8
+	maxIdleConns   = 8
+	benchmarkSpace = "benchmark-space"
 )
 
+var datasetRows = []int64{1_000_000, 5_000_000, 10_000_000}
+
 type querySpec struct {
-	Dataset string `json:"dataset"`
-	Rows    int64  `json:"rows"`
-	Query   string `json:"query"`
-	SQL     string `json:"sql"`
-	Index   string `json:"index"`
-	Args    []any  `json:"args"`
+	Args  []any  `json:"args"`
+	Name  string `json:"name"`
+	SQL   string `json:"sql"`
+	Rows  int64  `json:"rows"`
+	Label string `json:"label"`
 }
 
 type queryResult struct {
-	Args          []any    `json:"args"`
-	DatabaseBytes int64    `json:"database_bytes"`
-	Dataset       string   `json:"dataset"`
-	Index         string   `json:"index"`
-	IndexPlan     []string `json:"index_plan"`
-	P95           float64  `json:"p95_ms"`
-	P99           float64  `json:"p99_ms"`
-	Pass          bool     `json:"pass"`
-	Query         string   `json:"query"`
-	Samples       int      `json:"samples"`
-	ScannedRows   int64    `json:"scanned_rows"`
-	SQL           string   `json:"sql"`
-	ThresholdMS   float64  `json:"threshold_ms"`
+	Args          []any     `json:"args"`
+	DatabaseBytes int64     `json:"database_bytes"`
+	Dataset       string    `json:"dataset"`
+	DurationsMS   []float64 `json:"durations_ms"`
+	ExplainPlan   []string  `json:"explain_query_plan"`
+	P95           float64   `json:"p95_ms"`
+	P99           float64   `json:"p99_ms"`
+	Pass          bool      `json:"pass"`
+	Query         string    `json:"query"`
+	ResultCount   int       `json:"result_count"`
+	ResultIDs     []int64   `json:"result_ids"`
+	SQL           string    `json:"sql"`
+	ThresholdMS   float64   `json:"threshold_ms"`
+}
+
+type environment struct {
+	Driver       string   `json:"driver"`
+	DSNOptions   string   `json:"dsn_options"`
+	Indexes      []string `json:"indexes"`
+	MaxIdleConns int      `json:"max_idle_conns"`
+	MaxOpenConns int      `json:"max_open_conns"`
+	SchemaSource string   `json:"schema_source"`
 }
 
 type report struct {
+	Environment environment   `json:"environment"`
 	GeneratedAt string        `json:"generated_at"`
 	Results     []queryResult `json:"results"`
 }
@@ -66,145 +83,148 @@ func run(outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
-	dbPath := filepath.Join(".tmp", "benchmark", "fr2-007", "sqlite-index.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	dbPath := filepath.Join(outputDir, "sqlite-production.db")
+	gdb, sqlDB, err := openProductionDatabase(dbPath)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = db.Close()
-	}()
-	db.SetMaxOpenConns(1)
+	defer func() { _ = sqlDB.Close() }()
+	if err := applyProductionSchema(gdb); err != nil {
+		return err
+	}
+	if err := seedLibraries(sqlDB); err != nil {
+		return err
+	}
 
-	if err := configure(db); err != nil {
-		return err
+	results := make([]queryResult, 0, len(datasetRows)*3)
+	for _, rows := range datasetRows {
+		if err := seedMediaUntil(sqlDB, rows); err != nil {
+			return err
+		}
+		if _, err := sqlDB.Exec("ANALYZE"); err != nil {
+			return err
+		}
+		batch, err := runDataset(sqlDB, dbPath, rows)
+		if err != nil {
+			return err
+		}
+		results = append(results, batch...)
 	}
-	if err := ensureDataset(db); err != nil {
-		return err
-	}
-	results, err := runBenchmarks(db, dbPath)
+	indexes, err := listIndexes(sqlDB)
 	if err != nil {
 		return err
 	}
-	r := report{GeneratedAt: time.Now().Format(time.RFC3339), Results: results}
+	r := report{
+		Environment: environment{
+			Driver:       "github.com/mattn/go-sqlite3（经 gorm sqlite）",
+			DSNOptions:   "_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on",
+			Indexes:      indexes,
+			MaxIdleConns: maxIdleConns,
+			MaxOpenConns: maxOpenConns,
+			SchemaSource: "internal/migration.DefaultMigrations",
+		},
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		Results:     results,
+	}
 	if err := writeJSON(filepath.Join(outputDir, "results.json"), r); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outputDir, "summary.md"), []byte(renderSummary(r)), 0o644)
 }
 
-func configure(db *sql.DB) error {
-	statements := []string{
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = OFF",
-		"PRAGMA temp_store = MEMORY",
-		"PRAGMA cache_size = -262144",
+func openProductionDatabase(dbPath string) (*gorm.DB, *sql.DB, error) {
+	dsn := productionDSN(dbPath)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		return nil, nil, err
 	}
-	for _, statement := range statements {
-		if _, err := db.Exec(statement); err != nil {
-			return err
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	if err := sqlDB.Ping(); err != nil {
+		_ = sqlDB.Close()
+		return nil, nil, err
+	}
+	return gdb, sqlDB, nil
+}
+
+func productionDSN(dbPath string) string {
+	separator := "?"
+	if strings.Contains(dbPath, "?") {
+		separator = "&"
+	}
+	return dbPath + separator + "_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on"
+}
+
+func applyProductionSchema(db *gorm.DB) error {
+	ctx := context.Background()
+	for _, step := range migration.DefaultMigrations() {
+		if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return step.Up(ctx, tx)
+		}); err != nil {
+			return fmt.Errorf("应用生产迁移 %s 失败: %w", step.ID, err)
+		}
+		if step.Validate != nil {
+			if _, err := step.Validate(ctx, db); err != nil {
+				return fmt.Errorf("校验生产迁移 %s 失败: %w", step.ID, err)
+			}
 		}
 	}
 	return nil
 }
 
-func ensureDataset(db *sql.DB) error {
-	var userVersion int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+func seedLibraries(db *sql.DB) error {
+	if _, err := db.Exec(`INSERT OR IGNORE INTO spaces(id, name, owner_user_id, created_at, updated_at)
+		VALUES (?, 'Benchmark Space', 1, datetime('now'), datetime('now'))`, benchmarkSpace); err != nil {
 		return err
 	}
-	var count int64
-	if userVersion == schemaVersion {
-		if err := db.QueryRow("SELECT COUNT(*) FROM media_files").Scan(&count); err == nil && count == maxRows {
-			return nil
-		}
-	}
-	if err := rebuildDataset(db); err != nil {
-		return err
-	}
-	_, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
+	_, err := db.Exec(`WITH RECURSIVE seq(id) AS (
+		SELECT 1 UNION ALL SELECT id + 1 FROM seq WHERE id < 256
+	)
+	INSERT INTO library_paths(id, space_id, path, type, library_kind, library_profile_json, label, enabled, created_at)
+	SELECT id, ?, printf('/benchmark/lib-%03d', id), 'local', 'mixed', '{}', printf('基准库-%03d', id), 1, datetime('now')
+	FROM seq`, benchmarkSpace)
 	return err
 }
 
-func rebuildDataset(db *sql.DB) error {
-	statements := []string{
-		"DROP TABLE IF EXISTS media_files",
-		"DROP TABLE IF EXISTS library_paths",
-		`CREATE TABLE library_paths (
-			id INTEGER PRIMARY KEY,
-			space_id TEXT NOT NULL,
-			path TEXT NOT NULL,
-			type TEXT NOT NULL DEFAULT 'local',
-			label TEXT,
-			enabled INTEGER NOT NULL DEFAULT 1,
-			created_at DATETIME
-		)`,
-		`CREATE TABLE media_files (
-			id INTEGER PRIMARY KEY,
-			space_id TEXT NOT NULL,
-			library_id INTEGER NOT NULL,
-			file_path TEXT NOT NULL,
-			file_name TEXT NOT NULL,
-			file_size INTEGER DEFAULT 0,
-			format TEXT,
-			added_at DATETIME,
-			media_time DATETIME,
-			deleted_at DATETIME
-		)`,
-		`WITH RECURSIVE seq(id) AS (
-			SELECT 1
-			UNION ALL
-			SELECT id + 1 FROM seq WHERE id < 1000
-		)
-		INSERT INTO library_paths(id, space_id, path, type, label, enabled, created_at)
-		SELECT
-			id,
-			printf('space-%02d', (id % 10) + 1),
-			printf('/space-%02d/lib-%03d', (id % 10) + 1, id % 256),
-			'local',
-			printf('库-%03d', id % 256),
-			1,
-			1700000000
-		FROM seq`,
-		`WITH RECURSIVE seq(id) AS (
-			SELECT 1
-			UNION ALL
-			SELECT id + 1 FROM seq WHERE id < 10000000
-		)
-		INSERT INTO media_files
-		SELECT
-			id,
-			printf('space-%02d', (id % 10) + 1),
-			(id % 256) + 1,
-			printf('/space-%02d/lib-%03d/item-%08d.%s', (id % 10) + 1, id % 256, id, CASE WHEN id % 4 = 0 THEN 'jpg' ELSE 'mp4' END),
-			printf('item-%08d', id),
-			(id % 50000000) + 1024,
-			CASE WHEN id % 4 = 0 THEN 'jpg' ELSE 'mp4' END,
-			1893456000 - id,
-			1893456000 - id,
-			CASE WHEN id % 97 = 0 THEN 1893456000 - id ELSE NULL END
-		FROM seq`,
-		"CREATE INDEX idx_library_paths_space_id ON library_paths(space_id)",
-		"CREATE INDEX idx_library_paths_space_path_id ON library_paths(space_id, path, id)",
-		"CREATE INDEX idx_library_paths_space_enabled_id ON library_paths(space_id, enabled, id)",
-		"CREATE INDEX idx_media_files_space_id ON media_files(space_id)",
-		"CREATE INDEX idx_media_files_space_added_id ON media_files(space_id, added_at DESC, id DESC)",
-		"CREATE INDEX idx_media_files_space_media_time_id ON media_files(space_id, media_time DESC, id DESC)",
-		"CREATE INDEX idx_media_files_space_library_path_id ON media_files(space_id, library_id, file_path, id)",
-		"CREATE INDEX idx_media_files_space_deleted_id ON media_files(space_id, deleted_at, id)",
-		"CREATE INDEX idx_media_files_space_format_added_id ON media_files(space_id, format, added_at DESC, id DESC)",
-		"ANALYZE",
+func seedMediaUntil(db *sql.DB, target int64) error {
+	var current int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM media_files").Scan(&current); err != nil {
+		return err
 	}
-	for _, statement := range statements {
-		if _, err := db.Exec(statement); err != nil {
-			return err
-		}
+	if current >= target {
+		return nil
 	}
-	return nil
+	_, err := db.Exec(`WITH RECURSIVE seq(id) AS (
+		SELECT ? UNION ALL SELECT id + 1 FROM seq WHERE id < ?
+	)
+	INSERT INTO media_files(
+		id, space_id, library_id, file_path, file_name, file_size, format,
+		file_state, added_at, modified_at, media_time, deleted_at, content_hash_stale
+	)
+	SELECT
+		id,
+		?,
+		(id % 256) + 1,
+		printf('/benchmark/lib-%03d/item-%08d.%s', (id % 256) + 1, id, CASE WHEN id % 4 = 0 THEN 'jpg' ELSE 'mp4' END),
+		printf('item-%08d', id),
+		(id % 50000000) + 1024,
+		CASE WHEN id % 4 = 0 THEN 'jpg' ELSE 'mp4' END,
+		'available',
+		datetime(1893456000 - id, 'unixepoch'),
+		datetime(1893456000 - id, 'unixepoch'),
+		datetime(1893456000 - id, 'unixepoch'),
+		CASE WHEN id % 97 = 0 THEN datetime(1893456000 - id, 'unixepoch') ELSE NULL END,
+		1
+	FROM seq`, current+1, target, benchmarkSpace)
+	return err
 }
 
-func runBenchmarks(db *sql.DB, dbPath string) ([]queryResult, error) {
-	specs := buildSpecs()
+func runDataset(db *sql.DB, dbPath string, rows int64) ([]queryResult, error) {
+	specs := buildSpecs(rows)
 	results := make([]queryResult, 0, len(specs))
 	for _, spec := range specs {
 		result, err := runQuery(db, dbPath, spec)
@@ -216,66 +236,49 @@ func runBenchmarks(db *sql.DB, dbPath string) ([]queryResult, error) {
 	return results, nil
 }
 
-func buildSpecs() []querySpec {
-	datasets := []struct {
-		name string
-		rows int64
-	}{
-		{name: "media-index-1m", rows: 1_000_000},
-		{name: "media-index-5m", rows: 5_000_000},
-		{name: "media-index-10m", rows: 10_000_000},
-	}
-	specs := make([]querySpec, 0, len(datasets)*3)
-	for _, dataset := range datasets {
-		specs = append(specs, spaceTimeSpec(dataset.name, dataset.rows))
-		specs = append(specs, pathPrefixSpec(dataset.name, dataset.rows))
-		specs = append(specs, filterSpec(dataset.name, dataset.rows))
-	}
-	return specs
-}
-
-func spaceTimeSpec(dataset string, rows int64) querySpec {
-	return querySpec{
-		Args:    []any{rows, "space-03", int64(1893456000 - 1200)},
-		Dataset: dataset,
-		Index:   "idx_media_files_space_added_id",
-		Query:   "space-time-page",
-		Rows:    rows,
-		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
-	}
-}
-
-func pathPrefixSpec(dataset string, rows int64) querySpec {
-	return querySpec{
-		Args:    []any{rows, "space-03", int64(9), "/space-03/lib-008/", "/space-03/lib-009/"},
-		Dataset: dataset,
-		Index:   "idx_media_files_space_library_path_id",
-		Query:   "path-prefix",
-		Rows:    rows,
-		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND library_id = ? AND file_path >= ? AND file_path < ? ORDER BY file_path, id LIMIT 50",
-	}
-}
-
-func filterSpec(dataset string, rows int64) querySpec {
-	return querySpec{
-		Args:    []any{rows, "space-03", "mp4", int64(1893456000 - 1200)},
-		Dataset: dataset,
-		Index:   "idx_media_files_space_format_added_id",
-		Query:   "filter-combination",
-		Rows:    rows,
-		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND format = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
+func buildSpecs(rows int64) []querySpec {
+	cursorTime := time.Unix(1893456000-1200, 0).UTC().Format("2006-01-02 15:04:05")
+	active := "deleted_at IS NULL AND (file_state IS NULL OR file_state = '' OR file_state = 'available')"
+	return []querySpec{
+		{
+			Args:  []any{benchmarkSpace, cursorTime, cursorTime, int64(1200), queryLimit},
+			Name:  "space-time-page",
+			Rows:  rows,
+			Label: "Space + 时间游标分页",
+			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND (added_at < ? OR (added_at = ? AND id < ?)) ORDER BY added_at DESC, id DESC LIMIT ?",
+		},
+		{
+			Args:  []any{benchmarkSpace, int64(9), "/benchmark/lib-009/%", queryLimit},
+			Name:  "path-prefix-page",
+			Rows:  rows,
+			Label: "Space + 媒体库 + 路径前缀分页",
+			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND library_id = ? AND file_path LIKE ? ORDER BY added_at DESC, id DESC LIMIT ?",
+		},
+		{
+			Args:  []any{benchmarkSpace, "mp4", cursorTime, cursorTime, int64(1200), queryLimit},
+			Name:  "filter-combination-page",
+			Rows:  rows,
+			Label: "Space + 格式筛选 + 时间游标分页",
+			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND LOWER(format) IN (?) AND (added_at < ? OR (added_at = ? AND id < ?)) ORDER BY added_at DESC, id DESC LIMIT ?",
+		},
 	}
 }
 
 func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 	durations := make([]float64, 0, sampleCount)
+	var resultIDs []int64
 	for sample := 0; sample < sampleCount; sample++ {
-		duration, count, err := timeQuery(db, spec)
+		duration, ids, err := timeQuery(db, spec)
 		if err != nil {
 			return queryResult{}, err
 		}
-		if count != pageSize {
-			return queryResult{}, fmt.Errorf("%s/%s 返回 %d 条，期望 %d 条", spec.Dataset, spec.Query, count, pageSize)
+		if len(ids) != queryLimit {
+			return queryResult{}, fmt.Errorf("%s/%s 返回 %d 条，期望 %d 条", datasetName(spec.Rows), spec.Name, len(ids), queryLimit)
+		}
+		if sample == 0 {
+			resultIDs = ids
+		} else if !equalIDs(resultIDs, ids) {
+			return queryResult{}, fmt.Errorf("%s/%s 多次查询结果不稳定", datasetName(spec.Rows), spec.Name)
 		}
 		durations = append(durations, duration)
 	}
@@ -283,48 +286,46 @@ func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 	if err != nil {
 		return queryResult{}, err
 	}
-	p95 := percentile(durations, 0.95)
-	threshold := backendThresholdMS(spec.Dataset, spec.Query)
+	p95 := percentile(append([]float64(nil), durations...), 0.95)
+	threshold := backendThresholdMS(spec.Rows, spec.Name)
 	return queryResult{
 		Args:          spec.Args,
 		DatabaseBytes: fileSize(dbPath),
-		Dataset:       spec.Dataset,
-		Index:         spec.Index,
-		IndexPlan:     plan,
+		Dataset:       datasetName(spec.Rows),
+		DurationsMS:   durations,
+		ExplainPlan:   plan,
 		P95:           p95,
-		P99:           percentile(durations, 0.99),
+		P99:           percentile(append([]float64(nil), durations...), 0.99),
 		Pass:          p95 <= threshold,
-		Query:         spec.Query,
-		Samples:       len(durations),
-		ScannedRows:   int64(pageSize),
+		Query:         spec.Label,
+		ResultCount:   len(resultIDs),
+		ResultIDs:     resultIDs,
 		SQL:           spec.SQL,
 		ThresholdMS:   threshold,
 	}, nil
 }
 
-func timeQuery(db *sql.DB, spec querySpec) (float64, int, error) {
+func timeQuery(db *sql.DB, spec querySpec) (float64, []int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	started := time.Now()
 	rows, err := db.QueryContext(ctx, spec.SQL, spec.Args...)
 	if err != nil {
-		return 0, 0, err
+		return 0, nil, err
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
-	count := 0
+	defer func() { _ = rows.Close() }()
+	ids := make([]int64, 0, queryLimit)
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return 0, 0, err
+			return 0, nil, err
 		}
-		count++
+		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return 0, 0, err
+		return 0, nil, err
 	}
-	return float64(time.Since(started).Microseconds()) / 1000, count, nil
+	return float64(time.Since(started).Microseconds()) / 1000, ids, nil
 }
 
 func explainQueryPlan(db *sql.DB, spec querySpec) ([]string, error) {
@@ -332,9 +333,7 @@ func explainQueryPlan(db *sql.DB, spec querySpec) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
+	defer func() { _ = rows.Close() }()
 	var plan []string
 	for rows.Next() {
 		var id, parent, notUsed int
@@ -345,6 +344,23 @@ func explainQueryPlan(db *sql.DB, spec querySpec) ([]string, error) {
 		plan = append(plan, detail)
 	}
 	return plan, rows.Err()
+}
+
+func listIndexes(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('media_files', 'library_paths') ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var indexes []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, name)
+	}
+	return indexes, rows.Err()
 }
 
 func percentile(values []float64, ratio float64) float64 {
@@ -359,44 +375,73 @@ func percentile(values []float64, ratio float64) float64 {
 	return values[index]
 }
 
-func backendThresholdMS(dataset, query string) float64 {
+func backendThresholdMS(rows int64, query string) float64 {
 	if query == "space-time-page" {
-		if dataset == "media-index-10m" {
+		if rows == 10_000_000 {
 			return 500
 		}
 		return 200
 	}
-	if dataset == "media-index-10m" {
+	if rows == 10_000_000 {
 		return 800
 	}
 	return 300
 }
 
+func datasetName(rows int64) string {
+	return fmt.Sprintf("media-index-%dm", rows/1_000_000)
+}
+
+func equalIDs(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func renderSummary(r report) string {
 	var b strings.Builder
-	b.WriteString("# FR2-007 Benchmark Summary\n\n")
+	b.WriteString("# FR2-007 SQLite Benchmark 摘要\n\n")
 	b.WriteString("生成时间：" + r.GeneratedAt + "\n\n")
-	b.WriteString("| 数据集 | 查询 | 索引 | p95(ms) | p99(ms) | 门槛(ms) | 扫描行数 | 判定 |\n")
-	b.WriteString("|---|---|---|---:|---:|---:|---:|---|\n")
+	b.WriteString(fmt.Sprintf("- 驱动：%s\n- DSN 参数：%s\n- 连接池：max_open=%d，max_idle=%d\n- Schema 真源：%s\n\n",
+		r.Environment.Driver, r.Environment.DSNOptions, r.Environment.MaxOpenConns, r.Environment.MaxIdleConns, r.Environment.SchemaSource))
+	b.WriteString("| 数据集 | 查询 | p95(ms) | p99(ms) | 门槛(ms) | 结果数 | 首/末 ID | 判定 |\n")
+	b.WriteString("|---|---|---:|---:|---:|---:|---|---|\n")
 	for _, item := range r.Results {
 		status := "达标"
 		if !item.Pass {
 			status = "未达标"
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %.3f | %.3f | %.0f | %d | %s |\n",
-			item.Dataset, item.Query, item.Index, item.P95, item.P99, item.ThresholdMS, item.ScannedRows, status))
+		first, last := int64(0), int64(0)
+		if len(item.ResultIDs) > 0 {
+			first, last = item.ResultIDs[0], item.ResultIDs[len(item.ResultIDs)-1]
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | %.3f | %.3f | %.0f | %d | %d / %d | %s |\n",
+			item.Dataset, item.Query, item.P95, item.P99, item.ThresholdMS, item.ResultCount, first, last, status))
 	}
-	b.WriteString("\n## SQL 与索引计划\n\n")
+	b.WriteString("\n## EXPLAIN QUERY PLAN 与实测样本\n\n")
 	for _, item := range r.Results {
 		b.WriteString("### " + item.Dataset + " / " + item.Query + "\n\n")
 		b.WriteString("- SQL：" + item.SQL + "\n")
 		args, _ := json.Marshal(item.Args)
 		b.WriteString("- 参数：" + string(args) + "\n")
-		b.WriteString("- 索引：" + item.Index + "\n")
-		for _, plan := range item.IndexPlan {
-			b.WriteString("- 计划：" + plan + "\n")
+		durations, _ := json.Marshal(item.DurationsMS)
+		b.WriteString("- 真实耗时(ms)：" + string(durations) + "\n")
+		ids, _ := json.Marshal(item.ResultIDs)
+		b.WriteString("- 真实结果 ID：" + string(ids) + "\n")
+		for _, plan := range item.ExplainPlan {
+			b.WriteString("- 查询计划：" + plan + "\n")
 		}
 		b.WriteString("\n")
+	}
+	b.WriteString("## 生产索引列表\n\n")
+	for _, index := range r.Environment.Indexes {
+		b.WriteString("- " + index + "\n")
 	}
 	return b.String()
 }

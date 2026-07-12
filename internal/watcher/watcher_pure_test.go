@@ -9,7 +9,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
-// 路径统一使用正斜杠，与数据库存储和 pathToLib 的 key 格式一致
+// 路径统一使用正斜杠，与数据库存储和 bindings 的 key 格式一致
 const sep = "/"
 
 // buildBreadcrumbs 将路径拆分为面包屑段（与 library.Service 中相同的逻辑，供 watcher 包测试使用）。
@@ -77,10 +77,10 @@ func TestIsMediaFile_ExtCaseInsensitive(t *testing.T) {
 // TestFindLibraryID 验证根据文件路径查找所属 library_id。
 func TestFindLibraryID(t *testing.T) {
 	w := &Watcher{
-		pathToLib: map[string]int64{
-			sep + "movies":                  1,
-			sep + "movies" + sep + "action": 2,
-			sep + "tv":                      3,
+		bindings: map[string][]pathBinding{
+			sep + "movies":                  {{libraryID: 1}},
+			sep + "movies" + sep + "action": {{libraryID: 2}},
+			sep + "tv":                      {{libraryID: 3}},
 		},
 	}
 

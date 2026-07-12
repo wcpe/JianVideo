@@ -32,7 +32,47 @@ var (
 	thumbnailSemOnce sync.Once
 	// thumbnailSem 固定容量信号量，限制并发生成的缩略图任务数。
 	thumbnailSem chan struct{}
+
+	thumbnailFlights = thumbnailFlightGroup{calls: make(map[string]*thumbnailCall)}
 )
+
+// thumbnailCall 表示一个同键生成调用，后续调用等待并复用其结果。
+type thumbnailCall struct {
+	done chan struct{}
+	err  error
+}
+
+// thumbnailFlightGroup 提供项目内缩略图 singleflight，不引入第三方依赖。
+type thumbnailFlightGroup struct {
+	mu    sync.Mutex
+	calls map[string]*thumbnailCall
+}
+
+func (g *thumbnailFlightGroup) do(key string, fn func() error) error {
+	g.mu.Lock()
+	if call, ok := g.calls[key]; ok {
+		g.mu.Unlock()
+		<-call.done
+		return call.err
+	}
+	call := &thumbnailCall{done: make(chan struct{})}
+	g.calls[key] = call
+	g.mu.Unlock()
+
+	call.err = fn()
+	g.mu.Lock()
+	delete(g.calls, key)
+	close(call.done)
+	g.mu.Unlock()
+	return call.err
+}
+
+func (g *thumbnailFlightGroup) inProgress(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok := g.calls[key]
+	return ok
+}
 
 // thumbnailKind 缩略图任务类型，决定走哪条生成路径。
 type thumbnailKind int
@@ -92,25 +132,30 @@ func submitThumbnail(job thumbnailJob) {
 }
 
 // submitThumbnailWithRunner 仅供测试注入单次不可变执行函数，避免修改全局变量产生竞态。
-func submitThumbnailWithRunner(job thumbnailJob, runner func(thumbnailJob)) {
+func submitThumbnailWithRunner(job thumbnailJob, runner func(thumbnailJob) error) {
+	job.size = normalizeThumbnailSize(job.size)
 	sem := thumbnailSemaphore()
 	go func() {
-		sem <- struct{}{}
-		defer func() { <-sem }()
-		runner(job)
+		_ = thumbnailFlights.do(thumbnailJobKey(job), func() error {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			return runner(job)
+		})
 	}()
 }
 
 // realRunThumbnail 按任务类型分派到具体的生成实现。
-func realRunThumbnail(job thumbnailJob) {
+func realRunThumbnail(job thumbnailJob) error {
 	size := normalizeThumbnailSize(job.size)
 	switch job.kind {
 	case kindMagick:
-		generateMagickThumbnail(job.filePath, size)
+		return generateMagickThumbnail(job.filePath, size)
 	case kindImage:
-		generateImageThumbnail(job.filePath, size)
+		return generateImageThumbnailWithRunner(job.filePath, size, realRunFFmpegThumbnail)
 	case kindVideo:
-		generateVideoThumbnail(job.filePath, size)
+		return generateVideoThumbnailWithRunner(job.filePath, size, realRunFFmpegThumbnail)
+	default:
+		return fmt.Errorf("不支持的缩略图生成策略: %d", job.kind)
 	}
 }
 
@@ -154,7 +199,10 @@ func generateThumbnailSync(filePath string) {
 	if !ok {
 		return
 	}
-	realRunThumbnail(job)
+	job.size = thumbnailWidth
+	_ = thumbnailFlights.do(thumbnailJobKey(job), func() error {
+		return realRunThumbnail(job)
+	})
 }
 
 // resolveThumbnailJob 按文件类型解析出缩略图任务，类型不支持时返回 ok=false。
@@ -181,18 +229,14 @@ func TryGenerateThumbnail(filePath string) error {
 	if _, err := os.Stat(filePath); err != nil {
 		return fmt.Errorf("源文件不可访问: %w", err)
 	}
-	if needsMagickConvert(filePath) {
-		outputPath := getThumbnailPath(filePath)
-		return runMagick(buildMagickThumbnailArgs(filePath, outputPath, thumbnailWidth))
+	job, ok := resolveThumbnailJob(filePath)
+	if !ok {
+		return fmt.Errorf("不支持的缩略图类型: %s", strings.ToLower(filepath.Ext(filePath)))
 	}
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
-		return tryRunThumbnailFFmpeg(buildImageThumbnailArgs(filePath, getThumbnailPath(filePath), thumbnailWidth))
-	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".m4v", ".flv":
-		return tryRunThumbnailFFmpeg(buildVideoThumbnailArgs(filePath, getThumbnailPath(filePath), thumbnailWidth))
-	}
-	return fmt.Errorf("不支持的缩略图类型: %s", ext)
+	job.size = thumbnailWidth
+	return thumbnailFlights.do(thumbnailJobKey(job), func() error {
+		return realRunThumbnail(job)
+	})
 }
 
 // tryRunThumbnailFFmpeg 带超时执行一次 ffmpeg 缩略图命令并返回错误（含超时区分），供同步生成入口复用。
@@ -240,18 +284,20 @@ func buildVideoThumbnailArgs(filePath, outputPath string, width int) []string {
 
 // generateMagickThumbnail 用 ImageMagick 为 HEIC/RAW 生成缩略图。
 // magick 不可用或转换失败仅记日志，不阻塞入库（与 ffmpeg 缩略图一致）。
-func generateMagickThumbnail(filePath string, size int) {
+func generateMagickThumbnail(filePath string, size int) error {
 	outputPath := thumbnailPathForSize(filePath, size)
 	if err := runMagick(buildMagickThumbnailArgs(filePath, outputPath, size)); err != nil {
 		log.Printf("[WARN] HEIC/RAW 缩略图生成失败: %s, err=%v", filePath, err)
+		return err
 	}
+	return nil
 }
 
 func generateImageThumbnail(filePath string, size int) {
-	generateImageThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
+	_ = generateImageThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
 }
 
-func generateImageThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) {
+func generateImageThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) error {
 	outputPath := thumbnailPathForSize(filePath, size)
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
@@ -259,18 +305,20 @@ func generateImageThumbnailWithRunner(filePath string, size int, runner func(con
 	if err := runner(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 图片缩略图生成超时（已终止 ffmpeg）: %s", filePath)
-			return
+			return fmt.Errorf("图片缩略图生成超时: %w", err)
 		}
 		// 记录 ffmpeg stderr 关键尾部，便于定位具体失败原因（如格式不支持、文件损坏）
 		log.Printf("[ERROR] 图片缩略图生成失败: %s, err=%v", filePath, err)
+		return err
 	}
+	return nil
 }
 
 func generateVideoThumbnail(filePath string, size int) {
-	generateVideoThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
+	_ = generateVideoThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
 }
 
-func generateVideoThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) {
+func generateVideoThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) error {
 	outputPath := thumbnailPathForSize(filePath, size)
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
@@ -278,11 +326,13 @@ func generateVideoThumbnailWithRunner(filePath string, size int, runner func(con
 	if err := runner(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 视频缩略图生成超时（已终止 ffmpeg）: %s", filePath)
-			return
+			return fmt.Errorf("视频缩略图生成超时: %w", err)
 		}
 		// 记录 ffmpeg stderr 关键尾部，便于定位具体失败原因（如格式不支持、文件损坏）
 		log.Printf("[ERROR] 视频缩略图生成失败: %s, err=%v", filePath, err)
+		return err
 	}
+	return nil
 }
 
 // realRunFFmpegThumbnail 用给定参数执行 ffmpeg 缩略图命令，捕获 stderr。
@@ -308,6 +358,21 @@ func tailString(s string, n int) string {
 		return s
 	}
 	return s[len(s)-n:]
+}
+
+func thumbnailJobKey(job thumbnailJob) string {
+	size := normalizeThumbnailSize(job.size)
+	source := filepath.ToSlash(filepath.Clean(job.filePath))
+	output := filepath.ToSlash(filepath.Clean(thumbnailPathForSize(job.filePath, size)))
+	if runtime.GOOS == "windows" {
+		source = strings.ToLower(source)
+		output = strings.ToLower(output)
+	}
+	return source + "\x00" + strconv.Itoa(size) + "\x00" + strconv.Itoa(int(job.kind)) + "\x00" + output
+}
+
+func thumbnailFlightInProgress(job thumbnailJob) bool {
+	return thumbnailFlights.inProgress(thumbnailJobKey(job))
 }
 
 func getThumbnailPath(filePath string) string {

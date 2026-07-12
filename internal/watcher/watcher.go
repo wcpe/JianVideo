@@ -18,17 +18,21 @@ const debounceInterval = 500 * time.Millisecond
 
 const smbPollInterval = 5 * time.Minute
 
+type pathBinding struct {
+	libraryID int64
+	spaceID   string
+}
+
 // Watcher 文件系统事件监听器。
 type Watcher struct {
-	watcher     *fsnotify.Watcher
-	library     *library.Service
-	scanQueue   *library.TaskQueue
-	debounce    map[string]*time.Timer
-	mu          sync.RWMutex
-	done        chan struct{}
-	pathToLib   map[string]int64  // 目录路径 → library_id
-	pathToSpace map[string]string // 目录路径 → space_id
-	smbLibs     []models.LibraryPath
+	watcher   *fsnotify.Watcher
+	library   *library.Service
+	scanQueue *library.TaskQueue
+	debounce  map[string]*time.Timer
+	mu        sync.RWMutex
+	done      chan struct{}
+	bindings  map[string][]pathBinding // 目录路径 → 全部 Space/媒体库绑定
+	smbLibs   []models.LibraryPath
 }
 
 // New 创建文件监听器。
@@ -38,13 +42,12 @@ func New(lib *library.Service) (*Watcher, error) {
 		return nil, err
 	}
 	return &Watcher{
-		watcher:     fw,
-		library:     lib,
-		debounce:    make(map[string]*time.Timer),
-		done:        make(chan struct{}),
-		pathToLib:   make(map[string]int64),
-		pathToSpace: make(map[string]string),
-		smbLibs:     make([]models.LibraryPath, 0),
+		watcher:  fw,
+		library:  lib,
+		debounce: make(map[string]*time.Timer),
+		done:     make(chan struct{}),
+		bindings: make(map[string][]pathBinding),
+		smbLibs:  make([]models.LibraryPath, 0),
 	}, nil
 }
 
@@ -93,14 +96,11 @@ func (w *Watcher) Stop() {
 
 // addDir 递归添加目录及其子目录到监听列表。
 func (w *Watcher) addDir(libraryID int64, spaceID, dir string) error {
-	normalized := filepath.ToSlash(dir)
-	w.mu.Lock()
-	w.pathToLib[normalized] = libraryID
-	w.pathToSpace[normalized] = spaceID
-	w.mu.Unlock()
-
-	if err := w.watcher.Add(dir); err != nil {
-		return err
+	binding := pathBinding{libraryID: libraryID, spaceID: spaceID}
+	if w.addBinding(filepath.ToSlash(dir), binding) {
+		if err := w.watcher.Add(dir); err != nil {
+			return err
+		}
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -108,19 +108,31 @@ func (w *Watcher) addDir(libraryID int64, spaceID, dir string) error {
 		return nil // 目录可能暂时不可读，跳过子目录
 	}
 	for _, entry := range entries {
-		if entry.IsDir() {
-			subDir := filepath.Join(dir, entry.Name())
-			normalizedSubDir := filepath.ToSlash(subDir)
-			w.mu.Lock()
-			w.pathToLib[normalizedSubDir] = libraryID
-			w.pathToSpace[normalizedSubDir] = spaceID
-			w.mu.Unlock()
-			if err := w.watcher.Add(subDir); err != nil {
-				log.Printf("[WARN] 添加子目录监听失败: %s, 错误: %v", subDir, err)
-			}
+		if !entry.IsDir() {
+			continue
+		}
+		subDir := filepath.Join(dir, entry.Name())
+		if !w.addBinding(filepath.ToSlash(subDir), binding) {
+			continue
+		}
+		if err := w.watcher.Add(subDir); err != nil {
+			log.Printf("[WARN] 添加子目录监听失败: %s, 错误: %v", subDir, err)
 		}
 	}
 	return nil
+}
+
+func (w *Watcher) addBinding(path string, binding pathBinding) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	items := w.bindings[path]
+	for _, item := range items {
+		if item == binding {
+			return false
+		}
+	}
+	w.bindings[path] = append(items, binding)
+	return len(items) == 0
 }
 
 // isMediaFile 判断文件是否为内置媒体文件。
@@ -154,11 +166,10 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 
 	switch {
 	case event.Op&fsnotify.Create == fsnotify.Create:
-		// 检查是否是目录，如果是则添加监听
+		// 检查是否是目录，如果是则把全部上级绑定附加到新目录。
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			libID, spaceID := w.findLibrary(path)
-			if libID > 0 {
-				if err := w.addDir(libID, spaceID, path); err != nil {
+			for _, binding := range w.findBindings(path) {
+				if err := w.addDir(binding.libraryID, binding.spaceID, path); err != nil {
 					log.Printf("[WARN] 添加新目录监听失败: %s, 错误: %v", path, err)
 				}
 			}
@@ -179,13 +190,14 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	}
 }
 
-// isWatchedMediaFile 判断文件是否属于已监听媒体库支持的媒体文件。
+// isWatchedMediaFile 判断文件是否属于任一已监听媒体库支持的媒体文件。
 func (w *Watcher) isWatchedMediaFile(path string) bool {
-	libID := w.findLibraryID(path)
-	if libID == 0 {
-		return false
+	for _, binding := range w.findBindings(path) {
+		if w.library.IsMediaFileForLibrary(binding.libraryID, path) {
+			return true
+		}
 	}
-	return w.library.IsMediaFileForLibrary(libID, path)
+	return false
 }
 
 // scheduleInsert 调度去抖插入。
@@ -216,55 +228,45 @@ func (w *Watcher) cancelDebounce(path string) {
 	}
 }
 
-// insertRecord 将文件入库。
+// insertRecord 将文件变更 fan-out 到全部 Space/媒体库绑定。
 func (w *Watcher) insertRecord(path string) {
-	libID := w.findLibraryID(path)
-	if libID == 0 {
-		return
-	}
-
-	change := library.ScanChange{
-		SpaceID:   w.findSpaceID(path),
-		LibraryID: libID,
-		Path:      path,
-		Op:        library.ScanChangeModified,
-	}
-	if w.scanQueue != nil {
-		if _, err := w.scanQueue.EnqueueChange(change); err != nil {
-			log.Printf("[WARN] 媒体文件变更入队失败: %s, 错误: %v", path, err)
+	for _, binding := range w.findBindings(path) {
+		if !w.library.IsMediaFileForLibrary(binding.libraryID, path) {
+			continue
 		}
-		return
-	}
-	if _, err := w.library.ApplyScanChange(change); err != nil {
-		log.Printf("[WARN] 媒体文件变更处理失败: %s, 错误: %v", path, err)
-	} else {
-		log.Printf("[INFO] 媒体文件变更已处理: %s", path)
+		w.applyChange(library.ScanChange{
+			SpaceID:   binding.spaceID,
+			LibraryID: binding.libraryID,
+			Path:      path,
+			Op:        library.ScanChangeModified,
+		})
 	}
 }
 
-// removeRecord 标记数据库记录为缺失。
+// removeRecord 将文件缺失 fan-out 到全部 Space/媒体库绑定。
 func (w *Watcher) removeRecord(path string) {
-	libID := w.findLibraryID(path)
-	if libID == 0 {
-		return
+	for _, binding := range w.findBindings(path) {
+		w.applyChange(library.ScanChange{
+			SpaceID:   binding.spaceID,
+			LibraryID: binding.libraryID,
+			Path:      path,
+			Op:        library.ScanChangeRemoved,
+		})
 	}
-	change := library.ScanChange{
-		SpaceID:   w.findSpaceID(path),
-		LibraryID: libID,
-		Path:      path,
-		Op:        library.ScanChangeRemoved,
-	}
+}
+
+func (w *Watcher) applyChange(change library.ScanChange) {
 	if w.scanQueue != nil {
 		if _, err := w.scanQueue.EnqueueChange(change); err != nil {
-			log.Printf("[WARN] 媒体文件缺失变更入队失败: %s, 错误: %v", path, err)
+			log.Printf("[WARN] 媒体文件变更入队失败: %s, 错误: %v", change.Path, err)
 		}
 		return
 	}
 	if _, err := w.library.ApplyScanChange(change); err != nil {
-		log.Printf("[WARN] 标记媒体文件缺失失败: %s, 错误: %v", path, err)
-	} else {
-		log.Printf("[INFO] 媒体文件已标记缺失: %s", path)
+		log.Printf("[WARN] 媒体文件变更处理失败: %s, 错误: %v", change.Path, err)
+		return
 	}
+	log.Printf("[INFO] 媒体文件变更已处理: spaceID=%s, libraryID=%d, path=%s", change.SpaceID, change.LibraryID, change.Path)
 }
 
 // pollSMBLoop 定期轮询 SMB 路径，索引新增视频文件。
@@ -302,7 +304,7 @@ func (w *Watcher) pollAllSMB() {
 	}
 }
 
-// findLibraryID 根据文件路径查找所属的 library_id。
+// findLibraryID 根据文件路径查找首个兼容绑定的 library_id。
 func (w *Watcher) findLibraryID(filePath string) int64 {
 	id, _ := w.findLibrary(filePath)
 	return id
@@ -314,15 +316,22 @@ func (w *Watcher) findSpaceID(filePath string) string {
 }
 
 func (w *Watcher) findLibrary(filePath string) (int64, string) {
-	// 统一为正斜杠，与 pathToLib 的 key 格式一致
+	bindings := w.findBindings(filePath)
+	if len(bindings) == 0 {
+		return 0, ""
+	}
+	return bindings[0].libraryID, bindings[0].spaceID
+}
+
+func (w *Watcher) findBindings(filePath string) []pathBinding {
+	// 统一为正斜杠，与 bindings 的 key 格式一致。
 	dir := filepath.ToSlash(filepath.Dir(filePath))
 	for dir != "/" && dir != "." {
 		w.mu.RLock()
-		id, ok := w.pathToLib[dir]
-		spaceID := w.pathToSpace[dir]
+		items := append([]pathBinding(nil), w.bindings[dir]...)
 		w.mu.RUnlock()
-		if ok {
-			return id, spaceID
+		if len(items) > 0 {
+			return items
 		}
 		parent := filepath.ToSlash(filepath.Dir(dir))
 		if parent == dir {
@@ -330,5 +339,5 @@ func (w *Watcher) findLibrary(filePath string) (int64, string) {
 		}
 		dir = parent
 	}
-	return 0, ""
+	return nil
 }

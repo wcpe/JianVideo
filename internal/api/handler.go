@@ -46,14 +46,16 @@ type SubtitleTrack struct {
 
 // Handler API 请求处理器。
 type Handler struct {
-	library   *library.Service
-	settings  *settings.Service  // 运行期设置读写（FR-24）
-	scanQueue *library.TaskQueue // 扫描任务队列（FR-29），未注入时扫描回退直接异步执行
-	hlsDir    string             // HLS 切片输出根目录
-	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
-	version   string             // 应用版本号，由 main 经 ldflags 注入
-	share     *share.Service     // 分享链接读写（FR-43），未注入时分享端点不可用
-	updateSvc *update.Service    // 二进制自更新服务（FR-46），无外部依赖恒可用
+	library           *library.Service
+	settings          *settings.Service  // 运行期设置读写（FR-24）
+	scanQueue         *library.TaskQueue // 扫描任务队列（FR-29），未注入时扫描回退直接异步执行
+	hlsDir            string             // HLS 切片输出根目录
+	hlsMgr            *player.HLSManager // 用于写入 master.m3u8
+	preSliceAvailable func() bool
+	preSliceMedia     func(context.Context, models.MediaFile) (*transcoder.PreSliceResult, error)
+	version           string          // 应用版本号，由 main 经 ldflags 注入
+	share             *share.Service  // 分享链接读写（FR-43），未注入时分享端点不可用
+	updateSvc         *update.Service // 二进制自更新服务（FR-46），无外部依赖恒可用
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，未注入时回退冷态默认
 	capability *transcoder.CapabilityService
@@ -96,7 +98,15 @@ type Handler struct {
 
 // NewHandler 创建处理器。
 func NewHandler(lib *library.Service) *Handler {
-	return &Handler{library: lib, updateSvc: update.NewService()}
+	h := &Handler{
+		library:           lib,
+		updateSvc:         update.NewService(),
+		preSliceAvailable: transcoder.IsFFmpegAvailable,
+	}
+	h.preSliceMedia = func(ctx context.Context, mf models.MediaFile) (*transcoder.PreSliceResult, error) {
+		return transcoder.PreSliceWithPolicy(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hardwarePolicy(), h.hlsMgr, h.hlsDir)
+	}
+	return h
 }
 
 // WithVersion 注入应用版本号，供系统诊断接口展示。
@@ -179,6 +189,9 @@ func (h *Handler) WithCache(svc *storage.Service) *Handler {
 // 未注入时 ScanLibrary 回退原直接异步执行、任务列表返回空，保持无队列环境可用。
 func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
 	h.scanQueue = q
+	if q != nil {
+		q.WithSuccessCallback(h.preSliceAfterScanSuccess)
+	}
 	return h
 }
 
@@ -826,12 +839,6 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 	// 缺省/非法值回退增量，向后兼容既有调用方（FR-27）
 	mode := library.NormalizeScanMode(c.Query("mode"))
 
-	// 扫描触发后，对媒体库中所有视频文件触发 HLS 预切片（如果启用了）。
-	// 预切片失败不阻塞扫描响应（仅记日志）。
-	if transcoder.IsFFmpegAvailable() && h.hlsDir != "" && h.hlsMgr != nil {
-		go h.preSliceAllVideos(context.Background(), spaceID)
-	}
-
 	// 队列已注入：入队排队、单 worker 串行执行（FR-29）
 	if h.scanQueue != nil {
 		taskID, err := h.scanQueue.EnqueueInSpace(spaceID, id, lp.Path, lp.Type, mode)
@@ -843,8 +850,10 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	// 未注入队列：回退原直接异步扫描
-	h.library.StartAsyncScanInSpace(spaceID, id, lp.Path, lp.Type, mode)
+	// 未注入队列：回退直接异步扫描，成功后再启动预切片。
+	h.library.StartAsyncScanInSpaceWithSuccess(spaceID, id, lp.Path, lp.Type, mode, func() {
+		h.preSliceAfterScanSuccess(models.ScanTask{SpaceID: spaceID, LibraryID: id, Status: models.ScanTaskStatusCompleted})
+	})
 	c.JSON(http.StatusOK, gin.H{"status": "scanning"})
 }
 
@@ -968,37 +977,62 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 	}
 }
 
-// preSliceAllVideos 对媒体库中所有视频文件触发预切片（异步执行）。
-func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
-	h.refreshHWAccelSnapshot(ctx)
-	result, err := h.library.ListMediaFilesPage(library.MediaFilter{SpaceID: spaceID, MediaType: library.MediaTypeVideo}, library.MediaPageRequest{Page: 1, PageSize: 100})
-	if err != nil {
-		log.Printf("[WARN] 预切片：获取媒体列表失败: %v", err)
+func (h *Handler) preSliceAfterScanSuccess(task models.ScanTask) {
+	if task.Status != models.ScanTaskStatusCompleted || h.hlsDir == "" || h.hlsMgr == nil || h.preSliceAvailable == nil || !h.preSliceAvailable() {
 		return
 	}
-	for _, mf := range result.Items {
-		if strings.HasPrefix(mf.FilePath, "smb://") {
-			continue
-		}
-		if _, err := os.Stat(mf.FilePath); err != nil {
-			continue
-		}
-		result, err := transcoder.PreSliceWithPolicy(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hardwarePolicy(), h.hlsMgr, h.hlsDir)
+	h.preSliceAllVideos(context.Background(), task.SpaceID)
+}
+
+// preSliceAllVideos 按 Space 游标分页处理全部视频，避免一次性加载全库。
+func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
+	h.refreshHWAccelSnapshot(ctx)
+	cursor := ""
+	for {
+		page, err := h.library.ListMediaFilesPage(
+			library.MediaFilter{SpaceID: spaceID, MediaType: library.MediaTypeVideo},
+			library.MediaPageRequest{Page: 1, PageSize: 100, Cursor: cursor},
+		)
 		if err != nil {
-			log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
-			continue
+			log.Printf("[WARN] 预切片：获取媒体列表失败: spaceID=%s, err=%v", spaceID, err)
+			return
 		}
-		if h.cache != nil && result != nil {
-			if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
-				SpaceID:   mf.SpaceID,
-				LibraryID: mf.LibraryID,
-				MediaID:   mf.ID,
-				Kind:      storage.CacheKindHLS,
-				Path:      result.OutputDir,
-			}); err != nil {
-				log.Printf("[WARN] HLS 缓存登记失败: mediaID=%d, err=%v", mf.ID, err)
-			}
+		for _, mf := range page.Items {
+			h.preSliceMediaFile(ctx, mf)
 		}
+		if page.NextCursor == "" {
+			return
+		}
+		cursor = page.NextCursor
+	}
+}
+
+func (h *Handler) preSliceMediaFile(ctx context.Context, mf models.MediaFile) {
+	if strings.HasPrefix(mf.FilePath, "smb://") {
+		return
+	}
+	if _, err := os.Stat(mf.FilePath); err != nil {
+		return
+	}
+	if h.preSliceMedia == nil {
+		return
+	}
+	result, err := h.preSliceMedia(ctx, mf)
+	if err != nil {
+		log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
+		return
+	}
+	if h.cache == nil || result == nil {
+		return
+	}
+	if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
+		SpaceID:   mf.SpaceID,
+		LibraryID: mf.LibraryID,
+		MediaID:   mf.ID,
+		Kind:      storage.CacheKindHLS,
+		Path:      result.OutputDir,
+	}); err != nil {
+		log.Printf("[WARN] HLS 缓存登记失败: mediaID=%d, err=%v", mf.ID, err)
 	}
 }
 

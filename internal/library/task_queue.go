@@ -27,11 +27,12 @@ type ScanChangeExecFunc func(change ScanChange) (int, error)
 // 职责单一：只负责「排队 + 串行调度 + 状态持久化」，扫描执行逻辑由注入的 exec 承担，
 // 不在此重写扫描（增量/全量对账是 FR-27）。
 type TaskQueue struct {
-	db         *gorm.DB
-	exec       ScanExecFunc
-	changeExec ScanChangeExecFunc
-	audit      audit.Recorder
-	tasks      *tasksvc.Service
+	db              *gorm.DB
+	exec            ScanExecFunc
+	changeExec      ScanChangeExecFunc
+	successCallback func(models.ScanTask)
+	audit           audit.Recorder
+	tasks           *tasksvc.Service
 
 	store targetStore // 任务执行目标的过程态内存映射
 
@@ -57,6 +58,15 @@ func (q *TaskQueue) WithTasks(svc *tasksvc.Service) *TaskQueue {
 // WithChangeExec 注入单路径扫描变更执行函数。
 func (q *TaskQueue) WithChangeExec(exec ScanChangeExecFunc) *TaskQueue {
 	q.changeExec = exec
+	return q
+}
+
+// WithSuccessCallback 注入整库扫描成功后的回调。
+// 回调只在整库扫描成功并持久化 completed 终态后异步执行，单路径 watcher 变更不会触发。
+func (q *TaskQueue) WithSuccessCallback(callback func(models.ScanTask)) *TaskQueue {
+	q.mu.Lock()
+	q.successCallback = callback
+	q.mu.Unlock()
 	return q
 }
 
@@ -441,6 +451,18 @@ func (q *TaskQueue) runTask(task models.ScanTask) {
 	task.CompletedAt = &now
 	q.syncTask(&task)
 	log.Printf("[INFO] 扫描任务执行完成: taskID=%d, count=%d", task.ID, count)
+	if target.change == nil {
+		q.notifySuccess(task)
+	}
+}
+
+func (q *TaskQueue) notifySuccess(task models.ScanTask) {
+	q.mu.Lock()
+	callback := q.successCallback
+	q.mu.Unlock()
+	if callback != nil {
+		go callback(task)
+	}
 }
 
 func (q *TaskQueue) runTarget(task models.ScanTask, target scanTarget) (int, error) {
