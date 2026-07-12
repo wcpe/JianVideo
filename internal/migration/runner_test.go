@@ -258,11 +258,11 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 		"idx_media_files_space_added_id",
 		"idx_media_files_space_media_time_id",
 		"idx_media_files_space_library_path_id",
-		"idx_media_files_space_deleted_id",
 		"idx_media_files_space_format_added_id",
 		"idx_media_files_active_space_added_id",
 		"idx_media_files_active_space_library_added_id",
 		"idx_media_files_active_space_format_added_id",
+		"idx_media_files_deleted_space_deleted_at",
 		"idx_tags_space_id",
 		"idx_tags_space_name",
 		"idx_scan_tasks_space_status_created",
@@ -298,6 +298,15 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	if _, err := validateFR2007ActiveQueryIndexes(context.Background(), gdb); err != nil {
 		t.Fatalf("FR2-007 活跃媒体索引重复迁移后验证失败: %v", err)
 	}
+	for _, indexName := range []string{"idx_media_files_deleted_at", "idx_media_files_space_deleted_id"} {
+		if testIndexExists(t, gdb, indexName) {
+			t.Fatalf("宽泛删除索引应被迁移移除: %s", indexName)
+		}
+	}
+	if !indexDefinitionContains(gdb, "idx_media_files_deleted_space_deleted_at",
+		"ON media_files(space_id, deleted_at DESC) WHERE deleted_at IS NOT NULL") {
+		t.Fatal("回收站 partial index 定义不正确")
+	}
 
 	var ids []int64
 	if err := gdb.Raw(
@@ -315,6 +324,166 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	if got := countAuditEvents(t, gdb, "migration.succeeded"); got == 0 {
 		t.Fatal("迁移成功应写系统审计事件")
 	}
+}
+
+func TestFR2007DeletedQueryIndexesAreRepeatableAndPreserveQueryPlans(t *testing.T) {
+	gdb, dbPath := openLegacyDB(t)
+	if _, err := newDefaultRunner(t, gdb, dbPath).Run(context.Background()); err != nil {
+		t.Fatalf("执行默认迁移失败: %v", err)
+	}
+	repeatFR2007DeletedQueryMigration(t, gdb)
+	assertFR2007DeletedIndexes(t, gdb)
+	seedFR2007QueryPlanRows(t, gdb)
+	for _, query := range fr2007ActiveQueryPlanCases() {
+		t.Run(query.name, func(t *testing.T) {
+			assertPlanUsesIndexWithoutTempBTree(t, gdb, query.sql, query.indexName, query.args...)
+		})
+	}
+	assertFR2007RecycleQuery(t, gdb)
+}
+
+func repeatFR2007DeletedQueryMigration(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if err := gdb.Exec(`
+		CREATE INDEX idx_media_files_deleted_at ON media_files(deleted_at);
+		CREATE INDEX idx_media_files_space_deleted_id ON media_files(space_id, deleted_at, id);
+	`).Error; err != nil {
+		t.Fatalf("重建待清理索引失败: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		err := gdb.Transaction(func(tx *gorm.DB) error {
+			return migrateFR2007DeletedQueryIndexes(context.Background(), tx)
+		})
+		if err != nil {
+			t.Fatalf("删除态索引迁移第 %d 次执行失败: %v", attempt+1, err)
+		}
+	}
+}
+
+func assertFR2007DeletedIndexes(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if _, err := validateFR2007DeletedQueryIndexes(context.Background(), gdb); err != nil {
+		t.Fatalf("删除态索引迁移验证失败: %v", err)
+	}
+	for _, indexName := range []string{"idx_media_files_deleted_at", "idx_media_files_space_deleted_id"} {
+		if testIndexExists(t, gdb, indexName) {
+			t.Fatalf("宽泛删除索引应不存在: %s", indexName)
+		}
+	}
+}
+
+type queryPlanCase struct {
+	name      string
+	indexName string
+	sql       string
+	args      []any
+}
+
+func fr2007ActiveQueryPlanCases() []queryPlanCase {
+	active := "deleted_at IS NULL AND (file_state IS NULL OR file_state = '' OR file_state = 'available')"
+	return []queryPlanCase{
+		{
+			name: "Space 时间游标分页", indexName: "idx_media_files_active_space_added_id",
+			sql:  "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND (added_at, id) < (?, ?) ORDER BY added_at DESC, id DESC LIMIT ?",
+			args: []any{DefaultSpaceID, "2030-01-01 00:00:00", int64(3000), 51},
+		},
+		{
+			name: "媒体库路径前缀分页", indexName: "idx_media_files_active_space_library_added_id",
+			sql:  "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND library_id = ? AND file_path LIKE ? ORDER BY added_at DESC, id DESC LIMIT ?",
+			args: []any{DefaultSpaceID, int64(1), "/benchmark/space-default/lib-001/%", 51},
+		},
+		{
+			name: "格式筛选游标分页", indexName: "idx_media_files_active_space_format_added_id",
+			sql:  "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND LOWER(format) IN (?) AND (added_at, id) < (?, ?) ORDER BY added_at DESC, id DESC LIMIT ?",
+			args: []any{DefaultSpaceID, "mp4", "2030-01-01 00:00:00", int64(3000), 51},
+		},
+	}
+}
+
+func assertFR2007RecycleQuery(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	query := "SELECT id FROM media_files WHERE space_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+	assertPlanUsesIndexWithoutTempBTree(t, gdb, query, "idx_media_files_deleted_space_deleted_at", DefaultSpaceID)
+	var recycled []struct {
+		ID        int64
+		DeletedAt string
+	}
+	if err := gdb.Raw("SELECT id, deleted_at FROM media_files WHERE space_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC", DefaultSpaceID).
+		Scan(&recycled).Error; err != nil {
+		t.Fatalf("查询回收站行为失败: %v", err)
+	}
+	if len(recycled) == 0 {
+		t.Fatal("回收站查询应返回软删记录")
+	}
+	for i := 1; i < len(recycled); i++ {
+		if recycled[i-1].DeletedAt < recycled[i].DeletedAt {
+			t.Fatalf("回收站未按 deleted_at 倒序: %+v", recycled)
+		}
+	}
+}
+
+func seedFR2007QueryPlanRows(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if err := gdb.Exec(`WITH RECURSIVE seq(id) AS (
+		SELECT 1000 UNION ALL SELECT id + 1 FROM seq WHERE id < 1999
+	)
+	INSERT INTO media_files(
+		id, space_id, library_id, file_path, file_name, file_size, format,
+		file_state, added_at, modified_at, media_time, deleted_at, content_hash_stale
+	)
+	SELECT
+		id,
+		CASE WHEN id % 2 = 0 THEN ? ELSE 'space-alt' END,
+		CASE WHEN id % 4 < 2 THEN 1 ELSE 2 END,
+		printf('/benchmark/%s/lib-%03d/item-%04d.%s',
+			CASE WHEN id % 2 = 0 THEN ? ELSE 'space-alt' END,
+			CASE WHEN id % 4 < 2 THEN 1 ELSE 2 END,
+			id, CASE WHEN id % 3 = 0 THEN 'jpg' ELSE 'mp4' END),
+		printf('item-%04d', id), 1024, CASE WHEN id % 3 = 0 THEN 'jpg' ELSE 'mp4' END,
+		'available', datetime(1893456000 - id, 'unixepoch'), datetime(1893456000 - id, 'unixepoch'),
+		datetime(1893456000 - id, 'unixepoch'),
+		CASE WHEN id % 11 = 0 THEN datetime(1893456000 - id, 'unixepoch') ELSE NULL END,
+		1
+	FROM seq`, DefaultSpaceID, DefaultSpaceID).Error; err != nil {
+		t.Fatalf("写入查询计划测试数据失败: %v", err)
+	}
+	if err := gdb.Exec("ANALYZE").Error; err != nil {
+		t.Fatalf("分析查询计划测试数据失败: %v", err)
+	}
+}
+
+func assertPlanUsesIndexWithoutTempBTree(t *testing.T, gdb *gorm.DB, query, indexName string, args ...any) {
+	t.Helper()
+	plans := explainDetails(t, gdb, query, args...)
+	joined := strings.Join(plans, " | ")
+	if !strings.Contains(joined, indexName) {
+		t.Fatalf("查询计划未使用 %s: %s", indexName, joined)
+	}
+	if strings.Contains(joined, "USE TEMP B-TREE") {
+		t.Fatalf("查询计划不应使用 TEMP B-TREE: %s", joined)
+	}
+}
+
+func explainDetails(t *testing.T, gdb *gorm.DB, query string, args ...any) []string {
+	t.Helper()
+	rows, err := gdb.Raw("EXPLAIN QUERY PLAN "+query, args...).Rows()
+	if err != nil {
+		t.Fatalf("读取查询计划失败: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plans []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("解析查询计划失败: %v", err)
+		}
+		plans = append(plans, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("遍历查询计划失败: %v", err)
+	}
+	return plans
 }
 
 func TestMediaTypeRulesMigrationCreatesPartialIndexesAndBackfillsLegacyExtensions(t *testing.T) {

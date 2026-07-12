@@ -128,6 +128,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFR2007ActiveQueryIndexes,
 			Validate:    validateFR2007ActiveQueryIndexes,
 		},
+		{
+			ID:          "20260712_0014_fr2_007_deleted_query_indexes",
+			Description: "移除干扰活跃列表规划的宽泛删除索引并补齐回收站 partial 索引",
+			SafeToRetry: true,
+			Estimate:    estimateFR2007DeletedQueryIndexes,
+			Up:          migrateFR2007DeletedQueryIndexes,
+			Validate:    validateFR2007DeletedQueryIndexes,
+		},
 	}
 }
 
@@ -501,7 +509,6 @@ func fr2007IndexNames() []string {
 		"idx_media_files_space_added_id",
 		"idx_media_files_space_media_time_id",
 		"idx_media_files_space_library_path_id",
-		"idx_media_files_space_deleted_id",
 		"idx_media_files_space_format_added_id",
 		"idx_tags_space_id",
 		"idx_tags_space_name",
@@ -542,6 +549,39 @@ func validateFR2007ActiveQueryIndexes(_ context.Context, db *gorm.DB) (Validatio
 		}
 	}
 	return Validation{Summary: "FR2-007 活跃媒体 partial 组合索引已就绪"}, nil
+}
+
+func estimateFR2007DeletedQueryIndexes(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateFR2007DeletedQueryIndexes(_ context.Context, tx *gorm.DB) error {
+	statements := []string{
+		`DROP INDEX IF EXISTS idx_media_files_deleted_at;`,
+		`DROP INDEX IF EXISTS idx_media_files_space_deleted_id;`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_deleted_space_deleted_at
+			ON media_files(space_id, deleted_at DESC)
+			WHERE deleted_at IS NOT NULL;`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFR2007DeletedQueryIndexes(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, indexName := range []string{"idx_media_files_deleted_at", "idx_media_files_space_deleted_id"} {
+		if indexExists(db, indexName) {
+			return Validation{}, fmt.Errorf("FR2-007 宽泛删除索引仍存在: %s", indexName)
+		}
+	}
+	const definition = "ON media_files(space_id, deleted_at DESC) WHERE deleted_at IS NOT NULL"
+	if !indexDefinitionContains(db, "idx_media_files_deleted_space_deleted_at", definition) {
+		return Validation{}, fmt.Errorf("FR2-007 回收站 partial 索引定义不正确")
+	}
+	return Validation{Summary: "FR2-007 宽泛删除索引已移除，回收站 partial 索引已就绪"}, nil
 }
 
 func indexDefinitionContains(db *gorm.DB, indexName, expected string) bool {

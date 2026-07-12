@@ -32,7 +32,7 @@ type MediaFile struct {
 	DisplayName string `json:"display_name"`
 
 	// 软删除/回收站（FR-25）：非空表示已软删（进回收站），源文件不动
-	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 
 	// 文件状态（FR2-027）：missing 表示源文件丢失但尚未进入回收站。
 	FileState string `gorm:"not null;default:'available';index" json:"file_state"`
