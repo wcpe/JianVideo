@@ -68,6 +68,7 @@ type queryResult struct {
 	SQL               string    `json:"sql"`
 	TargetSpace       string    `json:"target_space"`
 	ThresholdMS       float64   `json:"threshold_ms"`
+	UsesTempBTree     bool      `json:"uses_temp_btree"`
 }
 
 type environment struct {
@@ -330,11 +331,11 @@ func buildSpecs(rows int64) []querySpec {
 	active := "deleted_at IS NULL AND (file_state IS NULL OR file_state = '' OR file_state = 'available')"
 	return []querySpec{
 		{
-			Args:  []any{targetSpace, cursorTime, cursorTime, cursorID, queryLimit},
+			Args:  []any{targetSpace, cursorTime, cursorID, queryLimit},
 			Name:  "space-time-page",
 			Rows:  rows,
 			Label: "Space + 时间游标分页",
-			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND (added_at < ? OR (added_at = ? AND id < ?)) ORDER BY added_at DESC, id DESC LIMIT ?",
+			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND (added_at, id) < (?, ?) ORDER BY added_at DESC, id DESC LIMIT ?",
 		},
 		{
 			Args:  []any{targetSpace, int64(1), "/benchmark/benchmark-space-a/lib-001/%", queryLimit},
@@ -344,11 +345,11 @@ func buildSpecs(rows int64) []querySpec {
 			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND library_id = ? AND file_path LIKE ? ORDER BY added_at DESC, id DESC LIMIT ?",
 		},
 		{
-			Args:  []any{targetSpace, "mp4", cursorTime, cursorTime, cursorID, queryLimit},
+			Args:  []any{targetSpace, "mp4", cursorTime, cursorID, queryLimit},
 			Name:  "filter-combination-page",
 			Rows:  rows,
 			Label: "Space + 格式筛选 + 时间游标分页",
-			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND LOWER(format) IN (?) AND (added_at < ? OR (added_at = ? AND id < ?)) ORDER BY added_at DESC, id DESC LIMIT ?",
+			SQL:   "SELECT id FROM media_files WHERE space_id = ? AND " + active + " AND LOWER(format) IN (?) AND (added_at, id) < (?, ?) ORDER BY added_at DESC, id DESC LIMIT ?",
 		},
 	}
 }
@@ -381,6 +382,7 @@ func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 	}
 	p95 := percentile(append([]float64(nil), durations...), 0.95)
 	threshold := backendThresholdMS(spec.Rows, spec.Name)
+	usesTempBTree := planUsesTempBTree(plan)
 	return queryResult{
 		Args:              spec.Args,
 		DatabaseBytes:     fileSize(dbPath),
@@ -390,14 +392,24 @@ func runQuery(db *sql.DB, dbPath string, spec querySpec) (queryResult, error) {
 		IsolationVerified: isolationVerified,
 		P95:               p95,
 		P99:               percentile(append([]float64(nil), durations...), 0.99),
-		Pass:              p95 <= threshold && isolationVerified,
+		Pass:              p95 <= threshold && isolationVerified && !usesTempBTree,
 		Query:             spec.Label,
 		ResultCount:       len(resultIDs),
 		ResultIDs:         resultIDs,
 		SQL:               spec.SQL,
 		TargetSpace:       targetSpace,
 		ThresholdMS:       threshold,
+		UsesTempBTree:     usesTempBTree,
 	}, nil
+}
+
+func planUsesTempBTree(plan []string) bool {
+	for _, detail := range plan {
+		if strings.Contains(detail, "USE TEMP B-TREE") {
+			return true
+		}
+	}
+	return false
 }
 
 func timeQuery(db *sql.DB, spec querySpec) (float64, []int64, error) {
@@ -548,8 +560,8 @@ func failedResults(results []queryResult) []string {
 		if result.Pass {
 			continue
 		}
-		failed = append(failed, fmt.Sprintf("%s/%s(p95=%.3fms, 阈值=%.0fms, Space隔离=%t)",
-			result.Dataset, result.Query, result.P95, result.ThresholdMS, result.IsolationVerified))
+		failed = append(failed, fmt.Sprintf("%s/%s(p95=%.3fms, 阈值=%.0fms, Space隔离=%t, TEMP B-TREE=%t)",
+			result.Dataset, result.Query, result.P95, result.ThresholdMS, result.IsolationVerified, result.UsesTempBTree))
 	}
 	return failed
 }
@@ -635,8 +647,8 @@ func renderSummary(r report) string {
 	for _, spaceID := range benchmarkSpaces {
 		b.WriteString(fmt.Sprintf("- %s：%d 行\n", spaceID, r.Environment.SpaceRows[spaceID]))
 	}
-	b.WriteString("\n| 数据集 | 查询 | 目标 Space | 隔离验证 | p95(ms) | p99(ms) | 门槛(ms) | 结果数 | 首/末 ID | 判定 |\n")
-	b.WriteString("|---|---|---|---|---:|---:|---:|---:|---|---|\n")
+	b.WriteString("\n| 数据集 | 查询 | 目标 Space | 隔离验证 | TEMP B-TREE | p95(ms) | p99(ms) | 门槛(ms) | 结果数 | 首/末 ID | 判定 |\n")
+	b.WriteString("|---|---|---|---|---|---:|---:|---:|---:|---|---|\n")
 	for _, item := range r.Results {
 		status := "达标"
 		if !item.Pass {
@@ -646,8 +658,8 @@ func renderSummary(r report) string {
 		if len(item.ResultIDs) > 0 {
 			first, last = item.ResultIDs[0], item.ResultIDs[len(item.ResultIDs)-1]
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %t | %.3f | %.3f | %.0f | %d | %d / %d | %s |\n",
-			item.Dataset, item.Query, item.TargetSpace, item.IsolationVerified, item.P95, item.P99,
+		b.WriteString(fmt.Sprintf("| %s | %s | %s | %t | %t | %.3f | %.3f | %.0f | %d | %d / %d | %s |\n",
+			item.Dataset, item.Query, item.TargetSpace, item.IsolationVerified, item.UsesTempBTree, item.P95, item.P99,
 			item.ThresholdMS, item.ResultCount, first, last, status))
 	}
 	b.WriteString("\n## EXPLAIN QUERY PLAN 与实测样本\n\n")

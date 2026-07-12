@@ -1,8 +1,10 @@
 package library
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
@@ -267,5 +269,56 @@ func TestBuiltInImageExtensionList(t *testing.T) {
 	// 不应含视频扩展名
 	if set["mp4"] || set["mkv"] {
 		t.Error("内置图片扩展名不应含视频后缀")
+	}
+}
+
+func TestListMediaFilesPageKeysetKeepsSameTimestampBoundary(t *testing.T) {
+	svc, gdb := newTestService(t)
+	newer := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	older := newer.Add(-time.Hour)
+	files := make([]models.MediaFile, 0, 7)
+	for id := int64(1); id <= 7; id++ {
+		addedAt := older
+		if id >= 4 {
+			addedAt = newer
+		}
+		files = append(files, models.MediaFile{
+			ID:         id,
+			SpaceID:    models.DefaultSpaceID,
+			LibraryID:  1,
+			FilePath:   fmt.Sprintf("/tmp/keyset-%d.mp4", id),
+			FileName:   fmt.Sprintf("keyset-%d.mp4", id),
+			Format:     "mp4",
+			FileState:  models.MediaFileStateAvailable,
+			AddedAt:    addedAt,
+			ModifiedAt: addedAt,
+		})
+	}
+	if err := gdb.Create(&files).Error; err != nil {
+		t.Fatalf("写入游标边界测试数据失败: %v", err)
+	}
+
+	var got []int64
+	cursor := ""
+	for {
+		result, err := svc.ListMediaFilesPage(MediaFilter{
+			SpaceID: models.DefaultSpaceID,
+			Sort:    "time_desc",
+		}, MediaPageRequest{PageSize: 2, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("游标分页失败: %v", err)
+		}
+		for _, item := range result.Items {
+			got = append(got, item.ID)
+		}
+		if result.NextCursor == "" {
+			break
+		}
+		cursor = result.NextCursor
+	}
+
+	want := []int64{7, 6, 5, 4, 3, 2, 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("同时间戳游标分页出现重复或遗漏: got=%v want=%v", got, want)
 	}
 }

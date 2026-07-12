@@ -79,7 +79,7 @@ func (r *gormMediaRepository) ListMediaFiles(filter MediaFilter, page MediaPageR
 		if err != nil {
 			return MediaPageResult{}, err
 		}
-		query = query.Where("(added_at < ? OR (added_at = ? AND id < ?))", cursor.SortTime, cursor.SortTime, cursor.ID)
+		query = query.Where("(added_at, id) < (?, ?)", cursor.SortTime, cursor.ID)
 	} else {
 		query = query.Offset((page.Page - 1) * page.PageSize)
 	}

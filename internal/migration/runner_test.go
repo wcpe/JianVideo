@@ -260,6 +260,9 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 		"idx_media_files_space_library_path_id",
 		"idx_media_files_space_deleted_id",
 		"idx_media_files_space_format_added_id",
+		"idx_media_files_active_space_added_id",
+		"idx_media_files_active_space_library_added_id",
+		"idx_media_files_active_space_format_added_id",
 		"idx_tags_space_id",
 		"idx_tags_space_name",
 		"idx_scan_tasks_space_status_created",
@@ -268,6 +271,32 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 		if !testIndexExists(t, gdb, indexName) {
 			t.Fatalf("关键索引不存在: %s", indexName)
 		}
+	}
+
+	activePredicate := "WHERE deleted_at IS NULL AND (file_state IS NULL OR file_state = '' OR file_state = 'available')"
+	for indexName, columns := range map[string]string{
+		"idx_media_files_active_space_added_id":         "ON media_files(space_id, added_at DESC, id DESC)",
+		"idx_media_files_active_space_library_added_id": "ON media_files(space_id, library_id, added_at DESC, id DESC)",
+		"idx_media_files_active_space_format_added_id":  "ON media_files(space_id, LOWER(format), added_at DESC, id DESC)",
+	} {
+		var definition string
+		if err := gdb.Raw("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?", indexName).Scan(&definition).Error; err != nil {
+			t.Fatalf("读取索引定义失败 %s: %v", indexName, err)
+		}
+		normalized := strings.Join(strings.Fields(definition), " ")
+		if !strings.Contains(normalized, columns+" "+activePredicate) {
+			t.Fatalf("索引 %s 未精确匹配活跃媒体语义: %s", indexName, definition)
+		}
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := gdb.Transaction(func(tx *gorm.DB) error {
+			return migrateFR2007ActiveQueryIndexes(context.Background(), tx)
+		}); err != nil {
+			t.Fatalf("FR2-007 活跃媒体索引迁移重复执行失败: %v", err)
+		}
+	}
+	if _, err := validateFR2007ActiveQueryIndexes(context.Background(), gdb); err != nil {
+		t.Fatalf("FR2-007 活跃媒体索引重复迁移后验证失败: %v", err)
 	}
 
 	var ids []int64

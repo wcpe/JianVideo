@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -118,6 +119,14 @@ func DefaultMigrations() []Migration {
 			Estimate:    estimateSpaceOwnedCollections,
 			Up:          migrateSpaceOwnedCollections,
 			Validate:    validateSpaceOwnedCollections,
+		},
+		{
+			ID:          "20260712_0013_fr2_007_active_query_indexes",
+			Description: "补齐活跃媒体分页查询 partial 组合索引",
+			SafeToRetry: true,
+			Estimate:    estimateFR2007ActiveQueryIndexes,
+			Up:          migrateFR2007ActiveQueryIndexes,
+			Validate:    validateFR2007ActiveQueryIndexes,
 		},
 	}
 }
@@ -499,6 +508,49 @@ func fr2007IndexNames() []string {
 		"idx_scan_tasks_space_status_created",
 		"idx_transcode_tasks_space_status_created",
 	}
+}
+
+const activeMediaPartialPredicate = "deleted_at IS NULL AND (file_state IS NULL OR file_state = '' OR file_state = 'available')"
+
+func estimateFR2007ActiveQueryIndexes(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateFR2007ActiveQueryIndexes(_ context.Context, tx *gorm.DB) error {
+	statements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_media_files_active_space_added_id ON media_files(space_id, added_at DESC, id DESC) WHERE ` + activeMediaPartialPredicate + `;`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_active_space_library_added_id ON media_files(space_id, library_id, added_at DESC, id DESC) WHERE ` + activeMediaPartialPredicate + `;`,
+		`CREATE INDEX IF NOT EXISTS idx_media_files_active_space_format_added_id ON media_files(space_id, LOWER(format), added_at DESC, id DESC) WHERE ` + activeMediaPartialPredicate + `;`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFR2007ActiveQueryIndexes(_ context.Context, db *gorm.DB) (Validation, error) {
+	definitions := map[string]string{
+		"idx_media_files_active_space_added_id":         "ON media_files(space_id, added_at DESC, id DESC)",
+		"idx_media_files_active_space_library_added_id": "ON media_files(space_id, library_id, added_at DESC, id DESC)",
+		"idx_media_files_active_space_format_added_id":  "ON media_files(space_id, LOWER(format), added_at DESC, id DESC)",
+	}
+	for name, columns := range definitions {
+		if !indexDefinitionContains(db, name, columns+" WHERE "+activeMediaPartialPredicate) {
+			return Validation{}, fmt.Errorf("FR2-007 活跃媒体索引定义不正确: %s", name)
+		}
+	}
+	return Validation{Summary: "FR2-007 活跃媒体 partial 组合索引已就绪"}, nil
+}
+
+func indexDefinitionContains(db *gorm.DB, indexName, expected string) bool {
+	var definition string
+	if err := db.Raw("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?", indexName).
+		Scan(&definition).Error; err != nil {
+		return false
+	}
+	return strings.Contains(strings.Join(strings.Fields(definition), " "), expected)
 }
 
 func estimateAuditEvents(_ context.Context, _ *gorm.DB) (StepPlan, error) {
