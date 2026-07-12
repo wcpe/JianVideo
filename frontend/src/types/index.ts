@@ -78,6 +78,39 @@ export interface MediaFile {
   inference?: MediaInference | null;
 }
 
+/** 文件自带元数据当前记录（FR2-030） */
+export interface MediaMetadata {
+  id: number;
+  media_id: number;
+  space_id: string;
+  source: 'ffprobe' | 'image' | string;
+  tool: string;
+  tool_version: string;
+  raw_json: string;
+  normalized_json: string;
+  parsed_at: string;
+  stale: boolean;
+}
+
+/** 文件自带元数据规范化结构（FR2-030） */
+export interface NormalizedEmbeddedMetadata {
+  media_type?: string;
+  container?: { format_name?: string; duration_seconds?: number; bitrate?: number };
+  video_streams?: Array<{
+    codec_name?: string;
+    width?: number;
+    height?: number;
+    frame_rate?: string;
+    average_frame_rate?: string;
+    bitrate?: number;
+    color?: { range?: string; space?: string; transfer?: string; primaries?: string };
+  }>;
+  audio_streams?: Array<{ codec_name?: string; language?: string; title?: string; channels?: number }>;
+  subtitle_streams?: Array<{ codec_name?: string; language?: string; title?: string; forced?: boolean }>;
+  image?: { exif?: Record<string, unknown>; iptc?: Record<string, string>; xmp?: Record<string, string> };
+  tags?: Record<string, string>;
+}
+
 /** 本地离线影视信息推断（FR2-031）：自动候选或人工纠正结果 */
 export interface MediaInference {
   id: number;

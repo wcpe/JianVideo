@@ -160,6 +160,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateHLSPreviewTasks,
 			Validate:    validateHLSPreviewTasks,
 		},
+		{
+			ID:          "20260712_0017_fr2_030_media_metadata",
+			Description: "建立文件自带元数据当前结果表与唯一键",
+			SafeToRetry: true,
+			Estimate:    estimateMediaMetadata,
+			Up:          migrateMediaMetadata,
+			Validate:    validateMediaMetadata,
+		},
 	}
 }
 
@@ -232,6 +240,7 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		&models.MetricSample{},
 		&models.MediaHashGroup{},
 		&models.MediaInference{},
+		&models.MediaMetadata{},
 	)
 }
 
@@ -1280,6 +1289,50 @@ func validateHLSPreviewTasks(_ context.Context, db *gorm.DB) (Validation, error)
 		return Validation{}, fmt.Errorf("有 %d 条 HLS preview 任务载荷无效", invalid)
 	}
 	return Validation{Summary: "HLS preview 任务类型与 profile 载荷已统一"}, nil
+}
+
+func estimateMediaMetadata(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var count int64
+	if tableExists(db, "media_files") {
+		if err := db.Table("media_files").Count(&count).Error; err != nil {
+			return StepPlan{}, err
+		}
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateMediaMetadata(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.MediaMetadata{}); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_metadata_space_media_source ON media_metadata(space_id, media_id, source);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_metadata_media ON media_metadata(space_id, media_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_metadata_space_stale ON media_metadata(space_id, stale);`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMediaMetadata(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_metadata") {
+		return Validation{}, fmt.Errorf("media_metadata 表不存在")
+	}
+	for _, column := range []string{"media_id", "space_id", "source", "tool", "tool_version", "raw_json", "normalized_json", "parsed_at", "stale"} {
+		if !columnExists(db, "media_metadata", column) {
+			return Validation{}, fmt.Errorf("media_metadata 缺少 %s", column)
+		}
+	}
+	for _, name := range []string{"idx_media_metadata_space_media_source", "idx_media_metadata_media", "idx_media_metadata_space_stale"} {
+		if !indexExists(db, name) {
+			return Validation{}, fmt.Errorf("媒体元数据索引不存在: %s", name)
+		}
+	}
+	return Validation{Summary: "文件自带元数据表与唯一键已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

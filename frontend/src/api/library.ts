@@ -25,6 +25,7 @@ import type {
   UploadResponse,
   MediaInference,
   MediaInferenceInput,
+  MediaMetadata,
 } from '@/types';
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -298,6 +299,11 @@ async function realGetRecentlyViewed(limit = 12): Promise<MediaFile[]> {
 async function realGetMediaFile(id: number): Promise<MediaFile> {
   const res = await client.get(`/api/library/media/${id}`);
   return res.data;
+}
+
+async function realGetMediaMetadata(id: number): Promise<MediaMetadata[]> {
+  const res = await client.get<{ items: MediaMetadata[] }>(`/api/library/media/${id}/metadata`);
+  return res.data.items;
 }
 
 async function realGetMediaInference(id: number): Promise<MediaInference | null> {
@@ -748,6 +754,11 @@ async function mockGetMediaFile(id: number): Promise<MediaFile> {
   return f;
 }
 
+async function mockGetMediaMetadata(): Promise<MediaMetadata[]> {
+  await mockDelay(80);
+  return [];
+}
+
 async function mockGetMediaInference(id: number): Promise<MediaInference | null> {
   await mockDelay(80);
   return mockInferences.get(id) ?? null;
@@ -1175,6 +1186,9 @@ export function getMediaFiles(params?: MediaListParams) {
 }
 export function getMediaFile(id: number) {
   return useMock ? mockGetMediaFile(id) : realGetMediaFile(id);
+}
+export function getMediaMetadata(id: number) {
+  return useMock ? mockGetMediaMetadata() : realGetMediaMetadata(id);
 }
 export function getMediaInference(id: number) {
   return useMock ? mockGetMediaInference(id) : realGetMediaInference(id);

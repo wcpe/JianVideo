@@ -316,11 +316,18 @@ func (s *Service) RefreshContentHashGroups(ctx context.Context, spaceID string) 
 	})
 }
 
+func mediaFileFingerprintChanged(mf *models.MediaFile, size int64, modifiedAt time.Time) bool {
+	if mf == nil {
+		return false
+	}
+	return mf.FileSize != size || !mf.ModifiedAt.Equal(modifiedAt)
+}
+
 func contentHashShouldBecomeStale(mf *models.MediaFile, size int64, modifiedAt time.Time) bool {
 	if mf == nil || mf.ContentHash == "" || mf.ContentHashStale {
 		return false
 	}
-	return mf.FileSize != size || !mf.ModifiedAt.Equal(modifiedAt)
+	return mediaFileFingerprintChanged(mf, size, modifiedAt)
 }
 
 func addContentHashStaleUpdate(updates map[string]any, mf *models.MediaFile, size int64, modifiedAt time.Time) {

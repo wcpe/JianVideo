@@ -29,6 +29,7 @@ type MediaPageResult struct {
 type MediaQueryRepository interface {
 	ListMediaFiles(filter MediaFilter, page MediaPageRequest) (MediaPageResult, error)
 	GetMediaFileByID(spaceID string, id int64) (*models.MediaFile, error)
+	GetMediaFileByLibraryAndPathAnyState(spaceID string, libraryID int64, path string) (*models.MediaFile, error)
 	ListMediaByPathPrefix(spaceID, prefix string) ([]models.MediaFile, error)
 	ListLibraryPaths(spaceID string) ([]models.LibraryPath, error)
 	GetLibraryPathByID(spaceID string, id int64) (*models.LibraryPath, error)
@@ -121,6 +122,15 @@ func (r *gormMediaRepository) GetMediaFileByID(spaceID string, id int64) (*model
 		return nil, err
 	}
 	return &mf, nil
+}
+
+func (r *gormMediaRepository) GetMediaFileByLibraryAndPathAnyState(spaceID string, libraryID int64, path string) (*models.MediaFile, error) {
+	var media models.MediaFile
+	err := r.db.Where("space_id = ? AND library_id = ? AND file_path = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID), libraryID, filepath.ToSlash(path)).First(&media).Error
+	if err != nil {
+		return nil, err
+	}
+	return &media, nil
 }
 
 func (r *gormMediaRepository) ListMediaByPathPrefix(spaceID, prefix string) ([]models.MediaFile, error) {

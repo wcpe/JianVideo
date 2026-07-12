@@ -133,6 +133,9 @@ func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Servi
 	if err := api.RegisterInferenceBackfillWorker(workers, libSvc); err != nil {
 		log.Fatalf("[ERROR] 注册离线推断回填 worker 失败: %v", err)
 	}
+	if err := library.RegisterMetadataWorkers(workers, taskSvc, libSvc); err != nil {
+		log.Fatalf("[ERROR] 注册文件元数据 worker 失败: %v", err)
+	}
 }
 
 func applyInstalledTool(result toolsvc.InstallResult) error {
@@ -322,6 +325,7 @@ func main() {
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
 	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	libSvc.WithScanChangeHook(libSvc.MetadataScanChangeHook(taskSvc, taskWorkers.Wake))
 	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
 		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)

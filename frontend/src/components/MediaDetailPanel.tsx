@@ -55,7 +55,8 @@ import {
   formatShutter,
   formatIso,
 } from '@/utils/format';
-import type { MediaFile } from '@/types';
+import { getMediaMetadata } from '@/api/library';
+import type { MediaFile, MediaMetadata, NormalizedEmbeddedMetadata } from '@/types';
 
 interface MediaDetailPanelProps {
   files: MediaFile[];
@@ -167,6 +168,53 @@ function hasExif(f: MediaFile): boolean {
   );
 }
 
+function parseNormalizedMetadata(item: MediaMetadata): NormalizedEmbeddedMetadata | null {
+  try {
+    return JSON.parse(item.normalized_json) as NormalizedEmbeddedMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function streamLabel(stream: { codec_name?: string; language?: string; title?: string }): string {
+  return [stream.codec_name, stream.language, stream.title].filter(Boolean).join(' · ');
+}
+
+function EmbeddedMetadataInfo({ items }: { items: MediaMetadata[] }) {
+  if (items.length === 0) return null;
+  const item = items[0];
+  const metadata = parseNormalizedMetadata(item);
+  if (!metadata) return null;
+  const video = metadata.video_streams?.[0];
+  const color = video?.color;
+  const videoValue = video
+    ? [
+        video.codec_name,
+        video.width && video.height ? `${video.width}×${video.height}` : '',
+        video.frame_rate,
+        color?.space,
+        color?.transfer,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+  return (
+    <>
+      <Divider my={4} label="文件自带元数据" labelPosition="left" />
+      <Box component="dl" style={{ margin: 0 }}>
+        <DetailRow label="解析来源" value={`${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`} />
+        <DetailRow label="容器" value={metadata.container?.format_name} />
+        <DetailRow label="视频流" value={videoValue} />
+        <DetailRow label="音频流" value={metadata.audio_streams?.map(streamLabel).filter(Boolean).join('；')} />
+        <DetailRow label="字幕流" value={metadata.subtitle_streams?.map(streamLabel).filter(Boolean).join('；')} />
+        <DetailRow label="内嵌标题" value={metadata.tags?.title} />
+        <DetailRow label="IPTC" value={metadata.image?.iptc ? Object.values(metadata.image.iptc).filter(Boolean).join('；') : ''} />
+        <DetailRow label="XMP" value={metadata.image?.xmp ? Object.values(metadata.image.xmp).filter(Boolean).join('；') : ''} />
+      </Box>
+    </>
+  );
+}
+
 /**
  * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频内嵌播放器直接播放，FR-102）、右侧元数据，
  * 支持全屏切换、←/→ 上下一项、Esc 关闭。EXIF 区块由 FR-38 在右侧补充。
@@ -194,6 +242,7 @@ export default function MediaDetailPanel({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   // 旋转角度（FR-105）：0/90/180/270，左右各 90°
   const [rotation, setRotation] = useState(0);
+  const [embeddedMetadata, setEmbeddedMetadata] = useState<MediaMetadata[]>([]);
   // 幻灯片自动轮播开关（FR-105）
   const [slideshow, setSlideshow] = useState(false);
 
@@ -301,6 +350,21 @@ export default function MediaDetailPanel({
   }, [opened, idx, total, files, customImageExtensions]);
 
   const file = opened && files[idx] ? files[idx] : null;
+  useEffect(() => {
+    let active = true;
+    setEmbeddedMetadata([]);
+    if (!file) return () => { active = false; };
+    void getMediaMetadata(file.id)
+      .then((items) => {
+        if (active) setEmbeddedMetadata(items);
+      })
+      .catch(() => {
+        if (active) setEmbeddedMetadata([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [file]);
   if (!file) return null;
 
   const isImage = isImageFile(file, customImageExtensions);
@@ -675,6 +739,8 @@ export default function MediaDetailPanel({
                   )}
                 </>
               )}
+
+              <EmbeddedMetadataInfo items={embeddedMetadata} />
 
               <Divider my="sm" />
               <Button

@@ -1,6 +1,6 @@
 # 功能规格：文件自带元数据解析
 
-> 状态：已审核接受　·　关联 PRD：FR2-030　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已实现并验收　·　关联 PRD：FR2-030　·　阶段：P2 `0.23.x`
 
 ## 1. 背景与目标
 
@@ -53,15 +53,16 @@ API：
 
 ## 4. 任务拆分
 
-- [ ] 定义元数据 schema 与规范化 JSON 结构。
-- [ ] 实现 ffprobe 解析和图片元数据解析扩展。
-- [ ] 扫描入库时写元数据，文件变更时标记 stale。
-- [ ] 实现单文件刷新与批量 backfill 任务。
-- [ ] 新增元数据 API 与基础前端展示入口。
-- [ ] 补固定测试素材清单：多音轨视频、多字幕视频、可变帧率视频、带 EXIF 图片、带 IPTC/XMP 图片。
-- [ ] 补单元测试：解析器、规范化、错误摘要、工具版本记录。
-- [ ] 补集成测试：真实 ffprobe 样本、文件修改后刷新、backfill checkpoint。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义元数据 schema 与规范化 JSON 结构。
+- [x] 实现 ffprobe 解析和图片元数据解析扩展。
+- [x] 扫描入库时幂等入队解析，文件变更时标记 stale 并刷新。
+- [x] 实现单文件刷新与批量 backfill 任务。
+- [x] 新增元数据 API 与基础前端展示入口。
+- [x] 补固定测试素材清单：多音轨视频、多字幕视频、可变帧率视频、带 EXIF 图片、带 IPTC/XMP 图片。
+- [x] 补单元测试：解析器、规范化、错误摘要、工具版本记录。
+- [x] 补集成测试：真实 ffprobe 样本、文件修改后刷新、backfill checkpoint、源文件 hash/mtime 不变、Go 单二进制扫描与查询。
+- [x] 补 SQLite 体积 benchmark：10,000 条、单条 raw JSON 4,135 bytes 时，数据库净增长 46,727,168 bytes，平均每条 4,672.72 bytes。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 
@@ -77,4 +78,4 @@ API：
 ## 6. 风险 / 待定
 
 - 已确认：IPTC/XMP 首版不新增第三方解析依赖，优先复用现有工具与标准库可得信息。
-- 大量 raw JSON 可能膨胀 SQLite，需在 Benchmark 中记录体积。
+- 已量化：`packages/benchmark/scripts/fr2-030-metadata-size-benchmark.go` 记录 raw/normalized JSON 与索引的 SQLite 体积；当前 10,000 条基准平均每条净增长约 4.56 KiB，报告写入 `.tmp/benchmark/fr2-030/`。

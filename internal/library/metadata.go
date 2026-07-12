@@ -273,6 +273,10 @@ func SetFFprobePath(path string) {
 	ffprobePathMu.Lock()
 	ffprobePath = path
 	ffprobePathMu.Unlock()
+	ffprobeVersionCache.Lock()
+	ffprobeVersionCache.path = ""
+	ffprobeVersionCache.version = ""
+	ffprobeVersionCache.Unlock()
 }
 
 func getFFprobePath() string {

@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取（图片用 `imagemeta`，视频用 ffprobe）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、字幕转换与转码预设存储 | → `tasks`, `storage`, `db` |
@@ -228,6 +228,22 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内筛出当前仍未软删的有效项，再置 `deleted_at` 并逐项写 `media.deleted` 审计事件；跳过不存在/已软删 id，返回受影响行数；供时间轴、目录浏览与重复项清理消费（进回收站、可还原）。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
+
+**文件自带元数据（media_metadata）（FR2-030）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| media_id | INTEGER, INDEX | 所属媒体 |
+| space_id | TEXT, INDEX | 所属 Space |
+| source | TEXT | 解析来源：视频 `ffprobe`、图片 `image` |
+| tool / tool_version | TEXT | 解析工具及版本 |
+| raw_json | TEXT | 工具原始摘要或图片可解析原始字段 JSON |
+| normalized_json | TEXT | 统一容器、流、EXIF/IPTC/XMP、标签与文件指纹 JSON |
+| parsed_at | DATETIME | 最近成功解析时间 |
+| stale | INTEGER, INDEX | 文件大小或 mtime 变化后的过期标记 |
+
+唯一键 `UNIQUE(space_id, media_id, source)` 保证刷新覆盖当前来源结果，不无限追加历史。扫描新增媒体通过 `ScanChange(added)` 幂等入队 `metadata.parse`；修改事件仅在文件大小或 mtime 指纹变化时标记 stale 并入队刷新，移除事件只标记 stale。`metadata.backfill` 以媒体 ID checkpoint 流式推进，进度写入 FR2-037 通用任务；失败保留最后成功 checkpoint 并按队列退避自动重试。解析器只读取源文件，规范化结果记录解析时的真实 size/mtime，并复用 `media_files` 中非 stale 的可信内容哈希；不会为提取元数据改写、复制回或触碰原媒体。视频通过配置注入的 ffprobe JSON 解析容器与全部视频/音频/字幕流，图片复用现有 `imagemeta` 与标准库解析 EXIF、IPTC、XMP 可得子集。
 
 **影视信息推断（media_inferences）（FR2-031）**
 

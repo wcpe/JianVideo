@@ -551,6 +551,41 @@ func TestOfflineTitleInferenceMigrationCreatesSchema(t *testing.T) {
 	}
 }
 
+func TestEmbeddedMetadataMigrationCreatesSchemaAndUniqueKey(t *testing.T) {
+	gdb, dbPath := openLegacyDB(t)
+	runner := newDefaultRunner(t, gdb, dbPath)
+	if _, err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("默认迁移失败: %v", err)
+	}
+
+	if !testTableExists(t, gdb, "media_metadata") {
+		t.Fatal("media_metadata 表应存在")
+	}
+	for _, column := range []string{"media_id", "space_id", "source", "tool", "tool_version", "raw_json", "normalized_json", "parsed_at", "stale"} {
+		if !testColumnExists(t, gdb, "media_metadata", column) {
+			t.Fatalf("media_metadata 缺少列 %s", column)
+		}
+	}
+	if !testIndexExists(t, gdb, "idx_media_metadata_space_media_source") {
+		t.Fatal("media_metadata 唯一索引不存在")
+	}
+	if got := testIndexColumns(t, gdb, "idx_media_metadata_space_media_source"); !reflect.DeepEqual(got, []string{"space_id", "media_id", "source"}) {
+		t.Fatalf("唯一索引列顺序错误: %v", got)
+	}
+	if got := testIndexColumns(t, gdb, "idx_media_metadata_media"); !reflect.DeepEqual(got, []string{"space_id", "media_id"}) {
+		t.Fatalf("媒体查询索引列顺序错误: %v", got)
+	}
+	if got := testIndexColumns(t, gdb, "idx_media_metadata_space_stale"); !reflect.DeepEqual(got, []string{"space_id", "stale"}) {
+		t.Fatalf("stale 查询索引列顺序错误: %v", got)
+	}
+	if err := gdb.Exec(`INSERT INTO media_metadata(media_id, space_id, source, tool, tool_version, raw_json, normalized_json, parsed_at, stale) VALUES (1, ?, 'ffprobe', 'ffprobe', '7.1', '{}', '{}', datetime('now'), 0)`, DefaultSpaceID).Error; err != nil {
+		t.Fatalf("写入首条元数据失败: %v", err)
+	}
+	if err := gdb.Exec(`INSERT INTO media_metadata(media_id, space_id, source, tool, tool_version, raw_json, normalized_json, parsed_at, stale) VALUES (1, ?, 'ffprobe', 'ffprobe', '7.1', '{}', '{}', datetime('now'), 0)`, DefaultSpaceID).Error; err == nil {
+		t.Fatal("唯一键应拒绝同 Space/媒体/来源重复记录")
+	}
+}
+
 func TestTasksCenterMigrationBackfillsLegacyQueues(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "tasks-migration.db")
 	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
@@ -739,6 +774,25 @@ func testIndexExists(t *testing.T, gdb *gorm.DB, indexName string) bool {
 		t.Fatalf("查询索引失败: %v", err)
 	}
 	return count == 1
+}
+
+func testIndexColumns(t *testing.T, gdb *gorm.DB, indexName string) []string {
+	t.Helper()
+	rows, err := gdb.Raw("PRAGMA index_info(" + indexName + ")").Rows()
+	if err != nil {
+		t.Fatalf("读取索引字段失败: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var columns []string
+	for rows.Next() {
+		var sequence, columnID int
+		var name string
+		if err := rows.Scan(&sequence, &columnID, &name); err != nil {
+			t.Fatalf("解析索引字段失败: %v", err)
+		}
+		columns = append(columns, name)
+	}
+	return columns
 }
 
 func migrationStatus(t *testing.T, gdb *gorm.DB, id string) string {

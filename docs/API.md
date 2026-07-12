@@ -324,6 +324,44 @@
 - **响应**（200）：媒体文件详情对象（含字幕轨道信息，以及 FR-44 的 `last_position`、`watched`、`last_watched_at`）
 - **说明**：跨 Space 请求返回 `404 NOT_FOUND`，不回退默认 Space。
 
+### 查询文件自带元数据（FR2-030）
+
+- **方法 / 路径**：`GET /api/library/media/:id/metadata`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 1,
+        "media_id": 42,
+        "space_id": "space-default",
+        "source": "ffprobe",
+        "tool": "ffprobe",
+        "tool_version": "7.1",
+        "raw_json": "{...}",
+        "normalized_json": "{...}",
+        "parsed_at": "2026-07-13T03:00:00Z",
+        "stale": false
+      }
+    ]
+  }
+  ```
+- **说明**：`source` 当前为视频 `ffprobe` 或图片 `image`；同一 Space、媒体、来源只保留一条当前结果。`normalized_json` 包含容器、视频/音频/字幕流、EXIF/IPTC/XMP、内嵌标签以及解析时记录的文件大小、mtime 和已有可信内容哈希。跨 Space 或媒体不存在返回 `404 NOT_FOUND`。
+
+### 刷新单文件自带元数据（FR2-030）
+
+- **方法 / 路径**：`POST /api/library/media/:id/metadata/refresh`
+- **响应**（202）：`{"status":"pending","task_id":123}`
+- **说明**：先把当前结果标记为 stale，再幂等入队 `metadata.parse`；任务默认最多尝试 3 次，后台 worker 完成后覆盖同来源当前结果，不修改原媒体文件。
+
+### 批量回填文件自带元数据（FR2-030）
+
+- **方法 / 路径**：`POST /api/library/metadata/backfill`
+- **请求**（可选）：`{"library_id":1}`；省略或传 0 表示当前 Space 全部媒体。
+- **响应**（202）：`{"status":"pending","task_id":124}`
+- **说明**：幂等入队 `metadata.backfill`，按媒体 ID checkpoint 分批推进并更新任务进度；失败由通用任务队列自动重试，已完成媒体不会因重试重复追加元数据记录。
+
 ### 继续观看列表（FR-44）
 
 - **方法 / 路径**：`GET /api/library/continue-watching`

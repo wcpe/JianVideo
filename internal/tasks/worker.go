@@ -148,6 +148,8 @@ func DefaultConcurrency(taskType string) int {
 		return 1
 	case taskType == "library.file_hash_backfill":
 		return 1
+	case taskType == "metadata.parse":
+		return 2
 	case strings.HasPrefix(taskType, "transcode."):
 		return 1
 	case strings.HasPrefix(taskType, "thumbnail."):

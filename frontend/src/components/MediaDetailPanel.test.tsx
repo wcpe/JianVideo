@@ -8,6 +8,11 @@ import MediaDetailPanel from './MediaDetailPanel';
 import type { MediaFile } from '@/types';
 
 const mockNavigate = vi.fn();
+const mockGetMediaMetadata = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+vi.mock('@/api/library', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/library')>();
+  return { ...actual, getMediaMetadata: mockGetMediaMetadata };
+});
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return { ...actual, useNavigate: () => mockNavigate };
@@ -120,6 +125,41 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     renderPanel([mediaFile({ id: 6, file_name: '无exif.jpg' })], 0);
     const dialog2 = await screen.findByRole('dialog');
     expect(within(dialog2).queryByRole('link', { name: /在外部地图打开/ })).not.toBeInTheDocument();
+  });
+
+  it('展示文件自带技术元数据基础面板（FR2-030）', async () => {
+    mockGetMediaMetadata.mockResolvedValueOnce([
+      {
+        id: 1,
+        media_id: 9,
+        space_id: 'space-default',
+        source: 'ffprobe',
+        tool: 'ffprobe',
+        tool_version: '7.1',
+        raw_json: '{}',
+        normalized_json: JSON.stringify({
+          container: { format_name: 'matroska,webm', bitrate: 2048000 },
+          video_streams: [
+            { codec_name: 'h264', width: 1920, height: 1080, frame_rate: '30000/1001', color: { space: 'bt709' } },
+          ],
+          audio_streams: [{ codec_name: 'aac', language: 'zh', title: '国语' }],
+          subtitle_streams: [{ codec_name: 'subrip', language: 'zh', title: '中文字幕' }],
+          tags: { title: '样片标题' },
+        }),
+        parsed_at: '2026-07-12T00:00:00Z',
+        stale: false,
+      },
+    ]);
+
+    renderPanel([mediaFile({ id: 9, file_name: '样片.mkv', format: 'mkv' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('文件自带元数据')).toBeInTheDocument();
+    expect(within(dialog).getByText(/matroska,webm/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/30000\/1001/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/国语/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/中文字幕/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/bt709/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ffprobe 7.1/)).toBeInTheDocument();
   });
 
   it('EXIF 光圈/快门/ISO 标准化为标准摄影写法（FR-106）', async () => {

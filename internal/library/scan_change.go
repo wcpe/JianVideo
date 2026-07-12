@@ -21,12 +21,13 @@ const (
 
 // ScanChange 是扫描、watcher、轮询统一提交的路径变更模型。
 type ScanChange struct {
-	SpaceID    string
-	LibraryID  int64
-	Path       string
-	OldPath    string
-	Op         string
-	ObservedAt time.Time
+	SpaceID            string
+	LibraryID          int64
+	Path               string
+	OldPath            string
+	Op                 string
+	ObservedAt         time.Time
+	FingerprintChanged bool
 }
 
 // NormalizeScanChange 归一化扫描变更，保证 Space、路径、操作和观测时间有稳定默认值。

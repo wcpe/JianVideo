@@ -108,6 +108,21 @@ func InitSchema(d *sql.DB) error {
     created_at DATETIME NOT NULL
 );`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_scope_space_created ON audit_events(scope, space_id, created_at, id);`,
+		`CREATE TABLE IF NOT EXISTS media_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'space-default',
+    source TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    tool_version TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    normalized_json TEXT NOT NULL,
+    parsed_at DATETIME NOT NULL,
+    stale INTEGER NOT NULL DEFAULT 0
+);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_metadata_space_media_source ON media_metadata(space_id, media_id, source);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_metadata_media ON media_metadata(space_id, media_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_metadata_space_stale ON media_metadata(space_id, stale);`,
 		`CREATE TABLE IF NOT EXISTS media_inferences (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     media_id INTEGER NOT NULL,

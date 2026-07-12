@@ -41,6 +41,8 @@ var (
 type Service struct {
 	db                           *gorm.DB
 	mediaRepo                    MediaQueryRepository
+	metadataRepo                 metadataRepository
+	metadataParser               embeddedMetadataParser
 	audit                        audit.Recorder
 	changeHook                   func(ScanChange)
 	inferenceConfig              InferenceConfigProvider
@@ -108,7 +110,10 @@ var builtInMediaExtensions = map[string]string{
 
 // NewService 创建媒体库服务。
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, mediaRepo: newGormMediaRepository(db)}
+	return &Service{
+		db: db, mediaRepo: newGormMediaRepository(db), metadataRepo: newGormMetadataRepository(db),
+		metadataParser: defaultEmbeddedMetadataParser,
+	}
 }
 
 // WithAudit 注入审计记录器，使媒体库关键变更与审计事件同事务提交。
@@ -469,6 +474,7 @@ func (s *Service) CreateMediaFileInSpace(spaceID string, libraryID int64, filePa
 			return mf, compensationErr
 		}
 	}
+	s.notifyScanChange(ScanChange{SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, Path: mf.FilePath, Op: ScanChangeAdded, FingerprintChanged: true})
 	return mf, nil
 }
 
@@ -1089,7 +1095,8 @@ func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath stri
 func (s *Service) MarkMediaMissingByLibraryAndPath(spaceID string, libraryID int64, filePath string) error {
 	filePath = filepath.ToSlash(filePath)
 	spaceID = normalizeSpaceID(spaceID)
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	var missing *models.MediaFile
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var before models.MediaFile
 		if err := tx.Where("space_id = ? AND library_id = ? AND file_path = ? AND deleted_at IS NULL", spaceID, libraryID, filePath).First(&before).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1103,7 +1110,7 @@ func (s *Service) MarkMediaMissingByLibraryAndPath(spaceID string, libraryID int
 		if err := tx.Model(&models.MediaFile{}).Where("id = ?", before.ID).Update("file_state", models.MediaFileStateMissing).Error; err != nil {
 			return err
 		}
-		return s.recordAuditTx(tx, audit.EventInput{
+		if err := s.recordAuditTx(tx, audit.EventInput{
 			Scope:        audit.ScopeSpace,
 			SpaceID:      spaceID,
 			ActorType:    audit.ActorSystem,
@@ -1112,8 +1119,17 @@ func (s *Service) MarkMediaMissingByLibraryAndPath(spaceID string, libraryID int
 			ResourceID:   fmt.Sprintf("%d", before.ID),
 			Before:       mediaAuditPayload(&before),
 			After:        map[string]any{"file_state": models.MediaFileStateMissing},
-		})
+		}); err != nil {
+			return err
+		}
+		missing = &before
+		return nil
 	})
+	if err != nil || missing == nil {
+		return err
+	}
+	s.notifyScanChange(ScanChange{SpaceID: spaceID, LibraryID: libraryID, Path: filePath, Op: ScanChangeRemoved})
+	return nil
 }
 
 // ApplyScanChange 执行单路径扫描变更，供 watcher、轮询和增量任务队列统一调用。
@@ -1170,7 +1186,6 @@ func (s *Service) applyUpsertChange(change ScanChange) (int, error) {
 	if _, err := s.CreateMediaFileInSpace(change.SpaceID, change.LibraryID, change.Path, info.Size()); err != nil {
 		return 0, err
 	}
-	s.notifyScanChange(change)
 	return 1, nil
 }
 
@@ -1179,6 +1194,7 @@ func (s *Service) updateExistingMediaFromPath(mf *models.MediaFile, newPath stri
 	if err != nil {
 		return s.MarkMediaMissingByLibraryAndPath(change.SpaceID, change.LibraryID, mf.FilePath)
 	}
+	fingerprintChanged := mediaFileFingerprintChanged(mf, info.Size(), info.ModTime())
 	updates := map[string]any{
 		"file_path":   filepath.ToSlash(newPath),
 		"file_name":   filepath.Base(newPath),
@@ -1191,11 +1207,13 @@ func (s *Service) updateExistingMediaFromPath(mf *models.MediaFile, newPath stri
 	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", mf.ID).Updates(updates).Error; err != nil {
 		return err
 	}
+	change.FingerprintChanged = fingerprintChanged
 	s.notifyScanChange(change)
 	return nil
 }
 
 func (s *Service) updateExistingMediaFromInfo(mf *models.MediaFile, info os.FileInfo, change ScanChange) error {
+	fingerprintChanged := mediaFileFingerprintChanged(mf, info.Size(), info.ModTime())
 	updates := map[string]any{
 		"file_size":   info.Size(),
 		"modified_at": info.ModTime(),
@@ -1205,6 +1223,7 @@ func (s *Service) updateExistingMediaFromInfo(mf *models.MediaFile, info os.File
 	if err := s.db.Model(&models.MediaFile{}).Where("id = ?", mf.ID).Updates(updates).Error; err != nil {
 		return err
 	}
+	change.FingerprintChanged = fingerprintChanged
 	s.notifyScanChange(change)
 	return nil
 }
