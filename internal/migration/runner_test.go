@@ -208,6 +208,14 @@ func TestDefaultMigrationBackfillsDefaultSpaceAndCreatesSmokeIndexes(t *testing.
 	if !testColumnExists(t, gdb, "transcode_tasks", "space_id") {
 		t.Fatal("transcode_tasks 缺少 space_id 字段")
 	}
+	for _, table := range []string{"albums", "album_items", "shares", "media_health_issues"} {
+		if !testColumnExists(t, gdb, table, "space_id") {
+			t.Fatalf("%s 缺少 space_id 字段", table)
+		}
+		if got := countWhere(t, gdb, table, "space_id = '' OR space_id IS NULL"); got != 0 {
+			t.Fatalf("%s 存在未回填 Space 归属的记录: %d", table, got)
+		}
+	}
 	var ownerUserID int64
 	if err := gdb.Raw("SELECT owner_user_id FROM spaces WHERE id = ?", DefaultSpaceID).Scan(&ownerUserID).Error; err != nil {
 		t.Fatalf("读取默认 Space owner 失败: %v", err)

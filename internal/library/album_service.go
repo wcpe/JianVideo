@@ -16,57 +16,70 @@ type AlbumWithCount struct {
 	ItemCount int64 `json:"item_count"`
 }
 
-// CreateAlbum 新建相册。名称必填，描述可选。
+// CreateAlbum 新建默认 Space 相册。
 func (s *Service) CreateAlbum(name, description string) (*models.Album, error) {
+	return s.CreateAlbumInSpace(models.DefaultSpaceID, name, description)
+}
+
+// CreateAlbumInSpace 新建指定 Space 相册。
+func (s *Service) CreateAlbumInSpace(spaceID, name, description string) (*models.Album, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("相册名称不能为空")
 	}
-	album := &models.Album{
-		Name:        name,
-		Description: strings.TrimSpace(description),
-	}
+	album := &models.Album{SpaceID: normalizeSpaceID(spaceID), Name: name, Description: strings.TrimSpace(description)}
 	if err := s.db.Create(album).Error; err != nil {
 		return nil, err
 	}
 	return album, nil
 }
 
-// ListAlbums 列出全部相册，按创建时间倒序，并附带成员数量。
+// ListAlbums 列出默认 Space 相册。
 func (s *Service) ListAlbums() ([]AlbumWithCount, error) {
-	var albums []models.Album
-	if err := s.db.Order("created_at DESC").Find(&albums).Error; err != nil {
-		return nil, err
-	}
-
-	result := make([]AlbumWithCount, 0, len(albums))
-	for _, a := range albums {
-		var count int64
-		if err := s.db.Model(&models.AlbumItem{}).Where("album_id = ?", a.ID).Count(&count).Error; err != nil {
-			return nil, err
-		}
-		result = append(result, AlbumWithCount{Album: a, ItemCount: count})
-	}
-	return result, nil
+	return s.ListAlbumsInSpace(models.DefaultSpaceID)
 }
 
-// GetAlbumByID 根据 ID 获取相册。
+// ListAlbumsInSpace 列出指定 Space 相册并附带成员数。
+func (s *Service) ListAlbumsInSpace(spaceID string) ([]AlbumWithCount, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	var result []AlbumWithCount
+	err := s.db.Table("albums").
+		Select("albums.*, COUNT(album_items.id) AS item_count").
+		Joins("LEFT JOIN album_items ON album_items.space_id = albums.space_id AND album_items.album_id = albums.id").
+		Where("albums.space_id = ?", spaceID).
+		Group("albums.id").
+		Order("albums.created_at DESC").
+		Scan(&result).Error
+	return result, err
+}
+
+// GetAlbumByID 获取默认 Space 相册。
 func (s *Service) GetAlbumByID(id int64) (*models.Album, error) {
+	return s.GetAlbumByIDInSpace(models.DefaultSpaceID, id)
+}
+
+// GetAlbumByIDInSpace 获取指定 Space 相册。
+func (s *Service) GetAlbumByIDInSpace(spaceID string, id int64) (*models.Album, error) {
 	var album models.Album
-	if err := s.db.First(&album, id).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), id).First(&album).Error; err != nil {
 		return nil, err
 	}
 	return &album, nil
 }
 
-// DeleteAlbum 删除相册：在同一事务内删除相册及其全部成员记录。
-// 仅删除逻辑集合，不触碰源文件与 media_files 记录。
+// DeleteAlbum 删除默认 Space 相册。
 func (s *Service) DeleteAlbum(id int64) error {
+	return s.DeleteAlbumInSpace(models.DefaultSpaceID, id)
+}
+
+// DeleteAlbumInSpace 删除指定 Space 相册及成员关联。
+func (s *Service) DeleteAlbumInSpace(spaceID string, id int64) error {
+	spaceID = normalizeSpaceID(spaceID)
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("album_id = ?", id).Delete(&models.AlbumItem{}).Error; err != nil {
+		if err := tx.Where("space_id = ? AND album_id = ?", spaceID, id).Delete(&models.AlbumItem{}).Error; err != nil {
 			return err
 		}
-		result := tx.Delete(&models.Album{}, id)
+		result := tx.Where("space_id = ? AND id = ?", spaceID, id).Delete(&models.Album{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -77,69 +90,87 @@ func (s *Service) DeleteAlbum(id int64) error {
 	})
 }
 
-// AddAlbumItem 把媒体加入相册。校验相册与媒体均存在；同一媒体重复加入做幂等处理。
+// AddAlbumItem 把默认 Space 媒体加入相册。
 func (s *Service) AddAlbumItem(albumID, mediaID int64) error {
-	if _, err := s.GetAlbumByID(albumID); err != nil {
-		return err
-	}
-	if _, err := s.GetMediaFileByID(mediaID); err != nil {
-		return err
-	}
-
-	item := models.AlbumItem{AlbumID: albumID, MediaID: mediaID, AddedAt: time.Now()}
-	// 唯一索引 (album_id, media_id) 保证不重复；已存在则幂等返回
-	return s.db.Where(models.AlbumItem{AlbumID: albumID, MediaID: mediaID}).
-		Attrs(models.AlbumItem{AddedAt: item.AddedAt}).
-		FirstOrCreate(&item).Error
+	return s.AddAlbumItemInSpace(models.DefaultSpaceID, albumID, mediaID)
 }
 
-// RemoveAlbumItem 从相册移出指定媒体。
+// AddAlbumItemInSpace 把指定 Space 媒体加入同 Space 相册。
+func (s *Service) AddAlbumItemInSpace(spaceID string, albumID, mediaID int64) error {
+	spaceID = normalizeSpaceID(spaceID)
+	if _, err := s.GetAlbumByIDInSpace(spaceID, albumID); err != nil {
+		return err
+	}
+	if _, err := s.GetMediaFileByIDInSpace(spaceID, mediaID); err != nil {
+		return err
+	}
+	item := models.AlbumItem{SpaceID: spaceID, AlbumID: albumID, MediaID: mediaID, AddedAt: time.Now()}
+	return s.db.Where(models.AlbumItem{SpaceID: spaceID, AlbumID: albumID, MediaID: mediaID}).
+		Attrs(models.AlbumItem{AddedAt: item.AddedAt}).FirstOrCreate(&item).Error
+}
+
+// RemoveAlbumItem 从默认 Space 相册移出媒体。
 func (s *Service) RemoveAlbumItem(albumID, mediaID int64) error {
-	return s.db.Where("album_id = ? AND media_id = ?", albumID, mediaID).
-		Delete(&models.AlbumItem{}).Error
+	return s.RemoveAlbumItemInSpace(models.DefaultSpaceID, albumID, mediaID)
 }
 
-// IsMediaInAlbum 判断指定媒体是否为相册成员（FR-43 分享范围校验用）。
-func (s *Service) IsMediaInAlbum(albumID, mediaID int64) (bool, error) {
-	var cnt int64
-	if err := s.db.Model(&models.AlbumItem{}).
-		Where("album_id = ? AND media_id = ?", albumID, mediaID).
-		Count(&cnt).Error; err != nil {
-		return false, err
+// RemoveAlbumItemInSpace 从指定 Space 相册移出媒体。
+func (s *Service) RemoveAlbumItemInSpace(spaceID string, albumID, mediaID int64) error {
+	spaceID = normalizeSpaceID(spaceID)
+	if _, err := s.GetAlbumByIDInSpace(spaceID, albumID); err != nil {
+		return err
 	}
-	return cnt > 0, nil
+	return s.db.Where("space_id = ? AND album_id = ? AND media_id = ?", spaceID, albumID, mediaID).Delete(&models.AlbumItem{}).Error
 }
 
-// ListAlbumItems 列出相册内的媒体成员，按加入时间排序。
+// IsMediaInAlbum 判断默认 Space 媒体是否为相册成员。
+func (s *Service) IsMediaInAlbum(albumID, mediaID int64) (bool, error) {
+	return s.IsMediaInAlbumInSpace(models.DefaultSpaceID, albumID, mediaID)
+}
+
+// IsMediaInAlbumInSpace 判断指定 Space 媒体是否为相册成员。
+func (s *Service) IsMediaInAlbumInSpace(spaceID string, albumID, mediaID int64) (bool, error) {
+	var count int64
+	err := s.db.Model(&models.AlbumItem{}).
+		Where("space_id = ? AND album_id = ? AND media_id = ?", normalizeSpaceID(spaceID), albumID, mediaID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// ListAlbumItems 列出默认 Space 相册成员。
 func (s *Service) ListAlbumItems(albumID int64) ([]models.MediaFile, error) {
+	return s.ListAlbumItemsInSpace(models.DefaultSpaceID, albumID)
+}
+
+// ListAlbumItemsInSpace 列出指定 Space 相册成员。
+func (s *Service) ListAlbumItemsInSpace(spaceID string, albumID int64) ([]models.MediaFile, error) {
+	spaceID = normalizeSpaceID(spaceID)
+	if _, err := s.GetAlbumByIDInSpace(spaceID, albumID); err != nil {
+		return nil, err
+	}
 	var items []models.AlbumItem
-	if err := s.db.Where("album_id = ?", albumID).Order("added_at ASC").Find(&items).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND album_id = ?", spaceID, albumID).Order("added_at ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
 		return []models.MediaFile{}, nil
 	}
-
 	mediaIDs := make([]int64, 0, len(items))
-	for _, it := range items {
-		mediaIDs = append(mediaIDs, it.MediaID)
+	for _, item := range items {
+		mediaIDs = append(mediaIDs, item.MediaID)
 	}
-
-	// 一次查询取回全部媒体，避免 N+1
 	var files []models.MediaFile
-	if err := s.db.Where("id IN ?", mediaIDs).Find(&files).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND id IN ? AND deleted_at IS NULL", spaceID, mediaIDs).Find(&files).Error; err != nil {
 		return nil, err
 	}
-
-	// 按 album_items 的加入顺序重排
 	byID := make(map[int64]models.MediaFile, len(files))
-	for _, f := range files {
-		byID[f.ID] = f
+	for _, file := range files {
+		byID[file.ID] = file
 	}
 	ordered := make([]models.MediaFile, 0, len(items))
-	for _, it := range items {
-		if f, ok := byID[it.MediaID]; ok {
-			ordered = append(ordered, f)
+	for _, item := range items {
+		if file, ok := byID[item.MediaID]; ok {
+			ordered = append(ordered, file)
 		}
 	}
 	return ordered, nil

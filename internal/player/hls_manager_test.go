@@ -1,6 +1,8 @@
 package player
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,6 +79,42 @@ func TestGetSegment(t *testing.T) {
 	data, err := mgr.GetSegment(1, "1080p", "1080p_segment_000.ts")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("test data"), data)
+}
+
+func TestGetSegment_RejectsTraversalAndAbsolutePaths(t *testing.T) {
+	baseDir := t.TempDir()
+	mgr := NewHLSManager(baseDir)
+	outside := filepath.Join(baseDir, "outside.ts")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("创建越界文件失败: %v", err)
+	}
+	if data, err := mgr.GetSegment(1, "1080p", filepath.Join("..", "outside.ts")); err == nil {
+		t.Fatalf("不得通过 .. 读取越界文件，读到 %q", data)
+	}
+	if data, err := mgr.GetSegment(1, "1080p", outside); err == nil {
+		t.Fatalf("不得通过绝对路径读取文件，读到 %q", data)
+	}
+}
+
+func TestGetSegment_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "hls")
+	mediaDir := filepath.Join(baseDir, "1")
+	if err := os.MkdirAll(mediaDir, 0o750); err != nil {
+		t.Fatalf("创建媒体目录失败: %v", err)
+	}
+	secret := filepath.Join(root, "secret.ts")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("创建越界文件失败: %v", err)
+	}
+	link := filepath.Join(mediaDir, "link.ts")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("当前环境无法创建符号链接: %v", err)
+	}
+	mgr := NewHLSManager(baseDir)
+	if data, err := mgr.GetSegment(1, "1080p", "link.ts"); err == nil {
+		t.Fatalf("不得通过越界符号链接读取文件，读到 %q", data)
+	}
 }
 
 func TestGetSegment_NoSession(t *testing.T) {

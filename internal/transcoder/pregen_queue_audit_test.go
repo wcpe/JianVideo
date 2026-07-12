@@ -18,7 +18,7 @@ func TestPregenQueueRecordsTaskAuditEvents(t *testing.T) {
 	if err := db.AutoMigrate(&models.TranscodeTask{}, &models.AuditEvent{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
-	q := NewPregenQueue(db, func(int64, string) error { return nil }).WithAudit(audit.NewRecorder(db))
+	q := NewPregenQueue(db, func(string, int64, string) error { return nil }).WithAudit(audit.NewRecorder(db))
 
 	id, err := q.EnqueueInSpace(models.DefaultSpaceID, 42, 1, "h264", 0, 0)
 	if err != nil {

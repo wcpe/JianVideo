@@ -63,14 +63,6 @@ func normalizeThumbnailSize(size int) int {
 	return thumbnailWidth
 }
 
-// runThumbnail 执行实际的缩略图生成动作，抽成可注入的函数变量以便测试限并发行为。
-var runThumbnail = realRunThumbnail
-
-// runFFmpegThumbnail 执行一次缩略图 ffmpeg 命令并捕获 stderr，
-// 抽成可注入的函数变量以便测试在不依赖真实 ffmpeg 的情况下注入失败桩。
-// 失败时返回的错误已包含 stderr 关键尾部，便于上层按 ERROR 级别记录具体原因。
-var runFFmpegThumbnail = realRunFFmpegThumbnail
-
 // thumbnailStderrTailLimit 失败日志中保留的 ffmpeg stderr 尾部最大字符数。
 const thumbnailStderrTailLimit = 500
 
@@ -96,11 +88,16 @@ func thumbnailSemaphore() chan struct{} {
 
 // submitThumbnail 在固定容量信号量约束下异步执行一个缩略图任务，不阻塞调用方（扫描）。
 func submitThumbnail(job thumbnailJob) {
+	submitThumbnailWithRunner(job, realRunThumbnail)
+}
+
+// submitThumbnailWithRunner 仅供测试注入单次不可变执行函数，避免修改全局变量产生竞态。
+func submitThumbnailWithRunner(job thumbnailJob, runner func(thumbnailJob)) {
 	sem := thumbnailSemaphore()
 	go func() {
-		sem <- struct{}{}        // 获取令牌（超出上限时在此排队）
-		defer func() { <-sem }() // 释放令牌
-		runThumbnail(job)
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		runner(job)
 	}()
 }
 
@@ -157,7 +154,7 @@ func generateThumbnailSync(filePath string) {
 	if !ok {
 		return
 	}
-	runThumbnail(job)
+	realRunThumbnail(job)
 }
 
 // resolveThumbnailJob 按文件类型解析出缩略图任务，类型不支持时返回 ok=false。
@@ -202,7 +199,7 @@ func TryGenerateThumbnail(filePath string) error {
 func tryRunThumbnailFFmpeg(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
-	if err := runFFmpegThumbnail(ctx, args); err != nil {
+	if err := realRunFFmpegThumbnail(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("缩略图生成超时: %w", err)
 		}
@@ -251,12 +248,15 @@ func generateMagickThumbnail(filePath string, size int) {
 }
 
 func generateImageThumbnail(filePath string, size int) {
+	generateImageThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
+}
+
+func generateImageThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) {
 	outputPath := thumbnailPathForSize(filePath, size)
-	// 使用 ffmpeg 缩放图片（比引入 imaging 库更轻量，项目已依赖 ffmpeg）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
 	args := buildImageThumbnailArgs(filePath, outputPath, size)
-	if err := runFFmpegThumbnail(ctx, args); err != nil {
+	if err := runner(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 图片缩略图生成超时（已终止 ffmpeg）: %s", filePath)
 			return
@@ -267,12 +267,15 @@ func generateImageThumbnail(filePath string, size int) {
 }
 
 func generateVideoThumbnail(filePath string, size int) {
+	generateVideoThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
+}
+
+func generateVideoThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) {
 	outputPath := thumbnailPathForSize(filePath, size)
-	// 提取第 2 秒帧（第 1 秒常是黑屏）
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
 	defer cancel()
 	args := buildVideoThumbnailArgs(filePath, outputPath, size)
-	if err := runFFmpegThumbnail(ctx, args); err != nil {
+	if err := runner(ctx, args); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Printf("[WARN] 视频缩略图生成超时（已终止 ffmpeg）: %s", filePath)
 			return

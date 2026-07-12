@@ -32,7 +32,11 @@ func (h *Handler) CreateAlbum(c *gin.Context) {
 		return
 	}
 
-	album, err := h.library.CreateAlbum(req.Name, req.Description)
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	album, err := h.library.CreateAlbumInSpace(spaceID, req.Name, req.Description)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": err.Error()})
 		return
@@ -42,7 +46,11 @@ func (h *Handler) CreateAlbum(c *gin.Context) {
 
 // ListAlbums GET /api/albums
 func (h *Handler) ListAlbums(c *gin.Context) {
-	items, err := h.library.ListAlbums()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	items, err := h.library.ListAlbumsInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -57,7 +65,11 @@ func (h *Handler) DeleteAlbum(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.library.DeleteAlbum(id); err != nil {
+	spaceID, allowed := h.resolveSpaceID(c)
+	if !allowed {
+		return
+	}
+	if err := h.library.DeleteAlbumInSpace(spaceID, id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "相册不存在"})
 		return
 	}
@@ -70,7 +82,11 @@ func (h *Handler) ListAlbumItems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	files, err := h.library.ListAlbumItems(id)
+	spaceID, allowed := h.resolveSpaceID(c)
+	if !allowed {
+		return
+	}
+	files, err := h.library.ListAlbumItemsInSpace(spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
@@ -93,7 +109,11 @@ func (h *Handler) AddAlbumItem(c *gin.Context) {
 		return
 	}
 
-	if err := h.library.AddAlbumItem(id, req.MediaID); err != nil {
+	spaceID, allowed := h.resolveSpaceID(c)
+	if !allowed {
+		return
+	}
+	if err := h.library.AddAlbumItemInSpace(spaceID, id, req.MediaID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "相册或媒体不存在"})
 			return
@@ -115,7 +135,11 @@ func (h *Handler) RemoveAlbumItem(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的媒体 ID"})
 		return
 	}
-	if err := h.library.RemoveAlbumItem(id, mediaID); err != nil {
+	spaceID, allowed := h.resolveSpaceID(c)
+	if !allowed {
+		return
+	}
+	if err := h.library.RemoveAlbumItemInSpace(spaceID, id, mediaID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "REMOVE_FAILED", "message": "移出相册失败"})
 		return
 	}

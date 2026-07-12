@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -90,7 +91,10 @@ func (m *HLSManager) GetM3U8(mediaID int64, quality string) (string, error) {
 
 	// 追播模式：内存里有 writer 就走 in-memory 路径（writer 维护 m3u8 文本）
 	if hasMedia && hasQuality {
-		m3u8Path := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), quality+".m3u8")
+		m3u8Path, err := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s.m3u8", mediaID, quality))
+		if err != nil {
+			return "", err
+		}
 		data, err := os.ReadFile(m3u8Path)
 		if err != nil {
 			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
@@ -99,8 +103,13 @@ func (m *HLSManager) GetM3U8(mediaID int64, quality string) (string, error) {
 	}
 
 	// 预切片模式：直接读文件系统（ffmpeg 写出的 m3u8）
-	m3u8Path := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), quality+".m3u8")
-	if _, err := os.Stat(m3u8Path); err == nil {
+	m3u8Path, pathErr := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s.m3u8", mediaID, quality))
+	if pathErr == nil {
+		if _, err := os.Stat(m3u8Path); err != nil {
+			pathErr = err
+		}
+	}
+	if pathErr == nil {
 		data, err := os.ReadFile(m3u8Path)
 		if err != nil {
 			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
@@ -123,7 +132,10 @@ func (m *HLSManager) GetSegment(mediaID int64, quality string, name string) ([]b
 	_, hasQuality := mediaWriters[quality]
 	m.mu.Unlock()
 
-	segPath := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), name)
+	segPath, pathErr := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s", mediaID, name))
+	if pathErr != nil {
+		return nil, pathErr
+	}
 
 	// 追播模式：必须内存里还有对应 writer 才允许读
 	if hasMedia && hasQuality {
@@ -143,7 +155,10 @@ func (m *HLSManager) GetSegment(mediaID int64, quality string, name string) ([]b
 
 // GetMasterM3U8 读取指定媒体文件的 master.m3u8 索引内容。
 func (m *HLSManager) GetMasterM3U8(mediaID int64) (string, error) {
-	masterPath := filepath.Join(m.baseDir, fmt.Sprintf("%d", mediaID), "master.m3u8")
+	masterPath, err := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/master.m3u8", mediaID))
+	if err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(masterPath)
 	if err != nil {
 		return "", fmt.Errorf("读取 master.m3u8 失败: %w", err)
@@ -159,6 +174,50 @@ func (m *HLSManager) SaveMasterM3U8(mediaID int64, content string) error {
 	}
 	masterPath := filepath.Join(mediaDir, "master.m3u8")
 	return os.WriteFile(masterPath, []byte(content), 0o644)
+}
+
+// ResolveContainedPath 解析 HLS 相对路径，并拒绝绝对路径、平台分隔符混用、路径穿越与越界符号链接。
+func ResolveContainedPath(baseDir, relPath string) (string, error) {
+	if relPath == "" || filepath.IsAbs(relPath) || strings.Contains(relPath, "\\") {
+		return "", fmt.Errorf("非法 HLS 路径")
+	}
+	for _, part := range strings.Split(filepath.ToSlash(relPath), "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("非法 HLS 路径")
+		}
+	}
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("解析 HLS 根目录失败: %w", err)
+	}
+	candidate := filepath.Join(baseAbs, filepath.FromSlash(filepath.ToSlash(relPath)))
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("解析 HLS 文件路径失败: %w", err)
+	}
+	if err := ensureContained(baseAbs, candidateAbs); err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(candidateAbs)
+	if err != nil {
+		return "", err
+	}
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureContained(baseResolved, resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func ensureContained(baseDir, candidate string) error {
+	rel, err := filepath.Rel(baseDir, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("HLS 路径越界")
+	}
+	return nil
 }
 
 // HasSession 检查指定媒体文件是否有活跃的 HLS 会话。

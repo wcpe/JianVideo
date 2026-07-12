@@ -19,8 +19,9 @@ const (
 // 每轮巡检先清空全表再写入，绝不改写 media_files.deleted_at（软删真源归 FR-25/27）。
 type MediaHealthIssue struct {
 	ID        int64     `gorm:"primaryKey" json:"id"`
-	MediaID   int64     `gorm:"index;not null" json:"media_id"`
-	IssueType string    `gorm:"index;not null" json:"issue_type"` // broken / zero_byte / missing / no_thumbnail
-	Detail    string    `json:"detail"`                           // 问题细节（如 ffprobe 错误尾部）
-	CheckedAt time.Time `json:"checked_at"`                       // 本轮巡检判定时刻
+	SpaceID   string    `gorm:"not null;default:space-default;index:idx_health_space_type_media,priority:1" json:"space_id"`
+	MediaID   int64     `gorm:"not null;index:idx_health_space_type_media,priority:3" json:"media_id"`
+	IssueType string    `gorm:"not null;index:idx_health_space_type_media,priority:2" json:"issue_type"` // broken / zero_byte / missing / no_thumbnail
+	Detail    string    `json:"detail"`                                                                  // 问题细节（如 ffprobe 错误尾部）
+	CheckedAt time.Time `json:"checked_at"`                                                              // 本轮巡检判定时刻
 }

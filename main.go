@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,14 @@ import (
 
 //go:embed frontend/dist
 var frontendDist embed.FS
+
+func sqliteDataSourceName(dbPath string) string {
+	separator := "?"
+	if strings.Contains(dbPath, "?") {
+		separator = "&"
+	}
+	return dbPath + separator + "_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on"
+}
 
 // version 应用版本号，构建时经 -ldflags "-X main.version=..." 注入，默认 dev。
 var version = "dev"
@@ -122,10 +131,16 @@ func main() {
 	dbLogger := dblog.NewDefault()
 
 	// 使用 gorm 打开数据库（同时兼容 db 包的 InitSchema）
-	gormDB, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{Logger: dbLogger})
+	gormDB, err := gorm.Open(sqlite.Open(sqliteDataSourceName(cfg.DBPath)), &gorm.Config{Logger: dbLogger})
 	if err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		log.Fatalf("获取数据库连接池失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(8)
+	sqlDB.SetMaxIdleConns(8)
 
 	registry, err := migration.NewRegistry(migration.DefaultMigrations()...)
 	if err != nil {
@@ -273,7 +288,7 @@ func main() {
 	scanScheduler := library.NewScanScheduler(
 		settingsSvc.ScanInterval,
 		func() {
-			libs, err := libSvc.ListLibraryPaths()
+			libs, err := libSvc.ListAllLibraryPaths()
 			if err != nil {
 				log.Printf("[WARN] 定时扫描枚举媒体库失败: %v", err)
 				return
@@ -299,8 +314,8 @@ func main() {
 	// exec 闭包反查媒体路径并按预设编码调 PreSliceWithCodec 预热切片到 hlsDir/{mediaID}/。
 	// 复用 FR-29 任务队列范式（见 ADR-0039），重启先恢复残留 running 再启动。
 	presetStore := transcoder.NewPresetStore(gormDB)
-	pregenQueue := transcoder.NewPregenQueue(gormDB, func(mediaID int64, codec string) error {
-		mf, err := libSvc.GetMediaFileByID(mediaID)
+	pregenQueue := transcoder.NewPregenQueue(gormDB, func(spaceID string, mediaID int64, codec string) error {
+		mf, err := libSvc.GetMediaFileByIDInSpace(spaceID, mediaID)
 		if err != nil {
 			return fmt.Errorf("预生成反查媒体失败: mediaID=%d: %w", mediaID, err)
 		}

@@ -56,7 +56,7 @@ func (w *Watcher) WithScanQueue(q *library.TaskQueue) *Watcher {
 
 // Start 启动监听，注册所有已存在的媒体库目录。
 func (w *Watcher) Start() error {
-	paths, err := w.library.ListLibraryPaths()
+	paths, err := w.library.ListAllLibraryPaths()
 	if err != nil {
 		return err
 	}
@@ -291,7 +291,7 @@ func (w *Watcher) pollAllSMB() {
 			}
 			continue
 		}
-		count, err := w.library.ScanLibraryWithType(lp.ID, lp.Path, "smb", library.ScanModeIncremental)
+		count, err := w.library.ScanLibraryWithTypeInSpace(lp.SpaceID, lp.ID, lp.Path, "smb", library.ScanModeIncremental)
 		if err != nil {
 			log.Printf("[WARN] SMB 轮询扫描失败: %s, err=%v", lp.Path, err)
 			continue

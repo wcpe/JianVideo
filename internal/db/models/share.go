@@ -16,6 +16,8 @@ const (
 type Share struct {
 	// Token 加密随机、不可枚举的分享令牌（主键）
 	Token string `gorm:"primaryKey" json:"token"`
+	// SpaceID 分享资源归属的 Space；历史记录迁入默认 Space。
+	SpaceID string `gorm:"not null;default:space-default;index:idx_shares_space_created,priority:1" json:"space_id"`
 	// ResourceType 分享资源类型：media / album
 	ResourceType string `gorm:"not null" json:"resource_type"`
 	// ResourceID 被分享的媒体 ID 或相册 ID
@@ -29,5 +31,5 @@ type Share struct {
 	MaxUses int `gorm:"default:0" json:"max_uses"`
 	// UsedCount 已访问次数（FR-78），实际访问资源时原子自增。
 	UsedCount int       `gorm:"default:0" json:"used_count"`
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `gorm:"index:idx_shares_space_created,priority:2" json:"created_at"`
 }

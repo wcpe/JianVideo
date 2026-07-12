@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -360,10 +359,14 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, 
 			return
 		}
 
-		// 其余路径走静态文件服务
-		fullPath := filepath.Join(hlsDir, relPath)
-		if _, err := os.Stat(fullPath); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
+		// 其余路径必须先做 canonical/Rel containment，再交给静态文件服务。
+		fullPath, err := player.ResolveContainedPath(hlsDir, relPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的 HLS 路径"})
 			return
 		}
 		c.Header("Content-Type", detectHLSMimeType(relPath))

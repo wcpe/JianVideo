@@ -36,15 +36,20 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		return
 	}
 
-	// 校验被分享资源存在
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+
+	// 校验被分享资源存在且属于当前 Space
 	switch req.ResourceType {
 	case models.ShareResourceMedia:
-		if _, err := h.library.GetMediaFileByID(req.ResourceID); err != nil {
+		if _, err := h.library.GetMediaFileByIDInSpace(spaceID, req.ResourceID); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "RESOURCE_NOT_FOUND", "message": "媒体不存在"})
 			return
 		}
 	case models.ShareResourceAlbum:
-		if _, err := h.library.GetAlbumByID(req.ResourceID); err != nil {
+		if _, err := h.library.GetAlbumByIDInSpace(spaceID, req.ResourceID); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "RESOURCE_NOT_FOUND", "message": "相册不存在"})
 			return
 		}
@@ -58,7 +63,7 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		t := time.Now().Add(time.Duration(req.ExpiresInHours) * time.Hour)
 		expiresAt = &t
 	}
-	sh, err := h.share.Create(req.ResourceType, req.ResourceID, expiresAt, req.Password, req.MaxUses)
+	sh, err := h.share.CreateInSpace(spaceID, req.ResourceType, req.ResourceID, expiresAt, req.Password, req.MaxUses)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CREATE_FAILED", "message": "创建分享失败"})
 		return
@@ -72,7 +77,11 @@ func (h *Handler) ListShares(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SHARE_UNAVAILABLE", "message": "分享服务未启用"})
 		return
 	}
-	shares, err := h.share.List()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	shares, err := h.share.ListInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询分享失败"})
 		return
@@ -86,7 +95,11 @@ func (h *Handler) RevokeShare(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SHARE_UNAVAILABLE", "message": "分享服务未启用"})
 		return
 	}
-	if err := h.share.Revoke(c.Param("token")); err != nil {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if err := h.share.RevokeInSpace(spaceID, c.Param("token")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "REVOKE_FAILED", "message": "撤销分享失败"})
 		return
 	}
@@ -125,7 +138,7 @@ func (h *Handler) shareAllowsMedia(sh *models.Share, mediaID int64) bool {
 	case models.ShareResourceMedia:
 		return sh.ResourceID == mediaID
 	case models.ShareResourceAlbum:
-		ok, err := h.library.IsMediaInAlbum(sh.ResourceID, mediaID)
+		ok, err := h.library.IsMediaInAlbumInSpace(sh.SpaceID, sh.ResourceID, mediaID)
 		return err == nil && ok
 	}
 	return false
@@ -144,7 +157,7 @@ func (h *Handler) resolveShareMedia(c *gin.Context) *models.MediaFile {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "资源不存在"})
 		return nil
 	}
-	mf, err := h.library.GetMediaFileByID(mediaID)
+	mf, err := h.library.GetMediaFileByIDInSpace(sh.SpaceID, mediaID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return nil
@@ -181,19 +194,19 @@ func (h *Handler) ShareInfo(c *gin.Context) {
 	}
 	switch sh.ResourceType {
 	case models.ShareResourceMedia:
-		mf, err := h.library.GetMediaFileByID(sh.ResourceID)
+		mf, err := h.library.GetMediaFileByIDInSpace(sh.SpaceID, sh.ResourceID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 			return
 		}
 		resp["media"] = mf
 	case models.ShareResourceAlbum:
-		album, err := h.library.GetAlbumByID(sh.ResourceID)
+		album, err := h.library.GetAlbumByIDInSpace(sh.SpaceID, sh.ResourceID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "相册不存在"})
 			return
 		}
-		items, err := h.library.ListAlbumItems(sh.ResourceID)
+		items, err := h.library.ListAlbumItemsInSpace(sh.SpaceID, sh.ResourceID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询相册成员失败"})
 			return

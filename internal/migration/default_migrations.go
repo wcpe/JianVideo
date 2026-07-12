@@ -111,6 +111,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateCacheAssets,
 			Validate:    validateCacheAssets,
 		},
+		{
+			ID:          "20260712_0012_space_owned_collections_health",
+			Description: "回填相册分享与健康问题的 Space 归属",
+			SafeToRetry: true,
+			Estimate:    estimateSpaceOwnedCollections,
+			Up:          migrateSpaceOwnedCollections,
+			Validate:    validateSpaceOwnedCollections,
+		},
 	}
 }
 
@@ -1006,6 +1014,55 @@ func validateMediaInferences(_ context.Context, db *gorm.DB) (Validation, error)
 		}
 	}
 	return Validation{Summary: "本地离线影视信息推断表已就绪"}, nil
+}
+
+func estimateSpaceOwnedCollections(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var total int64
+	for _, table := range []string{"albums", "album_items", "shares", "media_health_issues"} {
+		if tableExists(db, table) {
+			var count int64
+			if err := db.Table(table).Count(&count).Error; err != nil {
+				return StepPlan{}, err
+			}
+			total += count
+		}
+	}
+	return StepPlan{EstimatedRows: total}, nil
+}
+
+func migrateSpaceOwnedCollections(_ context.Context, tx *gorm.DB) error {
+	for _, target := range []struct{ table, column, definition string }{
+		{"albums", "space_id", "TEXT NOT NULL DEFAULT '" + DefaultSpaceID + "'"},
+		{"album_items", "space_id", "TEXT NOT NULL DEFAULT '" + DefaultSpaceID + "'"},
+		{"shares", "space_id", "TEXT NOT NULL DEFAULT '" + DefaultSpaceID + "'"},
+		{"media_health_issues", "space_id", "TEXT NOT NULL DEFAULT '" + DefaultSpaceID + "'"},
+	} {
+		if tableExists(tx, target.table) {
+			if err := addColumnIfMissing(tx, target.table, target.column, target.definition); err != nil {
+				return err
+			}
+			if err := tx.Table(target.table).Where("space_id IS NULL OR TRIM(space_id) = ''").Update("space_id", DefaultSpaceID).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return tx.AutoMigrate(&models.Album{}, &models.AlbumItem{}, &models.Share{}, &models.MediaHealthIssue{})
+}
+
+func validateSpaceOwnedCollections(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, table := range []string{"albums", "album_items", "shares", "media_health_issues"} {
+		if !columnExists(db, table, "space_id") {
+			return Validation{}, fmt.Errorf("%s 缺少 space_id", table)
+		}
+		var count int64
+		if err := db.Table(table).Where("space_id IS NULL OR TRIM(space_id) = ''").Count(&count).Error; err != nil {
+			return Validation{}, err
+		}
+		if count != 0 {
+			return Validation{}, fmt.Errorf("%s 仍有 %d 条记录缺少 Space 归属", table, count)
+		}
+	}
+	return Validation{Summary: "相册、分享与健康问题已具备非空 Space 归属"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

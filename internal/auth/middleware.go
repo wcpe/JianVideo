@@ -149,7 +149,7 @@ func currentUsername(c *gin.Context) (string, bool) {
 
 func requiresSpaceOwner(c *gin.Context) bool {
 	path := c.Request.URL.Path
-	for _, prefix := range []string{"/api/library", "/api/media-types", "/api/play", "/api/transcode/tasks", "/api/storage/cache", "/api/settings/storage"} {
+	for _, prefix := range []string{"/api/library", "/api/albums", "/api/shares", "/api/media-types", "/api/play", "/api/transcode/tasks", "/api/storage/cache", "/api/settings/storage"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}

@@ -75,6 +75,29 @@ func waitForCondition(t *testing.T, name string, fn func() bool) bool {
 	return false
 }
 
+func TestWatcher_StartIncludesNonDefaultSpaceLibraries(t *testing.T) {
+	w, svc, _, cleanup := newTestWatcher(t)
+	defer cleanup()
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathInSpace("space-other", dir, "local", "其他 Space")
+	if err != nil {
+		t.Fatalf("创建非默认 Space 媒体库失败: %v", err)
+	}
+	if err := w.Start(); err != nil {
+		t.Fatalf("启动监听器失败: %v", err)
+	}
+	videoPath := filepath.Join(dir, "other.mp4")
+	if err := os.WriteFile(videoPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("写入媒体失败: %v", err)
+	}
+	if !waitForCondition(t, "非默认 Space 媒体入库", func() bool {
+		mf, getErr := svc.GetMediaFileByPathInSpace("space-other", videoPath)
+		return getErr == nil && mf.LibraryID == lp.ID && mf.SpaceID == "space-other"
+	}) {
+		t.Fatal("watcher 未监听非默认 Space 媒体库")
+	}
+}
+
 func TestWatcher_CreatesMediaFile(t *testing.T) {
 	w, svc, gdb, cleanup := newTestWatcher(t)
 	defer cleanup()

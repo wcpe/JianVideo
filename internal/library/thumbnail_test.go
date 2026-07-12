@@ -22,8 +22,7 @@ func TestGenerateThumbnail_ConcurrencyCapped(t *testing.T) {
 	release := make(chan struct{})
 
 	// 注入阻塞桩：记录峰值并发，阻塞驻留以暴露超限；全部任务最终经 release 放行后退出。
-	orig := runThumbnail
-	runThumbnail = func(_ thumbnailJob) {
+	runner := func(_ thumbnailJob) {
 		n := atomic.AddInt32(&current, 1)
 		for {
 			p := atomic.LoadInt32(&peak)
@@ -39,7 +38,8 @@ func TestGenerateThumbnail_ConcurrencyCapped(t *testing.T) {
 	// 提交远多于上限的任务
 	total := capN * 5
 	for i := 0; i < total; i++ {
-		GenerateThumbnail("/fake/path/video_" + strconv.Itoa(i) + ".mp4")
+		job, _ := resolveThumbnailJob("/fake/path/video_" + strconv.Itoa(i) + ".mp4")
+		submitThumbnailWithRunner(job, runner)
 	}
 
 	// 等待信号量被占满（恰好 capN 个进入桩）；若无上限，更多任务会冲进桩抬高 peak。
@@ -61,8 +61,6 @@ func TestGenerateThumbnail_ConcurrencyCapped(t *testing.T) {
 	if d := atomic.LoadInt32(&done); d < int32(total) {
 		t.Fatalf("任务未全部排空：完成 %d / %d", d, total)
 	}
-	runThumbnail = orig
-
 	if gotPeak > int32(capN) {
 		t.Fatalf("并发峰值 %d 超过上限 %d", gotPeak, capN)
 	}

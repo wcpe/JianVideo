@@ -176,7 +176,7 @@ func TestRunHealthScan_ClearsPreviousIssues(t *testing.T) {
 	gdb := newHealthTestDB(t)
 	gdb.Create(&models.MediaFile{ID: 1, LibraryID: 1, FilePath: "D:/v/a.mp4", FileName: "a.mp4", FileSize: 100})
 	// 预置一条陈旧问题（上一轮残留）
-	gdb.Create(&models.MediaHealthIssue{MediaID: 999, IssueType: models.HealthIssueBroken, CheckedAt: time.Now().Add(-time.Hour)})
+	gdb.Create(&models.MediaHealthIssue{SpaceID: models.DefaultSpaceID, MediaID: 999, IssueType: models.HealthIssueBroken, CheckedAt: time.Now().Add(-time.Hour)})
 
 	svc := NewHealthService(gdb, healthChecks()) // 全部健康
 	if err := svc.runScan(); err != nil {

@@ -234,6 +234,15 @@ func (s *Service) ListLibraryPaths() ([]models.LibraryPath, error) {
 	return s.ListLibraryPathsInSpace(models.DefaultSpaceID)
 }
 
+// ListAllLibraryPaths 返回所有 Space 的媒体库，仅供后台 watcher 与定时扫描枚举。
+func (s *Service) ListAllLibraryPaths() ([]models.LibraryPath, error) {
+	var paths []models.LibraryPath
+	if err := s.db.Order("space_id ASC, id ASC").Find(&paths).Error; err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
 // ListLibraryPathsInSpace 查询指定 Space 的媒体库目录。
 func (s *Service) ListLibraryPathsInSpace(spaceID string) ([]models.LibraryPath, error) {
 	return s.mediaRepo.ListLibraryPaths(spaceID)
@@ -997,10 +1006,14 @@ func (s *Service) UpdateMediaNotesInSpace(spaceID string, id int64, notes string
 
 // GetMediaFileByPath 根据文件路径查询媒体文件。
 func (s *Service) GetMediaFileByPath(filePath string) (*models.MediaFile, error) {
-	// 统一为正斜杠，与存储格式一致
+	return s.GetMediaFileByPathInSpace(models.DefaultSpaceID, filePath)
+}
+
+// GetMediaFileByPathInSpace 根据 Space 与文件路径查询媒体文件。
+func (s *Service) GetMediaFileByPathInSpace(spaceID, filePath string) (*models.MediaFile, error) {
 	filePath = filepath.ToSlash(filePath)
 	var mf models.MediaFile
-	if err := s.db.Where("file_path = ?", filePath).Where(activeFileStateCondition()).First(&mf).Error; err != nil {
+	if err := s.db.Where("space_id = ? AND file_path = ?", normalizeSpaceID(spaceID), filePath).Where(activeFileStateCondition()).First(&mf).Error; err != nil {
 		return nil, err
 	}
 	return &mf, nil

@@ -13,7 +13,11 @@ func (h *Handler) StartHealthScan(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "HEALTH_UNAVAILABLE", "message": "健康巡检服务未启用"})
 		return
 	}
-	if !h.health.StartScan() {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if !h.health.StartScanInSpace(spaceID) {
 		c.JSON(http.StatusOK, gin.H{"status": "already_running"})
 		return
 	}
@@ -27,7 +31,11 @@ func (h *Handler) HealthStatus(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "HEALTH_UNAVAILABLE", "message": "健康巡检服务未启用"})
 		return
 	}
-	c.JSON(http.StatusOK, h.health.Status())
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, h.health.StatusInSpace(spaceID))
 }
 
 // HealthIssues GET /api/library/health/issues
@@ -38,7 +46,11 @@ func (h *Handler) HealthIssues(c *gin.Context) {
 		return
 	}
 
-	issues, err := h.health.ListIssues()
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	issues, err := h.health.ListIssuesInSpace(spaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询问题清单失败"})
 		return
@@ -54,7 +66,7 @@ func (h *Handler) HealthIssues(c *gin.Context) {
 			"detail":     issue.Detail,
 			"checked_at": issue.CheckedAt,
 		}
-		if mf, err := h.library.GetMediaFileByID(issue.MediaID); err == nil {
+		if mf, err := h.library.GetMediaFileByIDInSpace(spaceID, issue.MediaID); err == nil {
 			item["file_name"] = mf.FileName
 			item["file_path"] = mf.FilePath
 			item["library_id"] = mf.LibraryID

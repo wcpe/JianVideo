@@ -47,8 +47,9 @@ func TestPregenQueue_EnqueueExecuteFlow(t *testing.T) {
 	db := newPregenTestDB(t)
 
 	var gotMedia, gotCalls atomic.Int64
-	var gotCodec atomic.Value
-	exec := func(mediaID int64, codec string) error {
+	var gotCodec, gotSpace atomic.Value
+	exec := func(spaceID string, mediaID int64, codec string) error {
+		gotSpace.Store(spaceID)
 		gotMedia.Store(mediaID)
 		gotCodec.Store(codec)
 		gotCalls.Add(1)
@@ -58,7 +59,7 @@ func TestPregenQueue_EnqueueExecuteFlow(t *testing.T) {
 	q.Start()
 	defer q.Stop()
 
-	id, err := q.Enqueue(42, 1, "h265", 1920, 1080)
+	id, err := q.EnqueueInSpace("space-other", 42, 1, "h265", 1920, 1080)
 	if err != nil {
 		t.Fatalf("入队失败: %v", err)
 	}
@@ -75,6 +76,9 @@ func TestPregenQueue_EnqueueExecuteFlow(t *testing.T) {
 	})
 
 	// 断言 exec 按任务快照的 media_id/codec 被调用（预生成按 preset codec 调 PreSliceWithCodec 的契约）
+	if spaceID, _ := gotSpace.Load().(string); spaceID != "space-other" {
+		t.Fatalf("exec 应收到任务 Space space-other，实际 %q", spaceID)
+	}
 	if gotMedia.Load() != 42 {
 		t.Fatalf("exec 应按任务 media_id=42 调用, 实际 %d", gotMedia.Load())
 	}
@@ -96,7 +100,7 @@ func TestPregenQueue_EnqueueExecuteFlow(t *testing.T) {
 func TestPregenQueue_ErrorFlow(t *testing.T) {
 	db := newPregenTestDB(t)
 
-	exec := func(_ int64, _ string) error {
+	exec := func(_ string, _ int64, _ string) error {
 		return errors.New("预转码失败（测试桩）")
 	}
 	q := NewPregenQueue(db, exec)
@@ -126,7 +130,7 @@ func TestPregenQueue_SerialExecution(t *testing.T) {
 
 	var current, peak int32
 	var mu sync.Mutex
-	exec := func(_ int64, _ string) error {
+	exec := func(_ string, _ int64, _ string) error {
 		c := atomic.AddInt32(&current, 1)
 		mu.Lock()
 		if c > peak {
@@ -195,7 +199,7 @@ func TestPregenQueue_ExistingCapabilityCacheLoadedBeforeRecoveredTask(t *testing
 		t.Fatalf("同步加载能力缓存失败: %v", err)
 	}
 	var selected atomic.Value
-	q := NewPregenQueue(db, func(_ int64, codec string) error {
+	q := NewPregenQueue(db, func(_ string, _ int64, codec string) error {
 		pipeline, err := NewPipelineForCodecWithPolicy(codec, DefaultHardwarePolicy())
 		if err == nil {
 			selected.Store(pipeline.encoderName)
@@ -233,7 +237,7 @@ func TestPregenQueue_RecoverRunning(t *testing.T) {
 	}
 
 	var executed int32
-	exec := func(_ int64, _ string) error {
+	exec := func(_ string, _ int64, _ string) error {
 		atomic.AddInt32(&executed, 1)
 		return nil
 	}
@@ -260,7 +264,7 @@ func TestPregenQueue_RecoverRunning(t *testing.T) {
 // TestPregenQueue_ListTasksFilter 列任务支持按状态过滤、按入队倒序。
 func TestPregenQueue_ListTasksFilter(t *testing.T) {
 	db := newPregenTestDB(t)
-	exec := func(_ int64, _ string) error { return nil }
+	exec := func(_ string, _ int64, _ string) error { return nil }
 	q := NewPregenQueue(db, exec)
 	// 不启动 worker，观察 pending 列表
 	_, _ = q.Enqueue(1, 1, "h264", 0, 0)
@@ -289,7 +293,7 @@ func TestPregenQueue_ListTasksFilter(t *testing.T) {
 
 func TestPregenQueue_CancelAndRetry(t *testing.T) {
 	db := newPregenTestDB(t)
-	q := NewPregenQueue(db, func(int64, string) error { return nil })
+	q := NewPregenQueue(db, func(string, int64, string) error { return nil })
 
 	id, err := q.EnqueueInSpace(models.DefaultSpaceID, 1, 2, "h264", 0, 0)
 	if err != nil {

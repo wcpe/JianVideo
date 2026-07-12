@@ -15,19 +15,14 @@ import (
 func TestGenerateThumbnail_LogsFFmpegStderr(t *testing.T) {
 	const stderrMarker = "Invalid data found when processing input"
 
-	// 注入失败桩：返回带 stderr 关键内容的错误（模拟 realRunFFmpegThumbnail 的输出契约）
-	orig := runFFmpegThumbnail
-	runFFmpegThumbnail = func(_ context.Context, _ []string) error {
-		return errWithStderr(stderrMarker)
-	}
-	t.Cleanup(func() { runFFmpegThumbnail = orig })
-
+	// 每个调用显式传入失败桩，避免修改全局函数产生竞态。
+	runner := func(_ context.Context, _ []string) error { return errWithStderr(stderrMarker) }
 	cases := []struct {
 		name string
 		run  func(string)
 	}{
-		{"图片缩略图", func(p string) { generateImageThumbnail(p, thumbnailWidth) }},
-		{"视频缩略图", func(p string) { generateVideoThumbnail(p, thumbnailWidth) }},
+		{"图片缩略图", func(p string) { generateImageThumbnailWithRunner(p, thumbnailWidth, runner) }},
+		{"视频缩略图", func(p string) { generateVideoThumbnailWithRunner(p, thumbnailWidth, runner) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

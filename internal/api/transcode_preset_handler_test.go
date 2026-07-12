@@ -44,7 +44,7 @@ func setupTranscodeRouter(t *testing.T, pregenExec transcoder.PregenExecFunc) (*
 
 // TestTranscodePreset_CRUD 预设建/列/改/删全流程。
 func TestTranscodePreset_CRUD(t *testing.T) {
-	exec := func(_ int64, _ string) error { return nil }
+	exec := func(_ string, _ int64, _ string) error { return nil }
 	r, _, _ := setupTranscodeRouter(t, exec)
 
 	// 建
@@ -91,7 +91,7 @@ func TestTranscodePreset_CRUD(t *testing.T) {
 
 // TestTranscodePreset_CreateRejectInvalid 非法编码被拒为 400。
 func TestTranscodePreset_CreateRejectInvalid(t *testing.T) {
-	exec := func(_ int64, _ string) error { return nil }
+	exec := func(_ string, _ int64, _ string) error { return nil }
 	r, _, _ := setupTranscodeRouter(t, exec)
 
 	w := doJSON(t, r, "POST", "/api/transcode/presets", `{"name":"x","codec":"mpeg2"}`)
@@ -104,7 +104,7 @@ func TestTranscodePreset_CreateRejectInvalid(t *testing.T) {
 func TestTranscodeTask_EnqueueAndList(t *testing.T) {
 	var gotCodec string
 	done := make(chan struct{})
-	exec := func(_ int64, codec string) error {
+	exec := func(_ string, _ int64, codec string) error {
 		gotCodec = codec
 		close(done)
 		return nil
@@ -158,7 +158,7 @@ func TestTranscodeTask_EnqueueAndList(t *testing.T) {
 
 // TestTranscodeTask_EnqueueRejectMissing 媒体或预设不存在时入队 404。
 func TestTranscodeTask_EnqueueRejectMissing(t *testing.T) {
-	exec := func(_ int64, _ string) error { return nil }
+	exec := func(_ string, _ int64, _ string) error { return nil }
 	r, db, _ := setupTranscodeRouter(t, exec)
 
 	// 媒体不存在

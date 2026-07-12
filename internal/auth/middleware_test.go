@@ -198,10 +198,14 @@ func setupSpaceOwnerGuardRouter(t *testing.T) (*gin.Engine, string) {
 		"/api/library/paths",
 		"/api/play/1/stream",
 		"/api/settings/storage",
+		"/api/albums",
+		"/api/shares",
 	} {
 		r.GET(route, func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 	}
 	r.POST("/api/library/paths", func(c *gin.Context) { c.String(http.StatusCreated, "created") })
+	r.POST("/api/albums", func(c *gin.Context) { c.String(http.StatusCreated, "created") })
+	r.POST("/api/shares", func(c *gin.Context) { c.String(http.StatusCreated, "created") })
 	r.DELETE("/api/library/media/1", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	r.GET("/api/system/info", func(c *gin.Context) { c.String(http.StatusOK, "system") })
 	r.GET("/api/audit/events", func(c *gin.Context) { c.String(http.StatusOK, "audit") })
@@ -237,6 +241,10 @@ func TestSpaceOwnerGuard_AllowsOwnerReadWriteAndList(t *testing.T) {
 		{http.MethodDelete, "/api/library/media/1", http.StatusNoContent},
 		{http.MethodGet, "/api/play/1/stream", http.StatusOK},
 		{http.MethodGet, "/api/settings/storage", http.StatusOK},
+		{http.MethodGet, "/api/albums", http.StatusOK},
+		{http.MethodPost, "/api/albums", http.StatusCreated},
+		{http.MethodGet, "/api/shares", http.StatusOK},
+		{http.MethodPost, "/api/shares", http.StatusCreated},
 	} {
 		w := requestWithUserToken(t, r, secret, "owner", tc.method, tc.path, "space-default")
 		if w.Code != tc.want {
@@ -257,6 +265,10 @@ func TestSpaceOwnerGuard_DeniesNonOwnerReadWriteAndList(t *testing.T) {
 		{http.MethodDelete, "/api/library/media/1"},
 		{http.MethodGet, "/api/play/1/stream"},
 		{http.MethodGet, "/api/settings/storage"},
+		{http.MethodGet, "/api/albums"},
+		{http.MethodPost, "/api/albums"},
+		{http.MethodGet, "/api/shares"},
+		{http.MethodPost, "/api/shares"},
 	} {
 		w := requestWithUserToken(t, r, secret, "other", tc.method, tc.path, "space-default")
 		if w.Code != http.StatusForbidden {

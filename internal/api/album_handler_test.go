@@ -23,12 +23,23 @@ func setupAlbumRouter(t *testing.T) (*gin.Engine, *library.Service) {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.MediaFile{}, &models.Album{}, &models.AlbumItem{}); err != nil {
+	if err := gdb.AutoMigrate(&models.Space{}, &models.MediaFile{}, &models.Album{}, &models.AlbumItem{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
+	}
+	for _, spaceID := range []string{models.DefaultSpaceID, "space-a", "space-b"} {
+		if err := gdb.Create(&models.Space{ID: spaceID, Name: spaceID, OwnerUserID: 1}).Error; err != nil {
+			t.Fatalf("创建测试 Space 失败: %v", err)
+		}
 	}
 	svc := library.NewService(gdb)
 	h := NewHandler(svc)
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if spaceID := c.GetHeader("X-JianVideo-Space-Id"); spaceID != "" {
+			c.Set("space_id", spaceID)
+		}
+		c.Next()
+	})
 	RegisterRoutes(r, h)
 	return r, svc
 }
@@ -162,4 +173,68 @@ func TestDeleteAlbum_NotFound_API(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("删不存在相册期望 404, 实际 %d", w.Code)
 	}
+}
+
+func TestAlbums_AreIsolatedBySpace(t *testing.T) {
+	router, svc := setupAlbumRouter(t)
+	mediaA, err := svc.CreateMediaFileInSpace("space-a", 1, "/a/a.mp4", 1)
+	if err != nil {
+		t.Fatalf("创建 Space A 媒体失败: %v", err)
+	}
+	mediaB, err := svc.CreateMediaFileInSpace("space-b", 2, "/b/b.mp4", 1)
+	if err != nil {
+		t.Fatalf("创建 Space B 媒体失败: %v", err)
+	}
+
+	create := func(spaceID, name string) models.Album {
+		req := httptest.NewRequest(http.MethodPost, "/api/albums", bytes.NewBufferString(`{"name":"`+name+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-JianVideo-Space-Id", spaceID)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("%s 创建相册失败: code=%d body=%s", spaceID, w.Code, w.Body.String())
+		}
+		var album models.Album
+		_ = json.Unmarshal(w.Body.Bytes(), &album)
+		return album
+	}
+	albumA := create("space-a", "A 相册")
+	albumB := create("space-b", "B 相册")
+
+	add := func(spaceID string, albumID, mediaID int64) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/albums/"+strconv.FormatInt(albumID, 10)+"/items", bytes.NewBufferString(`{"media_id":`+strconv.FormatInt(mediaID, 10)+`}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-JianVideo-Space-Id", spaceID)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := add("space-a", albumA.ID, mediaA.ID); code != http.StatusNoContent {
+		t.Fatalf("Space A 加自身媒体应成功，实际 %d", code)
+	}
+	if code := add("space-a", albumA.ID, mediaB.ID); code != http.StatusNotFound {
+		t.Fatalf("Space A 不得加入 Space B 媒体，实际 %d", code)
+	}
+	if code := add("space-b", albumA.ID, mediaB.ID); code != http.StatusNotFound {
+		t.Fatalf("Space B 不得写 Space A 相册，实际 %d", code)
+	}
+
+	for spaceID, wantName := range map[string]string{"space-a": "A 相册", "space-b": "B 相册"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/albums", nil)
+		req.Header.Set("X-JianVideo-Space-Id", spaceID)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(wantName)) {
+			t.Fatalf("%s 只能列举自身相册，code=%d body=%s", spaceID, w.Code, w.Body.String())
+		}
+		otherName := "A 相册"
+		if spaceID == "space-a" {
+			otherName = "B 相册"
+		}
+		if bytes.Contains(w.Body.Bytes(), []byte(otherName)) {
+			t.Fatalf("%s 泄露其他 Space 相册: %s", spaceID, w.Body.String())
+		}
+	}
+	_ = albumB
 }

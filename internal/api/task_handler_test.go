@@ -193,7 +193,7 @@ func TestTaskAPI_LegacyQueueActionsSyncMirror(t *testing.T) {
 
 	svc := tasksvc.NewService(gdb)
 	scanQueue := library.NewTaskQueue(gdb, func(int64, string, string, string) (int, error) { return 0, nil }).WithTasks(svc)
-	pregenQueue := transcoder.NewPregenQueue(gdb, func(int64, string) error { return nil }).WithTasks(svc)
+	pregenQueue := transcoder.NewPregenQueue(gdb, func(string, int64, string) error { return nil }).WithTasks(svc)
 	h := NewHandler(library.NewService(gdb)).WithTasks(svc).WithScanQueue(scanQueue).WithTranscodePresets(nil, pregenQueue)
 	r := gin.New()
 	RegisterRoutes(r, h)

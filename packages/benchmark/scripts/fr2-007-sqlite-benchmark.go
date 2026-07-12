@@ -241,7 +241,7 @@ func spaceTimeSpec(dataset string, rows int64) querySpec {
 		Index:   "idx_media_files_space_added_id",
 		Query:   "space-time-page",
 		Rows:    rows,
-		SQL:     "SELECT id FROM media_files INDEXED BY idx_media_files_space_added_id WHERE id <= ? AND space_id = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
+		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
 	}
 }
 
@@ -252,7 +252,7 @@ func pathPrefixSpec(dataset string, rows int64) querySpec {
 		Index:   "idx_media_files_space_library_path_id",
 		Query:   "path-prefix",
 		Rows:    rows,
-		SQL:     "SELECT id FROM media_files INDEXED BY idx_media_files_space_library_path_id WHERE id <= ? AND space_id = ? AND library_id = ? AND file_path >= ? AND file_path < ? ORDER BY file_path, id LIMIT 50",
+		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND library_id = ? AND file_path >= ? AND file_path < ? ORDER BY file_path, id LIMIT 50",
 	}
 }
 
@@ -263,7 +263,7 @@ func filterSpec(dataset string, rows int64) querySpec {
 		Index:   "idx_media_files_space_format_added_id",
 		Query:   "filter-combination",
 		Rows:    rows,
-		SQL:     "SELECT id FROM media_files INDEXED BY idx_media_files_space_format_added_id WHERE id <= ? AND space_id = ? AND format = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
+		SQL:     "SELECT id FROM media_files WHERE id <= ? AND space_id = ? AND format = ? AND added_at < ? AND deleted_at IS NULL ORDER BY added_at DESC, id DESC LIMIT 50",
 	}
 }
 

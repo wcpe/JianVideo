@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -41,9 +42,13 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-// Create 创建分享：生成加密随机 token 落库。expiresAt 为空表示永不过期。
-// password 非空则以 bcrypt 哈希后存 PasswordHash（绝不存明文）；maxUses 为 0 表示无限次（FR-78）。
+// Create 创建默认 Space 分享。
 func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int) (*models.Share, error) {
+	return s.CreateInSpace(models.DefaultSpaceID, resourceType, resourceID, expiresAt, password, maxUses)
+}
+
+// CreateInSpace 创建指定 Space 分享：生成加密随机 token 落库。
+func (s *Service) CreateInSpace(spaceID, resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int) (*models.Share, error) {
 	if resourceType != models.ShareResourceMedia && resourceType != models.ShareResourceAlbum {
 		return nil, fmt.Errorf("非法分享资源类型: %s", resourceType)
 	}
@@ -62,8 +67,13 @@ func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.
 	if err != nil {
 		return nil, err
 	}
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = models.DefaultSpaceID
+	}
 	sh := &models.Share{
 		Token:        token,
+		SpaceID:      spaceID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		ExpiresAt:    expiresAt,
@@ -128,18 +138,43 @@ func (s *Service) ConsumeUse(token string) error {
 	})
 }
 
-// List 列出全部分享（含已过期，供管理端展示）。
+// List 列出默认 Space 分享。
 func (s *Service) List() ([]models.Share, error) {
+	return s.ListInSpace(models.DefaultSpaceID)
+}
+
+// ListInSpace 列出指定 Space 分享。
+func (s *Service) ListInSpace(spaceID string) ([]models.Share, error) {
 	var shares []models.Share
-	if err := s.db.Order("created_at DESC").Find(&shares).Error; err != nil {
+	if err := s.db.Where("space_id = ?", normalizeSpaceID(spaceID)).Order("created_at DESC").Find(&shares).Error; err != nil {
 		return nil, err
 	}
 	return shares, nil
 }
 
-// Revoke 撤销分享（删除 token）。
+// Revoke 撤销默认 Space 分享。
 func (s *Service) Revoke(token string) error {
-	return s.db.Where("token = ?", token).Delete(&models.Share{}).Error
+	return s.RevokeInSpace(models.DefaultSpaceID, token)
+}
+
+// RevokeInSpace 撤销指定 Space 分享。
+func (s *Service) RevokeInSpace(spaceID, token string) error {
+	result := s.db.Where("space_id = ? AND token = ?", normalizeSpaceID(spaceID), token).Delete(&models.Share{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrShareNotFound
+	}
+	return nil
+}
+
+func normalizeSpaceID(spaceID string) string {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		return models.DefaultSpaceID
+	}
+	return spaceID
 }
 
 // generateToken 生成加密随机 token（不用自增 ID / 时间戳，确保不可枚举）。

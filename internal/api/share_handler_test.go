@@ -30,14 +30,25 @@ func setupShareRouter(t *testing.T) (*gin.Engine, *library.Service, *share.Servi
 	sqlDB, _ := gdb.DB()
 	sqlDB.SetMaxOpenConns(1)
 	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{},
-		&models.Album{}, &models.AlbumItem{}, &models.Share{}); err != nil {
+		&models.Space{}, &models.Album{}, &models.AlbumItem{}, &models.Share{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
+	for _, spaceID := range []string{models.DefaultSpaceID, "space-a", "space-b"} {
+		if err := gdb.Create(&models.Space{ID: spaceID, Name: spaceID, OwnerUserID: 1}).Error; err != nil {
+			t.Fatalf("创建测试 Space 失败: %v", err)
+		}
+	}
 	libSvc := library.NewService(gdb)
 	shareSvc := share.NewService(gdb)
 	h := NewHandler(libSvc).WithShareService(shareSvc)
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if spaceID := c.GetHeader("X-JianVideo-Space-Id"); spaceID != "" {
+			c.Set("space_id", spaceID)
+		}
+		c.Next()
+	})
 	RegisterRoutes(r, h)
 	RegisterShareRoutes(r, h, nil)
 	return r, libSvc, shareSvc
@@ -312,6 +323,48 @@ func TestShare_MaxUsesExhausted(t *testing.T) {
 }
 
 // TestShare_CreateWithPasswordNotPlaintextInDB 带密码创建后库中存哈希、API 不回显（FR-78）。
+func TestShare_ManagementAndPublicTokenAreIsolatedBySpace(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mediaA, err := libSvc.CreateMediaFileInSpace("space-a", 1, filepath.Join(t.TempDir(), "a.mp4"), 1)
+	if err != nil {
+		t.Fatalf("创建 Space A 媒体失败: %v", err)
+	}
+	mediaB, err := libSvc.CreateMediaFileInSpace("space-b", 2, filepath.Join(t.TempDir(), "b.mp4"), 1)
+	if err != nil {
+		t.Fatalf("创建 Space B 媒体失败: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/shares", bytes.NewBufferString(`{"resource_type":"media","resource_id":`+strconv.FormatInt(mediaB.ID, 10)+`}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-JianVideo-Space-Id", "space-b")
+	createdW := httptest.NewRecorder()
+	r.ServeHTTP(createdW, createReq)
+	if createdW.Code != http.StatusCreated {
+		t.Fatalf("Space B 创建自身分享失败: code=%d body=%s", createdW.Code, createdW.Body.String())
+	}
+	var created models.Share
+	_ = json.Unmarshal(createdW.Body.Bytes(), &created)
+	if created.SpaceID != "space-b" {
+		t.Fatalf("分享应归属 space-b，实际 %q", created.SpaceID)
+	}
+
+	listA := httptest.NewRequest(http.MethodGet, "/api/shares", nil)
+	listA.Header.Set("X-JianVideo-Space-Id", "space-a")
+	listAW := httptest.NewRecorder()
+	r.ServeHTTP(listAW, listA)
+	if bytes.Contains(listAW.Body.Bytes(), []byte(created.Token)) {
+		t.Fatalf("Space A 不得列举 Space B 分享: %s", listAW.Body.String())
+	}
+
+	forged, err := shareSvc.CreateInSpace("space-b", models.ShareResourceMedia, mediaA.ID, nil, "", 0)
+	if err != nil {
+		t.Fatalf("创建伪造跨 Space 分享失败: %v", err)
+	}
+	if code := getStatus(r, "/api/share/"+forged.Token); code != http.StatusNotFound {
+		t.Fatalf("公开 token 不得读取其他 Space 资源，实际 %d", code)
+	}
+}
+
 func TestShare_CreateWithPasswordNotPlaintextInDB(t *testing.T) {
 	r, libSvc, shareSvc := setupShareRouter(t)
 	mf := realMedia(t, libSvc, "a.mp4", "A")

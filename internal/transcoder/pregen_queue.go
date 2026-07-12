@@ -18,7 +18,7 @@ import (
 // PregenExecFunc 预生成执行函数签名（FR-77）。
 // 经函数注入而非直接依赖 library/playback，便于队列单测替身并保持 transcoder 依赖单向。
 // 入参为任务快照的媒体与目标编码，由注入方负责反查媒体路径并调 PreSliceWithCodec。
-type PregenExecFunc func(mediaID int64, codec string) error
+type PregenExecFunc func(spaceID string, mediaID int64, codec string) error
 
 // PregenQueue 转码预生成队列（FR-77）：以 SQLite TranscodeTask 表为持久化真源，
 // 单 worker goroutine 串行执行入队任务，服务重启时把残留 running 重置为 pending 重新入队。
@@ -259,7 +259,7 @@ func (q *PregenQueue) nextPending() (models.TranscodeTask, bool) {
 // runTask 执行单个预生成任务并写回终态。预转码（高开销 IO）在锁外。
 func (q *PregenQueue) runTask(task models.TranscodeTask) {
 	log.Printf("[INFO] 开始执行预生成任务: taskID=%d, mediaID=%d, codec=%s", task.ID, task.MediaID, task.Codec)
-	err := q.exec(task.MediaID, task.Codec)
+	err := q.exec(task.SpaceID, task.MediaID, task.Codec)
 	now := time.Now()
 	if err != nil {
 		if txErr := q.db.Transaction(func(tx *gorm.DB) error {
@@ -324,7 +324,7 @@ func (q *PregenQueue) syncTask(task *models.TranscodeTask) {
 		Status:         task.Status,
 		Progress:       progress,
 		IdempotencyKey: fmt.Sprintf("transcode:%d", task.ID),
-		PayloadJSON:    fmt.Sprintf(`{"legacy_table":"transcode_tasks","legacy_id":%d,"media_id":%d,"preset_id":%d,"codec":%q,"width":%d,"height":%d}`, task.ID, task.MediaID, task.PresetID, task.Codec, task.Width, task.Height),
+		PayloadJSON:    fmt.Sprintf(`{"legacy_table":"transcode_tasks","legacy_id":%d,"space_id":%q,"media_id":%d,"preset_id":%d,"codec":%q,"width":%d,"height":%d}`, task.ID, task.SpaceID, task.MediaID, task.PresetID, task.Codec, task.Width, task.Height),
 		ResourceType:   "media",
 		ResourceID:     fmt.Sprintf("%d", task.MediaID),
 		Error:          task.Error,

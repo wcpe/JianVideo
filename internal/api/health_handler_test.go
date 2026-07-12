@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,14 +25,25 @@ func setupHealthRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	}
 	sqlDB, _ := gdb.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.MediaHealthIssue{}); err != nil {
+	if err := gdb.AutoMigrate(&models.Space{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.MediaHealthIssue{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
+	for _, spaceID := range []string{models.DefaultSpaceID, "space-a", "space-b"} {
+		if err := gdb.Create(&models.Space{ID: spaceID, Name: spaceID, OwnerUserID: 1}).Error; err != nil {
+			t.Fatalf("创建测试 Space 失败: %v", err)
+		}
+	}
 	svc := library.NewService(gdb)
 	healthSvc := library.NewDefaultHealthService(gdb)
 	h := NewHandler(svc).WithHealthService(healthSvc)
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if spaceID := c.GetHeader("X-JianVideo-Space-Id"); spaceID != "" {
+			c.Set("space_id", spaceID)
+		}
+		c.Next()
+	})
 	RegisterRoutes(r, h)
 	return r, gdb
 }
@@ -101,6 +113,58 @@ func TestHealthScanFlow(t *testing.T) {
 }
 
 // TestHealthEndpointsUnavailable 未注入健康服务时端点返回 503。
+func TestHealthScanAndIssuesAreIsolatedBySpace(t *testing.T) {
+	r, gdb := setupHealthRouter(t)
+	if err := gdb.Create(&models.MediaFile{ID: 11, SpaceID: "space-a", LibraryID: 1, FilePath: "A:/zero.mp4", FileName: "a.mp4", FileSize: 0}).Error; err != nil {
+		t.Fatalf("创建 Space A 媒体失败: %v", err)
+	}
+	if err := gdb.Create(&models.MediaFile{ID: 22, SpaceID: "space-b", LibraryID: 2, FilePath: "B:/zero.mp4", FileName: "b.mp4", FileSize: 0}).Error; err != nil {
+		t.Fatalf("创建 Space B 媒体失败: %v", err)
+	}
+	if err := gdb.Create(&models.MediaHealthIssue{SpaceID: "space-b", MediaID: 999, IssueType: models.HealthIssueBroken, CheckedAt: time.Now()}).Error; err != nil {
+		t.Fatalf("预置 Space B 问题失败: %v", err)
+	}
+
+	start := httptest.NewRequest(http.MethodPost, "/api/library/health/scan", nil)
+	start.Header.Set("X-JianVideo-Space-Id", "space-a")
+	startW := httptest.NewRecorder()
+	r.ServeHTTP(startW, start)
+	if startW.Code != http.StatusOK {
+		t.Fatalf("触发 Space A 巡检失败: %d %s", startW.Code, startW.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		statusReq := httptest.NewRequest(http.MethodGet, "/api/library/health/status", nil)
+		statusReq.Header.Set("X-JianVideo-Space-Id", "space-a")
+		statusW := httptest.NewRecorder()
+		r.ServeHTTP(statusW, statusReq)
+		var status library.HealthScanStatus
+		_ = json.Unmarshal(statusW.Body.Bytes(), &status)
+		if status.Status == "completed" {
+			if status.Total != 1 || status.IssueCount != 1 {
+				t.Fatalf("Space A 状态不得包含 Space B：%+v", status)
+			}
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	issuesReq := httptest.NewRequest(http.MethodGet, "/api/library/health/issues", nil)
+	issuesReq.Header.Set("X-JianVideo-Space-Id", "space-a")
+	issuesW := httptest.NewRecorder()
+	r.ServeHTTP(issuesW, issuesReq)
+	if bytes.Contains(issuesW.Body.Bytes(), []byte("b.mp4")) || bytes.Contains(issuesW.Body.Bytes(), []byte(`"media_id":999`)) {
+		t.Fatalf("Space A 问题清单泄露 Space B: %s", issuesW.Body.String())
+	}
+	var countB int64
+	if err := gdb.Model(&models.MediaHealthIssue{}).Where("space_id = ?", "space-b").Count(&countB).Error; err != nil {
+		t.Fatalf("统计 Space B 问题失败: %v", err)
+	}
+	if countB != 1 {
+		t.Fatalf("Space A 巡检不得清空 Space B 问题，实际剩余 %d", countB)
+	}
+}
+
 func TestHealthEndpointsUnavailable(t *testing.T) {
 	gdb, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	_ = gdb.AutoMigrate(&models.MediaFile{})

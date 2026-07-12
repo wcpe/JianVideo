@@ -768,10 +768,6 @@ func TestCustomMediaExtensionsPersistAndScan(t *testing.T) {
 
 func TestCustomImageExtensionUsesUnifiedRuleAcrossScanFilterSummaryThumbnail(t *testing.T) {
 	svc, _ := newTestService(t)
-	origRunThumbnail := runThumbnail
-	runThumbnail = func(_ thumbnailJob) {}
-	t.Cleanup(func() { runThumbnail = origRunThumbnail })
-
 	dir := t.TempDir()
 	lp, err := svc.CreateLibraryPath(dir, "local", "自定义图片后缀")
 	if err != nil {
