@@ -272,29 +272,27 @@ func (q *TaskQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
 	spaceID = normalizeSpaceID(spaceID)
 	var task models.ScanTask
 	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		result := tx.Model(&models.ScanTask{}).
+			Where("space_id = ? AND id = ? AND status = ?", spaceID, taskID, models.ScanTaskStatusPending).
+			Updates(map[string]any{
+				"status":       models.ScanTaskStatusCanceled,
+				"completed_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("仅 pending 扫描任务可取消")
+		}
 		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
 			return err
 		}
-		if task.Status != models.ScanTaskStatusPending {
-			return fmt.Errorf("仅 pending 扫描任务可取消")
-		}
-		now := time.Now()
-		if err := tx.Model(&models.ScanTask{}).Where("id = ?", taskID).Updates(map[string]any{
-			"status":       models.ScanTaskStatusCanceled,
-			"completed_at": now,
-		}).Error; err != nil {
-			return err
-		}
-		task.Status = models.ScanTaskStatusCanceled
-		task.CompletedAt = &now
-		q.forgetTarget(taskID)
-		if err := q.recordAuditTx(tx, &task, "task.canceled", ""); err != nil {
-			return err
-		}
-		return nil
+		return q.recordAuditTx(tx, &task, "task.canceled", "")
 	}); err != nil {
 		return err
 	}
+	q.forgetTarget(taskID)
 	q.syncTask(&task)
 	return nil
 }
@@ -371,25 +369,32 @@ func (q *TaskQueue) loop() {
 	}
 }
 
-// nextPending 取最早入队的 pending 任务并置为 running（记 started_at）。
+// nextPending 取最早入队的 pending 任务并原子置为 running（记 started_at）。
 // 返回 (task, true) 表示取到；(_, false) 表示当前无 pending。
 func (q *TaskQueue) nextPending() (models.ScanTask, bool) {
-	var task models.ScanTask
-	err := q.db.Where("status = ?", models.ScanTaskStatusPending).
-		Order("created_at ASC, id ASC").First(&task).Error
-	if err != nil {
-		return models.ScanTask{}, false
+	for {
+		var task models.ScanTask
+		err := q.db.Where("status = ?", models.ScanTaskStatusPending).
+			Order("created_at ASC, id ASC").First(&task).Error
+		if err != nil {
+			return models.ScanTask{}, false
+		}
+		now := time.Now()
+		result := q.db.Model(&models.ScanTask{}).
+			Where("space_id = ? AND id = ? AND status = ?", task.SpaceID, task.ID, models.ScanTaskStatusPending).
+			Updates(map[string]any{"status": models.ScanTaskStatusRunning, "started_at": now})
+		if result.Error != nil {
+			log.Printf("[ERROR] 标记扫描任务为 running 失败: taskID=%d, err=%v", task.ID, result.Error)
+			return models.ScanTask{}, false
+		}
+		if result.RowsAffected != 1 {
+			continue
+		}
+		task.Status = models.ScanTaskStatusRunning
+		task.StartedAt = &now
+		q.syncTask(&task)
+		return task, true
 	}
-	now := time.Now()
-	if err := q.db.Model(&models.ScanTask{}).Where("id = ?", task.ID).
-		Updates(map[string]any{"status": models.ScanTaskStatusRunning, "started_at": now}).Error; err != nil {
-		log.Printf("[ERROR] 标记扫描任务为 running 失败: taskID=%d, err=%v", task.ID, err)
-		return models.ScanTask{}, false
-	}
-	task.Status = models.ScanTaskStatusRunning
-	task.StartedAt = &now
-	q.syncTask(&task)
-	return task, true
 }
 
 // runTask 执行单个任务并写回终态（completed / error）。扫描执行（高开销 IO）在锁外。

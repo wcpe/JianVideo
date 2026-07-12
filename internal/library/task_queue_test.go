@@ -2,6 +2,7 @@ package library
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -35,6 +37,26 @@ func newTaskQueueDB(t *testing.T) *gorm.DB {
 	return gdb
 }
 
+// newConcurrentTaskQueueDB 创建允许并发连接的 WAL 文件库，用于确定性复现领取与取消交错。
+func newConcurrentTaskQueueDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "scan-queue.db")
+	gdb, err := gorm.Open(sqlite.Open(dbPath+"?_busy_timeout=5000&_journal_mode=WAL"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开并发测试数据库失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(4)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := gdb.AutoMigrate(&models.ScanTask{}, &models.LibraryPath{}, &models.AuditEvent{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	return gdb
+}
+
 // waitFor 轮询断言条件在 timeout 内成立，避免对固定时长 sleep 的脆弱依赖。
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
@@ -46,6 +68,136 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("等待条件超时（%s）", timeout)
+}
+
+// TestTaskQueue_CancelBetweenReadAndClaimKeepsCanceledAndContinues 确定性复现 worker 读到候选后取消先提交的交错。
+func TestTaskQueue_CancelBetweenReadAndClaimKeepsCanceledAndContinues(t *testing.T) {
+	gdb := newConcurrentTaskQueueDB(t)
+	claimReady := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	var intercepted atomic.Bool
+	if err := gdb.Callback().Update().Before("gorm:update").Register("test:block_scan_claim", func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "scan_tasks" {
+			return
+		}
+		updates, ok := tx.Statement.Dest.(map[string]any)
+		if !ok || updates["status"] != models.ScanTaskStatusRunning || !intercepted.CompareAndSwap(false, true) {
+			return
+		}
+		close(claimReady)
+		<-releaseClaim
+	}); err != nil {
+		t.Fatalf("注册领取拦截器失败: %v", err)
+	}
+
+	executed := make(chan int64, 2)
+	q := NewTaskQueue(gdb, func(libraryID int64, _, _, _ string) (int, error) {
+		executed <- libraryID
+		return 1, nil
+	}).WithAudit(audit.NewRecorder(gdb))
+	firstID, err := q.EnqueueInSpace("space-a", 1, "/first", "local", models.ScanTypeFull)
+	if err != nil {
+		t.Fatalf("首个任务入队失败: %v", err)
+	}
+	secondID, err := q.EnqueueInSpace("space-a", 2, "/second", "local", models.ScanTypeFull)
+	if err != nil {
+		t.Fatalf("第二个任务入队失败: %v", err)
+	}
+	q.Start()
+	defer q.Stop()
+
+	select {
+	case <-claimReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker 未进入首个任务领取窗口")
+	}
+	if err := q.CancelTaskInSpace("space-a", firstID); err != nil {
+		t.Fatalf("并发取消首个任务失败: %v", err)
+	}
+	close(releaseClaim)
+
+	waitFor(t, 2*time.Second, func() bool {
+		var first, second models.ScanTask
+		return gdb.First(&first, firstID).Error == nil &&
+			gdb.First(&second, secondID).Error == nil &&
+			first.Status == models.ScanTaskStatusCanceled &&
+			second.Status == models.ScanTaskStatusCompleted
+	})
+	select {
+	case libraryID := <-executed:
+		if libraryID != 2 {
+			t.Fatalf("worker 不得执行已取消任务，实际执行 libraryID=%d", libraryID)
+		}
+	default:
+		t.Fatal("worker 领取冲突后应继续执行下一个 pending 任务")
+	}
+	select {
+	case libraryID := <-executed:
+		t.Fatalf("worker 只应执行第二个任务，额外执行 libraryID=%d", libraryID)
+	default:
+	}
+
+	var canceledCount, firstSucceededCount int64
+	gdb.Model(&models.AuditEvent{}).Where("action = ? AND resource_id = ?", "task.canceled", fmt.Sprintf("%d", firstID)).Count(&canceledCount)
+	gdb.Model(&models.AuditEvent{}).Where("action = ? AND resource_id = ?", "task.succeeded", fmt.Sprintf("%d", firstID)).Count(&firstSucceededCount)
+	if canceledCount != 1 || firstSucceededCount != 0 {
+		t.Fatalf("并发取消审计语义异常: canceled=%d first_succeeded=%d", canceledCount, firstSucceededCount)
+	}
+}
+
+// TestTaskQueue_ClaimBetweenCancelReadAndUpdateRejectsCancel 确定性复现取消读取后由 worker 先领取的交错。
+func TestTaskQueue_ClaimBetweenCancelReadAndUpdateRejectsCancel(t *testing.T) {
+	gdb := newConcurrentTaskQueueDB(t)
+	cancelReady := make(chan struct{})
+	releaseCancel := make(chan struct{})
+	var intercepted atomic.Bool
+	if err := gdb.Callback().Update().Before("gorm:update").Register("test:block_scan_cancel", func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "scan_tasks" {
+			return
+		}
+		updates, ok := tx.Statement.Dest.(map[string]any)
+		if !ok || updates["status"] != models.ScanTaskStatusCanceled || !intercepted.CompareAndSwap(false, true) {
+			return
+		}
+		close(cancelReady)
+		<-releaseCancel
+	}); err != nil {
+		t.Fatalf("注册取消拦截器失败: %v", err)
+	}
+
+	q := NewTaskQueue(gdb, func(int64, string, string, string) (int, error) { return 1, nil }).WithAudit(audit.NewRecorder(gdb))
+	taskID, err := q.EnqueueInSpace("space-a", 1, "/first", "local", models.ScanTypeFull)
+	if err != nil {
+		t.Fatalf("任务入队失败: %v", err)
+	}
+	cancelResult := make(chan error, 1)
+	go func() { cancelResult <- q.CancelTaskInSpace("space-a", taskID) }()
+	select {
+	case <-cancelReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("取消操作未进入 CAS 更新窗口")
+	}
+	claimed, ok := q.nextPending()
+	if !ok || claimed.ID != taskID {
+		t.Fatal("worker 应在取消 CAS 前成功领取 pending 任务")
+	}
+	close(releaseCancel)
+	if err := <-cancelResult; err == nil || err.Error() != "仅 pending 扫描任务可取消" {
+		t.Fatalf("任务已被领取后应返回稳定状态错误，实际 %v", err)
+	}
+
+	var task models.ScanTask
+	if err := gdb.First(&task, taskID).Error; err != nil {
+		t.Fatalf("读取任务失败: %v", err)
+	}
+	if task.Status != models.ScanTaskStatusRunning || task.CompletedAt != nil {
+		t.Fatalf("取消失败不得覆盖 running 状态: %+v", task)
+	}
+	var canceledCount int64
+	gdb.Model(&models.AuditEvent{}).Where("action = ? AND resource_id = ?", "task.canceled", fmt.Sprintf("%d", taskID)).Count(&canceledCount)
+	if canceledCount != 0 {
+		t.Fatalf("取消 CAS 失败不得写取消审计，实际 %d 条", canceledCount)
+	}
 }
 
 // TestTaskQueue_EnqueueExecuteFlow 入队→running→completed 状态流转，记录 scanned_files。

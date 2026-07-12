@@ -1,6 +1,6 @@
 # 功能规格：存储库、Space 归属与数据库索引基线
 
-> 状态：已交付@v0.23.0　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-007-complete`
+> 状态：验收阻塞　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-007-complete`
 
 ## 1. 背景与目标
 
@@ -64,7 +64,11 @@ Repository：
 Benchmark：
 
 - 复用 `packages/benchmark` 与 FR2-063 数据集生成思路，新增生产 schema 查询 harness。
-- 报告进 `.tmp/benchmark/fr2-007/`，记录数据规模、索引列表、SQL/参数、p95/p99、扫描行数、是否达标。
+- 正式门禁命令：`go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go`，依次运行 1m/5m/10m 数据集；任一查询超过阈值时进程必须非零退出。
+- 小规模回归命令：`go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go -rows=1000,5000,10000 -output-dir=.tmp/benchmark/fr2-007/regression-small-current`。
+- 阈值沿用 FR2-003：5m 的时间分页不超过 200ms、路径前缀与筛选组合不超过 300ms；10m 分别不超过 500ms、800ms、800ms。
+- 数据集必须覆盖多个 Space，查询固定命中目标 Space 并校验结果 ID 归属；使用生产 DSN、8/8 连接池、生产迁移与生产查询 SQL，不使用 `INDEXED BY` 等强制索引提示。
+- 报告进 `.tmp/benchmark/fr2-007/`，保存真实 `EXPLAIN QUERY PLAN`、`results.json` 与 `summary.md`，记录数据规模、Space 分布、索引列表、SQL/参数、p95/p99 与是否达标。
 
 ## 4. 任务拆分
 
@@ -79,7 +83,7 @@ Benchmark：
 - [x] 补集成测试：默认 Space 创建、跨 Space 隔离、索引存在、旧 page 兼容。
 - [x] 补 owner-only 权限测试：owner 正常，非 owner 读/写/列举拒绝，未认证与非法 Space 拒绝。
 - [x] 补 Web 设置闭环：展示存储目录、索引库、当前 Space，并复用媒体库管理页维护目录。
-- [x] 补 Benchmark 验收：FR2-003 后端门槛对照。
+- [ ] 补 Benchmark 验收：当前真实 1m/5m/10m 报告未达到 FR2-003 后端门槛，保持阻塞。
 - [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
@@ -96,12 +100,14 @@ Benchmark：
 - `go test`、Benchmark、`pnpm run quality` 全绿。
 - Go 单二进制 serve 后，真实 API 带/不带 Space header 的列表与详情隔离行为通过集成复验。
 
-## 6. 交付证据（2026-07-12）
+## 6. 当前证据（2026-07-12）
 
-- `go test ./...` 全绿，覆盖 API、auth、web、迁移、library 与 Go e2e；owner/非 owner/匿名/非法或不存在 Space、审计目标 Space、stream/HLS 跨 Space 媒体归属均有自动化用例。
-- `npm test`（`frontend/`）通过 128 个测试文件、880 个测试；`npm run lint` 与 `npm run build` 通过。
-- Chromium Playwright 用例“设置页展示存储与 Space 并进入媒体库管理”通过，验证真实 Go 单二进制、真实 API、设置区块与管理页跳转闭环。
-- `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go` 完成 1m/5m/10m 九组查询；10m 的 Space + 时间分页、路径前缀、筛选组合 p95 分别为 1.008ms、1.009ms、1.506ms，均使用目标组合索引并低于 500ms/800ms/800ms 门槛。报告位于本机 `.tmp/benchmark/fr2-007/`，不入库。
+- 小规模命令 `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go -rows=1000,5000,10000 -output-dir=.tmp/benchmark/fr2-007/regression-small-current` 通过，验证多 Space 数据生成、目标 Space 结果隔离、真实查询计划与报告输出。
+- 阻断门回归使用更严格且不可放宽阈值的 `-threshold-scale=0.000001`，进程以非零退出并输出中文“基准未达阈值，阻断交付”。
+- 正式命令 `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go` 已真实完成 1m/5m/10m 九组查询，报告位于 `.tmp/benchmark/fr2-007/final-current/`；10m 四个 Space 各 250 万行，九组查询的结果隔离均通过。
+- 正式门禁未通过：10m 的 Space + 时间分页、路径前缀、筛选组合 p95 分别为 7864.747ms、7362.836ms、9292.577ms，高于 500ms/800ms/800ms 门槛；进程非零退出。
+- 真实 `EXPLAIN QUERY PLAN` 显示三类查询均选择 `idx_media_files_space_deleted_id`，并使用临时 B-Tree 排序；在未强制索引的生产等价 SQL 下形成当前性能阻塞。
+- 因新报告未达标，FR2-007 不保留“已交付”状态；后续必须按 FR2-003 要求修正查询/索引策略并重新生成全绿报告，方可恢复已交付。
 
 ## 7. 风险 / 待定
 

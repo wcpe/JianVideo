@@ -160,21 +160,22 @@ func (q *PregenQueue) CancelTaskInSpace(spaceID string, taskID int64) error {
 	spaceID = normalizeTaskSpaceID(spaceID)
 	var task models.TranscodeTask
 	if err := q.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		result := tx.Model(&models.TranscodeTask{}).
+			Where("space_id = ? AND id = ? AND status = ?", spaceID, taskID, models.TranscodeTaskStatusPending).
+			Updates(map[string]any{
+				"status":       models.TranscodeTaskStatusCanceled,
+				"completed_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("仅 pending 预生成任务可取消")
+		}
 		if err := tx.Where("space_id = ? AND id = ?", spaceID, taskID).First(&task).Error; err != nil {
 			return err
 		}
-		if task.Status != models.TranscodeTaskStatusPending {
-			return fmt.Errorf("仅 pending 预生成任务可取消")
-		}
-		now := time.Now()
-		if err := tx.Model(&models.TranscodeTask{}).Where("id = ?", taskID).Updates(map[string]any{
-			"status":       models.TranscodeTaskStatusCanceled,
-			"completed_at": now,
-		}).Error; err != nil {
-			return err
-		}
-		task.Status = models.TranscodeTaskStatusCanceled
-		task.CompletedAt = &now
 		return q.recordAuditTx(tx, &task, "task.canceled", "")
 	}); err != nil {
 		return err
@@ -236,24 +237,31 @@ func (q *PregenQueue) loop() {
 	}
 }
 
-// nextPending 取最早入队的 pending 任务并置为 running（记 started_at）。
+// nextPending 取最早入队的 pending 任务并原子置为 running（记 started_at）。
 func (q *PregenQueue) nextPending() (models.TranscodeTask, bool) {
-	var task models.TranscodeTask
-	err := q.db.Where("status = ?", models.TranscodeTaskStatusPending).
-		Order("created_at ASC, id ASC").First(&task).Error
-	if err != nil {
-		return models.TranscodeTask{}, false
+	for {
+		var task models.TranscodeTask
+		err := q.db.Where("status = ?", models.TranscodeTaskStatusPending).
+			Order("created_at ASC, id ASC").First(&task).Error
+		if err != nil {
+			return models.TranscodeTask{}, false
+		}
+		now := time.Now()
+		result := q.db.Model(&models.TranscodeTask{}).
+			Where("space_id = ? AND id = ? AND status = ?", task.SpaceID, task.ID, models.TranscodeTaskStatusPending).
+			Updates(map[string]any{"status": models.TranscodeTaskStatusRunning, "started_at": now})
+		if result.Error != nil {
+			log.Printf("[ERROR] 标记预生成任务为 running 失败: taskID=%d, err=%v", task.ID, result.Error)
+			return models.TranscodeTask{}, false
+		}
+		if result.RowsAffected != 1 {
+			continue
+		}
+		task.Status = models.TranscodeTaskStatusRunning
+		task.StartedAt = &now
+		q.syncTask(&task)
+		return task, true
 	}
-	now := time.Now()
-	if err := q.db.Model(&models.TranscodeTask{}).Where("id = ?", task.ID).
-		Updates(map[string]any{"status": models.TranscodeTaskStatusRunning, "started_at": now}).Error; err != nil {
-		log.Printf("[ERROR] 标记预生成任务为 running 失败: taskID=%d, err=%v", task.ID, err)
-		return models.TranscodeTask{}, false
-	}
-	task.Status = models.TranscodeTaskStatusRunning
-	task.StartedAt = &now
-	q.syncTask(&task)
-	return task, true
 }
 
 // runTask 执行单个预生成任务并写回终态。预转码（高开销 IO）在锁外。
