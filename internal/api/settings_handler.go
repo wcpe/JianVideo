@@ -1,15 +1,52 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
+
+// GetStorageSettings GET /api/settings/storage
+// 返回当前 owner 可查看的 Space、数据目录与索引库路径。
+func (h *Handler) GetStorageSettings(c *gin.Context) {
+	spaceID := models.DefaultSpaceID
+	if value, ok := c.Get("space_id"); ok {
+		spaceID, _ = value.(string)
+	}
+	space, err := h.library.GetSpace(spaceID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "SPACE_NOT_FOUND", "message": "Space 不存在"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询 Space 失败"})
+		return
+	}
+	libraryCount, err := h.library.CountLibraryPathsInSpace(spaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询媒体库目录失败"})
+		return
+	}
+	dataDir := ""
+	if h.dbPath != "" {
+		dataDir = filepath.Dir(h.dbPath)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"space":         space,
+		"data_dir":      dataDir,
+		"database_path": h.dbPath,
+		"library_count": libraryCount,
+	})
+}
 
 // GetSettings GET /api/settings
 // 返回全部运行期设置，形如 {"settings": {"scan_interval": "3600", ...}}。

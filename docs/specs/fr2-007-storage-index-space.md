@@ -1,6 +1,6 @@
 # 功能规格：存储库、Space 归属与数据库索引基线
 
-> 状态：已审核接受　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已交付@v0.23.0　·　关联 PRD：FR2-007　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-007-complete`
 
 ## 1. 背景与目标
 
@@ -18,7 +18,9 @@ P2 要让“存储库扫描”取代 Web 上传成为主入口，并为 500 万�
 - 新增 `spaces` 表，启动时确保存在默认 Space。
 - P2 最小归属阶段记录默认 Space owner 的迁移线索：可在 `spaces.owner_user_id` 保存现有单用户，或预留 `space_members` 默认 owner 记录；完整角色矩阵仍归属 P5。
 - `library_paths`、`media_files` 等现有资源新增非空 `space_id`，历史数据归入默认 Space。
-- 所有媒体列表、详情、目录浏览、统计、扫描入口必须按 Space 过滤；缺失 Space header 使用默认 Space，非法、不存在或无权限 Space 不得跨 Space 返回数据，也不得静默回退默认 Space。
+- 所有媒体列表、详情、目录浏览、统计、扫描与播放入口必须按 Space 过滤；缺失 Space header 使用默认 Space，非法、不存在或无权限 Space 不得跨 Space 返回数据，也不得静默回退默认 Space。
+- P2 权限固定为 owner-only：仅 `spaces.owner_user_id` 对应的当前认证用户可读、写或列举该 Space 资源；非 owner 统一拒绝，不扩展 editor/viewer 或通用 RBAC。
+- Web 设置必须展示当前 owner 的 Space、存储数据目录、SQLite 索引库路径和已注册目录数量，并能进入现有媒体库管理页维护目录。
 - 新增关键组合索引，覆盖：
   - Space + 媒体时间 + id 游标分页。
   - Space + 路径/库 + id。
@@ -43,7 +45,8 @@ Schema：
 Space 上下文：
 
 - API 层读取 `X-JianVideo-Space-Id`；缺失时使用默认 Space，保持单用户兼容。
-- 不存在、无权限或格式非法的 Space header 必须返回明确错误，不得静默回退默认 Space。
+- 认证后由统一 owner 守卫在业务 handler 前对 Space 资源执行 `当前用户 ID == spaces.owner_user_id` 校验，覆盖 HLS/stream 等直出路径；不在各 handler 散落权限判断。
+- 不存在、非 owner 或格式非法的 Space header 分别返回 404、403、400，不得静默回退默认 Space。
 - 服务层方法显式接收 `spaceID` 或 Space-scoped query 参数。
 - repository 层强制 Space 过滤，测试覆盖“跨 Space 查不到”。
 
@@ -65,17 +68,19 @@ Benchmark：
 
 ## 4. 任务拆分
 
-- [ ] 定义 `spaces` 与 `space_id` schema，补默认 Space 初始化。
-- [ ] 为 `library_paths`、`media_files` 增加 Space 字段、约束和组合索引。
-- [ ] 新增媒体查询 repository 接口与 SQLite/GORM 实现。
-- [ ] API 层接入 `X-JianVideo-Space-Id`，缺省回退默认 Space。
-- [ ] 媒体列表、详情、目录浏览、统计、扫描入口改为 Space scoped。
-- [ ] 增加 cursor 分页查询与兼容响应字段。
-- [ ] 建立 1m/5m/10m 本机 Benchmark harness 与报告输出。
-- [ ] 补单元测试：Space 上下文解析、cursor 编解码、查询条件组合。
-- [ ] 补集成测试：默认 Space 创建、跨 Space 隔离、索引存在、旧 page 兼容。
-- [ ] 补 Benchmark 验收：FR2-003 后端门槛对照。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义 `spaces` 与 `space_id` schema，补默认 Space 初始化。
+- [x] 为 `library_paths`、`media_files` 增加 Space 字段、约束和组合索引。
+- [x] 新增媒体查询 repository 接口与 SQLite/GORM 实现。
+- [x] API 层接入 `X-JianVideo-Space-Id`，缺省回退默认 Space。
+- [x] 媒体列表、详情、目录浏览、统计、扫描入口改为 Space scoped。
+- [x] 增加 cursor 分页查询与兼容响应字段。
+- [x] 建立 1m/5m/10m 本机 Benchmark harness 与报告输出。
+- [x] 补单元测试：Space 上下文解析、cursor 编解码、查询条件组合。
+- [x] 补集成测试：默认 Space 创建、跨 Space 隔离、索引存在、旧 page 兼容。
+- [x] 补 owner-only 权限测试：owner 正常，非 owner 读/写/列举拒绝，未认证与非法 Space 拒绝。
+- [x] 补 Web 设置闭环：展示存储目录、索引库、当前 Space，并复用媒体库管理页维护目录。
+- [x] 补 Benchmark 验收：FR2-003 后端门槛对照。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 
@@ -83,13 +88,22 @@ Benchmark：
 - 缺失 Space header 使用默认 Space；不存在、无权限或格式非法的 Space header 返回错误且不得回退默认 Space。
 - 默认 Space 记录能追溯现有单用户 owner，为 P5 `space_members` 迁移提供依据。
 - 带 Space A 请求无法读到 Space B 的媒体列表、详情、目录浏览和统计结果。
+- 仅 Space owner 可读、写、列举该 Space 资源；非 owner 返回 `403 SPACE_FORBIDDEN`，未认证返回 401。
+- Web 设置页可查看当前 Space、存储数据目录、SQLite 索引库路径与目录数，并可进入媒体库管理页维护目录。
 - 关键组合索引存在，Benchmark 报告记录并证明目标查询使用对应索引或给出可解释替代。
 - 5m/10m 数据集下，FR2-003 §4 中 Space + 时间分页、路径前缀、筛选组合达到或明确标注未达标阻塞；任务查询门槛与 FR2-037 合批核销。
 - 旧 `GET /api/library/media?page=&page_size=` 仍可用；v2 cursor 查询可用。
 - `go test`、Benchmark、`pnpm run quality` 全绿。
 - Go 单二进制 serve 后，真实 API 带/不带 Space header 的列表与详情隔离行为通过集成复验。
 
-## 6. 风险 / 待定
+## 6. 交付证据（2026-07-12）
+
+- `go test ./...` 全绿，覆盖 API、auth、web、迁移、library 与 Go e2e；owner/非 owner/匿名/非法或不存在 Space、审计目标 Space、stream/HLS 跨 Space 媒体归属均有自动化用例。
+- `npm test`（`frontend/`）通过 128 个测试文件、880 个测试；`npm run lint` 与 `npm run build` 通过。
+- Chromium Playwright 用例“设置页展示存储与 Space 并进入媒体库管理”通过，验证真实 Go 单二进制、真实 API、设置区块与管理页跳转闭环。
+- `go run packages/benchmark/scripts/fr2-007-sqlite-benchmark.go` 完成 1m/5m/10m 九组查询；10m 的 Space + 时间分页、路径前缀、筛选组合 p95 分别为 1.008ms、1.009ms、1.506ms，均使用目标组合索引并低于 500ms/800ms/800ms 门槛。报告位于本机 `.tmp/benchmark/fr2-007/`，不入库。
+
+## 7. 风险 / 待定
 
 - 已确认：默认 Space ID 使用稳定字符串，便于 mock/client 对齐；默认 owner 使用 `spaces.owner_user_id`。
 - 已确认：旧 page API 返回 cursor 字段，但不要求旧前端消费。

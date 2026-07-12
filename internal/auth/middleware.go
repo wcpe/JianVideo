@@ -7,7 +7,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const cookieName = "auth_token"
+const (
+	cookieName     = "auth_token"
+	spaceHeader    = "X-JianVideo-Space-Id"
+	defaultSpaceID = "space-default"
+)
 
 // Middleware JWT 认证中间件
 func Middleware(jwtSecret string) gin.HandlerFunc {
@@ -79,6 +83,94 @@ func APIGuard(jwtSecret string) gin.HandlerFunc {
 		c.Set("username", claims.Username)
 		c.Next()
 	}
+}
+
+// SpaceOwnerGuard 对 Space 资源统一执行 owner-only 校验。
+func SpaceOwnerGuard(svc *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requiresSpaceOwner(c) || authorizeSpaceOwner(c, svc) {
+			c.Next()
+		}
+	}
+}
+
+func authorizeSpaceOwner(c *gin.Context, svc *Service) bool {
+	spaceID, ok := requestedSpaceID(c)
+	if !ok {
+		return false
+	}
+	username, ok := currentUsername(c)
+	if !ok {
+		return false
+	}
+	exists, owned, err := svc.SpaceAccess(username, spaceID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "校验 Space 权限失败"})
+		return false
+	}
+	if !exists {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"code": "SPACE_NOT_FOUND", "message": "Space 不存在"})
+		return false
+	}
+	if !owned {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "SPACE_FORBIDDEN", "message": "仅 Space owner 可访问"})
+		return false
+	}
+	c.Set("space_id", spaceID)
+	return true
+}
+
+func requestedSpaceID(c *gin.Context) (string, bool) {
+	spaceID := strings.TrimSpace(c.GetHeader(spaceHeader))
+	if c.Request.URL.Path == "/api/audit/events" && c.Query("scope") != "system" {
+		if querySpaceID := strings.TrimSpace(c.Query("space_id")); querySpaceID != "" {
+			spaceID = querySpaceID
+		}
+	}
+	if spaceID == "" {
+		spaceID = defaultSpaceID
+	}
+	if validSpaceID(spaceID) {
+		return spaceID, true
+	}
+	c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "INVALID_SPACE", "message": "Space ID 不合法"})
+	return "", false
+}
+
+func currentUsername(c *gin.Context) (string, bool) {
+	value, ok := c.Get("username")
+	username, valid := value.(string)
+	if ok && valid && strings.TrimSpace(username) != "" {
+		return username, true
+	}
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "请先登录"})
+	return "", false
+}
+
+func requiresSpaceOwner(c *gin.Context) bool {
+	path := c.Request.URL.Path
+	for _, prefix := range []string{"/api/library", "/api/media-types", "/api/play", "/api/transcode/tasks", "/api/storage/cache", "/api/settings/storage"} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	if strings.HasPrefix(path, "/api/tasks") || strings.HasPrefix(path, "/api/audit/events") {
+		return c.Query("scope") != "system"
+	}
+	return false
+}
+
+func validSpaceID(spaceID string) bool {
+	if spaceID == "" || len(spaceID) > 128 {
+		return false
+	}
+	for _, ch := range spaceID {
+		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_' || ch == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // extractToken 从请求中提取 JWT：优先 Cookie，其次 Authorization: Bearer。

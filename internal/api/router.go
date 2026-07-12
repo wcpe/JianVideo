@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 )
@@ -213,6 +215,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	// 运行期设置（FR-24）：键值读写
 	settingsGroup := r.Group("/api/settings")
 	{
+		settingsGroup.GET("/storage", h.GetStorageSettings)
 		settingsGroup.GET("/definitions", h.GetSettingDefinitions)
 		settingsGroup.GET("", h.GetSettings)
 		settingsGroup.PUT("", h.UpdateSettings)
@@ -321,7 +324,7 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 //
 // master 内容里的 playlist 路径写 "{quality}.m3u8"（与 master 同目录），
 // hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。
-func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) {
+func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service) {
 	r.GET("/api/play/hls/*path", func(c *gin.Context) {
 		relPath := c.Param("path")
 		// 去掉前导 /
@@ -336,6 +339,9 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) 
 		mediaID, err := strconv.ParseInt(parts[0], 10, 64)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
+			return
+		}
+		if !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
 			return
 		}
 		rest := ""
@@ -363,6 +369,18 @@ func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string) 
 		c.Header("Content-Type", detectHLSMimeType(relPath))
 		c.File(fullPath)
 	})
+}
+
+func mediaBelongsToRequestedSpace(c *gin.Context, libraryService *library.Service, mediaID int64) bool {
+	spaceID := c.GetString("space_id")
+	if spaceID == "" {
+		spaceID = models.DefaultSpaceID
+	}
+	if _, err := libraryService.GetMediaFileByIDInSpace(spaceID, mediaID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return false
+	}
+	return true
 }
 
 // detectHLSMimeType 根据 HLS 文件路径返回对应的 Content-Type。

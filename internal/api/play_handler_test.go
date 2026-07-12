@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
+	"github.com/wcpe/JianVideo/internal/player"
 )
 
 // setupPlayTestRouter 创建带播放路由的测试路由器。
@@ -24,6 +27,47 @@ func setupPlayTestRouter(t *testing.T) (*gin.Engine, *library.Service, *playback
 	r := gin.New()
 	RegisterRoutes(r, h, pbSvc)
 	return r, libSvc, pbSvc
+}
+
+// TestHLSRoute_RejectsMediaOutsideRequestedSpace 验证 HLS 直出不会跨 Space 读取媒体。
+func TestHLSRoute_RejectsMediaOutsideRequestedSpace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupTestDB(t)
+	defaultMedia := models.MediaFile{SpaceID: models.DefaultSpaceID, LibraryID: 1, FilePath: "D:/default.mp4", FileName: "default.mp4"}
+	otherMedia := models.MediaFile{SpaceID: "space-other", LibraryID: 2, FilePath: "D:/other.mp4", FileName: "other.mp4"}
+	if err := db.Create(&defaultMedia).Error; err != nil {
+		t.Fatalf("创建默认 Space 媒体失败: %v", err)
+	}
+	if err := db.Create(&otherMedia).Error; err != nil {
+		t.Fatalf("创建其他 Space 媒体失败: %v", err)
+	}
+
+	hlsMgr := player.NewHLSManager(t.TempDir())
+	if err := hlsMgr.SaveMasterM3U8(defaultMedia.ID, "#EXTM3U\n"); err != nil {
+		t.Fatalf("创建 HLS master 失败: %v", err)
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("space_id", c.GetHeader("X-JianVideo-Space-Id"))
+		c.Next()
+	})
+	RegisterHLSRoutes(router, hlsMgr, t.TempDir(), library.NewService(db))
+
+	deniedReq := httptest.NewRequest(http.MethodGet, "/api/play/hls/"+strconv.FormatInt(defaultMedia.ID, 10)+"/master.m3u8", nil)
+	deniedReq.Header.Set("X-JianVideo-Space-Id", "space-other")
+	denied := httptest.NewRecorder()
+	router.ServeHTTP(denied, deniedReq)
+	if denied.Code != http.StatusNotFound {
+		t.Fatalf("其他 Space 不得读取默认 Space HLS, 期望 404, 实际 %d", denied.Code)
+	}
+
+	allowedReq := httptest.NewRequest(http.MethodGet, "/api/play/hls/"+strconv.FormatInt(defaultMedia.ID, 10)+"/master.m3u8", nil)
+	allowedReq.Header.Set("X-JianVideo-Space-Id", models.DefaultSpaceID)
+	allowed := httptest.NewRecorder()
+	router.ServeHTTP(allowed, allowedReq)
+	if allowed.Code != http.StatusOK || allowed.Body.String() != "#EXTM3U\n" {
+		t.Fatalf("默认 Space 应可读取自身 HLS, code=%d body=%q", allowed.Code, allowed.Body.String())
+	}
 }
 
 // TestStreamHandler_InvalidID 测试无效的媒体 ID 格式。

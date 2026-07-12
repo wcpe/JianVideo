@@ -1,6 +1,17 @@
 import type { SettingDefinition, SettingsMap } from '@/types';
 import client from './client';
 
+export interface StorageSettingsInfo {
+  space: {
+    id: string;
+    name: string;
+    owner_user_id: number;
+  };
+  data_dir: string;
+  database_path: string;
+  library_count: number;
+}
+
 // 使用构建时环境变量决定是否启用 mock 模式
 const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
@@ -38,6 +49,11 @@ function mockDelay(ms: number): Promise<void> {
 }
 
 // ─── 真实 API 实现 ──────────────────────────────────
+
+async function realGetStorageSettings(): Promise<StorageSettingsInfo> {
+  const res = await client.get<StorageSettingsInfo>('/api/settings/storage');
+  return res.data;
+}
 
 async function realGetSettings(): Promise<SettingsMap> {
   const res = await client.get<{ settings: SettingsMap }>('/api/settings');
@@ -284,6 +300,16 @@ const mockDefinitions: SettingDefinition[] = [
   },
 ];
 
+async function mockGetStorageSettings(): Promise<StorageSettingsInfo> {
+  await mockDelay(80);
+  return {
+    space: { id: 'space-default', name: '默认 Space', owner_user_id: 1 },
+    data_dir: 'data',
+    database_path: 'data/jianvideo.db',
+    library_count: 0,
+  };
+}
+
 async function mockGetSettings(): Promise<SettingsMap> {
   await mockDelay(150);
   return { ...mockStore };
@@ -301,6 +327,10 @@ async function mockGetSettingDefinitions(): Promise<SettingDefinition[]> {
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
+
+export function getStorageSettings(): Promise<StorageSettingsInfo> {
+  return useMock ? mockGetStorageSettings() : realGetStorageSettings();
+}
 
 export function getSettings(): Promise<SettingsMap> {
   return useMock ? mockGetSettings() : realGetSettings();

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -23,14 +24,46 @@ func setupSettingsRouter(t *testing.T) *gin.Engine {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.Setting{}); err != nil {
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Space{}, &models.LibraryPath{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
+	if err := gdb.Create(&models.Space{ID: models.DefaultSpaceID, Name: "默认 Space", OwnerUserID: 1}).Error; err != nil {
+		t.Fatalf("创建默认 Space 失败: %v", err)
+	}
 
-	h := NewHandler(library.NewService(gdb)).WithSettings(settings.NewService(gdb))
+	h := NewHandler(library.NewService(gdb)).WithSettings(settings.NewService(gdb)).WithDBPath("D:/jianvideo-data/jianvideo.db")
 	r := gin.New()
 	RegisterRoutes(r, h)
 	return r
+}
+
+func TestSettings_StorageInfoShowsSpaceAndSeparatedPaths(t *testing.T) {
+	router := setupSettingsRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/storage", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("存储信息期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Space        models.Space `json:"space"`
+		DataDir      string       `json:"data_dir"`
+		DatabasePath string       `json:"database_path"`
+		LibraryCount int          `json:"library_count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析存储信息失败: %v", err)
+	}
+	if resp.Space.ID != models.DefaultSpaceID || resp.Space.Name != "默认 Space" {
+		t.Fatalf("当前 Space 不正确: %+v", resp.Space)
+	}
+	if resp.DataDir != filepath.Dir("D:/jianvideo-data/jianvideo.db") || resp.DatabasePath != "D:/jianvideo-data/jianvideo.db" {
+		t.Fatalf("目录与索引库路径不正确: data=%q db=%q", resp.DataDir, resp.DatabasePath)
+	}
+	if resp.LibraryCount != 0 {
+		t.Fatalf("空库目录计数应为 0, 实际 %d", resp.LibraryCount)
+	}
 }
 
 // TestSettings_PutThenGet PUT 写入后 GET 能读回（持久化往返）。

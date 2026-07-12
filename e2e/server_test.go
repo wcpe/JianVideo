@@ -29,12 +29,22 @@ import (
 // FR-109 起 NewRouter 不再自动建号，依赖 admin 登录的 e2e 用例在搭建后显式播种。
 func seedAdmin(t *testing.T, gormDB *gorm.DB, secret string) {
 	t.Helper()
+	if err := gormDB.AutoMigrate(&models.Space{}); err != nil {
+		t.Fatalf("迁移 Space 测试表失败: %v", err)
+	}
 	sqlDB, err := gormDB.DB()
 	if err != nil {
 		t.Fatalf("获取 sql.DB 失败: %v", err)
 	}
 	if err := auth.NewService(sqlDB, secret).CreateDefaultUser(); err != nil {
 		t.Fatalf("播种默认用户失败: %v", err)
+	}
+	if err := gormDB.FirstOrCreate(&models.Space{
+		ID:          models.DefaultSpaceID,
+		Name:        "默认 Space",
+		OwnerUserID: 1,
+	}).Error; err != nil {
+		t.Fatalf("播种默认 Space 失败: %v", err)
 	}
 }
 

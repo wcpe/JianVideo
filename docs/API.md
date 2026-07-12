@@ -11,7 +11,7 @@
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
 - **静态资源**：前端文件通过 `go:embed` 内嵌，由 `/` 路径提供服务
 - **数据库迁移（FR2-017）**：当前切片不新增对外 HTTP 迁移端点。v0.20 到 v2 schema 升级在服务启动期由 `internal/migration` 执行；dry-run、备份校验、重入和校验能力先作为 Go 内部契约提供，供后续 CLI 或管理端点复用。
-- **Space 头（FR2-007）**：`GET/POST /api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及 `/api/transcode/tasks`、`/api/tasks` 任务入口支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`。当前仅实现最小 owner 归属，不暴露成员/角色矩阵。
+- **Space 头与权限（FR2-007）**：`/api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及播放、`/api/transcode/tasks`、Space scoped `/api/tasks`、`/api/audit/events`、`/api/storage/cache`、`/api/settings/storage` 支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`；当前 JWT 用户不是该 Space 的 `owner_user_id` 时返回 `403 SPACE_FORBIDDEN`。审计查询显式携带 `space_id` 时以该查询值作为实际授权目标，不能用默认 Space owner 身份查询其他 Space；stream/HLS 除 owner 校验外还会确认媒体记录属于该 Space。P2 仅实现 owner-only，不暴露成员/角色矩阵；系统级 `scope=system` 任务/审计与非 Space 系统端点不走 Space owner 守卫。
 
 ## 2. 错误约定
 
@@ -1410,6 +1410,22 @@
     "media_files_count": 1500
   }
   ```
+
+### 读取存储与 Space 信息（FR2-007）
+
+- **方法 / 路径**：`GET /api/settings/storage`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：
+  ```json
+  {
+    "space": {"id": "space-default", "name": "默认 Space", "owner_user_id": 1},
+    "data_dir": "D:/JianVideo/data",
+    "database_path": "D:/JianVideo/data/jianvideo.db",
+    "library_count": 3
+  }
+  ```
+- **说明**：仅 Space owner 可读。`data_dir` 是 SQLite 索引库、缩略图、HLS 与可重建缓存所在的数据目录；原媒体仍保留在媒体库注册目录。Web 设置页展示这些信息，并跳转现有媒体库管理页完成目录增删改。
+- **错误**：`400 INVALID_SPACE`、`401 UNAUTHORIZED`、`403 SPACE_FORBIDDEN`、`404 SPACE_NOT_FOUND`
 
 ### 读取运行期设置
 

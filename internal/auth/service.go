@@ -98,6 +98,23 @@ func (s *Service) ChangePassword(username, currentPassword, newPassword string) 
 	return models.UpdateUserPassword(s.db, username, string(hash))
 }
 
+// SpaceAccess 返回目标 Space 是否存在，以及当前用户是否为其 owner。
+func (s *Service) SpaceAccess(username, spaceID string) (bool, bool, error) {
+	var ownerUserID int64
+	err := s.db.QueryRow("SELECT owner_user_id FROM spaces WHERE id = ?", spaceID).Scan(&ownerUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	user, err := models.FindUserByUsername(s.db, username)
+	if err != nil {
+		return true, false, err
+	}
+	return true, user != nil && int64(user.ID) == ownerUserID, nil
+}
+
 // Login 验证用户凭据
 func (s *Service) Login(username, password string) (*models.User, error) {
 	user, err := models.FindUserByUsername(s.db, username)

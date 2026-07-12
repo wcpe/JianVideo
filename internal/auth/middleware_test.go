@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func setupTestRouter(secret string) *gin.Engine {
@@ -167,6 +169,148 @@ func TestAPIGuard_ExemptsAuthAndHealth(t *testing.T) {
 	r.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusOK {
 		t.Errorf("/health 应放行返回 200, 得到 %d", w2.Code)
+	}
+}
+
+func setupSpaceOwnerGuardRouter(t *testing.T) (*gin.Engine, string) {
+	t.Helper()
+	secret := "test-secret"
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at DATETIME NOT NULL)`,
+		`CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id INTEGER NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
+		`INSERT INTO users(id, username, password_hash, created_at) VALUES (1, 'owner', 'x', datetime('now')), (2, 'other', 'x', datetime('now'))`,
+		`INSERT INTO spaces(id, name, owner_user_id, created_at, updated_at) VALUES ('space-default', '默认 Space', 1, datetime('now'), datetime('now')), ('space-other', '其他 Space', 2, datetime('now'), datetime('now'))`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("初始化测试数据失败: %v", err)
+		}
+	}
+
+	r := gin.New()
+	r.Use(APIGuard(secret), SpaceOwnerGuard(NewService(db, secret)))
+	for _, route := range []string{
+		"/api/library/media",
+		"/api/library/paths",
+		"/api/play/1/stream",
+		"/api/settings/storage",
+	} {
+		r.GET(route, func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	}
+	r.POST("/api/library/paths", func(c *gin.Context) { c.String(http.StatusCreated, "created") })
+	r.DELETE("/api/library/media/1", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.GET("/api/system/info", func(c *gin.Context) { c.String(http.StatusOK, "system") })
+	r.GET("/api/audit/events", func(c *gin.Context) { c.String(http.StatusOK, "audit") })
+	return r, secret
+}
+
+func requestWithUserToken(t *testing.T, r *gin.Engine, secret, username, method, path, spaceID string) *httptest.ResponseRecorder {
+	t.Helper()
+	token, err := GenerateToken(username, secret, time.Hour)
+	if err != nil {
+		t.Fatalf("生成令牌失败: %v", err)
+	}
+	req := httptest.NewRequest(method, path, nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	if spaceID != "" {
+		req.Header.Set("X-JianVideo-Space-Id", spaceID)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestSpaceOwnerGuard_AllowsOwnerReadWriteAndList(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+	for _, tc := range []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodGet, "/api/library/media", http.StatusOK},
+		{http.MethodGet, "/api/library/paths", http.StatusOK},
+		{http.MethodPost, "/api/library/paths", http.StatusCreated},
+		{http.MethodDelete, "/api/library/media/1", http.StatusNoContent},
+		{http.MethodGet, "/api/play/1/stream", http.StatusOK},
+		{http.MethodGet, "/api/settings/storage", http.StatusOK},
+	} {
+		w := requestWithUserToken(t, r, secret, "owner", tc.method, tc.path, "space-default")
+		if w.Code != tc.want {
+			t.Fatalf("owner %s %s 期望 %d, 实际 %d, body: %s", tc.method, tc.path, tc.want, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestSpaceOwnerGuard_DeniesNonOwnerReadWriteAndList(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/library/media"},
+		{http.MethodGet, "/api/library/paths"},
+		{http.MethodPost, "/api/library/paths"},
+		{http.MethodDelete, "/api/library/media/1"},
+		{http.MethodGet, "/api/play/1/stream"},
+		{http.MethodGet, "/api/settings/storage"},
+	} {
+		w := requestWithUserToken(t, r, secret, "other", tc.method, tc.path, "space-default")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("非 owner %s %s 期望 403, 实际 %d, body: %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestSpaceOwnerGuard_RejectsUnauthenticatedInvalidAndMissingSpace(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+
+	unauthenticated := httptest.NewRecorder()
+	r.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/library/media", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("未认证请求期望 401, 实际 %d", unauthenticated.Code)
+	}
+
+	invalid := requestWithUserToken(t, r, secret, "owner", http.MethodGet, "/api/library/media", "bad space")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("非法 Space 期望 400, 实际 %d", invalid.Code)
+	}
+
+	missing := requestWithUserToken(t, r, secret, "owner", http.MethodGet, "/api/library/media", "space-missing")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("不存在 Space 期望 404, 实际 %d", missing.Code)
+	}
+}
+
+func TestSpaceOwnerGuard_AuthorizesAuditQuerySpace(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+
+	forbidden := requestWithUserToken(t, r, secret, "owner", http.MethodGet, "/api/audit/events?space_id=space-other", "space-default")
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("默认 Space owner 查询其他 Space 审计应返回 403, 实际 %d", forbidden.Code)
+	}
+
+	allowed := requestWithUserToken(t, r, secret, "other", http.MethodGet, "/api/audit/events?space_id=space-other", "")
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("目标 Space owner 查询自身审计应返回 200, 实际 %d", allowed.Code)
+	}
+
+	invalid := requestWithUserToken(t, r, secret, "owner", http.MethodGet, "/api/audit/events?space_id=bad%20space", "")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("非法审计 Space 应返回 400, 实际 %d", invalid.Code)
+	}
+}
+
+func TestSpaceOwnerGuard_DoesNotBlockSystemEndpoint(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+	for _, path := range []string{"/api/system/info", "/api/audit/events?scope=system"} {
+		w := requestWithUserToken(t, r, secret, "other", http.MethodGet, path, "space-default")
+		if w.Code != http.StatusOK {
+			t.Fatalf("系统端点 %s 不应被 owner 守卫阻断, 实际 %d", path, w.Code)
+		}
 	}
 }
 

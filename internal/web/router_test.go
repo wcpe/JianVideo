@@ -5,7 +5,9 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -18,6 +20,8 @@ import (
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 )
 
@@ -34,6 +38,7 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 		&models.MediaFile{},
 		&models.MediaExtension{},
 		&models.User{},
+		&models.Space{},
 		&models.PlaybackSession{},
 	); err != nil {
 		t.Fatalf("自动迁移失败: %v", err)
@@ -55,7 +60,102 @@ func setupTestRouter(t *testing.T) *gin.Engine {
 	if err := auth.NewService(sqlDB, cfg.JWTSecret).CreateDefaultUser(); err != nil {
 		t.Fatalf("播种默认用户失败: %v", err)
 	}
+	if err := gormDB.FirstOrCreate(&models.Space{ID: models.DefaultSpaceID, Name: "默认 Space", OwnerUserID: 1}).Error; err != nil {
+		t.Fatalf("播种默认 Space 失败: %v", err)
+	}
 	return r
+}
+
+// TestNewRouter_DefaultHandlerExposesStorageSettings 验证默认装配也注入数据库路径。
+func TestNewRouter_DefaultHandlerExposesStorageSettings(t *testing.T) {
+	router := setupTestRouter(t)
+	token, err := auth.GenerateToken("admin", "test-secret", time.Hour)
+	if err != nil {
+		t.Fatalf("生成令牌失败: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/storage", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("读取存储设置期望 200, 实际 %d, body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Space        models.Space `json:"space"`
+		DatabasePath string       `json:"database_path"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析存储设置失败: %v", err)
+	}
+	if body.Space.ID != models.DefaultSpaceID || body.DatabasePath != ":memory:" {
+		t.Fatalf("默认路由未完整注入 Space 或数据库路径: %+v", body)
+	}
+}
+
+// TestRegisterStreamRoute_RejectsMediaOutsideRequestedSpace 验证流式播放按 Space 查询媒体。
+func TestRegisterStreamRoute_RejectsMediaOutsideRequestedSpace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dbPath := filepath.Join(t.TempDir(), "stream-space.db")
+	gormDB, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gormDB.AutoMigrate(&models.User{}, &models.Space{}, &models.MediaFile{}); err != nil {
+		t.Fatalf("迁移测试数据库失败: %v", err)
+	}
+	users := []models.User{
+		{ID: 1, Username: "owner", PasswordHash: "x"},
+		{ID: 2, Username: "other", PasswordHash: "x"},
+	}
+	spaces := []models.Space{
+		{ID: models.DefaultSpaceID, Name: "默认 Space", OwnerUserID: 1},
+		{ID: "space-other", Name: "其他 Space", OwnerUserID: 2},
+	}
+	if err := gormDB.Create(&users).Error; err != nil {
+		t.Fatalf("创建测试用户失败: %v", err)
+	}
+	if err := gormDB.Create(&spaces).Error; err != nil {
+		t.Fatalf("创建测试 Space 失败: %v", err)
+	}
+	mediaPath := filepath.Join(t.TempDir(), "default.mp4")
+	if err := os.WriteFile(mediaPath, []byte("default-space-media"), 0o600); err != nil {
+		t.Fatalf("创建测试媒体失败: %v", err)
+	}
+	media := models.MediaFile{SpaceID: models.DefaultSpaceID, LibraryID: 1, FilePath: mediaPath, FileName: "default.mp4", FileSize: 19}
+	if err := gormDB.Create(&media).Error; err != nil {
+		t.Fatalf("创建媒体记录失败: %v", err)
+	}
+
+	sqlDB, _ := gormDB.DB()
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	secret := "test-secret"
+	playbackSvc := playback.NewService()
+	t.Cleanup(playbackSvc.Stop)
+	router := gin.New()
+	router.Use(auth.APIGuard(secret), auth.SpaceOwnerGuard(auth.NewService(sqlDB, secret)))
+	registerStreamRoute(router, library.NewService(gormDB), playbackSvc)
+
+	request := func(username, spaceID string) *httptest.ResponseRecorder {
+		token, tokenErr := auth.GenerateToken(username, secret, time.Hour)
+		if tokenErr != nil {
+			t.Fatalf("生成令牌失败: %v", tokenErr)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/play/"+strconv.FormatInt(media.ID, 10)+"/stream", nil)
+		req.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+		req.Header.Set("X-JianVideo-Space-Id", spaceID)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	denied := request("other", "space-other")
+	if denied.Code != http.StatusNotFound {
+		t.Fatalf("其他 Space owner 不得读取默认 Space 媒体, 期望 404, 实际 %d", denied.Code)
+	}
+	allowed := request("owner", models.DefaultSpaceID)
+	if allowed.Code != http.StatusOK || allowed.Body.String() != "default-space-media" {
+		t.Fatalf("默认 Space owner 应可读取自身媒体, code=%d body=%q", allowed.Code, allowed.Body.String())
+	}
 }
 
 // setupFreshRouter 构建一个「尚无任何用户」的路由（独立临时文件库，不播种），

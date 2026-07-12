@@ -158,7 +158,7 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
 
-FR2-007 仅落最小 Space 归属：`library_paths` 与 `media_files` 均带非空 `space_id`，缺失 `X-JianVideo-Space-Id` 时使用默认 Space；完整成员/角色矩阵留后续迭代。媒体列表、详情、目录浏览、统计和扫描入口均在 API 层解析 Space，再由 repository/service 查询强制带 `space_id`。
+FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 `media_files` 均带非空 `space_id`，缺失 `X-JianVideo-Space-Id` 时使用默认 Space；`auth.SpaceOwnerGuard` 在 Space 资源进入 API handler 前统一校验当前 JWT 用户是否匹配 `spaces.owner_user_id`，非 owner 返回 `403 SPACE_FORBIDDEN`，不存在或非法 Space 分别返回 404/400，且不会回退默认 Space。完整成员/角色矩阵仍留后续迭代。媒体列表、详情、播放、目录浏览、统计、扫描、Space scoped 任务/审计与缓存入口继续由 repository/service 强制带 `space_id`；审计的 `space_id` 查询参数作为实际授权目标，HLS/stream 等非 handler 直出路径在 owner 守卫后还会按 `space_id + media_id` 验证媒体归属，避免仅凭其他 Space 的 owner 身份读取跨 Space 媒体。Web 设置页通过 `GET /api/settings/storage` 展示当前 Space、存储数据目录、SQLite 索引库路径与已注册目录数，并复用媒体库管理页完成目录增删改。
 
 **媒体库目录（library_paths）**
 

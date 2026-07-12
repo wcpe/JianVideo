@@ -21,9 +21,11 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconTrash, IconPlus, IconDownload } from '@tabler/icons-react';
+import { Link } from 'react-router-dom';
 import {
   getSettingDefinitions,
   getSettings,
+  getStorageSettings,
   updateSettings,
   SETTING_SENSITIVE_DISPLAY_VALUE,
   SETTING_KEY_RECYCLE_BIN_PATHS,
@@ -65,9 +67,11 @@ import type {
   ToolSource,
   ToolStatus,
 } from '@/types';
+import type { StorageSettingsInfo } from '@/api/settings';
 
 // 设置页左侧锚点（FR-113）：各分区标题挂同名 id，点击滚动定位、滚动高亮
 const SETTINGS_ANCHORS = [
+  { id: 'set-storage', label: '存储与 Space' },
   { id: 'set-account', label: '账户安全' },
   { id: 'set-scan', label: '扫描' },
   { id: 'set-upload', label: '上传' },
@@ -116,6 +120,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [definitions, setDefinitions] = useState<Record<string, SettingDefinition>>({});
+  const [storageInfo, setStorageInfo] = useState<StorageSettingsInfo | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
 
   // 修改密码（FR-108）：独立于设置读写，不被设置加载阻塞
   const [currentPassword, setCurrentPassword] = useState('');
@@ -154,6 +160,21 @@ export default function SettingsPage() {
     reachable: boolean;
     detail: string;
   } | null>(null);
+
+  // 挂载时加载 owner 可见的存储目录、索引库与 Space 信息。
+  useEffect(() => {
+    let active = true;
+    getStorageSettings()
+      .then((data) => {
+        if (active) setStorageInfo(data);
+      })
+      .catch((err) => {
+        if (active) setStorageError(extractErrorMessage(err, '加载存储与 Space 信息失败'));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // 挂载时加载现有设置
   useEffect(() => {
@@ -536,6 +557,59 @@ export default function SettingsPage() {
       </Box>
       <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
         <Title order={2}>设置</Title>
+
+        <Title id="set-storage" order={3}>
+          存储与 Space
+        </Title>
+        {storageError ? (
+          <Alert icon={<IconAlertCircle size={16} />} color="red" title="加载失败">
+            {storageError}
+          </Alert>
+        ) : storageInfo ? (
+          <Card withBorder padding="md" radius="md">
+            <Stack gap="sm">
+              <Group justify="space-between" align="flex-start">
+                <Box>
+                  <Text size="sm" c="dimmed">
+                    当前 Space
+                  </Text>
+                  <Group gap="xs">
+                    <Text fw={600}>{storageInfo.space.name}</Text>
+                    <Code>{storageInfo.space.id}</Code>
+                    <Badge color="purple">owner</Badge>
+                  </Group>
+                </Box>
+                <Badge variant="light">{storageInfo.library_count} 个已注册目录</Badge>
+              </Group>
+              <Box>
+                <Text size="sm" c="dimmed">
+                  存储数据目录
+                </Text>
+                <Code>{storageInfo.data_dir || '未配置'}</Code>
+              </Box>
+              <Box>
+                <Text size="sm" c="dimmed">
+                  SQLite 索引库
+                </Text>
+                <Code>{storageInfo.database_path || '未配置'}</Code>
+              </Box>
+              <Text size="xs" c="dimmed">
+                原媒体保留在已注册媒体库目录；缩略图、HLS、缓存与 SQLite
+                索引库位于存储数据目录，实现原媒体与可重建索引分离。
+              </Text>
+              <Button
+                component={Link}
+                to="/library-manager"
+                variant="default"
+                style={{ alignSelf: 'flex-start' }}
+              >
+                管理媒体库目录
+              </Button>
+            </Stack>
+          </Card>
+        ) : (
+          <Skeleton height={190} radius="md" />
+        )}
 
         {/* 账户安全（FR-108）：修改当前登录用户密码，独立于下方运行期设置 */}
         <Title id="set-account" order={3}>

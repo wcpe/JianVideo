@@ -133,6 +133,22 @@ func (s *Service) SpaceExists(spaceID string) (bool, error) {
 	return count == 1, nil
 }
 
+// GetSpace 返回指定 Space 的基础归属信息。
+func (s *Service) GetSpace(spaceID string) (*models.Space, error) {
+	var space models.Space
+	if err := s.db.Where("id = ?", normalizeSpaceID(spaceID)).First(&space).Error; err != nil {
+		return nil, err
+	}
+	return &space, nil
+}
+
+// CountLibraryPathsInSpace 返回指定 Space 已注册媒体库目录数量。
+func (s *Service) CountLibraryPathsInSpace(spaceID string) (int64, error) {
+	var count int64
+	err := s.db.Model(&models.LibraryPath{}).Where("space_id = ?", normalizeSpaceID(spaceID)).Count(&count).Error
+	return count, err
+}
+
 // SetSMBCredentialStore 设置 SMB 凭据存储器。
 func (s *Service) SetSMBCredentialStore(store *smb.CredentialStore) {
 	s.smbCredsMu.Lock()

@@ -69,6 +69,20 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     await expect(page.getByPlaceholder(/搜索：文件名/)).toBeVisible();
   });
 
+  test('设置页展示存储与 Space 并进入媒体库管理', async ({ page }) => {
+    await login(page);
+    await page.goto('/system?tab=settings');
+
+    await expect(page.getByRole('heading', { name: '存储与 Space' })).toBeVisible();
+    await expect(page.getByText('默认 Space')).toBeVisible();
+    await expect(page.getByText('space-default')).toBeVisible();
+    await expect(page.getByText(/\.tmp[\\/]e2e\.db/).first()).toBeVisible();
+
+    await page.getByRole('link', { name: '管理媒体库目录' }).click();
+    await expect(page).toHaveURL(/\/library-manager/);
+    await expect(page.getByRole('heading', { name: '存储库管理' })).toBeVisible();
+  });
+
   test('管理页添加并移除媒体库目录', async ({ page }) => {
     // 后端要求本地路径真实存在，故创建临时目录作为样本；用例结束清理库记录与目录
     const dir = mkdtempSync(join(tmpdir(), 'jianvideo-browse-e2e-'));

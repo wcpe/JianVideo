@@ -16,6 +16,7 @@ import (
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/api"
 	"github.com/wcpe/JianVideo/internal/auth"
+	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
@@ -67,7 +68,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 
 	// 全局鉴权中间件：保护除 /api/auth/ 外的所有 /api/* 路由（FR-13）。
 	// 必须在注册业务路由之前挂上，确保库 / 播放 / HLS / 设置 / 相册等全部受保护。
-	r.Use(auth.APIGuard(cfg.JWTSecret))
+	r.Use(auth.APIGuard(cfg.JWTSecret), auth.SpaceOwnerGuard(svc))
 
 	// FR-109：不再自动创建 admin/admin 默认账户。系统无用户时由前端初始化引导页
 	// 经 /api/auth/setup 创建首个账户（见下方认证路由）。
@@ -78,7 +79,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	if overrideHandler != nil {
 		apiHandler = overrideHandler
 	} else {
-		apiHandler = api.NewHandler(libSvc).WithSettings(settings.NewService(db))
+		apiHandler = api.NewHandler(libSvc).WithSettings(settings.NewService(db)).WithDBPath(cfg.DBPath)
 	}
 
 	// 注册 API 路由（库路由）
@@ -87,7 +88,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	// HLS 路由：master 动态读取 + 其余静态文件服务挂载 hlsDir
 	hlsDir := filepath.Join(filepath.Dir(cfg.DBPath), "hls")
 	if hlsMgr != nil {
-		api.RegisterHLSRoutes(r, hlsMgr, hlsDir)
+		api.RegisterHLSRoutes(r, hlsMgr, hlsDir, libSvc)
 	}
 
 	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，
@@ -137,7 +138,11 @@ func registerStreamRoute(r *gin.Engine, libSvc *library.Service, pbSvc *playback
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 			return
 		}
-		mf, err := libSvc.GetMediaFileByID(id)
+		spaceID := c.GetString("space_id")
+		if spaceID == "" {
+			spaceID = models.DefaultSpaceID
+		}
+		mf, err := libSvc.GetMediaFileByIDInSpace(spaceID, id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 			return

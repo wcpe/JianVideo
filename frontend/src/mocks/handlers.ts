@@ -1743,6 +1743,16 @@ export const handlers = [
 
   // ─── 运行期设置 ────────────────────────────────────────
 
+  http.get('*/api/settings/storage', async () => {
+    await delay(80);
+    return HttpResponse.json({
+      space: { id: 'space-default', name: '默认 Space', owner_user_id: 1 },
+      data_dir: 'data',
+      database_path: 'data/jianvideo.db',
+      library_count: paths.length,
+    });
+  }),
+
   http.get('*/api/settings', async () => {
     await delay(100);
     return HttpResponse.json({ settings: { ...settingsStore } });

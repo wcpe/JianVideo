@@ -75,6 +75,32 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.network_proxy).toBeUndefined();
   });
 
+  it('owner 可查看存储目录、索引库与当前 Space，并进入媒体库管理', async () => {
+    server.use(
+      http.get('*/api/settings/storage', () =>
+        HttpResponse.json({
+          space: { id: 'space-default', name: '默认 Space', owner_user_id: 1 },
+          data_dir: 'D:/jianvideo-data',
+          database_path: 'D:/jianvideo-data/jianvideo.db',
+          library_count: 2,
+        }),
+      ),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: '存储与 Space' })).toBeVisible();
+    expect(screen.getByText('默认 Space')).toBeVisible();
+    expect(screen.getByText('space-default')).toBeVisible();
+    expect(screen.getByText('D:/jianvideo-data')).toBeVisible();
+    expect(screen.getByText('D:/jianvideo-data/jianvideo.db')).toBeVisible();
+    expect(screen.getByText('2 个已注册目录')).toBeVisible();
+    expect(screen.getByRole('link', { name: '管理媒体库目录' })).toHaveAttribute(
+      'href',
+      '/library-manager',
+    );
+  });
+
   it('设置项按「扫描 / 网络 / 工具路径 / 回收站」分区且字段归位', async () => {
     renderPage();
     await screen.findByLabelText('扫描周期（秒）');
