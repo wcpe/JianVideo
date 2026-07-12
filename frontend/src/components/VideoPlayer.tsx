@@ -26,6 +26,8 @@ interface VideoPlayerProps {
    * 缺省时保持现有 url/isABR/streamType 行为不变（现有调用方零改动）。
    */
   descriptor?: PlaybackDescriptor;
+  /** 可选视频海报；只传给原生 video，不参与播放状态机。 */
+  poster?: string;
   /** 自动播放 */
   autoPlay?: boolean;
   /** 当前播放路径发生不可恢复错误时通知调用方切换 fallback。 */
@@ -145,6 +147,7 @@ function resolveDescriptor(
 export default function VideoPlayer({
   url,
   descriptor,
+  poster,
   autoPlay = true,
   subtitleEntries,
   subtitleVisible = false,
@@ -732,6 +735,7 @@ export default function VideoPlayer({
       >
         <video
           ref={videoRef}
+          poster={poster}
           style={{ width: '100%', height: '100%', backgroundColor: 'black', objectFit: 'contain' }}
           playsInline
           onError={() => onPlaybackErrorRef.current?.()}

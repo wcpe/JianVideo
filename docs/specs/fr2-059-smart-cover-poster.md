@@ -29,8 +29,8 @@
 
 Schema：
 
-- `media_covers`：`media_id`、`space_id`、`selected_asset_id`、`source`、`manual`、`updated_at`。
-- `cover_candidates`：`id`、`media_id`、`asset_id`、`timestamp_seconds`、`score`、`created_at`。
+- `media_covers`：`media_id`、`space_id`、`selected_asset_id`、`selected_source`、`selected_timestamp_seconds`、`selected_fingerprint`、`manual`、`updated_at`。
+- `cover_candidates`：`id`、`media_id`、`space_id`、`asset_id`、`source`、`timestamp_seconds`、`fingerprint`、`score`、`created_at`、`updated_at`。
 - 人工选择语义不得只依赖可清理的 `selected_asset_id`；必须同时保存 `selected_source`、`selected_timestamp_seconds`、`manual` 和候选指纹。封面缓存被清理后，重建应能按这些字段恢复同一选择语义。
 
 任务：
@@ -43,6 +43,7 @@ API：
 - `GET /api/library/media/:id/covers`
 - `POST /api/library/media/:id/covers/generate`
 - `PUT /api/library/media/:id/cover`
+- `GET /api/library/media/:id/covers/:candidate_id/image`
 
 前端：
 
@@ -51,16 +52,16 @@ API：
 
 ## 4. 任务拆分
 
-- [ ] 定义封面与候选 schema。
-- [ ] 实现本地抽帧候选生成任务。
-- [ ] 接入缓存资产登记和清理重建。
-- [ ] 新增封面查询/生成/选择 API。
-- [ ] 前端详情页封面选择与列表回退展示。
-- [ ] 接入审计事件。
-- [ ] 补单元测试：候选时间点、选择逻辑、回退策略。
-- [ ] 补集成测试：视频生成候选、选择、清理后重建。
-- [ ] 补 E2E：详情页更换封面并列表同步。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义封面与候选 schema。
+- [x] 实现本地抽帧候选生成任务。
+- [x] 接入缓存资产登记和清理重建。
+- [x] 新增封面查询/生成/选择 API。
+- [x] 前端详情页封面选择与列表回退展示。
+- [x] 接入审计事件。
+- [x] 补单元测试：候选时间点、选择逻辑、回退策略。
+- [x] 补集成测试：视频生成候选、选择、清理后重建。
+- [x] 补 E2E：详情页更换封面并列表同步。
+- [x] 文档同步：ARCHITECTURE、API、CHANGELOG；PRD 验收状态留待最终全量门禁后更新。
 
 ## 5. 验收标准
 

@@ -26,6 +26,8 @@ import type {
   MediaInference,
   MediaInferenceInput,
   MediaMetadata,
+  MediaCover,
+  MediaCoversResponse,
 } from '@/types';
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -304,6 +306,26 @@ async function realGetMediaFile(id: number): Promise<MediaFile> {
 async function realGetMediaMetadata(id: number): Promise<MediaMetadata[]> {
   const res = await client.get<{ items: MediaMetadata[] }>(`/api/library/media/${id}/metadata`);
   return res.data.items;
+}
+
+async function realGetMediaCovers(id: number): Promise<MediaCoversResponse> {
+  const res = await client.get<MediaCoversResponse>(`/api/library/media/${id}/covers`);
+  return res.data;
+}
+
+async function realGenerateMediaCovers(id: number, refresh: boolean): Promise<{ status: string; task_id: number }> {
+  const res = await client.post<{ status: string; task_id: number }>(
+    `/api/library/media/${id}/covers/generate`,
+    { refresh },
+  );
+  return res.data;
+}
+
+async function realSelectMediaCover(id: number, candidateID: number): Promise<MediaCover> {
+  const res = await client.put<MediaCover>(`/api/library/media/${id}/cover`, {
+    candidate_id: candidateID,
+  });
+  return res.data;
 }
 
 async function realGetMediaInference(id: number): Promise<MediaInference | null> {
@@ -759,6 +781,20 @@ async function mockGetMediaMetadata(): Promise<MediaMetadata[]> {
   return [];
 }
 
+async function mockGetMediaCovers(): Promise<MediaCoversResponse> {
+  await mockDelay(80);
+  return { cover: null, candidates: [] };
+}
+
+async function mockGenerateMediaCovers(): Promise<{ status: string; task_id: number }> {
+  await mockDelay(80);
+  return { status: 'pending', task_id: nextMockTaskId++ };
+}
+
+async function mockSelectMediaCover(): Promise<MediaCover> {
+  throw new Error('mock 模式没有可选择的封面候选');
+}
+
 async function mockGetMediaInference(id: number): Promise<MediaInference | null> {
   await mockDelay(80);
   return mockInferences.get(id) ?? null;
@@ -1189,6 +1225,15 @@ export function getMediaFile(id: number) {
 }
 export function getMediaMetadata(id: number) {
   return useMock ? mockGetMediaMetadata() : realGetMediaMetadata(id);
+}
+export function getMediaCovers(id: number) {
+  return useMock ? mockGetMediaCovers() : realGetMediaCovers(id);
+}
+export function generateMediaCovers(id: number, refresh: boolean) {
+  return useMock ? mockGenerateMediaCovers() : realGenerateMediaCovers(id, refresh);
+}
+export function selectMediaCover(id: number, candidateID: number) {
+  return useMock ? mockSelectMediaCover() : realSelectMediaCover(id, candidateID);
 }
 export function getMediaInference(id: number) {
   return useMock ? mockGetMediaInference(id) : realGetMediaInference(id);

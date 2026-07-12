@@ -202,6 +202,36 @@ func SupportedThumbnailSizes() []int {
 	return []int{160, 320, 640}
 }
 
+// GenerateVideoFrameFile 在指定时间点同步抽取视频帧，供智能封面任务复用缩略图 FFmpeg 基础设施。
+func GenerateVideoFrameFile(ctx context.Context, filePath string, timestamp float64, size int, outputPath string) error {
+	if strings.TrimSpace(outputPath) == "" {
+		return errors.New("封面输出路径不能为空")
+	}
+	if timestamp < 0 {
+		return errors.New("封面时间点不能为负数")
+	}
+	size = normalizeThumbnailSize(size)
+	key := "cover\x00" + filepath.ToSlash(filepath.Clean(outputPath))
+	return thumbnailFlights.do(key, func() error {
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o750); err != nil {
+			return fmt.Errorf("创建封面目录失败: %w", err)
+		}
+		tempPath := outputPath + ".tmp.jpg"
+		_ = os.Remove(tempPath)
+		defer func() { _ = os.Remove(tempPath) }()
+		commandCtx, cancel := context.WithTimeout(ctx, thumbnailFFmpegTimeout)
+		defer cancel()
+		args := buildVideoFrameArgs(filePath, tempPath, timestamp, size)
+		if err := realRunFFmpegThumbnail(commandCtx, args); err != nil {
+			return err
+		}
+		if err := os.Rename(tempPath, outputPath); err != nil {
+			return fmt.Errorf("提交封面文件失败: %w", err)
+		}
+		return nil
+	})
+}
+
 // GenerateThumbnailFile 同步生成指定输出路径的缩略图，供通用任务 worker 使用。
 func GenerateThumbnailFile(ctx context.Context, filePath, mediaType string, size int, outputPath string) error {
 	if strings.TrimSpace(outputPath) == "" {
@@ -348,8 +378,13 @@ func buildImageThumbnailArgs(filePath, outputPath string, width int) []string {
 
 // buildVideoThumbnailArgs 构造视频缩略图的 ffmpeg 参数（取第 2 秒帧、缩放至 width 宽并合成中性灰底）。
 func buildVideoThumbnailArgs(filePath, outputPath string, width int) []string {
+	return buildVideoFrameArgs(filePath, outputPath, 2, width)
+}
+
+// buildVideoFrameArgs 构造指定时间点的视频抽帧参数。
+func buildVideoFrameArgs(filePath, outputPath string, timestamp float64, width int) []string {
 	return []string{
-		"-ss", "00:00:02", "-i", filePath,
+		"-ss", strconv.FormatFloat(timestamp, 'f', 3, 64), "-i", filePath,
 		"-f", "lavfi", "-i", "color=c=0x" + thumbnailMatteColor,
 		"-filter_complex", matteFilterComplex(width),
 		"-frames:v", "1", "-y", outputPath,

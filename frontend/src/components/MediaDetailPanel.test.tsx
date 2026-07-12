@@ -9,10 +9,21 @@ import type { MediaFile } from '@/types';
 
 const mockNavigate = vi.fn();
 const mockGetMediaMetadata = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockGetMediaCovers = vi.hoisted(() => vi.fn().mockResolvedValue({ cover: null, candidates: [] }));
+const mockGenerateMediaCovers = vi.hoisted(() => vi.fn().mockResolvedValue({ status: 'pending', task_id: 1 }));
+const mockSelectMediaCover = vi.hoisted(() => vi.fn());
+const mockGetTask = vi.hoisted(() => vi.fn());
 vi.mock('@/api/library', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/library')>();
-  return { ...actual, getMediaMetadata: mockGetMediaMetadata };
+  return {
+    ...actual,
+    getMediaMetadata: mockGetMediaMetadata,
+    getMediaCovers: mockGetMediaCovers,
+    generateMediaCovers: mockGenerateMediaCovers,
+    selectMediaCover: mockSelectMediaCover,
+  };
 });
+vi.mock('@/api/tasks', () => ({ getTask: mockGetTask }));
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return { ...actual, useNavigate: () => mockNavigate };
@@ -21,7 +32,9 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // FR-102：灯箱内视频内嵌 VideoPlayer 直接播放。以桩替身断言其渲染及收到的 URL，
 // 避免引入 mpegts.js 真实内核。
 vi.mock('@/components/VideoPlayer', () => ({
-  default: ({ url }: { url: string }) => <div data-testid="video-player" data-url={url} />,
+  default: ({ url, poster }: { url: string; poster?: string }) => (
+    <div data-testid="video-player" data-url={url} data-poster={poster} />
+  ),
 }));
 
 function mediaFile(over: Partial<MediaFile>): MediaFile {
@@ -61,7 +74,13 @@ function renderPanel(files: MediaFile[], initialIndex: number | null) {
 }
 
 describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetMediaMetadata.mockResolvedValue([]);
+    mockGetMediaCovers.mockResolvedValue({ cover: null, candidates: [] });
+    mockGenerateMediaCovers.mockResolvedValue({ status: 'pending', task_id: 1 });
+    mockGetTask.mockResolvedValue({ status: 'succeeded', error: null });
+  });
 
   it('关闭态（initialIndex=null）不渲染对话框', () => {
     renderPanel([mediaFile({})], null);
@@ -91,6 +110,80 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     // 去掉中间一步：不再展示「打开播放」按钮，也不跳转
     expect(within(dialog).queryByRole('button', { name: /打开播放/ })).not.toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('视频播放器使用统一缩略图路由作为可选 poster（FR2-059）', async () => {
+    renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 120 })], 0);
+    const player = await screen.findByTestId('video-player');
+    expect(player).toHaveAttribute('data-poster', '/api/library/thumbnail/9');
+  });
+
+  it('展示封面候选并支持人工选择（FR2-059）', async () => {
+    mockGetMediaCovers.mockResolvedValueOnce({
+      cover: {
+        media_id: 9,
+        space_id: 'space-default',
+        selected_asset_id: 101,
+        selected_source: 'video_frame',
+        selected_timestamp_seconds: 1,
+        selected_fingerprint: 'a'.repeat(32),
+        manual: false,
+        updated_at: '2026-07-12T00:00:00Z',
+      },
+      candidates: [
+        {
+          id: 11,
+          media_id: 9,
+          space_id: 'space-default',
+          asset_id: 101,
+          source: 'video_frame',
+          timestamp_seconds: 1,
+          fingerprint: 'a'.repeat(32),
+          score: 0.6,
+          image_url: '/api/library/media/9/covers/11/image',
+          created_at: '2026-07-12T00:00:00Z',
+          updated_at: '2026-07-12T00:00:00Z',
+        },
+        {
+          id: 12,
+          media_id: 9,
+          space_id: 'space-default',
+          asset_id: 102,
+          source: 'video_frame',
+          timestamp_seconds: 5,
+          fingerprint: 'b'.repeat(32),
+          score: 1,
+          image_url: '/api/library/media/9/covers/12/image',
+          created_at: '2026-07-12T00:00:00Z',
+          updated_at: '2026-07-12T00:00:00Z',
+        },
+      ],
+    });
+    mockSelectMediaCover.mockResolvedValueOnce({
+      media_id: 9,
+      space_id: 'space-default',
+      selected_asset_id: 102,
+      selected_source: 'video_frame',
+      selected_timestamp_seconds: 5,
+      selected_fingerprint: 'b'.repeat(32),
+      manual: true,
+      updated_at: '2026-07-12T00:00:00Z',
+    });
+
+    renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 10 })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('封面')).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: '选择 5.0 秒封面' }));
+    expect(mockSelectMediaCover).toHaveBeenCalledWith(9, 12);
+    expect(await within(dialog).findByText('人工选择')).toBeInTheDocument();
+  });
+
+  it('没有候选时可触发本地封面生成（FR2-059）', async () => {
+    renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 10 })], 0);
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(await within(dialog).findByRole('button', { name: '生成封面候选' }));
+    expect(mockGenerateMediaCovers).toHaveBeenCalledWith(9, false);
+    await vi.waitFor(() => expect(mockGetTask).toHaveBeenCalledWith('1'));
   });
 
   it('有 EXIF 时展示拍摄信息与外部地图链接（FR-38），无 EXIF 时不展示', async () => {

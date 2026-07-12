@@ -1074,9 +1074,20 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	h.serveThumbnail(c, mf)
 }
 
-// serveThumbnail 回传缩略图；生产路径统一通过 FR2-028 任务服务生成。
+// serveThumbnail 优先回传当前封面，封面缓存缺失时回退 FR2-028 普通缩略图。
 func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
 	size := library.NormalizeThumbnailSize(parseThumbnailSize(c))
+	if h.thumbnail != nil {
+		coverPath, err := h.thumbnail.CurrentCoverPath(c.Request.Context(), mf.SpaceID, mf.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "COVER_ERROR", "message": "封面处理失败"})
+			return
+		}
+		if coverPath != "" {
+			c.File(coverPath)
+			return
+		}
+	}
 	if h.thumbnail == nil {
 		h.serveLegacyThumbnail(c, mf, size)
 		return

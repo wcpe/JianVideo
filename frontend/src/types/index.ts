@@ -78,6 +78,39 @@ export interface MediaFile {
   inference?: MediaInference | null;
 }
 
+/** 当前媒体封面选择语义（FR2-059） */
+export interface MediaCover {
+  media_id: number;
+  space_id: string;
+  selected_asset_id: number;
+  selected_source: 'video_frame' | 'image' | string;
+  selected_timestamp_seconds: number;
+  selected_fingerprint: string;
+  manual: boolean;
+  updated_at: string;
+}
+
+/** 本地抽帧封面候选（FR2-059） */
+export interface CoverCandidate {
+  id: number;
+  media_id: number;
+  space_id: string;
+  asset_id: number;
+  source: 'video_frame' | 'image' | string;
+  timestamp_seconds: number;
+  fingerprint: string;
+  score: number;
+  image_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MediaCoversResponse {
+  cover: MediaCover | null;
+  candidates: CoverCandidate[];
+  cover_url?: string;
+}
+
 /** 文件自带元数据当前记录（FR2-030） */
 export interface MediaMetadata {
   id: number;

@@ -362,7 +362,7 @@ func main() {
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
 		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)
 	}
-	thumbnailSvc := thumbsvc.NewService(libSvc, taskSvc, cacheSvc, dataDir)
+	thumbnailSvc := thumbsvc.NewService(libSvc, taskSvc, cacheSvc, dataDir).WithAudit(auditSvc)
 	if err := thumbnailSvc.RegisterWorkers(taskWorkers, thumbnailConcurrencyFromSettings(settingsSvc)); err != nil {
 		log.Fatalf("[ERROR] 注册缩略图任务 worker 失败: %v", err)
 	}

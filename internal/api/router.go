@@ -49,6 +49,10 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/media", h.ListMediaFiles)
 		lib.GET("/media/:id", h.GetMediaFile)
+		lib.GET("/media/:id/covers", h.GetMediaCovers)
+		lib.POST("/media/:id/covers/generate", h.GenerateMediaCovers)
+		lib.PUT("/media/:id/cover", h.SelectMediaCover)
+		lib.GET("/media/:id/covers/:candidate_id/image", h.GetCoverCandidateImage)
 		lib.GET("/media/:id/metadata", h.GetMediaMetadata)
 		lib.POST("/media/:id/metadata/refresh", h.RefreshMediaMetadata)
 		lib.GET("/media/:id/inference", h.GetMediaInference)

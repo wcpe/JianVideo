@@ -386,6 +386,34 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 
 FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记并聚合 `size_bytes` 与 `file_count`，segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过 `PrepareHLSRebuild` 仅删除目标 Space/media/profile 的受控目录与资产行，不影响同媒体其他 profile 或原媒体。
 
+**媒体当前封面（media_covers）** — FR2-059
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| media_id | INTEGER PK | 媒体 ID；媒体主键全局唯一 |
+| space_id | TEXT | Space 归属；所有读写同时按 `space_id + media_id` 校验 |
+| selected_asset_id | INTEGER | 当前缓存资产 ID；缓存清理后允许暂时指向已删除资产 |
+| selected_source | TEXT | `video_frame` / `image`，人工选择的可信来源语义 |
+| selected_timestamp_seconds | REAL | 视频抽帧时间点；图片为 0 |
+| selected_fingerprint | TEXT | 基于媒体版本、来源和时间点的稳定 32 位十六进制指纹 |
+| manual | BOOLEAN | 是否由用户人工选择 |
+| updated_at | DATETIME | 最近生成或选择时间 |
+
+**封面候选（cover_candidates）** — FR2-059
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 候选 ID |
+| space_id / media_id | TEXT / INTEGER | Space 与媒体归属 |
+| asset_id | INTEGER | 对应 `cache_assets(kind=cover)` 资产 ID |
+| source | TEXT | `video_frame` / `image` |
+| timestamp_seconds | REAL | 规则化抽帧时间点 |
+| fingerprint | TEXT | 同一 Space/media 内唯一的稳定候选指纹 |
+| score | REAL | 本期规则评分；越接近视频中点越高 |
+| created_at / updated_at | DATETIME | 创建 / 更新时间 |
+
+`media_covers` 是可信选择语义，`cover_candidates.asset_id` 和 `selected_asset_id` 只是可重建缓存关联。`POST /api/storage/cache/clean` 删除 cover 文件与 `cache_assets` 行时不删除上述两张语义表；后续 `cover.generate` 按稳定指纹 upsert 候选，并把人工选择恢复到新的资产 ID。迁移 `20260712_0018_fr2_059_smart_covers` 创建 `(space_id, media_id)` 查询索引和 `(space_id, media_id, fingerprint)` 唯一索引，API、任务 payload、缓存路径与选择操作均显式校验 Space。
+
 **相册（albums）** — FR-40
 
 | 字段 | 类型 | 说明 |
@@ -612,6 +640,15 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 - **Space 与缓存资产**：生产缩略图路径固定为 `thumbnails/{spaceID}/{mediaID}/{size}.jpg`，尺寸白名单为 `{160,320,640}`、默认 320。每个成功产物登记为 `cache_assets(kind=thumbnail, variant=size)`，携带 Space、媒体库和媒体关联；缓存盘点只进入目标 Space 子目录且不清空已有资产关联，清理后再次访问会重新入队生成。历史 hash 路径及同步生成函数仅保留给旧 API 测试、dHash 与健康巡检兼容，不再是扫描/HTTP 生产路径。
 - **生成器与工具配置**：视频取第 2 秒帧，普通图片缩放为目标宽，HEIC/RAW 使用 ImageMagick。ffmpeg 可执行文件由启动发现、持久化设置或工具下载结果注入，设置热更新会同步到缩略图生成器，任务处理器不再直接写死命令名。透明源继续以中性灰底合成 JPEG（FR-81 P1）。
 - **API 与前端兼容**：`GET /api/library/thumbnail/:id?size=...&probe=1` 在缺失时立即返回 `202 + task_id + sizes`，就绪后返回 JPEG 200；`POST /api/library/thumbnails/backfill` 返回批量任务 ID。`MediaThumbnail` 保持三档 `srcSet`，加载失败时按浏览器实际选择的档位追加 `probe=1` 探测，202 期间保持骨架占位并轮询重载，其他错误显示降级占位。图片预览弹窗仍使用原图。
+
+#### 5.1.1.1 智能封面/海报（FR2-059）
+
+- `internal/thumbnail.Service` 复用 FR2-028 的外部 ffmpeg、任务队列与缓存登记基础。视频按 10% / 30% / 50% / 70% / 90% 生成规则化候选，图片生成单个自身候选；极短视频时间点按毫秒去重并严格小于 duration。本期“智能”仅为确定性规则评分，不引 AI 或联网海报源。
+- `cover.generate` 与 `cover.refresh` payload 同时携带 `space_id`、`media_id`、`refresh`，worker 会交叉校验任务 scope、类型、资源 ID 与 payload，随后再次按 Space 读取媒体。路径固定为 `covers/{space_id}/{media_id}/{fingerprint}.jpg`，指纹包含媒体 ID、文件大小、mtime、内容哈希、来源和时间点；每个文件登记 `cache_assets(kind=cover, variant=fingerprint)`。
+- 人工选择以 `selected_source + selected_timestamp_seconds + selected_fingerprint + manual` 为可信语义。通用 cover 缓存清理只删除文件和 `cache_assets`，不删除候选与当前选择记录；重建按指纹 upsert 并恢复新的 `selected_asset_id`。源媒体 missing、不可访问或 SMB 路径时，在删除/生成任何候选前失败，保持原选择，不静默改选其他帧。
+- `GET /api/library/media/:id/covers` 返回当前选择、候选与稳定 `cover_url`；生成、选择和候选图片路由全部经当前 Space owner 与媒体/候选归属校验。统一 `GET /api/library/thumbnail/:id` 优先返回当前封面，封面文件缺失时回退原 FR2-028 分档缩略图，保持旧客户端兼容。
+- 详情面板等待封面任务终态后刷新候选；人工选择或重建成功会发布当前媒体的封面变化事件，已挂载的 `MediaThumbnail` 仅刷新同一媒体并追加缓存版本参数，使时间轴/目录列表同步显示新封面。视频详情把同一稳定 URL 作为原生 `<video poster>`。
+- 生成与选择分别写 `cover.generated` / `cover.selected` Space scoped 审计。真实验收包含串行 Playwright（详情选择、列表同步、清理与恢复）和 Go 单二进制 ffmpeg/ffprobe 测试（候选 JPEG、审计、缓存资产、新资产 ID 恢复、失效源不换帧）。
 
 ### 5.2 文件监听与增量更新
 

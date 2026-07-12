@@ -123,6 +123,21 @@ describe('MediaThumbnail', () => {
     expect(screen.getByTestId('ov')).toBeTruthy();
   });
 
+  it('当前媒体封面变化时主动重新加载列表缩略图（FR2-059）', () => {
+    const { container } = renderThumb({ mediaID: 9 });
+    const before = screen.getByAltText('pic.png');
+    fireEvent.load(before);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('jianvideo:cover-changed', { detail: { mediaID: 9 } }),
+      );
+    });
+
+    expect(screen.getByAltText('pic.png')).not.toBe(before);
+    expect(container.querySelector('.mantine-Skeleton-root')).toBeTruthy();
+  });
+
   it('加载失败且非 202 时显示降级占位', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
     vi.stubGlobal('fetch', fetchMock);

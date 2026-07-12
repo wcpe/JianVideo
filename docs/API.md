@@ -324,6 +324,64 @@
 - **响应**（200）：媒体文件详情对象（含字幕轨道信息，以及 FR-44 的 `last_position`、`watched`、`last_watched_at`）
 - **说明**：跨 Space 请求返回 `404 NOT_FOUND`，不回退默认 Space。
 
+### 查询媒体封面与候选（FR2-059）
+
+- **方法 / 路径**：`GET /api/library/media/:id/covers`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：
+  ```json
+  {
+    "cover": {
+      "media_id": 42,
+      "space_id": "space-default",
+      "selected_asset_id": 101,
+      "selected_source": "video_frame",
+      "selected_timestamp_seconds": 3,
+      "selected_fingerprint": "0123456789abcdef0123456789abcdef",
+      "manual": true,
+      "updated_at": "2026-07-12T08:00:00Z"
+    },
+    "candidates": [
+      {
+        "id": 7,
+        "media_id": 42,
+        "space_id": "space-default",
+        "asset_id": 101,
+        "source": "video_frame",
+        "timestamp_seconds": 3,
+        "fingerprint": "0123456789abcdef0123456789abcdef",
+        "score": 1,
+        "image_url": "/api/library/media/42/covers/7/image",
+        "created_at": "2026-07-12T08:00:00Z",
+        "updated_at": "2026-07-12T08:00:00Z"
+      }
+    ],
+    "cover_url": "/api/library/thumbnail/42"
+  }
+  ```
+- **说明**：视频候选按时长 10% / 30% / 50% / 70% / 90% 规则化抽帧，极短视频会去重且不越过结尾；图片生成单个自身缩略图候选。`cover` 可为 `null`，`candidates` 为空数组。查询、候选图片与选择均校验当前 Space 和媒体归属，跨 Space 返回 `404`。
+
+### 生成或刷新媒体封面候选（FR2-059）
+
+- **方法 / 路径**：`POST /api/library/media/:id/covers/generate`
+- **请求**：`{"refresh":false}`；`refresh=true` 使用独立 `cover.refresh` 任务重新生成候选，缺省为 `cover.generate`。
+- **响应**（202）：`{"status":"pending","task_id":123}`
+- **说明**：任务经 FR2-037 通用队列执行并最多尝试 3 次。产物写入 `covers/{space_id}/{media_id}/{fingerprint}.jpg`，登记为 `cache_assets(kind=cover)`；客户端通过 `GET /api/tasks/:id` 等待终态。源媒体 missing、不可访问或非本地文件时任务失败，不会改写当前人工选择。
+
+### 选择媒体封面（FR2-059）
+
+- **方法 / 路径**：`PUT /api/library/media/:id/cover`
+- **请求**：`{"candidate_id":7}`
+- **响应**（200）：更新后的 `MediaCover` 对象。
+- **说明**：只能选择当前 Space、当前媒体所属候选。人工选择同时保存 `selected_source`、`selected_timestamp_seconds`、`selected_fingerprint` 与 `manual=true`，不只依赖可清理的 `selected_asset_id`；封面缓存清理后语义保留，重建时按指纹恢复新的资产 ID。生成与选择分别写 `cover.generated` / `cover.selected` 审计事件。
+- **错误**：`400` 请求或封面任务无效，`404` 媒体/候选不存在或归属不匹配，`503` 封面服务未启用。
+
+### 获取媒体封面候选图片（FR2-059）
+
+- **方法 / 路径**：`GET /api/library/media/:id/covers/:candidate_id/image`
+- **响应**（200）：候选 JPEG 二进制内容。
+- **说明**：候选记录仍在但对应可重建缓存已被清理时，需先重新生成候选；不会跨 Space 或跨媒体读取其他候选文件。
+
 ### 查询文件自带元数据（FR2-030）
 
 - **方法 / 路径**：`GET /api/library/media/:id/metadata`
@@ -644,9 +702,9 @@
 
 - **方法 / 路径**：`GET /api/library/thumbnail/:id`
 - **查询参数**：`size`（可选）缩略图宽度，受支持白名单 `160` / `320` / `640`，缺省或非白名单值回落默认 `320`；`probe=1` 表示前端状态探测（FR2-028）
-- **响应**（200）：缩略图 JPEG 二进制内容（按 `size` 缩放，视频取第 2 秒帧、图片缩放；带透明区的源已合成中性灰底，FR-81 P1）
-- **响应**（202）：`{"code":"GENERATING","message":"缩略图生成中","task_id":123,"sizes":[320]}`；同一 Space、媒体和尺寸集合的未完成任务按幂等键复用
-- **说明**：扫描只建立媒体索引，缩略图按需经通用任务 `thumbnail.generate` 生成。产物存于 `thumbnails/{spaceID}/{mediaID}/{size}.jpg`，并登记为 `cache_assets(kind=thumbnail, variant=size)`；清理后再次访问会重新入队。普通图片/视频使用配置的 ffmpeg 路径，HEIC/RAW 使用 ImageMagick。前端图片加载失败后以浏览器实际选择的 `srcSet` 档位追加 `probe=1` 轮询，期间保留骨架占位。
+- **响应**（200）：存在当前 FR2-059 封面缓存时优先返回该 JPEG；否则返回按 `size` 生成的普通缩略图（视频取第 2 秒帧、图片缩放；带透明区的源已合成中性灰底，FR-81 P1）
+- **响应**（202）：普通缩略图回退尚未就绪时返回 `{"code":"GENERATING","message":"缩略图生成中","task_id":123,"sizes":[320]}`；同一 Space、媒体和尺寸集合的未完成任务按幂等键复用
+- **说明**：该稳定 URL 是列表、详情和播放器 poster 的统一封面入口。当前智能封面存在时忽略 `size` 返回封面原始 640px JPEG；封面缓存缺失或被清理时保持 FR2-028 向后兼容，按需经 `thumbnail.generate` 生成 `thumbnails/{spaceID}/{mediaID}/{size}.jpg` 并登记 `cache_assets(kind=thumbnail, variant=size)`。前端选择或重建封面后会给请求追加缓存版本参数以主动刷新列表图片，其他未知查询参数均可安全忽略。
 - **错误**：`202` 缩略图生成中，`404` 媒体记录不存在
 
 ### 批量预生成缩略图（FR2-028）

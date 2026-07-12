@@ -541,6 +541,47 @@ func (s *Service) executeCleanTask(ctx context.Context, taskID int64, spaceID st
 	return s.updateTaskProgress(ctx, taskID, 95, "已写入清理审计")
 }
 
+// DeleteMediaKindAssetsExcept 只删除指定媒体与缓存类型中不在保留集的白名单资产。
+func (s *Service) DeleteMediaKindAssetsExcept(ctx context.Context, spaceID string, mediaID int64, kind string, keepPaths []string) error {
+	if !isKnownKind(kind) || mediaID <= 0 {
+		return ErrInvalidKind
+	}
+	keep := make(map[string]struct{}, len(keepPaths))
+	for _, path := range keepPaths {
+		_, relative, err := s.safePath(path, kind)
+		if err != nil {
+			return err
+		}
+		keep[relative] = struct{}{}
+	}
+	var assets []models.CacheAsset
+	if err := s.db.WithContext(ctx).Where("space_id = ? AND media_id = ? AND kind = ?", normalizeSpace(spaceID), mediaID, kind).Find(&assets).Error; err != nil {
+		return err
+	}
+	libraryRoots, err := s.libraryRoots(ctx)
+	if err != nil {
+		return err
+	}
+	deletedIDs := make([]int64, 0, len(assets))
+	for _, asset := range assets {
+		if _, ok := keep[asset.RelativePath]; ok {
+			continue
+		}
+		path, err := s.validateDeleteTarget(asset, libraryRoots)
+		if err != nil {
+			return err
+		}
+		if err := deleteAssetPath(path, asset.AssetLevel); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		deletedIDs = append(deletedIDs, asset.ID)
+	}
+	if len(deletedIDs) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Where("id IN ?", deletedIDs).Delete(&models.CacheAsset{}).Error
+}
+
 // PrepareHLSRebuild 通过缓存资产安全边界清理单个 HLS profile，绝不删除同媒体其他 profile。
 func (s *Service) PrepareHLSRebuild(ctx context.Context, spaceID string, mediaID int64, profileID, path string) error {
 	absPath, relPath, err := s.safePath(path, CacheKindHLS)

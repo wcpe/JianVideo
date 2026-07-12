@@ -22,10 +22,12 @@ const THUMB_SIZES = [160, 320, 640];
 // 命中 202「生成中」时的轮询重试上限与间隔（毫秒）。
 const MAX_RETRIES = 8;
 const RETRY_INTERVAL_MS = 1500;
+const COVER_CHANGED_EVENT = 'jianvideo:cover-changed';
 
-// thumbnailURL 按尺寸拼接缩略图请求地址。
-function thumbnailURL(mediaID: number, size: number): string {
-  return `/api/library/thumbnail/${mediaID}?size=${size}`;
+// thumbnailURL 按尺寸拼接缩略图请求地址；reloadKey 非零时绕过浏览器旧封面缓存。
+function thumbnailURL(mediaID: number, size: number, reloadKey = 0): string {
+  const version = reloadKey > 0 ? `&cover_v=${reloadKey}` : '';
+  return `/api/library/thumbnail/${mediaID}?size=${size}${version}`;
 }
 
 // probeURL 保留浏览器实际选择的 srcset 档位，仅追加轻量探测标记。
@@ -60,6 +62,17 @@ export default function MediaThumbnail({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
+  }, [mediaID]);
+
+  useEffect(() => {
+    const refreshSelectedCover = (event: Event) => {
+      const changedMediaID = (event as CustomEvent<{ mediaID?: number }>).detail?.mediaID;
+      if (changedMediaID !== mediaID) return;
+      setStatus('loading');
+      setReloadKey((key) => key + 1);
+    };
+    window.addEventListener(COVER_CHANGED_EVENT, refreshSelectedCover);
+    return () => window.removeEventListener(COVER_CHANGED_EVENT, refreshSelectedCover);
   }, [mediaID]);
 
   const handleLoad = useCallback(() => setStatus('loaded'), []);
@@ -105,8 +118,8 @@ export default function MediaThumbnail({
       {status !== 'error' && (
         <img
           key={reloadKey}
-          src={thumbnailURL(mediaID, baseSize)}
-          srcSet={THUMB_SIZES.map((s) => `${thumbnailURL(mediaID, s)} ${s}w`).join(', ')}
+          src={thumbnailURL(mediaID, baseSize, reloadKey)}
+          srcSet={THUMB_SIZES.map((s) => `${thumbnailURL(mediaID, s, reloadKey)} ${s}w`).join(', ')}
           // 列宽自适应（FR-141）：调用方给定档时把 sizes 收敛为该档像素，浏览器据真实列宽选 srcset；
           // 未给定则沿用按视口宽度的静态启发式。
           sizes={

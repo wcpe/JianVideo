@@ -168,6 +168,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateMediaMetadata,
 			Validate:    validateMediaMetadata,
 		},
+		{
+			ID:          "20260712_0018_fr2_059_smart_covers",
+			Description: "建立智能封面候选与人工选择可信语义表",
+			SafeToRetry: true,
+			Estimate:    estimateSmartCovers,
+			Up:          migrateSmartCovers,
+			Validate:    validateSmartCovers,
+		},
 	}
 }
 
@@ -1333,6 +1341,61 @@ func validateMediaMetadata(_ context.Context, db *gorm.DB) (Validation, error) {
 		}
 	}
 	return Validation{Summary: "文件自带元数据表与唯一键已就绪"}, nil
+}
+
+func estimateSmartCovers(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateSmartCovers(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.MediaCover{}, &models.CoverCandidate{}); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_covers_space_media ON media_covers(space_id, media_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_cover_candidates_space_media_created ON cover_candidates(space_id, media_id, created_at, id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_cover_candidates_space_media_fingerprint ON cover_candidates(space_id, media_id, fingerprint);`,
+		`CREATE INDEX IF NOT EXISTS idx_cover_candidates_asset_id ON cover_candidates(asset_id);`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSmartCovers(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, table := range []string{"media_covers", "cover_candidates"} {
+		if !tableExists(db, table) {
+			return Validation{}, fmt.Errorf("封面表不存在: %s", table)
+		}
+	}
+	for _, column := range []string{
+		"media_id", "space_id", "selected_asset_id", "selected_source",
+		"selected_timestamp_seconds", "selected_fingerprint", "manual", "updated_at",
+	} {
+		if !columnExists(db, "media_covers", column) {
+			return Validation{}, fmt.Errorf("media_covers 缺少 %s", column)
+		}
+	}
+	for _, column := range []string{
+		"id", "media_id", "space_id", "asset_id", "source", "timestamp_seconds",
+		"fingerprint", "score", "created_at", "updated_at",
+	} {
+		if !columnExists(db, "cover_candidates", column) {
+			return Validation{}, fmt.Errorf("cover_candidates 缺少 %s", column)
+		}
+	}
+	for _, name := range []string{
+		"idx_media_covers_space_media", "idx_cover_candidates_space_media_created",
+		"idx_cover_candidates_space_media_fingerprint", "idx_cover_candidates_asset_id",
+	} {
+		if !indexExists(db, name) {
+			return Validation{}, fmt.Errorf("封面索引不存在: %s", name)
+		}
+	}
+	return Validation{Summary: "智能封面候选与人工选择语义已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

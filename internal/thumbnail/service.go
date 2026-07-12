@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/storage"
@@ -36,11 +37,13 @@ type Generator func(context.Context, models.MediaFile, int, string) error
 
 // Service 管理缩略图按需与批量任务。
 type Service struct {
-	library   *library.Service
-	tasks     *tasksvc.Service
-	cache     *storage.Service
-	dataDir   string
-	generator Generator
+	library        *library.Service
+	tasks          *tasksvc.Service
+	cache          *storage.Service
+	dataDir        string
+	generator      Generator
+	coverGenerator CoverGenerator
+	audit          audit.Recorder
 }
 
 // Result 表示缩略图就绪状态或异步任务信息。
@@ -66,6 +69,7 @@ type backfillPayload struct {
 func NewService(lib *library.Service, tasks *tasksvc.Service, cache *storage.Service, dataDir string) *Service {
 	service := &Service{library: lib, tasks: tasks, cache: cache, dataDir: filepath.Clean(dataDir)}
 	service.generator = service.generateFile
+	service.coverGenerator = service.generateCoverFile
 	return service
 }
 
@@ -96,7 +100,13 @@ func (s *Service) RegisterWorkers(registry *tasksvc.WorkerRegistry, concurrency 
 	if err := registry.Register(TaskTypeGenerate, concurrency, s.handleGenerate); err != nil {
 		return err
 	}
-	return registry.Register(TaskTypeBackfill, 1, s.handleBackfill)
+	if err := registry.Register(TaskTypeBackfill, 1, s.handleBackfill); err != nil {
+		return err
+	}
+	if err := registry.Register(TaskTypeCoverGenerate, 2, s.handleCoverGenerate); err != nil {
+		return err
+	}
+	return registry.Register(TaskTypeCoverRefresh, 1, s.handleCoverGenerate)
 }
 
 // Ensure 确保指定媒体的尺寸缓存存在；缺失尺寸按幂等键入队。

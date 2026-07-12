@@ -13,6 +13,9 @@ import {
   Divider,
   Tooltip,
   Anchor,
+  Badge,
+  SimpleGrid,
+  UnstyledButton,
 } from '@mantine/core';
 import {
   IconChevronLeft,
@@ -55,8 +58,19 @@ import {
   formatShutter,
   formatIso,
 } from '@/utils/format';
-import { getMediaMetadata } from '@/api/library';
-import type { MediaFile, MediaMetadata, NormalizedEmbeddedMetadata } from '@/types';
+import {
+  generateMediaCovers,
+  getMediaCovers,
+  getMediaMetadata,
+  selectMediaCover,
+} from '@/api/library';
+import { getTask } from '@/api/tasks';
+import type {
+  MediaCoversResponse,
+  MediaFile,
+  MediaMetadata,
+  NormalizedEmbeddedMetadata,
+} from '@/types';
 
 interface MediaDetailPanelProps {
   files: MediaFile[];
@@ -77,6 +91,25 @@ const ZOOM_DOUBLE_CLICK = 2;
 const SLIDESHOW_INTERVAL_MS = 3000;
 // 相邻预加载半径（FR-105）：预取前后各 1 张原图，切换不闪白
 const PRELOAD_RADIUS = 1;
+const COVER_TASK_POLL_INTERVAL_MS = 500;
+const COVER_TASK_MAX_POLLS = 120;
+const COVER_CHANGED_EVENT = 'jianvideo:cover-changed';
+
+async function waitForCoverTask(taskID: number): Promise<void> {
+  for (let poll = 0; poll < COVER_TASK_MAX_POLLS; poll += 1) {
+    const task = await getTask(String(taskID));
+    if (task.status === 'succeeded') return;
+    if (task.status === 'failed' || task.status === 'canceled') {
+      throw new Error(task.error || '封面生成任务未完成');
+    }
+    await new Promise((resolve) => setTimeout(resolve, COVER_TASK_POLL_INTERVAL_MS));
+  }
+  throw new Error('封面生成任务等待超时');
+}
+
+function notifyCoverChanged(mediaID: number): void {
+  window.dispatchEvent(new CustomEvent(COVER_CHANGED_EVENT, { detail: { mediaID } }));
+}
 
 // 详情区定宽 label 列宽（FR-106）：定义列表两列对齐，键值成对易读
 const DETAIL_LABEL_WIDTH = 64;
@@ -243,6 +276,8 @@ export default function MediaDetailPanel({
   // 旋转角度（FR-105）：0/90/180/270，左右各 90°
   const [rotation, setRotation] = useState(0);
   const [embeddedMetadata, setEmbeddedMetadata] = useState<MediaMetadata[]>([]);
+  const [covers, setCovers] = useState<MediaCoversResponse>({ cover: null, candidates: [] });
+  const [coverGenerating, setCoverGenerating] = useState(false);
   // 幻灯片自动轮播开关（FR-105）
   const [slideshow, setSlideshow] = useState(false);
 
@@ -365,9 +400,44 @@ export default function MediaDetailPanel({
       active = false;
     };
   }, [file]);
+
+  useEffect(() => {
+    let active = true;
+    setCovers({ cover: null, candidates: [] });
+    setCoverGenerating(false);
+    if (!file) return () => { active = false; };
+    void getMediaCovers(file.id)
+      .then((result) => {
+        if (active) setCovers(result);
+      })
+      .catch(() => {
+        if (active) setCovers({ cover: null, candidates: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, [file]);
   if (!file) return null;
 
   const isImage = isImageFile(file, customImageExtensions);
+
+  const handleGenerateCovers = async () => {
+    setCoverGenerating(true);
+    try {
+      const task = await generateMediaCovers(file.id, covers.candidates.length > 0);
+      await waitForCoverTask(task.task_id);
+      setCovers(await getMediaCovers(file.id));
+      notifyCoverChanged(file.id);
+    } finally {
+      setCoverGenerating(false);
+    }
+  };
+
+  const handleSelectCover = async (candidateID: number) => {
+    const selected = await selectMediaCover(file.id, candidateID);
+    setCovers((current) => ({ ...current, cover: selected }));
+    notifyCoverChanged(file.id);
+  };
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
@@ -635,7 +705,12 @@ export default function MediaDetailPanel({
                   </Text>
                 }
               >
-                <VideoPlayer url={mediaStreamUrl(file.id)} streamType="mp4" autoPlay />
+                <VideoPlayer
+                  url={mediaStreamUrl(file.id)}
+                  streamType="mp4"
+                  poster={`/api/library/thumbnail/${file.id}`}
+                  autoPlay
+                />
               </Suspense>
             </Box>
           )}
@@ -738,6 +813,59 @@ export default function MediaDetailPanel({
                     </Stack>
                   )}
                 </>
+              )}
+
+              <Divider my={4} label="封面" labelPosition="left" />
+              <Group justify="space-between" align="center">
+                <Badge color={covers.cover?.manual ? 'teal' : 'gray'} variant="light">
+                  {covers.cover?.manual ? '人工选择' : covers.cover ? '自动选择' : '尚未生成'}
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="light"
+                  loading={coverGenerating}
+                  onClick={() => void handleGenerateCovers()}
+                >
+                  {covers.candidates.length > 0 ? '重新生成封面候选' : '生成封面候选'}
+                </Button>
+              </Group>
+              {covers.candidates.length > 0 && (
+                <SimpleGrid cols={2} spacing="xs">
+                  {covers.candidates.map((candidate) => {
+                    const selected = covers.cover?.selected_fingerprint === candidate.fingerprint;
+                    const label =
+                      candidate.source === 'image'
+                        ? '选择图片封面'
+                        : `选择 ${candidate.timestamp_seconds.toFixed(1)} 秒封面`;
+                    return (
+                      <UnstyledButton
+                        key={candidate.id}
+                        aria-label={label}
+                        onClick={() => void handleSelectCover(candidate.id)}
+                        style={{
+                          border: selected
+                            ? '2px solid var(--mantine-color-teal-6)'
+                            : '1px solid var(--mantine-color-default-border)',
+                          borderRadius: 6,
+                          overflow: 'hidden',
+                          background: 'var(--mantine-color-default)',
+                        }}
+                      >
+                        <Box
+                          component="img"
+                          src={candidate.image_url}
+                          alt={label}
+                          style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+                        />
+                        <Text size="xs" ta="center" py={4} c={selected ? 'teal' : undefined}>
+                          {candidate.source === 'image'
+                            ? '原图'
+                            : `${candidate.timestamp_seconds.toFixed(1)} 秒`}
+                        </Text>
+                      </UnstyledButton>
+                    );
+                  })}
+                </SimpleGrid>
               )}
 
               <EmbeddedMetadataInfo items={embeddedMetadata} />
