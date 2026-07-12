@@ -81,9 +81,21 @@ test("工具下载通过自定义本机源安装、写设置并可查任务审�
       fullPage: true,
     });
   } finally {
+    await restoreFFmpegPath(page);
     await source.close();
   }
 });
+
+async function restoreFFmpegPath(page: Page) {
+  const loginResponse = await page.request.post("/api/auth/login", {
+    data: { username: "admin", password: "admin" },
+  });
+  expect(loginResponse.ok()).toBeTruthy();
+  const response = await page.request.put("/api/settings", {
+    data: { settings: { ffmpeg_path: "ffmpeg" } },
+  });
+  expect(response.ok()).toBeTruthy();
+}
 
 async function waitToolTaskSucceeded(page: Page, taskID: string) {
   await expect

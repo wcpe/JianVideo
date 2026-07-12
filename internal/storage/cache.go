@@ -444,10 +444,14 @@ func (s *Service) scanInventoryKinds(ctx context.Context, spaceID string, taskID
 }
 
 func (s *Service) inventoryKind(ctx context.Context, spaceID, kind, root string) (int64, error) {
-	if kind == CacheKindHLS {
+	switch kind {
+	case CacheKindHLS:
 		return s.inventoryHLS(ctx, spaceID, root)
+	case CacheKindThumbnail:
+		return s.inventoryThumbnails(ctx, spaceID, root)
+	default:
+		return s.inventoryFiles(ctx, spaceID, kind, root)
 	}
-	return s.inventoryFiles(ctx, spaceID, kind, root)
 }
 
 // Clean 同步预览清理范围，真实清理则写入通用任务队列。
@@ -629,15 +633,71 @@ func (s *Service) buildAsset(input RegisterInput, kind, level, relPath string, s
 func (s *Service) upsertAsset(ctx context.Context, asset *models.CacheAsset) error {
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "relative_path"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"space_id", "library_id", "media_id", "kind", "asset_level", "profile_id",
-			"variant", "cache_key", "size_bytes", "file_count", "rebuildable", "missing_at", "updated_at",
+		DoUpdates: clause.Assignments(map[string]any{
+			"space_id":    gorm.Expr("excluded.space_id"),
+			"library_id":  preservePositive("library_id"),
+			"media_id":    preservePositive("media_id"),
+			"kind":        gorm.Expr("excluded.kind"),
+			"asset_level": gorm.Expr("excluded.asset_level"),
+			"profile_id":  preserveText("profile_id"),
+			"variant":     preserveText("variant"),
+			"cache_key":   preserveText("cache_key"),
+			"size_bytes":  gorm.Expr("excluded.size_bytes"),
+			"file_count":  gorm.Expr("excluded.file_count"),
+			"rebuildable": gorm.Expr("excluded.rebuildable"),
+			"missing_at":  nil,
+			"updated_at":  gorm.Expr("excluded.updated_at"),
 		}),
 	}).Create(asset).Error
 	if err != nil {
 		return err
 	}
 	return s.db.WithContext(ctx).Where("relative_path = ?", asset.RelativePath).First(asset).Error
+}
+
+func preservePositive(column string) clause.Expr {
+	return gorm.Expr("CASE WHEN excluded." + column + " > 0 THEN excluded." + column + " ELSE cache_assets." + column + " END")
+}
+
+func preserveText(column string) clause.Expr {
+	return gorm.Expr("CASE WHEN excluded." + column + " <> '' THEN excluded." + column + " ELSE cache_assets." + column + " END")
+}
+
+func (s *Service) inventoryThumbnails(ctx context.Context, spaceID, root string) (int64, error) {
+	var count int64
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return 0, nil
+	}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		allowed, skip := thumbnailInventoryPath(root, path, entry, spaceID)
+		if skip {
+			return filepath.SkipDir
+		}
+		if !allowed || entry.IsDir() {
+			return nil
+		}
+		if _, err := s.RegisterFile(ctx, RegisterInput{SpaceID: spaceID, Kind: CacheKindThumbnail, Path: path}); err != nil {
+			return err
+		}
+		count++
+		return ctx.Err()
+	})
+	return count, err
+}
+
+func thumbnailInventoryPath(root, path string, entry os.DirEntry, spaceID string) (bool, bool) {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." {
+		return false, false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) == 1 {
+		return !entry.IsDir() && spaceID == models.DefaultSpaceID, entry.IsDir() && parts[0] != spaceID
+	}
+	return parts[0] == spaceID, entry.IsDir() && len(parts) == 1 && parts[0] != spaceID
 }
 
 func (s *Service) inventoryFiles(ctx context.Context, spaceID, kind, root string) (int64, error) {

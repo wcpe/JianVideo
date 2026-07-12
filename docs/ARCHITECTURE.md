@@ -592,11 +592,10 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 
 ### 5.1.1 缩略图生成
 
-- `thumbnail.go` 提供缩略图能力：入库时对新文件异步调用 `GenerateThumbnail`，视频取第 2 秒帧、普通图片缩放为目标宽，统一经 ffmpeg 生成；HEIC/RAW 改经外部 ImageMagick（`magick`）缩放生成缩略图（FR-37）。生成失败仅记日志不阻塞入库。
-- **透明源中性灰底（FR-81 P1）**：带 alpha 的源（透明 PNG / 部分 WEBP / HEIC 等）若直接压 JPEG，透明区会被默认黑底合成纯黑。ffmpeg 路径以 `color=0x808080` 经 `scale2ref`+`overlay` 把图像合成到中性灰底；magick 路径以 `-background #808080 -flatten` 刷灰后再缩放。无 alpha 的源叠加灰底不可见、结果不变。灰底色值由常量 `thumbnailMatteColor` 统一定义。
-- **多尺寸缓存（FR-81 P12）**：受支持尺寸白名单 `{160,320,640}`（默认 320）。`thumbnailPathForSize` 按尺寸映射缓存路径——**默认尺寸 320 保持历史命名（无后缀），非默认尺寸用 `<hash>_<size>.jpg` 与默认产物并存**；故 dHash 去重（FR-70）与健康巡检（FR-73）读取的固定缩略图路径不变。
-- 缩略图存于数据目录下 `thumbnails/`（启动时 `InitThumbnailDir` 初始化，按原始路径 SHA-256 hash 命名避免特殊字符冲突）。
-- `GET /api/library/thumbnail/:id` 返回缩略图，支持 `size` 查询参数按列宽请求多尺寸（非白名单值回落默认 320）；对应尺寸尚未生成时返回 `202` 并触发后台生成，前端可稍后重试。前端 `MediaThumbnail` 以 `object-fit:contain` + 中性背景容器按原比例自适应显示（竖图/正方图完整不裁，FR-81 P3），缺图先显骨架占位、命中 202 时短间隔轮询重载、加载失败显降级占位（FR-81 P14），并经 `srcset`/`sizes` 按列宽请求更小尺寸。图片预览弹窗仍用原图。
+- **FR2-028 任务化生成**：扫描只建立媒体索引，不再为每个新文件启动进程内缩略图 goroutine。按需请求经 `internal/thumbnail.Service` 幂等入队 `thumbnail.generate`（高优先级、支持单档或多档），手动批量预生成经 `thumbnail.backfill` 按媒体 ID checkpoint 分批处理；通用 `WorkerRegistry` 负责持久化状态、重试、取消和并发上限。
+- **Space 与缓存资产**：生产缩略图路径固定为 `thumbnails/{spaceID}/{mediaID}/{size}.jpg`，尺寸白名单为 `{160,320,640}`、默认 320。每个成功产物登记为 `cache_assets(kind=thumbnail, variant=size)`，携带 Space、媒体库和媒体关联；缓存盘点只进入目标 Space 子目录且不清空已有资产关联，清理后再次访问会重新入队生成。历史 hash 路径及同步生成函数仅保留给旧 API 测试、dHash 与健康巡检兼容，不再是扫描/HTTP 生产路径。
+- **生成器与工具配置**：视频取第 2 秒帧，普通图片缩放为目标宽，HEIC/RAW 使用 ImageMagick。ffmpeg 可执行文件由启动发现、持久化设置或工具下载结果注入，设置热更新会同步到缩略图生成器，任务处理器不再直接写死命令名。透明源继续以中性灰底合成 JPEG（FR-81 P1）。
+- **API 与前端兼容**：`GET /api/library/thumbnail/:id?size=...&probe=1` 在缺失时立即返回 `202 + task_id + sizes`，就绪后返回 JPEG 200；`POST /api/library/thumbnails/backfill` 返回批量任务 ID。`MediaThumbnail` 保持三档 `srcSet`，加载失败时按浏览器实际选择的档位追加 `probe=1` 探测，202 期间保持骨架占位并轮询重载，其他错误显示降级占位。图片预览弹窗仍使用原图。
 
 ### 5.2 文件监听与增量更新
 

@@ -100,3 +100,13 @@ func TestBuildMagickThumbnailArgs_Matte(t *testing.T) {
 		t.Fatalf("magick 缩略图参数应含中性灰底色值 %s：%s", thumbnailMatteColor, joined)
 	}
 }
+
+func TestSetFFmpegPath_缩略图使用运行期设置路径(t *testing.T) {
+	previous := GetFFmpegPath()
+	t.Cleanup(func() { SetFFmpegPath(previous) })
+
+	SetFFmpegPath("D:/tools/custom-ffmpeg.exe")
+	if got := GetFFmpegPath(); got != "D:/tools/custom-ffmpeg.exe" {
+		t.Fatalf("缩略图 ffmpeg 路径未热应用: %s", got)
+	}
+}

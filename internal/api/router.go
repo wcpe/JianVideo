@@ -114,6 +114,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.GET("/trends", h.MediaTrends)
 
 		lib.GET("/thumbnail/:id", h.GetThumbnail)
+		lib.POST("/thumbnails/backfill", h.BackfillThumbnails)
 
 		// Web 上传入库（FR-149，见 ADR-0051）：multipart 接收图片/视频，落盘到库内目标位置后触发增量扫描
 		lib.POST("/upload", h.UploadMedia)

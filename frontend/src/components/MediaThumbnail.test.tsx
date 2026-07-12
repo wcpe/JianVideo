@@ -92,6 +92,26 @@ describe('MediaThumbnail', () => {
     expect(container.querySelector('.mantine-Skeleton-root')).toBeNull();
   });
 
+  it('探测当前请求档位并显式携带 probe 参数', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 202 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderThumb({ requestSize: 640 });
+    const img = screen.getByAltText('pic.png') as HTMLImageElement;
+    Object.defineProperty(img, 'currentSrc', {
+      configurable: true,
+      value: 'http://localhost/api/library/thumbnail/1?size=640',
+    });
+    fireEvent.error(img);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/library/thumbnail/1?size=640&probe=1',
+        expect.anything(),
+      );
+    });
+  });
+
   it('传入 objectFit=cover 时图片以 cover 填充（FR-99）', () => {
     renderThumb({ objectFit: 'cover' });
     const img = screen.getByAltText('pic.png') as HTMLImageElement;

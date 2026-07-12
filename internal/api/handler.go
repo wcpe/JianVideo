@@ -31,6 +31,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/smb"
 	"github.com/wcpe/JianVideo/internal/storage"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
+	thumbsvc "github.com/wcpe/JianVideo/internal/thumbnail"
 	"github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/update"
@@ -95,6 +96,9 @@ type Handler struct {
 
 	// 存储与缓存管理（FR2-048）：缓存资产登记、统计、盘点与白名单清理。
 	cache *storage.Service
+
+	// 分档缩略图任务服务（FR2-028）：按需/批量入队、Space 路径隔离与缓存登记。
+	thumbnail *thumbsvc.Service
 }
 
 // NewHandler 创建处理器。
@@ -189,6 +193,12 @@ func (h *Handler) WithTools(manager *tools.Manager) *Handler {
 // WithCache 注入缓存资产服务，启用 /api/storage/cache/* 端点。
 func (h *Handler) WithCache(svc *storage.Service) *Handler {
 	h.cache = svc
+	return h
+}
+
+// WithThumbnail 注入分档缩略图任务服务。
+func (h *Handler) WithThumbnail(svc *thumbsvc.Service) *Handler {
+	h.thumbnail = svc
 	return h
 }
 
@@ -1062,19 +1072,38 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	h.serveThumbnail(c, mf)
 }
 
-// serveThumbnail 回传缩略图（不存在则异步生成并返回 202）。抽出供鉴权版与分享版（FR-43）共用。
-// 支持 size 查询参数按列宽请求多尺寸（FR-81 P12）：非白名单值回落默认尺寸；默认尺寸缓存路径保持不变。
+// serveThumbnail 回传缩略图；生产路径统一通过 FR2-028 任务服务生成。
 func (h *Handler) serveThumbnail(c *gin.Context, mf *models.MediaFile) {
 	size := library.NormalizeThumbnailSize(parseThumbnailSize(c))
+	if h.thumbnail == nil {
+		h.serveLegacyThumbnail(c, mf, size)
+		return
+	}
+	result, err := h.thumbnail.Ensure(c.Request.Context(), mf.SpaceID, mf.ID, []int{size})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "THUMBNAIL_ERROR", "message": "缩略图处理失败"})
+		return
+	}
+	if result.Ready {
+		c.File(result.Path)
+		return
+	}
+	if h.taskWorkers != nil {
+		h.taskWorkers.Wake()
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"code": "GENERATING", "message": "缩略图生成中", "task_id": result.TaskID, "sizes": result.Sizes,
+	})
+}
+
+func (h *Handler) serveLegacyThumbnail(c *gin.Context, mf *models.MediaFile, size int) {
 	thumbnailPath := library.ThumbnailPathForSize(mf.FilePath, size)
 	if _, err := os.Stat(thumbnailPath); err != nil {
-		// 该尺寸缩略图不存在，异步生成后返回 202
 		go h.library.GenerateThumbnailSizeInSpace(mf.SpaceID, mf.LibraryID, mf.FilePath, size)
 		c.JSON(http.StatusAccepted, gin.H{"code": "GENERATING", "message": "缩略图生成中"})
 		return
 	}
 	h.registerCacheFile(c, mf, storage.CacheKindThumbnail, thumbnailPath, strconv.Itoa(size))
-
 	c.File(thumbnailPath)
 }
 

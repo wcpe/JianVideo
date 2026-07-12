@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
@@ -19,9 +20,11 @@ import (
 func TestUpdateSettings_AppliesFFmpegPathToRuntime(t *testing.T) {
 	// 保存并在结束后恢复全局路径，避免污染其他测试
 	savedFFmpeg := transcoder.GetFFmpegPath()
+	savedThumbnailFFmpeg := library.GetFFmpegPath()
 	savedFFprobe := transcoder.GetFFprobePath()
 	t.Cleanup(func() {
 		transcoder.SetFFmpegPath(savedFFmpeg)
+		library.SetFFmpegPath(savedThumbnailFFmpeg)
 		transcoder.SetFFprobePath(savedFFprobe)
 	})
 
@@ -40,6 +43,9 @@ func TestUpdateSettings_AppliesFFmpegPathToRuntime(t *testing.T) {
 	}
 	if got := transcoder.GetFFmpegPath(); got != newFFmpeg {
 		t.Errorf("保存后 GetFFmpegPath 应为 %q，实际 %q", newFFmpeg, got)
+	}
+	if got := library.GetFFmpegPath(); got != newFFmpeg {
+		t.Errorf("保存后缩略图 ffmpeg 路径应为 %q，实际 %q", newFFmpeg, got)
 	}
 	if got := transcoder.GetFFprobePath(); got != newFFprobe {
 		t.Errorf("保存后 GetFFprobePath 应为 %q，实际 %q", newFFprobe, got)

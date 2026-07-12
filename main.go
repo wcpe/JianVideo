@@ -36,6 +36,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/storage"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
+	thumbsvc "github.com/wcpe/JianVideo/internal/thumbnail"
 	toolsvc "github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/watcher"
@@ -111,6 +112,18 @@ func hardwarePolicyFromSettings(svc *settings.Service) transcoder.HardwarePolicy
 	}
 }
 
+func thumbnailConcurrencyFromSettings(service *settings.Service) int {
+	if service == nil {
+		return tasksvc.DefaultConcurrency(thumbsvc.TaskTypeGenerate)
+	}
+	raw, _ := service.Get(settings.KeyTaskWorkerThumbnailConcurrency)
+	value := int(settings.ParseInt64Setting(raw))
+	if value <= 0 {
+		return tasksvc.DefaultConcurrency(thumbsvc.TaskTypeGenerate)
+	}
+	return value
+}
+
 func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service) {
 	if err := workers.Register(library.TaskTypeFileHashBackfill, tasksvc.DefaultConcurrency(library.TaskTypeFileHashBackfill), func(ctx context.Context, task models.Task) error {
 		return libSvc.HandleContentHashBackfillTask(ctx, taskSvc, task)
@@ -126,6 +139,7 @@ func applyInstalledTool(result toolsvc.InstallResult) error {
 	switch result.Tool {
 	case toolsvc.ToolFFmpeg:
 		transcoder.SetFFmpegPath(result.Path)
+		library.SetFFmpegPath(result.Path)
 	case toolsvc.ToolFFprobe:
 		transcoder.SetFFprobePath(result.Path)
 		library.SetFFprobePath(result.Path)
@@ -227,6 +241,7 @@ func main() {
 		transcoder.SetFFmpegPath(p)
 		log.Printf("[INFO] 采用持久化设置的 ffmpeg 路径: %s", p)
 	}
+	library.SetFFmpegPath(transcoder.GetFFmpegPath())
 	if p, _ := settingsSvc.Get(settings.KeyFFprobePath); p != "" {
 		transcoder.SetFFprobePath(p)
 		ffprobeBin = p
@@ -310,6 +325,10 @@ func main() {
 	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
 		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)
+	}
+	thumbnailSvc := thumbsvc.NewService(libSvc, taskSvc, cacheSvc, dataDir)
+	if err := thumbnailSvc.RegisterWorkers(taskWorkers, thumbnailConcurrencyFromSettings(settingsSvc)); err != nil {
+		log.Fatalf("[ERROR] 注册缩略图任务 worker 失败: %v", err)
 	}
 	toolsManager := toolsvc.NewManager(toolsvc.ManagerOptions{
 		Installer: toolsvc.NewInstaller(filepath.Join(filepath.Dir(cfg.DBPath), "tools"), nil),
@@ -398,7 +417,7 @@ func main() {
 		log.Fatalf("[ERROR] 注册 HLS preview worker 失败: %v", err)
 	}
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc)
+	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

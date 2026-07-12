@@ -28,6 +28,13 @@ function thumbnailURL(mediaID: number, size: number): string {
   return `/api/library/thumbnail/${mediaID}?size=${size}`;
 }
 
+// probeURL 保留浏览器实际选择的 srcset 档位，仅追加轻量探测标记。
+function probeURL(source: string, mediaID: number, fallbackSize: number): string {
+  const url = new URL(source || thumbnailURL(mediaID, fallbackSize), window.location.origin);
+  url.searchParams.set('probe', '1');
+  return `${url.pathname}${url.search}`;
+}
+
 export default function MediaThumbnail({
   mediaID,
   fileName,
@@ -58,23 +65,27 @@ export default function MediaThumbnail({
   const handleLoad = useCallback(() => setStatus('loaded'), []);
 
   // 加载失败时探测服务端：202 表示生成中，短间隔重试；其余错误显降级占位。
-  const handleError = useCallback(async () => {
-    if (retriesRef.current >= MAX_RETRIES) {
-      setStatus('error');
-      return;
-    }
-    try {
-      const resp = await fetch(thumbnailURL(mediaID, 320), { method: 'GET' });
-      if (resp.status === 202) {
-        retriesRef.current += 1;
-        timerRef.current = setTimeout(() => setReloadKey((k) => k + 1), RETRY_INTERVAL_MS);
+  const handleError = useCallback(
+    async (event: React.SyntheticEvent<HTMLImageElement>) => {
+      if (retriesRef.current >= MAX_RETRIES) {
+        setStatus('error');
         return;
       }
-    } catch {
-      // 网络异常按失败兜底
-    }
-    setStatus('error');
-  }, [mediaID]);
+      const source = event.currentTarget.currentSrc || event.currentTarget.src;
+      try {
+        const resp = await fetch(probeURL(source, mediaID, baseSize), { method: 'GET' });
+        if (resp.status === 202) {
+          retriesRef.current += 1;
+          timerRef.current = setTimeout(() => setReloadKey((k) => k + 1), RETRY_INTERVAL_MS);
+          return;
+        }
+      } catch {
+        // 网络异常按失败兜底
+      }
+      setStatus('error');
+    },
+    [baseSize, mediaID],
+  );
 
   return (
     <Box

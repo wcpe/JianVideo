@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -27,6 +28,10 @@ const (
 var (
 	thumbnailDirMu sync.Once
 	thumbnailDir   string
+
+	// thumbnailFFmpegPath 由启动发现结果与运行期设置共同注入，缩略图禁止硬编码 PATH 命令。
+	thumbnailFFmpegPathMu sync.RWMutex
+	thumbnailFFmpegPath   = "ffmpeg"
 
 	// thumbnailSemOnce 确保信号量只初始化一次。
 	thumbnailSemOnce sync.Once
@@ -172,6 +177,75 @@ func InitThumbnailDir(baseDir string) {
 // GetThumbnailDir 返回缩略图存储目录路径。
 func GetThumbnailDir() string {
 	return thumbnailDir
+}
+
+// SetFFmpegPath 注入缩略图生成使用的 ffmpeg 可执行文件路径。
+func SetFFmpegPath(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	thumbnailFFmpegPathMu.Lock()
+	thumbnailFFmpegPath = path
+	thumbnailFFmpegPathMu.Unlock()
+}
+
+// GetFFmpegPath 返回缩略图生成当前使用的 ffmpeg 路径。
+func GetFFmpegPath() string {
+	thumbnailFFmpegPathMu.RLock()
+	defer thumbnailFFmpegPathMu.RUnlock()
+	return thumbnailFFmpegPath
+}
+
+// SupportedThumbnailSizes 返回受支持的缩略图尺寸副本。
+func SupportedThumbnailSizes() []int {
+	return []int{160, 320, 640}
+}
+
+// GenerateThumbnailFile 同步生成指定输出路径的缩略图，供通用任务 worker 使用。
+func GenerateThumbnailFile(ctx context.Context, filePath, mediaType string, size int, outputPath string) error {
+	if strings.TrimSpace(outputPath) == "" {
+		return errors.New("缩略图输出路径不能为空")
+	}
+	job, ok := resolveThumbnailJobForMediaType(filePath, mediaType)
+	if !ok {
+		return fmt.Errorf("不支持的缩略图类型: %s", mediaType)
+	}
+	job.size = normalizeThumbnailSize(size)
+	key := "task\x00" + filepath.ToSlash(filepath.Clean(outputPath))
+	return thumbnailFlights.do(key, func() error {
+		if _, err := os.Stat(outputPath); err == nil {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o750); err != nil {
+			return fmt.Errorf("创建缩略图目录失败: %w", err)
+		}
+		tempPath := outputPath + ".tmp.jpg"
+		_ = os.Remove(tempPath)
+		defer func() { _ = os.Remove(tempPath) }()
+		if err := generateThumbnailToPath(ctx, job, tempPath); err != nil {
+			return err
+		}
+		if err := os.Rename(tempPath, outputPath); err != nil {
+			return fmt.Errorf("提交缩略图文件失败: %w", err)
+		}
+		return nil
+	})
+}
+
+func generateThumbnailToPath(ctx context.Context, job thumbnailJob, outputPath string) error {
+	ctx, cancel := context.WithTimeout(ctx, thumbnailFFmpegTimeout)
+	defer cancel()
+	switch job.kind {
+	case kindMagick:
+		return runMagick(buildMagickThumbnailArgs(job.filePath, outputPath, job.size))
+	case kindImage:
+		return realRunFFmpegThumbnail(ctx, buildImageThumbnailArgs(job.filePath, outputPath, job.size))
+	case kindVideo:
+		return realRunFFmpegThumbnail(ctx, buildVideoThumbnailArgs(job.filePath, outputPath, job.size))
+	default:
+		return fmt.Errorf("不支持的缩略图生成策略: %d", job.kind)
+	}
 }
 
 // GenerateThumbnail 根据文件类型异步生成缩略图。
@@ -339,7 +413,7 @@ func generateVideoThumbnailWithRunner(filePath string, size int, runner func(con
 // 命令失败时返回的错误包含 stderr 关键尾部（截断至 thumbnailStderrTailLimit 字符），
 // 以便上层日志说明「为什么失败」，而非仅一句 exit status。
 func realRunFFmpegThumbnail(ctx context.Context, args []string) error {
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, GetFFmpegPath(), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -297,6 +297,7 @@ func sortedDisabledLibraries(disabled map[int64]bool) []int64 {
 func applyFFmpegPathSettings(values map[string]string) {
 	if p, ok := values[settings.KeyFFmpegPath]; ok && p != "" {
 		transcoder.SetFFmpegPath(p)
+		library.SetFFmpegPath(p)
 	}
 	if p, ok := values[settings.KeyFFprobePath]; ok && p != "" {
 		transcoder.SetFFprobePath(p)

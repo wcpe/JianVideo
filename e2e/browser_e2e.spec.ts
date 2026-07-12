@@ -62,7 +62,7 @@ test.describe('JianVideo 浏览器端到端测试', () => {
 
   test('时间轴页渲染', async ({ page }) => {
     await login(page);
-    // 时间轴迁至 /timeline（FR-117）：经导航进入后断言标题与搜索框
+    // 时间轴迁至 /timeline（FR-117）：经导航进入后断言标题与页眉全局搜索框
     await page.getByRole('link', { name: '时间轴' }).click();
     await expect(page).toHaveURL(/\/timeline/);
     await expect(page.getByRole('heading', { name: '时间轴' })).toBeVisible();
@@ -141,7 +141,8 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     const searchInput = page.getByRole('textbox', { name: '全局搜索' });
     await expect(searchInput).toBeVisible();
     await searchInput.fill('test');
-    await expect(searchInput).toHaveValue('test');
+    await searchInput.press('Enter');
+    await expect(page).toHaveURL(/\/timeline\?search=test/);
   });
 
   test('登出功能', async ({ page }) => {

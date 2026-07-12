@@ -48,6 +48,41 @@ func newCacheTestService(t *testing.T) (*Service, *gorm.DB, string) {
 	return NewService(db, dataDir).WithAudit(audit.NewRecorder(db)).WithTasks(taskSvc), db, dataDir
 }
 
+func TestThumbnailInventory仅盘点目标Space路径(t *testing.T) {
+	svc, db, dataDir := newCacheTestService(t)
+	if err := db.Create(&models.Space{ID: "space-other", Name: "其他 Space", OwnerUserID: 1}).Error; err != nil {
+		t.Fatalf("创建其他 Space 失败: %v", err)
+	}
+	ownPath := filepath.Join(dataDir, "thumbnails", models.DefaultSpaceID, "1", "320.jpg")
+	otherPath := filepath.Join(dataDir, "thumbnails", "space-other", "2", "320.jpg")
+	mustWriteFile(t, ownPath, "own")
+	mustWriteFile(t, otherPath, "other")
+	if _, err := svc.RegisterFile(context.Background(), RegisterInput{
+		SpaceID: models.DefaultSpaceID, LibraryID: 11, MediaID: 1, Kind: CacheKindThumbnail,
+		Variant: "320", CacheKey: "space-default/1/320", Path: ownPath,
+	}); err != nil {
+		t.Fatalf("登记已有缩略图失败: %v", err)
+	}
+
+	queued, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("盘点任务入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, queued.TaskID)
+
+	var assets []models.CacheAsset
+	if err := db.Where("kind = ?", CacheKindThumbnail).Order("relative_path ASC").Find(&assets).Error; err != nil {
+		t.Fatalf("查询缩略图资产失败: %v", err)
+	}
+	if len(assets) != 1 || assets[0].SpaceID != models.DefaultSpaceID || strings.Contains(assets[0].RelativePath, "space-other") {
+		t.Fatalf("盘点不得跨 Space 登记缩略图: %+v", assets)
+	}
+	if assets[0].LibraryID != 11 || assets[0].MediaID != 1 || assets[0].Variant != "320" || assets[0].CacheKey == "" {
+		t.Fatalf("盘点不得清空已有缩略图关联信息: %+v", assets[0])
+	}
+}
+
 func TestCacheRegisterRejectsNonWhitelistPaths(t *testing.T) {
 	svc, _, dataDir := newCacheTestService(t)
 	outside := filepath.Join(t.TempDir(), "x.jpg")

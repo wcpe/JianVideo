@@ -515,6 +515,26 @@ func (s *Service) GetMediaFileByIDInSpace(spaceID string, id int64) (*models.Med
 	return s.mediaRepo.GetMediaFileByID(spaceID, id)
 }
 
+// CountThumbnailCandidates 返回当前 Space 可生成缩略图的媒体数量。
+func (s *Service) CountThumbnailCandidates(spaceID string) (int64, error) {
+	var count int64
+	err := s.db.Model(&models.MediaFile{}).
+		Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID)).
+		Count(&count).Error
+	return count, err
+}
+
+// ListThumbnailCandidates 按 ID 游标返回当前 Space 的缩略图批量候选。
+func (s *Service) ListThumbnailCandidates(spaceID string, afterID int64, limit int) ([]models.MediaFile, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var items []models.MediaFile
+	err := s.db.Where("space_id = ? AND id > ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), afterID).
+		Order("id ASC").Limit(limit).Find(&items).Error
+	return items, err
+}
+
 // DeleteMediaFile 软删除单条媒体文件记录（FR-25）。
 // 仅置 deleted_at 标记进回收站，不物理删除数据库记录、不动磁盘源文件。
 func (s *Service) DeleteMediaFile(id int64) error {
@@ -746,12 +766,7 @@ func (s *Service) RenameMediaFileInSpace(spaceID string, id int64, newName strin
 		return nil, fmt.Errorf("更新媒体文件记录失败: %w", err)
 	}
 
-	// 旧缩略图按旧路径 hash 命名，重命名后失效，尽力删除并为新文件重新生成
-	if rmErr := os.Remove(FindThumbnailPath(mf.FilePath)); rmErr != nil && !os.IsNotExist(rmErr) {
-		log.Printf("[WARN] 删除旧缩略图失败: %v", rmErr)
-	}
-	go GenerateThumbnail(newDiskPath)
-
+	// FR2-028 缩略图按 Space/media ID 寻址，重命名不改变缓存键，也无需进程内重新生成。
 	mf.FilePath = newPathSlash
 	mf.FileName = newName
 	mf.Format = format
@@ -829,11 +844,7 @@ func (s *Service) MoveMediaFileInSpace(spaceID string, id int64, targetDir strin
 		}
 		return nil, fmt.Errorf("更新媒体文件记录失败: %w", err)
 	}
-	if rmErr := os.Remove(FindThumbnailPath(mf.FilePath)); rmErr != nil && !os.IsNotExist(rmErr) {
-		log.Printf("[WARN] 删除旧缩略图失败: %v", rmErr)
-	}
-	go GenerateThumbnail(newDiskPath)
-
+	// FR2-028 缩略图按 Space/media ID 寻址，移动不改变缓存键，也无需进程内重新生成。
 	mf.FilePath = newPathSlash
 	return mf, nil
 }
@@ -1792,8 +1803,7 @@ func (s *Service) indexMediaFiles(scanCtx ScanContext, paths []string) (int, err
 			// SQLite WAL 串行写、计数走原子，进度状态经 updateScanStatus 互斥更新，均并发安全
 			done := atomic.AddInt64(&count, 1)
 
-			// 异步生成缩略图，不阻塞入库
-			go s.GenerateThumbnailSizeInSpace(scanCtx.SpaceID, scanCtx.LibraryID, pf.fullPath, thumbnailWidth)
+			// 缩略图按需或由 thumbnail.backfill 批量生成，扫描只负责索引入库。
 
 			// 每处理 10 个文件更新一次进度
 			if done%10 == 0 {

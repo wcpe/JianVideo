@@ -605,10 +605,19 @@
 ### 获取媒体缩略图
 
 - **方法 / 路径**：`GET /api/library/thumbnail/:id`
-- **查询参数**：`size`（可选）缩略图宽度，受支持白名单 `160` / `320` / `640`，缺省或非白名单值回落默认 `320`（FR-81 P12）
+- **查询参数**：`size`（可选）缩略图宽度，受支持白名单 `160` / `320` / `640`，缺省或非白名单值回落默认 `320`；`probe=1` 表示前端状态探测（FR2-028）
 - **响应**（200）：缩略图 JPEG 二进制内容（按 `size` 缩放，视频取第 2 秒帧、图片缩放；带透明区的源已合成中性灰底，FR-81 P1）
-- **说明**：缩略图在扫描入库时异步生成，存于数据目录下的 `thumbnails/`（按原始路径 hash 命名；**默认 320 尺寸命名不变**，非默认尺寸用 `<hash>_<size>.jpg` 并存）。普通图片/视频经 ffmpeg 生成，HEIC/RAW 经外部 ImageMagick 生成（FR-37）。请求尺寸尚未生成时返回 `202` 并触发后台异步生成该尺寸，前端可稍后重试。
+- **响应**（202）：`{"code":"GENERATING","message":"缩略图生成中","task_id":123,"sizes":[320]}`；同一 Space、媒体和尺寸集合的未完成任务按幂等键复用
+- **说明**：扫描只建立媒体索引，缩略图按需经通用任务 `thumbnail.generate` 生成。产物存于 `thumbnails/{spaceID}/{mediaID}/{size}.jpg`，并登记为 `cache_assets(kind=thumbnail, variant=size)`；清理后再次访问会重新入队。普通图片/视频使用配置的 ffmpeg 路径，HEIC/RAW 使用 ImageMagick。前端图片加载失败后以浏览器实际选择的 `srcSet` 档位追加 `probe=1` 轮询，期间保留骨架占位。
 - **错误**：`202` 缩略图生成中，`404` 媒体记录不存在
+
+### 批量预生成缩略图（FR2-028）
+
+- **方法 / 路径**：`POST /api/library/thumbnails/backfill`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求**：`{"sizes":[160,320,640]}`；`sizes` 为空或省略时使用全部三档，非法尺寸返回 `400`
+- **响应**（202）：`{"status":"queued","task_id":124,"sizes":[160,320,640]}`
+- **说明**：创建 `thumbnail.backfill` 任务，按媒体 ID checkpoint 分批扫描当前 Space；只处理具备缩略图能力的图片/视频，生成成功后逐档登记缓存资产。任务进度与终态通过 `GET /api/tasks/:id` 查询。
 
 ### 设置媒体收藏（FR-41）
 
