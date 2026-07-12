@@ -134,6 +134,7 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
 
   const dir = mkdtempSync(join(tmpdir(), "jianvideo-fr2-031-settings-e2e-"));
   const fileName = "Library.Scope.Movie.2026.mp4";
+  const libraryLabel = `FR2-031 E2E 范围库 ${process.pid}-${Date.now()}`;
   let libraryID = 0;
 
   try {
@@ -173,7 +174,7 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
       data: {
         path: dir.replace(/\\/g, "/"),
         type: "local",
-        label: "FR2-031 E2E 范围库",
+        label: libraryLabel,
         library_kind: "movie",
       },
     });
@@ -182,10 +183,10 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
 
     await page.goto("/settings");
     const librarySwitch = page.getByRole("switch", {
-      name: "FR2-031 E2E 范围库影视信息推断",
+      name: `${libraryLabel}影视信息推断`,
     });
     await expect(librarySwitch).toBeChecked();
-    const librarySwitchLabel = page.getByText("FR2-031 E2E 范围库", { exact: true });
+    const librarySwitchLabel = page.getByText(libraryLabel, { exact: true });
     await librarySwitchLabel.click();
     await page.getByRole("button", { name: "保存设置" }).click();
     await expect(page.getByText("设置已保存")).toBeVisible();
