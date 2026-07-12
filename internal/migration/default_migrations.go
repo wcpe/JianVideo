@@ -17,6 +17,14 @@ const DefaultSpaceID = models.DefaultSpaceID
 func DefaultMigrations() []Migration {
 	return []Migration{
 		{
+			ID:          "20260708_0000_v020_album_compat",
+			Description: "先行补齐 v0.20 相册 Space 列以兼容 SQLite 表重建",
+			SafeToRetry: true,
+			Estimate:    estimateV020AlbumCompat,
+			Up:          migrateV020AlbumCompat,
+			Validate:    validateV020AlbumCompat,
+		},
+		{
 			ID:          "20260708_0001_baseline_schema",
 			Description: "收敛既有基础 schema 与受控 AutoMigrate",
 			SafeToRetry: true,
@@ -136,7 +144,60 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFR2007DeletedQueryIndexes,
 			Validate:    validateFR2007DeletedQueryIndexes,
 		},
+		{
+			ID:          "20260712_0015_fr2_017_settings_preflight",
+			Description: "预检旧 settings 注册状态与启动敏感边界",
+			SafeToRetry: true,
+			Estimate:    estimateSettingsPreflight,
+			Up:          migrateSettingsPreflight,
+			Validate:    validateSettingsPreflight,
+		},
 	}
+}
+
+func estimateV020AlbumCompat(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var total int64
+	for _, table := range []string{"albums", "album_items"} {
+		if !tableExists(db, table) {
+			continue
+		}
+		var count int64
+		if err := db.Table(table).Count(&count).Error; err != nil {
+			return StepPlan{}, err
+		}
+		total += count
+	}
+	return StepPlan{EstimatedRows: total}, nil
+}
+
+func migrateV020AlbumCompat(_ context.Context, tx *gorm.DB) error {
+	for _, table := range []string{"albums", "album_items"} {
+		if !tableExists(tx, table) {
+			continue
+		}
+		if err := addColumnIfMissing(tx, table, "space_id", "TEXT NOT NULL DEFAULT '"+DefaultSpaceID+"'"); err != nil {
+			return err
+		}
+		if err := tx.Table(table).Where("space_id IS NULL OR TRIM(space_id) = ''").Update("space_id", DefaultSpaceID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateV020AlbumCompat(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, table := range []string{"albums", "album_items"} {
+		if !tableExists(db, table) {
+			continue
+		}
+		if !columnExists(db, table, "space_id") {
+			return Validation{}, fmt.Errorf("%s 缺少先行兼容列 space_id", table)
+		}
+		if count := countTableWhere(db, table, "space_id IS NULL OR TRIM(space_id) = ''"); count != 0 {
+			return Validation{}, fmt.Errorf("%s 仍有 %d 条记录缺少 Space 归属", table, count)
+		}
+	}
+	return Validation{Summary: "v0.20 相册已具备 baseline 重建所需 Space 列"}, nil
 }
 
 func estimateBaseline(_ context.Context, _ *gorm.DB) (StepPlan, error) {

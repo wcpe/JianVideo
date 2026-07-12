@@ -194,6 +194,7 @@ var registry = []Definition{
 	{
 		Key: "server_port", Label: "监听端口", Description: "服务启动时确定的 HTTP 监听端口，运行期不可修改。",
 		Layer: LayerStartup, ValueType: ValueInt, DefaultValue: "", HotApply: false, Consumer: "config",
+		Validate: validatePort,
 	},
 	{
 		Key: "db_path", Label: "数据库路径", Description: "SQLite 数据库文件路径，运行期不可通过设置接口修改。",
@@ -227,6 +228,15 @@ func definitionFor(key string) (Definition, bool) {
 	return def, ok
 }
 
+// ValidateStored 使用注册表校验已落库设置，未知 key 交由调用方决定兼容策略。
+func ValidateStored(key, value string) (bool, error) {
+	def, ok := definitionFor(key)
+	if !ok {
+		return false, nil
+	}
+	return true, validateDefinitionValue(def, value)
+}
+
 func validateWritable(key, value string) error {
 	def, ok := definitionFor(key)
 	if !ok {
@@ -235,11 +245,15 @@ func validateWritable(key, value string) error {
 	if def.Layer != LayerRuntime {
 		return ValidationError{Key: key, Message: "该设置不能在运行期修改"}
 	}
+	return validateDefinitionValue(def, value)
+}
+
+func validateDefinitionValue(def Definition, value string) error {
 	if def.Validate == nil {
 		return nil
 	}
 	if err := def.Validate(value); err != nil {
-		return ValidationError{Key: key, Message: err.Error()}
+		return ValidationError{Key: def.Key, Message: err.Error()}
 	}
 	return nil
 }
@@ -273,6 +287,14 @@ func validatePositiveInt(value string) error {
 	n, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("必须是正整数")
+	}
+	return nil
+}
+
+func validatePort(value string) error {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("必须是 1 到 65535 的端口")
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,17 +40,20 @@ type Runner struct {
 
 // StepPlan 表示 dry-run 输出中的单步计划。
 type StepPlan struct {
-	ID             string `json:"id"`
-	Description    string `json:"description"`
-	EstimatedRows  int64  `json:"estimated_rows"`
-	WillRun        bool   `json:"will_run"`
-	AlreadyApplied bool   `json:"already_applied"`
+	ID             string   `json:"id"`
+	Description    string   `json:"description"`
+	EstimatedRows  int64    `json:"estimated_rows"`
+	WillRun        bool     `json:"will_run"`
+	AlreadyApplied bool     `json:"already_applied"`
+	Blockers       []string `json:"blockers"`
+	Warnings       []string `json:"warnings"`
 }
 
 // Plan 表示 dry-run 只读计划。
 type Plan struct {
 	Steps    []StepPlan `json:"steps"`
 	Blockers []string   `json:"blockers"`
+	Warnings []string   `json:"warnings"`
 }
 
 // BackupResult 表示迁移前 SQLite 备份结果。
@@ -103,6 +107,14 @@ func (r *Runner) DryRun(ctx context.Context) (Plan, error) {
 				plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", migration.ID, err))
 			} else {
 				step.EstimatedRows = estimated.EstimatedRows
+				step.Blockers = append(step.Blockers, estimated.Blockers...)
+				step.Warnings = append(step.Warnings, estimated.Warnings...)
+				for _, blocker := range estimated.Blockers {
+					plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %s", migration.ID, blocker))
+				}
+				for _, warning := range estimated.Warnings {
+					plan.Warnings = append(plan.Warnings, fmt.Sprintf("%s: %s", migration.ID, warning))
+				}
 			}
 		}
 		plan.Steps = append(plan.Steps, step)
@@ -110,9 +122,16 @@ func (r *Runner) DryRun(ctx context.Context) (Plan, error) {
 	return plan, nil
 }
 
-// Run 先备份并校验 SQLite，再执行待迁移步骤。
+// Run 先执行只读预检，再备份并校验 SQLite，最后执行待迁移步骤。
 func (r *Runner) Run(ctx context.Context) (RunResult, error) {
 	var result RunResult
+	plan, err := r.DryRun(ctx)
+	if err != nil {
+		return result, fmt.Errorf("执行迁移预检失败: %w", err)
+	}
+	if len(plan.Blockers) > 0 {
+		return result, fmt.Errorf("迁移预检存在阻断项: %s", strings.Join(plan.Blockers, "; "))
+	}
 	pending, err := r.pendingMigrations(ctx)
 	if err != nil {
 		return result, err
@@ -137,7 +156,10 @@ func (r *Runner) Run(ctx context.Context) (RunResult, error) {
 	for _, migration := range pending {
 		applied, err := r.runMigration(ctx, migration, backup)
 		if err != nil {
-			_ = r.recordAudit("migration.failed", migration.ID, err.Error(), backup)
+			auditErr := r.recordAudit("migration.failed", migration.ID, err.Error(), backup)
+			if auditErr != nil {
+				err = errors.Join(err, auditErr)
+			}
 			return result, err
 		}
 		if applied {
@@ -159,50 +181,90 @@ func (r *Runner) pendingMigrations(ctx context.Context) ([]Migration, error) {
 		if err != nil {
 			return nil, err
 		}
-		if exists && row.Status == MigrationStatusSucceeded {
-			if migration.Validate != nil {
-				if _, err := migration.Validate(ctx, r.db); err != nil {
-					if !migration.SafeToRetry {
-						return nil, fmt.Errorf("migration %s 已成功但校验失败且不可重试: %w", migration.ID, err)
-					}
-					pending = append(pending, migration)
-				}
-			}
+		if !exists {
+			pending = append(pending, migration)
 			continue
 		}
-		if exists && row.Status == MigrationStatusFailed && !migration.SafeToRetry {
-			return nil, fmt.Errorf("migration %s 上次失败且不可安全重试", migration.ID)
+		switch row.Status {
+		case MigrationStatusSucceeded:
+			retry, err := r.shouldRetrySucceeded(ctx, migration)
+			if err != nil {
+				return nil, err
+			}
+			if retry {
+				pending = append(pending, migration)
+			}
+		case MigrationStatusPending:
+			pending = append(pending, migration)
+		case MigrationStatusRunning:
+			if !migration.SafeToRetry {
+				return nil, fmt.Errorf("migration %s 上次仍在运行中且不可安全重试", migration.ID)
+			}
+			pending = append(pending, migration)
+		case MigrationStatusFailed:
+			if !migration.SafeToRetry {
+				return nil, fmt.Errorf("migration %s 上次失败且不可安全重试", migration.ID)
+			}
+			pending = append(pending, migration)
+		default:
+			return nil, fmt.Errorf("migration %s 存在未知状态: %s", migration.ID, row.Status)
 		}
-		pending = append(pending, migration)
 	}
 	return pending, nil
 }
 
+func (r *Runner) shouldRetrySucceeded(ctx context.Context, migration Migration) (bool, error) {
+	if migration.Validate == nil {
+		return false, nil
+	}
+	if _, err := migration.Validate(ctx, r.db); err != nil {
+		if !migration.SafeToRetry {
+			return false, fmt.Errorf("migration %s 已成功但校验失败且不可重试: %w", migration.ID, err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func (r *Runner) runMigration(ctx context.Context, migration Migration, backup BackupResult) (bool, error) {
 	if err := r.markRunning(migration, backup.Path); err != nil {
-		return false, err
+		return false, fmt.Errorf("migration %s 记录运行状态失败: %w", migration.ID, err)
 	}
-	if migration.Up != nil {
-		if err := r.db.Transaction(func(tx *gorm.DB) error {
-			return migration.Up(ctx, tx)
-		}); err != nil {
-			r.markFailed(migration.ID, err)
-			return false, fmt.Errorf("migration %s 执行失败: %w", migration.ID, err)
-		}
-	}
-	validationSummary := ""
-	if migration.Validate != nil {
-		validation, err := migration.Validate(ctx, r.db)
+	transactionErr := r.db.Transaction(func(tx *gorm.DB) error {
+		validationSummary, err := executeMigrationTransaction(ctx, tx, migration)
 		if err != nil {
-			r.markFailed(migration.ID, err)
-			return false, fmt.Errorf("migration %s 校验失败: %w", migration.ID, err)
+			return err
 		}
-		validationSummary = validation.Summary
+		if err := r.markSucceeded(tx, migration.ID, validationSummary); err != nil {
+			return fmt.Errorf("写入成功状态失败: %w", err)
+		}
+		return nil
+	})
+	if transactionErr == nil {
+		return true, nil
 	}
-	if err := r.markSucceeded(migration.ID, validationSummary); err != nil {
-		return false, err
+
+	migrationErr := fmt.Errorf("migration %s 事务失败: %w", migration.ID, transactionErr)
+	if err := r.markFailed(migration.ID, migrationErr); err != nil {
+		migrationErr = errors.Join(migrationErr, fmt.Errorf("migration %s 记录失败状态失败: %w", migration.ID, err))
 	}
-	return true, nil
+	return false, migrationErr
+}
+
+func executeMigrationTransaction(ctx context.Context, tx *gorm.DB, migration Migration) (string, error) {
+	if migration.Up != nil {
+		if err := migration.Up(ctx, tx); err != nil {
+			return "", fmt.Errorf("执行失败: %w", err)
+		}
+	}
+	if migration.Validate == nil {
+		return "", nil
+	}
+	validation, err := migration.Validate(ctx, tx)
+	if err != nil {
+		return "", fmt.Errorf("校验失败: %w", err)
+	}
+	return validation.Summary, nil
 }
 
 func (r *Runner) createBackup() (BackupResult, error) {
@@ -343,24 +405,38 @@ func (r *Runner) markRunning(migration Migration, backupPath string) error {
 	).Error
 }
 
-func (r *Runner) markFailed(id string, cause error) {
+func (r *Runner) markFailed(id string, cause error) error {
 	now := r.options.Now()
-	r.db.Exec(
+	result := r.db.Exec(
 		`UPDATE schema_migrations
 		 SET status = ?, completed_at = ?, error_summary = ?, updated_at = ?
 		 WHERE id = ?`,
 		MigrationStatusFailed, now, truncate(cause.Error(), 500), now, id,
 	)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("未找到 migration %s 的状态记录", id)
+	}
+	return nil
 }
 
-func (r *Runner) markSucceeded(id, validationSummary string) error {
+func (r *Runner) markSucceeded(tx *gorm.DB, id, validationSummary string) error {
 	now := r.options.Now()
-	return r.db.Exec(
+	result := tx.Exec(
 		`UPDATE schema_migrations
 		 SET status = ?, completed_at = ?, validation_summary = ?, updated_at = ?
 		 WHERE id = ?`,
 		MigrationStatusSucceeded, now, validationSummary, now, id,
-	).Error
+	)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("未找到 migration %s 的状态记录", id)
+	}
+	return nil
 }
 
 func (r *Runner) recordAudit(eventType, migrationID, message string, backup BackupResult) error {

@@ -56,7 +56,7 @@
 | `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
 | `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交 | → `db` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
-| `migration` | 版本化 SQLite schema 迁移、dry-run 计划、迁移前备份、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models` |
+| `migration` | 版本化 SQLite schema 迁移、settings blocker/warning 预检、Runner 单步事务原子性、dry-run 计划、迁移前一致性备份、旧任务幂等映射、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models`, `settings` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
 | `config` | 配置加载（环境变量优先） | 无业务依赖 |
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
@@ -329,7 +329,7 @@ FR2-031 只做本地离线规则解析，不联网刮削、不下载海报、不
 | name | TEXT | Space 名称 |
 | created_at | DATETIME | 创建时间 |
 
-FR2-017 迁移会给既有 `library_paths` 与 `media_files` 增加 `space_id`，把历史记录回填到默认 Space，并创建 `idx_library_paths_space_id`、`idx_media_files_space_id`、`idx_media_files_space_library_added`。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。
+FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转码任务及相册、分享、健康问题等历史资源补齐 `space_id`，统一回填到默认 Space；默认 owner 取旧库首个用户。迁移同时创建 FR2-007 的 Space/媒体/任务组合索引。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。旧 `scan_tasks` / `transcode_tasks` 继续保留为兼容执行真源，并通过稳定幂等键 `scan:<legacy_id>` / `transcode:<legacy_id>` 映射到通用 `tasks`；重复执行映射不会重复插入。
 
 **审计事件（audit_events）** — FR2-040
 
@@ -744,11 +744,16 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 ### 5.13 版本化 schema 迁移（FR2-017，[ADR-0062](adr/0062-versioned-schema-migrations.md)）
 
 - `internal/migration` 是启动期 schema 演进入口：生产启动不再直接执行无版本记录的全局 `InitSchema + AutoMigrate`，而是经 migration registry 顺序执行。
-- 每个 migration 提供 ID、说明、`SafeToRetry`、`Up` 与 `Validate`；dry-run 只读返回步骤和影响预估，不写业务表、`schema_migrations` 或审计表。
-- 真实迁移只在存在待执行步骤时运行；执行前使用 SQLite `VACUUM INTO` 在数据目录 `backups/` 下创建备份，并打开备份执行 `PRAGMA integrity_check`，校验失败即停止。
-- `schema_migrations` 记录每步 `running/succeeded/failed`、错误摘要、校验摘要与备份路径；中断后重启会跳过已成功且校验通过的步骤，失败且 `SafeToRetry=true` 的步骤可重试。
-- FR2-007 在版本化迁移中追加 `spaces.owner_user_id`、`spaces.updated_at`、`library_paths.space_id`、`media_files.space_id`、`tags.space_id`、`scan_tasks.space_id`、`transcode_tasks.space_id` 与媒体/任务查询组合索引；历史资源回填到 `space-default`，默认 owner 取现有单用户 `users.id`。
+- 每个 migration 提供 ID、说明、`SafeToRetry`、`Estimate`、`Up` 与 `Validate`。dry-run 汇总预计影响行数、是否执行、是否已应用、blocker 和 warning，不写业务表、`schema_migrations`、审计表或备份。
+- Runner 在真实迁移前复用同一份预检。settings 预检调用 FR2-024 registry：已知非法值与未知高风险 key（密钥/口令/token、数据库路径、监听端口等）是 blocker；普通未知历史 key 是 warning 并原样保留。blocker 在备份和任何迁移写入前终止，诊断只含 key 名、不含 value。
+- 单步先记录 `running`，随后把 `Up`、事务内 `Validate` 和 `succeeded + validation_summary` 放入同一个 SQLite 事务；任一失败整体回滚，再在事务外记录 `failed`。已成功步骤仅在再次校验失败且 `SafeToRetry=true` 时重试；不可安全重试的遗留 `running/failed` 状态阻断启动。
+- 真实迁移只在存在待执行步骤时运行；执行前使用 SQLite `VACUUM INTO` 在数据库文件同目录的 `backups/` 下创建 `<数据库名>-before-v2-<UTC时间戳>.sqlite`，并重新打开备份执行 `PRAGMA integrity_check`，校验失败即停止。
+- 失败时保留完整性已校验的迁移前备份，不自动覆盖当前库。单步事务失败自动回滚；整库回退需停服后恢复备份，并确保不混用新库遗留的 `-wal` / `-shm` 文件。
+- 真实 v0.20 fixture 包含用户、媒体库、媒体、settings、相册、标签、扫描/转码任务、分享、健康问题与自定义后缀；验收保护旧数据值和原媒体 hash/mtime。旧任务按 `scan:<id>` / `transcode:<id>` 幂等映射到通用 `tasks`。
+- FR2-007 在版本化迁移中追加 `spaces.owner_user_id`、`spaces.updated_at`、各 Space 归属列与媒体/任务查询组合索引；历史资源回填到 `space-default`，默认 owner 取旧库首个 `users.id`。
 - 迁移开始、成功、失败写 `scope=system` 的 `audit_events`，`space_id` 为空，符合 ADR-0063 的系统级作用域语义。
+- Go 单二进制启动测试会构建当前程序、复制真实 v0.20 fixture、启动并验证迁移结果与备份完整性。CLI 只读入口 `-migration-dry-run` 已落地：输出 JSON 计划后退出，不启动服务、不备份、不写库；blocker 以非零状态退出，warning 不阻断。
+- `.tmp/benchmark/fr2-017/` 已完成 1m/5m/10m SQLite 规模验收：Runner 完整迁移分别为 57.197s、216.203s、596.426s，一致性备份分别为 2.526s、8.540s、18.245s；三档备份与主库 integrity、迁移前后计数、媒体指纹均通过，关键索引无缺失。
 
 ## 6. 部署
 

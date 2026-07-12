@@ -4,10 +4,13 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,11 +46,37 @@ import (
 var frontendDist embed.FS
 
 func sqliteDataSourceName(dbPath string) string {
+	return appendSQLiteOptions(dbPath, "_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on")
+}
+
+func sqliteReadOnlyDataSourceName(dbPath string) string {
+	fileURL := sqliteFileURL(dbPath)
+	query := url.Values{}
+	query.Set("mode", "ro")
+	query.Set("_busy_timeout", "10000")
+	query.Set("_foreign_keys", "on")
+	fileURL.RawQuery = query.Encode()
+	return fileURL.String()
+}
+
+func sqliteFileURL(dbPath string) *url.URL {
+	path := filepath.ToSlash(dbPath)
+	if strings.HasPrefix(path, "//") {
+		escapedPath := (&url.URL{Path: path}).EscapedPath()
+		return &url.URL{Scheme: "file", Opaque: "//" + escapedPath}
+	}
+	if filepath.IsAbs(dbPath) && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return &url.URL{Scheme: "file", Path: path}
+}
+
+func appendSQLiteOptions(dbPath, options string) string {
 	separator := "?"
 	if strings.Contains(dbPath, "?") {
 		separator = "&"
 	}
-	return dbPath + separator + "_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on"
+	return dbPath + separator + options
 }
 
 // version 应用版本号，构建时经 -ldflags "-X main.version=..." 注入，默认 dev。
@@ -122,6 +151,9 @@ func startTaskWorkers(ctx context.Context, workers *tasksvc.WorkerRegistry) {
 }
 
 func main() {
+	migrationDryRun := flag.Bool("migration-dry-run", false, "只读输出数据库迁移计划后退出")
+	flag.Parse()
+
 	// 记录进程启动时刻，供系统诊断「运行环境」计算运行时长（FR-60）。
 	startTime := time.Now()
 	cfg := config.Load()
@@ -131,7 +163,11 @@ func main() {
 	dbLogger := dblog.NewDefault()
 
 	// 使用 gorm 打开数据库（同时兼容 db 包的 InitSchema）
-	gormDB, err := gorm.Open(sqlite.Open(sqliteDataSourceName(cfg.DBPath)), &gorm.Config{Logger: dbLogger})
+	dataSourceName := sqliteDataSourceName(cfg.DBPath)
+	if *migrationDryRun {
+		dataSourceName = sqliteReadOnlyDataSourceName(cfg.DBPath)
+	}
+	gormDB, err := gorm.Open(sqlite.Open(dataSourceName), &gorm.Config{Logger: dbLogger})
 	if err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
@@ -146,11 +182,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("数据库迁移注册失败: %v", err)
 	}
-	migrationResult, err := migration.NewRunner(gormDB, migration.RunnerOptions{
+	runner := migration.NewRunner(gormDB, migration.RunnerOptions{
 		DBPath:    cfg.DBPath,
 		BackupDir: filepath.Join(filepath.Dir(cfg.DBPath), "backups"),
 		Registry:  registry,
-	}).Run(context.Background())
+	})
+	if *migrationDryRun {
+		plan, err := runner.DryRun(context.Background())
+		if err != nil {
+			log.Fatalf("数据库迁移 dry-run 失败: %v", err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(plan); err != nil {
+			log.Fatalf("输出数据库迁移 dry-run JSON 失败: %v", err)
+		}
+		if len(plan.Blockers) > 0 {
+			os.Exit(1)
+		}
+		return
+	}
+	migrationResult, err := runner.Run(context.Background())
 	if err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
