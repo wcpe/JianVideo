@@ -18,7 +18,7 @@
 ## 2. 需求（要什么）
 
 - 工具范围：ffmpeg、ffprobe、ImageMagick `magick`。
-- 下载源：内置官方/镜像元数据 + 用户自定义 URL。
+- 下载源：内置 `tools-v1.0.0` 六平台可信镜像 + 用户自定义 URL。
 - 支持代理下载，代理连通测试目标可按下载源配置。
 - 下载前展示版本、平台、架构、大小、sha256；自定义 URL 必须要求用户提供 sha256。
 - 下载文件保存到受控工具目录，不允许路径穿越或覆盖任意文件。
@@ -31,7 +31,7 @@
 
 配置与 registry：
 
-- `tool_sources` 内置为代码/JSON registry，包含 tool、platform、arch、version、url、sha256、size、mirror label。
+- `tool_sources` 内置为代码 registry，包含 tool、platform、arch、version、url、sha256、size、mirror label；只返回当前运行平台的 `tools-v1.0.0` Release 工具包，运行期绑定源拒绝平台与架构错配。
 - 用户自定义 URL 不落入内置 registry，作为一次性下载请求或保存为设置项。
 
 安全：
@@ -69,7 +69,7 @@ API：
 
 ## 5. 验收标准
 
-- 使用测试下载源能下载工具包、校验 sha256、安装到受控目录并探测版本。
+- `tools-v1.0.0` 六个平台 ZIP 均完成构建、来源证明、回下载 SHA-256 校验并正式发布；GitHub Actions run `29174143513` 已于 2026-07-12 完成该门禁。当前运行平台可从内置源下载工具包、校验 SHA-256、安装到受控目录并探测版本。
 - checksum 错误、路径穿越压缩包、symlink/hardlink、自定义 URL 缺 sha256 都会被拒绝。
 - 代理 URL 中的凭据不出现在日志、API 或审计事件明文中。
 - 下载任务可查看进度、失败可重试、可取消。

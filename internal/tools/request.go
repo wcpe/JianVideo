@@ -28,6 +28,12 @@ func ResolveDownloadRequest(req DownloadRequest, registry []Source) (Source, err
 			if source.Tool != tool {
 				return Source{}, fmt.Errorf("工具与下载源不匹配")
 			}
+			if source.runtimeBound && source.Platform != runtime.GOOS {
+				return Source{}, fmt.Errorf("内置下载源平台与当前运行平台不匹配")
+			}
+			if source.runtimeBound && source.Arch != runtime.GOARCH {
+				return Source{}, fmt.Errorf("内置下载源架构与当前运行架构不匹配")
+			}
 			if strings.TrimSpace(source.SHA256) == "" {
 				return Source{}, fmt.Errorf("内置下载源缺少 sha256，不能自动下载")
 			}

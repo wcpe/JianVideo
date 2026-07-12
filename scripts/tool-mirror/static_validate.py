@@ -7,6 +7,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 workflow = (root / ".github/workflows/tool-mirror.yml").read_text(encoding="utf-8")
 release = (root / "scripts/tool-mirror/release.sh").read_text(encoding="utf-8")
+release_assets = root / "scripts/tool-mirror/release_assets.py"
+if not release_assets.is_file():
+    raise SystemExit("错误：缺少发布资产解析脚本")
 required = {
     "ubuntu-24.04", "ubuntu-24.04-arm", "windows-2025",
     "windows-11-arm", "macos-15-intel", "macos-15",
@@ -36,6 +39,7 @@ release_tokens = (
     "trap cleanup EXIT",
     "release_created=1",
     "require_absent \"tag\"",
+    "python scripts/tool-mirror/release_assets.py",
 )
 for token in workflow_tokens:
     if token not in workflow:

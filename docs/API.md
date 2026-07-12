@@ -1329,11 +1329,11 @@
   ```json
   {
     "sources": [
-      { "id": "ffmpeg-source-8.1.2", "tool": "ffmpeg", "platform": "source", "arch": "all", "version": "8.1.2", "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.gz", "sha256": "", "size": 0, "label": "FFmpeg 官方源码包" }
+      { "id": "ffmpeg-tools-v1.0.0-windows-amd64", "tool": "ffmpeg", "platform": "windows", "arch": "amd64", "version": "tools-v1.0.0", "url": "https://github.com/wcpe/JianVideo/releases/download/tools-v1.0.0/jianvideo-tools-windows-x86_64.zip", "sha256": "ac4ddd58f077b9cf27058a5c5149a800113ec6e092c58e08176408b63167944f", "size": 34160498, "label": "JianVideo 工具包 tools-v1.0.0" }
     ]
   }
   ```
-- **说明**：返回内置工具源元数据。缺少 `sha256` 的源只能展示，不能自动下载。
+- **说明**：返回当前运行平台的内置工具源元数据。Linux、Windows、macOS 的 amd64/arm64 分别映射到 `tools-v1.0.0` GitHub Release 六个平台 ZIP；每个平台为 ffmpeg、ffprobe、magick 返回独立 source，三者共享该平台 ZIP 的固定 URL、大小与 SHA-256。下载请求会拒绝错配当前平台或架构的运行期绑定源。
 
 - **方法 / 路径**：`POST /api/system/tools/download`
 - **请求**：

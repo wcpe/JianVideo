@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -60,25 +61,62 @@ func TestResolveDownloadRequestAllowsExplicitLocalHTTP(t *testing.T) {
 	}
 }
 
-func TestResolveDownloadRequestUsesBuiltinSource(t *testing.T) {
+func TestResolveDownloadRequestUsesBuiltinSourceForCurrentRuntime(t *testing.T) {
 	registry := []Source{
-		{
-			ID:       "ffmpeg-test",
-			Tool:     ToolFFmpeg,
-			Platform: "windows",
-			Arch:     "amd64",
-			Version:  "8.1.2",
-			URL:      "https://downloads.example.com/ffmpeg.zip",
-			SHA256:   strings.Repeat("c", 64),
-			Size:     1024,
-			Label:    "测试镜像",
-		},
+		builtinTestSource(runtime.GOOS, runtime.GOARCH),
 	}
 	source, err := ResolveDownloadRequest(DownloadRequest{Tool: ToolFFmpeg, SourceID: "ffmpeg-test"}, registry)
 	if err != nil {
-		t.Fatalf("内置源应可解析: %v", err)
+		t.Fatalf("当前运行平台架构的内置源应可解析: %v", err)
 	}
 	if source.Label != "测试镜像" || source.SHA256 != strings.Repeat("c", 64) {
 		t.Fatalf("解析到的内置源不正确: %+v", source)
+	}
+}
+
+func TestResolveDownloadRequestAllowsUnboundSourceForOtherRuntime(t *testing.T) {
+	registry := []Source{
+		builtinTestSource("other-platform", "other-arch"),
+	}
+	source, err := ResolveDownloadRequest(DownloadRequest{Tool: ToolFFmpeg, SourceID: "ffmpeg-test"}, registry)
+	if err != nil {
+		t.Fatalf("未绑定运行环境的异平台注入源应可解析: %v", err)
+	}
+	if source.Platform != "other-platform" || source.Arch != "other-arch" {
+		t.Fatalf("解析到的注入源不正确: %+v", source)
+	}
+}
+
+func TestResolveDownloadRequestRejectsBuiltinSourceForOtherPlatform(t *testing.T) {
+	source := builtinTestSource("other-platform", runtime.GOARCH)
+	source.runtimeBound = true
+	registry := []Source{source}
+	_, err := ResolveDownloadRequest(DownloadRequest{Tool: ToolFFmpeg, SourceID: "ffmpeg-test"}, registry)
+	if err == nil || !strings.Contains(err.Error(), "平台") {
+		t.Fatalf("期望平台不匹配错误，实际 %v", err)
+	}
+}
+
+func TestResolveDownloadRequestRejectsBuiltinSourceForOtherArch(t *testing.T) {
+	source := builtinTestSource(runtime.GOOS, "other-arch")
+	source.runtimeBound = true
+	registry := []Source{source}
+	_, err := ResolveDownloadRequest(DownloadRequest{Tool: ToolFFmpeg, SourceID: "ffmpeg-test"}, registry)
+	if err == nil || !strings.Contains(err.Error(), "架构") {
+		t.Fatalf("期望架构不匹配错误，实际 %v", err)
+	}
+}
+
+func builtinTestSource(platform, arch string) Source {
+	return Source{
+		ID:       "ffmpeg-test",
+		Tool:     ToolFFmpeg,
+		Platform: platform,
+		Arch:     arch,
+		Version:  "8.1.2",
+		URL:      "https://downloads.example.com/ffmpeg.zip",
+		SHA256:   strings.Repeat("c", 64),
+		Size:     1024,
+		Label:    "测试镜像",
 	}
 }

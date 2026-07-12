@@ -25,6 +25,8 @@ type Source struct {
 	Size      int64  `json:"size"`
 	Label     string `json:"label"`
 	AllowHTTP bool   `json:"allow_http,omitempty"`
+	// runtimeBound 标记仅允许当前运行平台和架构使用的内部下载源。
+	runtimeBound bool `json:"-"`
 }
 
 // DownloadRequest 描述外部工具下载请求。
