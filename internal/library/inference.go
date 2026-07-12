@@ -316,10 +316,28 @@ func (s *Service) BackfillMediaInferencesWithProgressInSpace(
 	libraryID int64,
 	onProgress InferenceBackfillProgress,
 ) (int, error) {
-	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID)
+	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID, false)
 	if err != nil {
 		return 0, err
 	}
+	return s.backfillInferenceFiles(ctx, files, onProgress)
+}
+
+// BackfillMissingMediaInferencesWithProgressInSpace 只为尚无推断记录的媒体补齐结果。
+func (s *Service) BackfillMissingMediaInferencesWithProgressInSpace(
+	ctx context.Context,
+	spaceID string,
+	libraryID int64,
+	onProgress InferenceBackfillProgress,
+) (int, error) {
+	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID, true)
+	if err != nil {
+		return 0, err
+	}
+	return s.backfillInferenceFiles(ctx, files, onProgress)
+}
+
+func (s *Service) backfillInferenceFiles(ctx context.Context, files []models.MediaFile, onProgress InferenceBackfillProgress) (int, error) {
 	updated := 0
 	for i := range files {
 		if err := ctx.Err(); err != nil {
@@ -341,13 +359,17 @@ func (s *Service) BackfillMediaInferencesWithProgressInSpace(
 	return updated, nil
 }
 
-func (s *Service) listInferenceBackfillFiles(ctx context.Context, spaceID string, libraryID int64) ([]models.MediaFile, error) {
+func (s *Service) listInferenceBackfillFiles(ctx context.Context, spaceID string, libraryID int64, missingOnly bool) ([]models.MediaFile, error) {
 	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
 		return nil, nil
 	}
 	query := s.db.WithContext(ctx).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID))
 	if libraryID > 0 {
 		query = query.Where("library_id = ?", libraryID)
+	}
+	if missingOnly {
+		inferred := s.db.Model(&models.MediaInference{}).Select("media_id").Where("space_id = ?", normalizeSpaceID(spaceID))
+		query = query.Where("id NOT IN (?)", inferred)
 	}
 	var files []models.MediaFile
 	if err := query.Order("id ASC").Find(&files).Error; err != nil {

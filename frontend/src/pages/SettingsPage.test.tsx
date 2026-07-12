@@ -537,6 +537,37 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.ffmpeg_path).toBe('D:/tools/ffmpeg.exe');
   });
 
+  it('展示影视信息推断总开关并保存关闭状态', async () => {
+    const user = userEvent.setup();
+    let putBody: { settings: Record<string, string> } | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            scan_interval: '3600',
+            recycle_bin_paths: '{"D":"D:/.recycle"}',
+            media_inference_enabled: '1',
+          },
+        }),
+      ),
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = (await request.json()) as { settings: Record<string, string> };
+        return HttpResponse.json({ settings: putBody.settings });
+      }),
+    );
+
+    renderPage();
+    const inferenceSwitch = await screen.findByRole('switch', { name: '本地影视信息推断' });
+    expect(inferenceSwitch).toBeChecked();
+    expect(screen.getByRole('heading', { name: '影视信息' })).toBeVisible();
+
+    await user.click(inferenceSwitch);
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => expect(putBody).not.toBeNull());
+    expect(putBody!.settings.media_inference_enabled).toBe('0');
+  });
+
   it('渲染调试日志开关，默认按现有设置关闭（FR-110）', async () => {
     renderPage();
     const sw = await screen.findByRole('switch', { name: '调试日志' });

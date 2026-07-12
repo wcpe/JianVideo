@@ -5,13 +5,16 @@ const HIGH_CONFIDENCE_THRESHOLD = 0.75;
 
 /** 媒体展示名（FR2-031）：人工推断优先，其次 display_name、高置信自动推断、真实文件名。 */
 export function mediaDisplayName(file: MediaFile, inference?: MediaInference | null): string {
-  const manualTitle = inference?.manual ? inference.title.trim() : '';
+  const resolvedInference = inference === undefined ? file.inference : inference;
+  const manualTitle = resolvedInference?.manual ? resolvedInference.title.trim() : '';
   if (manualTitle) return manualTitle;
   const name = file.display_name?.trim();
   if (name) return name;
   const autoTitle =
-    inference && !inference.manual && inference.confidence >= HIGH_CONFIDENCE_THRESHOLD
-      ? inference.title.trim()
+    resolvedInference &&
+    !resolvedInference.manual &&
+    resolvedInference.confidence >= HIGH_CONFIDENCE_THRESHOLD
+      ? resolvedInference.title.trim()
       : '';
   return autoTitle || file.file_name;
 }

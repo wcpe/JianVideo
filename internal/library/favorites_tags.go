@@ -12,13 +12,20 @@ import (
 
 // MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
 // Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
+const (
+	InferenceStatusAuto    = "auto"
+	InferenceStatusManual  = "manual"
+	InferenceStatusMissing = "missing"
+)
+
 type MediaFilter struct {
-	SpaceID   string
-	LibraryID int64
-	Sort      string
-	Search    string
-	Favorite  *bool
-	TagID     int64
+	SpaceID         string
+	LibraryID       int64
+	Sort            string
+	Search          string
+	Favorite        *bool
+	TagID           int64
+	InferenceStatus string
 
 	// FR-35 结构化筛选（零值表示不约束，全部走参数化查询，无 SQL 注入面）
 	MediaType           string     // "image" / "video" / ""(不限)

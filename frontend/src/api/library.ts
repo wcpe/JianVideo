@@ -201,6 +201,8 @@ export interface MediaListParams {
   path?: string;
   // FR-39 照片地图：仅带 GPS 的媒体
   has_gps?: boolean;
+  // FR2-031 本地影视信息筛选
+  inference?: 'auto' | 'manual' | 'missing';
 }
 
 async function realGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
@@ -599,11 +601,14 @@ async function mockDeleteLibraryPath(id: number): Promise<void> {
 
 async function mockGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
   await mockDelay(200);
-  const { page = 1, page_size = 20, search, sort, favorite, tag_id } = params;
+  const { page = 1, page_size = 20, search, sort, favorite, tag_id, inference } = params;
   // 常规列表排除已软删项（FR-25）
   let items = mockMediaFiles.filter((m) => !mockDeletedIds.has(m.id));
   if (search) items = items.filter((m) => m.file_name.toLowerCase().includes(search.toLowerCase()));
   if (favorite) items = items.filter((m) => m.favorite);
+  if (inference === 'auto') items = items.filter((m) => m.inference && !m.inference.manual);
+  if (inference === 'manual') items = items.filter((m) => m.inference?.manual);
+  if (inference === 'missing') items = items.filter((m) => !m.inference);
   if (tag_id) {
     const ids = new Set(
       mockTagMappings.filter((tm) => tm.tag_id === tag_id).map((tm) => tm.media_id),

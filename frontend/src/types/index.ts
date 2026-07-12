@@ -74,6 +74,8 @@ export interface MediaFile {
   gps_lon?: number;
   /** 逆地理编码地名（FR-146 接线 FR-147）：由 GPS 就近解析的「省·市」，无 GPS 则空，旧数据可能缺省 */
   location?: string;
+  /** 列表批量附带的本地影视信息推断（FR2-031），尚无结果时缺省 */
+  inference?: MediaInference | null;
 }
 
 /** 本地离线影视信息推断（FR2-031）：自动候选或人工纠正结果 */

@@ -102,6 +102,9 @@ func (r *gormMediaRepository) ListMediaFiles(filter MediaFilter, page MediaPageR
 			nextCursor = token
 		}
 	}
+	if err := r.attachMediaInferences(items); err != nil {
+		return MediaPageResult{}, err
+	}
 	return MediaPageResult{
 		Items:      items,
 		Total:      total,
@@ -160,6 +163,7 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		query = query.Where("id IN (?)",
 			taggedMedia)
 	}
+	query = r.applyInferenceFilter(query, filter)
 
 	if len(filter.MediaTypeExtensions) > 0 {
 		query = query.Where("LOWER(format) IN ?", lowerAll(filter.MediaTypeExtensions))
@@ -211,6 +215,53 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		query = query.Where("lens LIKE ?", "%"+escapeLike(term)+"%")
 	}
 	return query
+}
+
+func (r *gormMediaRepository) applyInferenceFilter(query *gorm.DB, filter MediaFilter) *gorm.DB {
+	if filter.InferenceStatus == "" {
+		return query
+	}
+	if !r.db.Migrator().HasTable(&models.MediaInference{}) {
+		if filter.InferenceStatus == InferenceStatusMissing {
+			return query
+		}
+		return query.Where("1 = 0")
+	}
+	subquery := r.db.Model(&models.MediaInference{}).
+		Select("media_id").
+		Where("space_id = ?", normalizeSpaceID(filter.SpaceID))
+	switch filter.InferenceStatus {
+	case InferenceStatusAuto:
+		return query.Where("id IN (?)", subquery.Where("manual = ?", false))
+	case InferenceStatusManual:
+		return query.Where("id IN (?)", subquery.Where("manual = ?", true))
+	case InferenceStatusMissing:
+		return query.Where("id NOT IN (?)", subquery)
+	default:
+		return query
+	}
+}
+
+func (r *gormMediaRepository) attachMediaInferences(items []models.MediaFile) error {
+	if len(items) == 0 || !r.db.Migrator().HasTable(&models.MediaInference{}) {
+		return nil
+	}
+	ids := make([]int64, 0, len(items))
+	for i := range items {
+		ids = append(ids, items[i].ID)
+	}
+	var inferences []models.MediaInference
+	if err := r.db.Where("media_id IN ?", ids).Find(&inferences).Error; err != nil {
+		return err
+	}
+	byMediaID := make(map[int64]*models.MediaInference, len(inferences))
+	for i := range inferences {
+		byMediaID[inferences[i].MediaID] = &inferences[i]
+	}
+	for i := range items {
+		items[i].Inference = byMediaID[items[i].ID]
+	}
+	return nil
 }
 
 func applyMediaOrder(query *gorm.DB, sortKey string) *gorm.DB {

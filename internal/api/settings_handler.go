@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -123,6 +124,11 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		h.settingsReload()
 	}
 
+	if err := h.enqueueInferenceRefreshForSettings(c.Request.Context(), req.Settings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INFERENCE_REFRESH_FAILED", "message": "影视信息增量刷新任务入队失败"})
+		return
+	}
+
 	// 写入成功后回读返回，便于前端直接刷新状态。
 	all, err := h.settings.GetAll()
 	if err != nil {
@@ -135,6 +141,23 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 // applyFFmpegPathSettings 把本次保存的 ffmpeg/ffprobe 路径设置应用到运行期（FR-56）。
 // 仅当对应键出现且非空时覆盖；ffprobe 同步给 library，与 main.go 启动注入保持一致。
 // 空串不覆盖（保留自动发现/捆绑版结果），由 transcoder.Set* 自身的空值守卫保证。
+func (h *Handler) enqueueInferenceRefreshForSettings(ctx context.Context, values map[string]string) error {
+	_, enabledChanged := values[settings.KeyMediaInferenceEnabled]
+	_, librariesChanged := values[settings.KeyMediaInferenceDisabledLibraries]
+	if (!enabledChanged && !librariesChanged) || h.tasks == nil || h.taskWorkers == nil {
+		return nil
+	}
+	raw, err := h.settings.Get(settings.KeyMediaInferenceEnabled)
+	if err != nil || !settings.ParseBoolSetting(raw, true) {
+		return err
+	}
+	if _, err := h.enqueueInferenceBackfillTaskWithMode(ctx, models.DefaultSpaceID, 0, inferenceBackfillModeMissing); err != nil {
+		return err
+	}
+	h.taskWorkers.Wake()
+	return nil
+}
+
 func applyFFmpegPathSettings(values map[string]string) {
 	if p, ok := values[settings.KeyFFmpegPath]; ok && p != "" {
 		transcoder.SetFFmpegPath(p)

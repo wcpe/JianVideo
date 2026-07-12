@@ -273,6 +273,7 @@
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
   - 结构化筛选（可选，FR-35，显式参数优先于 `search` 表达式同名约束）：`type`（`image`/`video`）、`size_min`/`size_max`（字节）、`time_from`/`time_to`（媒体时间范围，`RFC3339` 或 `YYYY-MM-DD`，按 `COALESCE(media_time, added_at)` 比较）、`path`（目录前缀）。以上全部走参数化查询，无 SQL 注入面。
   - `has_gps`：传 `true` 时仅返回带 GPS 坐标（`gps_lat != 0 OR gps_lon != 0`）的媒体（可选，FR-39 照片地图）。
+  - `inference`：传 `auto` 时仅返回自动推断媒体，传 `manual` 时仅返回人工纠正媒体，传 `missing` 时仅返回尚无推断记录的媒体（可选，FR2-031）。
 - **响应**（200）：
   ```json
   {
@@ -298,7 +299,14 @@
         "shutter": "1/200",
         "iso": 400,
         "gps_lat": 31.23,
-        "gps_lon": 121.47
+        "gps_lon": 121.47,
+        "inference": {
+          "kind": "movie",
+          "title": "电影名",
+          "confidence": 0.9,
+          "source": "offline_rule",
+          "manual": false
+        }
       }
     ],
     "total": 100,
@@ -493,7 +501,7 @@
   ```json
   {"status": "pending", "task_id": 12}
   ```
-- **说明**：批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务以当前 Space、`library_id` 和固定幂等键入队为 `library.inference.backfill`，跳过 `home_video`、关闭的库和已有人工纠正的媒体。客户端须使用 `GET /api/tasks/:task_id` 轮询 `pending` / `running`，直到 `succeeded` / `failed` / `canceled` 终态；`progress` 按逐媒体完成比例更新，`checkpoint` 为最近处理的媒体 ID。取消 `running` 任务会向 worker 处理器传递 context 取消信号。
+- **说明**：手工发起时批量重跑当前 Space 内的离线影视信息推断。`library_id` 可省，省略则扫描全部库；任务以当前 Space、`library_id` 和执行模式组成的幂等键入队为 `library.inference.backfill`，跳过 `home_video`、关闭的库和已有人工纠正的媒体。保存推断总开关或按库关闭配置时，若保存后总开关开启，后端自动入队 `missing` 模式，仅为尚无推断记录的已有媒体补齐结果，不重算已有自动结果且不覆盖人工结果。客户端须使用 `GET /api/tasks/:task_id` 轮询 `pending` / `running`，直到 `succeeded` / `failed` / `canceled` 终态；`progress` 按逐媒体完成比例更新，`checkpoint` 为最近处理的媒体 ID。取消 `running` 任务会向 worker 处理器传递 context 取消信号。
 - **错误**：`503` 通用任务服务或 worker 未启用，`500` 入队失败
 
 ### 编辑备注（FR-137）
@@ -1481,7 +1489,7 @@
   }
   ```
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
-- **说明**：批量 upsert 键值，同一 key 覆盖旧值；所有 key 必须先登记为 `runtime`，并通过 registry 类型校验。任一 key 未知、不可运行期修改或值类型非法时整体返回 `400`，不写入任何设置。提交成功后回读返回，并触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时写入前校验协议和格式，落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），支持 http/https/socks5/socks5h，保存即生效（FR-80）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。
+- **说明**：批量 upsert 键值，同一 key 覆盖旧值；所有 key 必须先登记为 `runtime`，并通过 registry 类型校验。任一 key 未知、不可运行期修改或值类型非法时整体返回 `400`，不写入任何设置。提交成功后回读返回，并触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时写入前校验协议和格式，落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），支持 http/https/socks5/socks5h，保存即生效（FR-80）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。含 `media_inference_enabled` 或 `media_inference_disabled_libraries` 时即时刷新推断配置；若保存后总开关开启，自动为已有媒体入队缺失项增量推断任务，人工推断保持不变（FR2-031）。
 - **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`transcode_hwaccel_mode`（硬件转码策略：`auto/software/nvenc/qsv/amf/vaapi/videotoolbox`）、`transcode_hwaccel_fallback`（硬件失败软件回退，`"1"`=开启、`"0"`=关闭）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`media_inference_enabled`（FR2-031，本地影视信息推断总开关，`"1"`/`"true"`=开启）、`media_inference_disabled_libraries`（FR2-031，按库关闭推断的库 ID JSON 数组）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
 - **错误**：`400` 请求参数错误、`settings` 为空或配置校验失败（`INVALID_SETTING`），`503` 设置服务未启用，`500` 保存失败
 

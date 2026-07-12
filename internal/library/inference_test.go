@@ -206,6 +206,60 @@ func TestAutoInferenceDoesNotOverwriteConcurrentManualValue(t *testing.T) {
 	}
 }
 
+func TestListMediaFilesIncludesInferenceAndFiltersStatus(t *testing.T) {
+	svc, db := newInferenceTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	auto, err := svc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, "Auto.Movie.2024.mkv"), 10)
+	if err != nil {
+		t.Fatalf("创建自动推断媒体失败: %v", err)
+	}
+	manual, err := svc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, "Manual.Movie.2025.mkv"), 10)
+	if err != nil {
+		t.Fatalf("创建人工推断媒体失败: %v", err)
+	}
+	if _, err := svc.UpsertManualInferenceInSpace(models.DefaultSpaceID, manual.ID, InferenceManualInput{Title: "人工电影"}); err != nil {
+		t.Fatalf("保存人工推断失败: %v", err)
+	}
+	missing := models.MediaFile{
+		SpaceID: models.DefaultSpaceID, LibraryID: lp.ID, FilePath: filepath.Join(dir, "Missing.mkv"),
+		FileName: "Missing.mkv", Format: "mkv", AddedAt: time.Now(), ModifiedAt: time.Now(),
+	}
+	if err := db.Create(&missing).Error; err != nil {
+		t.Fatalf("创建待推断媒体失败: %v", err)
+	}
+
+	result, err := svc.ListMediaFilesPage(MediaFilter{SpaceID: models.DefaultSpaceID, InferenceStatus: InferenceStatusManual}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按人工推断筛选失败: %v", err)
+	}
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != manual.ID {
+		t.Fatalf("人工推断筛选结果不正确: %+v", result.Items)
+	}
+	if result.Items[0].Inference == nil || !result.Items[0].Inference.Manual || result.Items[0].Inference.Title != "人工电影" {
+		t.Fatalf("列表应批量附带人工推断信息: %+v", result.Items[0].Inference)
+	}
+
+	result, err = svc.ListMediaFilesPage(MediaFilter{SpaceID: models.DefaultSpaceID, InferenceStatus: InferenceStatusAuto}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按自动推断筛选失败: %v", err)
+	}
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != auto.ID || result.Items[0].Inference == nil {
+		t.Fatalf("自动推断筛选结果不正确: %+v", result.Items)
+	}
+
+	result, err = svc.ListMediaFilesPage(MediaFilter{SpaceID: models.DefaultSpaceID, InferenceStatus: InferenceStatusMissing}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按待推断筛选失败: %v", err)
+	}
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != missing.ID || result.Items[0].Inference != nil {
+		t.Fatalf("待推断筛选结果不正确: %+v", result.Items)
+	}
+}
+
 func TestBackfillMediaInferencesReportsProgressAndCancels(t *testing.T) {
 	svc, _ := newInferenceTestService(t)
 	dir := t.TempDir()

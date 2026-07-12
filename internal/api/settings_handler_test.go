@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/settings"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
 // setupSettingsRouter 构建带 settings 服务的测试路由。
@@ -268,6 +270,85 @@ func TestSettings_PutTriggersReload(t *testing.T) {
 	}
 	if reloaded != 1 {
 		t.Fatalf("失败保存不应触发回调, 回调次数 %d", reloaded)
+	}
+}
+
+func TestSettings_InferenceChangeEnqueuesIncrementalRefresh(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings-inference.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取测试数据库连接失败: %v", err)
+	}
+	defer sqlDB.Close()
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
+		t.Fatalf("预置关闭开关失败: %v", err)
+	}
+	libSvc := library.NewService(gdb).WithInferenceConfigProvider(func(string, int64) library.InferenceConfig {
+		raw, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+		return library.InferenceConfig{Enabled: settings.ParseBoolSetting(raw, true)}
+	})
+	dir := t.TempDir()
+	lp, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建测试媒体库失败: %v", err)
+	}
+	missing, err := libSvc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, "Missing.Movie.2024.mkv"), 10)
+	if err != nil {
+		t.Fatalf("创建待补齐媒体失败: %v", err)
+	}
+	manual, err := libSvc.CreateMediaFileInSpace(models.DefaultSpaceID, lp.ID, filepath.Join(dir, "Manual.Movie.2025.mkv"), 10)
+	if err != nil {
+		t.Fatalf("创建人工媒体失败: %v", err)
+	}
+	if _, err := libSvc.UpsertManualInferenceInSpace(models.DefaultSpaceID, manual.ID, library.InferenceManualInput{Title: "人工片名"}); err != nil {
+		t.Fatalf("保存人工推断失败: %v", err)
+	}
+
+	taskSvc := tasksvc.NewService(gdb)
+	workers := tasksvc.NewWorkerRegistry(taskSvc)
+	h := NewHandler(libSvc).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(workers)
+	r := gin.New()
+	RegisterRoutes(r, h)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"settings":{"media_inference_enabled":"1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("启用推断期望 200, 实际 %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var tasks []models.Task
+	if err := gdb.Where("type = ?", inferenceBackfillTaskType).Find(&tasks).Error; err != nil {
+		t.Fatalf("查询增量刷新任务失败: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("推断设置变化应入队 1 个增量刷新任务，实际 %d", len(tasks))
+	}
+	var payload inferenceBackfillPayload
+	if err := json.Unmarshal([]byte(tasks[0].PayloadJSON), &payload); err != nil {
+		t.Fatalf("解析增量刷新任务参数失败: %v", err)
+	}
+	if payload.Mode != inferenceBackfillModeMissing || payload.LibraryID != 0 {
+		t.Fatalf("设置变化应触发全局缺失项增量刷新: %+v", payload)
+	}
+	if _, err := libSvc.BackfillMissingMediaInferencesWithProgressInSpace(context.Background(), models.DefaultSpaceID, 0, nil); err != nil {
+		t.Fatalf("执行缺失项增量推断失败: %v", err)
+	}
+	missingInference, err := libSvc.GetMediaInferenceInSpace(models.DefaultSpaceID, missing.ID)
+	if err != nil || missingInference == nil || missingInference.Source != library.InferenceSourceRule {
+		t.Fatalf("待补齐媒体推断 = %#v, %v，期望自动推断", missingInference, err)
+	}
+	manualInference, err := libSvc.GetMediaInferenceInSpace(models.DefaultSpaceID, manual.ID)
+	if err != nil || manualInference == nil || manualInference.Source != library.InferenceSourceManual || manualInference.Title != "人工片名" {
+		t.Fatalf("人工推断 = %#v, %v，期望保持不变", manualInference, err)
 	}
 }
 

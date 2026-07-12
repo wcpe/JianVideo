@@ -81,4 +81,7 @@ type MediaFile struct {
 	// 观看次数（FR-75）：每「看完」一次 +1（由 MarkWatched 自增），位置上报不计数。
 	// 供观看统计页的「观看次数 Top N」与各维度聚合，默认 0。
 	ViewCount int `gorm:"default:0" json:"view_count"`
+
+	// Inference 是列表查询批量附带的影视推断信息，不属于 media_files 表。
+	Inference *MediaInference `gorm:"-" json:"inference,omitempty"`
 }

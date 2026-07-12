@@ -11,6 +11,7 @@ import {
   Button,
   Drawer,
   Box,
+  NativeSelect,
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -85,6 +86,8 @@ export default function TimelinePage() {
   // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
   const [sizeMin, setSizeMin] = useState(0);
+  // 本地影视信息筛选（FR2-031）：全局查看自动、人工或尚未推断的媒体
+  const [inferenceStatus, setInferenceStatus] = useState<'' | 'auto' | 'manual' | 'missing'>('');
   // 拍摄时间范围（FR-36 + FR-145）：从 ?date= 初始化为当天区间——下界当天零点、上界次日零点
   // （后端 <= 次日零点即含当天整天）；无 ?date= 时为空、不过滤。
   const [timeFrom, setTimeFrom] = useState(initialDate);
@@ -112,6 +115,7 @@ export default function TimelinePage() {
     sizeMin,
     timeFrom,
     timeTo,
+    inference: inferenceStatus,
     sort: 'media_time',
     initialSearch,
   });
@@ -151,10 +155,21 @@ export default function TimelinePage() {
         libraryId ||
         mediaType ||
         sizeMin ||
+        inferenceStatus ||
         timeFrom ||
         timeTo
       ),
-    [infinite.searchInput, favorite, tagId, libraryId, mediaType, sizeMin, timeFrom, timeTo],
+    [
+      infinite.searchInput,
+      favorite,
+      tagId,
+      libraryId,
+      mediaType,
+      sizeMin,
+      inferenceStatus,
+      timeFrom,
+      timeTo,
+    ],
   );
 
   // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
@@ -165,6 +180,7 @@ export default function TimelinePage() {
     setLibraryId(0);
     setMediaType('');
     setSizeMin(0);
+    setInferenceStatus('');
     setTimeFrom('');
     setTimeTo('');
   }, [infinite]);
@@ -262,6 +278,20 @@ export default function TimelinePage() {
             onTimeFromChange={setTimeFrom}
             timeTo={timeTo}
             onTimeToChange={setTimeTo}
+          />
+          <NativeSelect
+            aria-label="影视信息筛选"
+            size="xs"
+            value={inferenceStatus}
+            onChange={(e) =>
+              setInferenceStatus(e.currentTarget.value as '' | 'auto' | 'manual' | 'missing')
+            }
+            data={[
+              { value: '', label: '全部影视信息' },
+              { value: 'auto', label: '自动推断' },
+              { value: 'manual', label: '人工纠正' },
+              { value: 'missing', label: '待推断' },
+            ]}
           />
         </Stack>
       </Box>

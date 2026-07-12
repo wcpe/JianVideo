@@ -142,6 +142,63 @@ describe('TimelinePage', () => {
     expect(mkvThumb.getAttribute('src')).toContain('/api/library/thumbnail/201');
   });
 
+  it('提供全局影视信息筛选并展示推断标题', async () => {
+    const user = userEvent.setup();
+    let inferenceFilter: string | null = null;
+    server.use(
+      http.get('*/api/library/media', ({ request }) => {
+        inferenceFilter = new URL(request.url).searchParams.get('inference');
+        return HttpResponse.json({
+          items: [
+            {
+              id: 260,
+              library_id: 1,
+              file_path: 'D:/Movies/Raw.Movie.2024.mkv',
+              file_name: 'Raw.Movie.2024.mkv',
+              file_size: 1000,
+              format: 'mkv',
+              video_codec: 'h264',
+              audio_codec: 'aac',
+              duration: 60,
+              width: 1920,
+              height: 1080,
+              bitrate: 1000,
+              subtitle_tracks: '',
+              added_at: '2025-01-01T12:00:00Z',
+              modified_at: '2025-01-01T12:00:00Z',
+              inference: {
+                id: 1,
+                media_id: 260,
+                space_id: 'space-default',
+                kind: 'movie',
+                title: '推断电影名',
+                year: 2024,
+                season: 0,
+                episode: 0,
+                episode_title: '',
+                confidence: 0.9,
+                source: 'offline_rule',
+                rule_version: 'fr2-031-v1',
+                manual: false,
+                created_at: '2025-01-01T12:00:00Z',
+                updated_at: '2025-01-01T12:00:00Z',
+              },
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        });
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('推断电影名')).toBeVisible();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: '影视信息筛选' }), 'manual');
+    await waitFor(() => expect(inferenceFilter).toBe('manual'));
+  });
+
   it('点击刷新按钮重载首页数据（FR-67）', async () => {
     let requestCount = 0;
     server.use(

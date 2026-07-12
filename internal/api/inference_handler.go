@@ -74,11 +74,16 @@ func (h *Handler) UpdateMediaInference(c *gin.Context) {
 	c.JSON(http.StatusOK, inf)
 }
 
-const inferenceBackfillTaskType = "library.inference.backfill"
+const (
+	inferenceBackfillTaskType    = "library.inference.backfill"
+	inferenceBackfillModeFull    = "full"
+	inferenceBackfillModeMissing = "missing"
+)
 
 type inferenceBackfillPayload struct {
 	SpaceID   string `json:"space_id"`
 	LibraryID int64  `json:"library_id"`
+	Mode      string `json:"mode"`
 }
 
 // BackfillMediaInferences 处理媒体影视信息批量回填请求。
@@ -105,7 +110,11 @@ func (h *Handler) BackfillMediaInferences(c *gin.Context) {
 }
 
 func (h *Handler) enqueueInferenceBackfillTask(ctx context.Context, spaceID string, libraryID int64) (*models.Task, error) {
-	payload, err := json.Marshal(inferenceBackfillPayload{SpaceID: spaceID, LibraryID: libraryID})
+	return h.enqueueInferenceBackfillTaskWithMode(ctx, spaceID, libraryID, inferenceBackfillModeFull)
+}
+
+func (h *Handler) enqueueInferenceBackfillTaskWithMode(ctx context.Context, spaceID string, libraryID int64, mode string) (*models.Task, error) {
+	payload, err := json.Marshal(inferenceBackfillPayload{SpaceID: spaceID, LibraryID: libraryID, Mode: mode})
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +124,7 @@ func (h *Handler) enqueueInferenceBackfillTask(ctx context.Context, spaceID stri
 		Type:           inferenceBackfillTaskType,
 		Priority:       0,
 		MaxAttempts:    1,
-		IdempotencyKey: fmt.Sprintf("inference-backfill:%s:%d", spaceID, libraryID),
+		IdempotencyKey: fmt.Sprintf("inference-backfill:%s:%d:%s", spaceID, libraryID, mode),
 		PayloadJSON:    string(payload),
 		ResourceType:   "library",
 		ResourceID:     fmt.Sprintf("%d", libraryID),
@@ -147,7 +156,11 @@ func inferenceBackfillHandler(lib *library.Service, registry *tasksvc.WorkerRegi
 				Checkpoint: fmt.Sprintf("media:%d", mediaID),
 			})
 		}
-		_, err = lib.BackfillMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
+		if payload.Mode == inferenceBackfillModeMissing {
+			_, err = lib.BackfillMissingMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
+		} else {
+			_, err = lib.BackfillMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
+		}
 		return err
 	}
 }
@@ -166,6 +179,12 @@ func parseInferenceBackfillTask(task models.Task) (inferenceBackfillPayload, err
 	}
 	if payload.SpaceID != taskSpaceID {
 		return payload, errors.New("推断回填任务 Space 与参数不一致")
+	}
+	if payload.Mode == "" {
+		payload.Mode = inferenceBackfillModeFull
+	}
+	if payload.Mode != inferenceBackfillModeFull && payload.Mode != inferenceBackfillModeMissing {
+		return payload, errors.New("推断回填任务模式无效")
 	}
 	return payload, nil
 }

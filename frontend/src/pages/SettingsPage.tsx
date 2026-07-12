@@ -35,6 +35,7 @@ import {
   SETTING_KEY_MAGICK_PATH,
   SETTING_KEY_NETWORK_PROXY,
   SETTING_KEY_DEBUG_LOG,
+  SETTING_KEY_MEDIA_INFERENCE_ENABLED,
   SETTING_KEY_UPLOAD_TARGET_DIR,
   SETTING_KEY_UPLOAD_NAMING_RULE,
 } from '@/api/settings';
@@ -74,6 +75,7 @@ const SETTINGS_ANCHORS = [
   { id: 'set-storage', label: '存储与 Space' },
   { id: 'set-account', label: '账户安全' },
   { id: 'set-scan', label: '扫描' },
+  { id: 'set-inference', label: '影视信息' },
   { id: 'set-upload', label: '上传' },
   { id: 'set-network', label: '网络' },
   { id: 'set-tools', label: '工具路径' },
@@ -111,6 +113,8 @@ export default function SettingsPage() {
   const [networkProxyMasked, setNetworkProxyMasked] = useState(false);
   // 调试日志开关（FR-110）：开启输出 GORM 详细 SQL/慢查询日志，关闭恢复安静；保存即生效
   const [debugLog, setDebugLog] = useState(false);
+  // 本地离线影视信息推断总开关（FR2-031）：关闭后扫描与回填不再产生新推断
+  const [mediaInferenceEnabled, setMediaInferenceEnabled] = useState(true);
   // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
   const [uploadTargetDir, setUploadTargetDir] = useState('');
   const [uploadNamingRule, setUploadNamingRule] = useState('');
@@ -194,6 +198,7 @@ export default function SettingsPage() {
         setNetworkProxy(proxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : proxy);
         setNetworkProxyMasked(proxy === SETTING_SENSITIVE_DISPLAY_VALUE);
         setDebugLog((data[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
+        setMediaInferenceEnabled((data[SETTING_KEY_MEDIA_INFERENCE_ENABLED] ?? '1') !== '0');
         setUploadTargetDir(data[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
         setUploadNamingRule(data[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       })
@@ -367,6 +372,7 @@ export default function SettingsPage() {
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
         [SETTING_KEY_MAGICK_PATH]: magickPath,
         [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
+        [SETTING_KEY_MEDIA_INFERENCE_ENABLED]: mediaInferenceEnabled ? '1' : '0',
         [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
         [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
       };
@@ -384,6 +390,7 @@ export default function SettingsPage() {
       setNetworkProxy(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : nextProxy);
       setNetworkProxyMasked(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE);
       setDebugLog((updated[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
+      setMediaInferenceEnabled((updated[SETTING_KEY_MEDIA_INFERENCE_ENABLED] ?? '1') !== '0');
       setUploadTargetDir(updated[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
       setUploadNamingRule(updated[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       notifications.show({
@@ -410,6 +417,7 @@ export default function SettingsPage() {
     magickPath,
     networkProxy,
     debugLog,
+    mediaInferenceEnabled,
     uploadTargetDir,
     uploadNamingRule,
     networkProxyMasked,
@@ -681,6 +689,22 @@ export default function SettingsPage() {
                 )}
                 value={scanInterval}
                 onChange={(e) => setScanInterval(e.currentTarget.value)}
+              />
+            </Card>
+
+            <Title id="set-inference" order={3}>
+              影视信息
+            </Title>
+            <Card withBorder padding="md" radius="md">
+              <Switch
+                label="本地影视信息推断"
+                aria-label="本地影视信息推断"
+                description={settingDescription(
+                  SETTING_KEY_MEDIA_INFERENCE_ENABLED,
+                  '仅根据文件名和目录离线推断片名、年份与季集信息；关闭后扫描和回填不再产生新推断。重新开启会为尚无结果的已有媒体创建增量刷新任务。',
+                )}
+                checked={mediaInferenceEnabled}
+                onChange={(e) => setMediaInferenceEnabled(e.currentTarget.checked)}
               />
             </Card>
 

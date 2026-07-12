@@ -19,7 +19,7 @@
 - **FR2-052 多媒体库分型**：`library_paths` 新增 `library_kind` 与 `library_profile_json`，旧库迁移默认 `mixed`；`GET /api/library/kinds` 返回 `movie/series/home_video/mixed` 的中文说明、命名提示与推荐扫描策略，库路径创建/更新支持分型校验与回读。扫描上下文携带 `library_kind`，媒体库管理页新增分型选择并区分来源类型与内容分型，MSW mock 与前端类型同步。
 - **FR2-056 硬件转码加速管理面板**：新增 `transcode_hwaccel_mode` 与 `transcode_hwaccel_fallback` 运行期设置，支持自动、软件、NVENC、QSV、AMF、VAAPI、VideoToolbox 策略与硬件失败软件回退；转码预生成、播放协商与预切片执行器按策略选择 ffmpeg encoder，指定硬件不可用且关闭回退时返回明确中文错误。系统控制台硬件加速 tab 新增策略分段控件、回退开关、保存与强制重测按钮，强制重测写入系统级 `codec_probe.retested` 审计事件。能力缓存键纳入 FFmpeg 版本、实际路径、文件元数据与内容摘要，避免工具热切换后复用同版本其他构建的旧探测结果。
 - **FR2-061 文件级/哈希去重**：`media_files` 新增 SHA-256 内容哈希字段、计算时间、stale 标记与 `(space_id, file_size, content_hash)` 组合索引；`media_hash_groups` 保存 Space 内重复组快照，精确查询会回连 `media_files` 复验软删、missing 与 stale 状态。扫描增量变更会在大小或 mtime 变化后置 stale，回填通过 FR2-037 任务 `library.file_hash_backfill` 流式计算源文件内容 hash。新增 `POST /api/library/file-hashes/backfill` 与 `GET /api/library/duplicates/exact`，旧 dHash 去重保留为 Space scoped 的「相似重复」；重复项页区分「精确重复 / 相似重复」，两类处理都复用批量软删并写审计，不物理删除源文件。Benchmark 报告输出到 `.tmp/benchmark/fr2-061/`。
-- **FR2-031 本地离线影视信息推断**：新增 `media_inferences` 推断真源、movie/series/mixed/home_video 本地规则解析、全局与按库关闭配置、扫描入库与 backfill 接入、查询/人工纠正 API 以及播放页详情抽屉编辑入口。人工纠正优先并写审计事件，backfill 不覆盖人工值；展示名按「人工纠正 > 库内显示名 > 高置信自动推断 > 原始文件名」决策，低置信候选不自动替换显示名。
+- **FR2-031 本地离线影视信息推断**：新增 `media_inferences` 推断真源、movie/series/mixed/home_video 本地规则解析、全局与按库关闭配置、扫描入库与 backfill 接入、查询/人工纠正 API 以及播放页详情抽屉编辑入口。人工纠正优先并写审计事件，backfill 不覆盖人工值；展示名按「人工纠正 > 库内显示名 > 高置信自动推断 > 原始文件名」决策，低置信候选不自动替换显示名。设置变更后会自动为已有媒体补齐缺失推断；时间轴新增全局已推断/未推断筛选并展示推断标题。
 
 ### 修复
 - **FR2-022 可信工具镜像发布**：修复原子发布阶段的资产列表解析语法错误，以及回下载请求混用 JSON/二进制 `Accept` 头导致 `SHA256SUMS` 下载为错误响应的问题；六平台工具包已通过来源证明与回下载校验并正式发布为 `tools-v1.0.0`。
