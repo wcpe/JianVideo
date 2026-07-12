@@ -195,8 +195,12 @@ describe('TimelinePage', () => {
     renderPage();
     expect(await screen.findByText('推断电影名')).toBeVisible();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: '影视信息筛选' }), 'manual');
-    await waitFor(() => expect(inferenceFilter).toBe('manual'));
+    const filter = screen.getByRole('combobox', { name: '影视信息筛选' });
+    expect(within(filter).getByRole('option', { name: '已推断' })).toHaveValue('inferred');
+    expect(within(filter).getByRole('option', { name: '自动推断' })).toHaveValue('auto');
+    expect(within(filter).getByRole('option', { name: '人工纠正' })).toHaveValue('manual');
+    await user.selectOptions(filter, 'inferred');
+    await waitFor(() => expect(inferenceFilter).toBe('inferred'));
   });
 
   it('点击刷新按钮重载首页数据（FR-67）', async () => {

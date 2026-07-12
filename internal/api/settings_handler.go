@@ -5,9 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
@@ -95,7 +99,13 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
-	if err := h.settings.SetMany(req.Settings); err != nil {
+	wakeInferenceWorker := false
+	err := h.settings.SetManyWithHook(c.Request.Context(), req.Settings, func(ctx context.Context, tx *gorm.DB, before, after map[string]string) error {
+		queued, hookErr := h.persistInferenceRefreshForSettings(ctx, tx, before, after)
+		wakeInferenceWorker = queued
+		return hookErr
+	})
+	if err != nil {
 		if settings.IsValidationError(err) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_SETTING", "message": err.Error()})
 			return
@@ -124,9 +134,8 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		h.settingsReload()
 	}
 
-	if err := h.enqueueInferenceRefreshForSettings(c.Request.Context(), req.Settings); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "INFERENCE_REFRESH_FAILED", "message": "影视信息增量刷新任务入队失败"})
-		return
+	if wakeInferenceWorker {
+		h.taskWorkers.Wake()
 	}
 
 	// 写入成功后回读返回，便于前端直接刷新状态。
@@ -141,21 +150,148 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 // applyFFmpegPathSettings 把本次保存的 ffmpeg/ffprobe 路径设置应用到运行期（FR-56）。
 // 仅当对应键出现且非空时覆盖；ffprobe 同步给 library，与 main.go 启动注入保持一致。
 // 空串不覆盖（保留自动发现/捆绑版结果），由 transcoder.Set* 自身的空值守卫保证。
-func (h *Handler) enqueueInferenceRefreshForSettings(ctx context.Context, values map[string]string) error {
-	_, enabledChanged := values[settings.KeyMediaInferenceEnabled]
-	_, librariesChanged := values[settings.KeyMediaInferenceDisabledLibraries]
-	if (!enabledChanged && !librariesChanged) || h.tasks == nil || h.taskWorkers == nil {
+func (h *Handler) persistInferenceRefreshForSettings(ctx context.Context, tx *gorm.DB, before, after map[string]string) (bool, error) {
+	if !containsInferenceSetting(after) {
+		return false, nil
+	}
+	oldCfg, newCfg, err := inferenceSettingsTransition(tx, before, after)
+	if err != nil || inferenceConfigsEqual(oldCfg, newCfg) {
+		return false, err
+	}
+	newCfg.Generation++
+	if err := persistInferenceGeneration(tx, newCfg.Generation); err != nil {
+		return false, err
+	}
+	libraryIDs := newlyEnabledInferenceLibraries(oldCfg, newCfg)
+	if !newCfg.Enabled || (oldCfg.Enabled && len(libraryIDs) == 0) {
+		return false, nil
+	}
+	spaces, err := inferenceRefreshSpaces(ctx, tx, newCfg, libraryIDs)
+	if err != nil || len(spaces) == 0 {
+		return false, err
+	}
+	if h.tasks == nil || h.taskWorkers == nil {
+		return false, gorm.ErrInvalidDB
+	}
+	disabled := sortedDisabledLibraries(newCfg.DisabledLibraries)
+	for _, spaceID := range spaces {
+		payload := inferenceBackfillPayload{
+			SpaceID: spaceID, Mode: inferenceBackfillModeMissing, Generation: newCfg.Generation,
+			Enabled: true, DisabledLibraries: disabled,
+		}
+		if _, err := h.enqueueInferenceTask(ctx, tx, payload); err != nil {
+			return false, err
+		}
+	}
+	return len(spaces) > 0, nil
+}
+
+func containsInferenceSetting(values map[string]string) bool {
+	_, enabled := values[settings.KeyMediaInferenceEnabled]
+	_, libraries := values[settings.KeyMediaInferenceDisabledLibraries]
+	return enabled || libraries
+}
+
+func inferenceSettingsTransition(tx *gorm.DB, before, after map[string]string) (library.InferenceConfig, library.InferenceConfig, error) {
+	newCfg, err := inferenceConfigTx(tx)
+	if err != nil {
+		return library.InferenceConfig{}, library.InferenceConfig{}, err
+	}
+	oldCfg := newCfg
+	if _, ok := after[settings.KeyMediaInferenceEnabled]; ok {
+		oldCfg.Enabled = settings.ParseBoolSetting(settingBefore(before, settings.KeyMediaInferenceEnabled, "1"), true)
+	}
+	if _, ok := after[settings.KeyMediaInferenceDisabledLibraries]; ok {
+		oldCfg.DisabledLibraries = library.ParseDisabledInferenceLibraries(settingBefore(before, settings.KeyMediaInferenceDisabledLibraries, "[]"))
+	}
+	return oldCfg, newCfg, nil
+}
+
+func settingBefore(before map[string]string, key, fallback string) string {
+	if value, ok := before[key]; ok {
+		return value
+	}
+	return fallback
+}
+
+func inferenceConfigTx(tx *gorm.DB) (library.InferenceConfig, error) {
+	var items []models.Setting
+	if err := tx.Where("key IN ?", []string{
+		settings.KeyMediaInferenceEnabled,
+		settings.KeyMediaInferenceDisabledLibraries,
+		settings.KeyMediaInferenceGeneration,
+	}).Find(&items).Error; err != nil {
+		return library.InferenceConfig{}, err
+	}
+	values := map[string]string{}
+	for _, item := range items {
+		values[item.Key] = item.Value
+	}
+	return library.InferenceConfig{
+		Enabled:           settings.ParseBoolSetting(values[settings.KeyMediaInferenceEnabled], true),
+		DisabledLibraries: library.ParseDisabledInferenceLibraries(values[settings.KeyMediaInferenceDisabledLibraries]),
+		Generation:        settings.ParseInt64Setting(values[settings.KeyMediaInferenceGeneration]),
+	}, nil
+}
+
+func inferenceConfigsEqual(a, b library.InferenceConfig) bool {
+	if a.Enabled != b.Enabled || len(a.DisabledLibraries) != len(b.DisabledLibraries) {
+		return false
+	}
+	for id := range a.DisabledLibraries {
+		if !b.DisabledLibraries[id] {
+			return false
+		}
+	}
+	return true
+}
+
+func newlyEnabledInferenceLibraries(oldCfg, newCfg library.InferenceConfig) []int64 {
+	if !oldCfg.Enabled && newCfg.Enabled {
 		return nil
 	}
-	raw, err := h.settings.Get(settings.KeyMediaInferenceEnabled)
-	if err != nil || !settings.ParseBoolSetting(raw, true) {
-		return err
+	result := make([]int64, 0)
+	for id := range oldCfg.DisabledLibraries {
+		if !newCfg.DisabledLibraries[id] {
+			result = append(result, id)
+		}
 	}
-	if _, err := h.enqueueInferenceBackfillTaskWithMode(ctx, models.DefaultSpaceID, 0, inferenceBackfillModeMissing); err != nil {
-		return err
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func persistInferenceGeneration(tx *gorm.DB, generation int64) error {
+	setting := models.Setting{Key: settings.KeyMediaInferenceGeneration, Value: strconv.FormatInt(generation, 10), UpdatedAt: time.Now()}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
+	}).Create(&setting).Error
+}
+
+func inferenceRefreshSpaces(ctx context.Context, tx *gorm.DB, cfg library.InferenceConfig, libraryIDs []int64) ([]string, error) {
+	query := tx.WithContext(ctx).Table("media_files").Distinct("media_files.space_id").
+		Joins("JOIN library_paths ON library_paths.id = media_files.library_id AND library_paths.space_id = media_files.space_id").
+		Joins("LEFT JOIN media_inferences ON media_inferences.media_id = media_files.id AND media_inferences.space_id = media_files.space_id").
+		Where("media_files.deleted_at IS NULL AND media_inferences.media_id IS NULL").
+		Where("library_paths.library_kind <> ?", models.LibraryKindHomeVideo)
+	if len(libraryIDs) > 0 {
+		query = query.Where("media_files.library_id IN ?", libraryIDs)
 	}
-	h.taskWorkers.Wake()
-	return nil
+	if disabled := sortedDisabledLibraries(cfg.DisabledLibraries); len(disabled) > 0 {
+		query = query.Where("media_files.library_id NOT IN ?", disabled)
+	}
+	var spaces []string
+	err := query.Order("media_files.space_id ASC").Pluck("media_files.space_id", &spaces).Error
+	return spaces, err
+}
+
+func sortedDisabledLibraries(disabled map[int64]bool) []int64 {
+	result := make([]int64, 0, len(disabled))
+	for id := range disabled {
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func applyFFmpegPathSettings(values map[string]string) {

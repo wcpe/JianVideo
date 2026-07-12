@@ -231,6 +231,8 @@ func (r *gormMediaRepository) applyInferenceFilter(query *gorm.DB, filter MediaF
 		Select("media_id").
 		Where("space_id = ?", normalizeSpaceID(filter.SpaceID))
 	switch filter.InferenceStatus {
+	case InferenceStatusInferred:
+		return query.Where("id IN (?)", subquery)
 	case InferenceStatusAuto:
 		return query.Where("id IN (?)", subquery.Where("manual = ?", false))
 	case InferenceStatusManual:

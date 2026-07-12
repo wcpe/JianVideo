@@ -81,9 +81,12 @@ const (
 )
 
 type inferenceBackfillPayload struct {
-	SpaceID   string `json:"space_id"`
-	LibraryID int64  `json:"library_id"`
-	Mode      string `json:"mode"`
+	SpaceID           string  `json:"space_id"`
+	LibraryID         int64   `json:"library_id"`
+	Mode              string  `json:"mode"`
+	Generation        int64   `json:"generation,omitempty"`
+	Enabled           bool    `json:"enabled,omitempty"`
+	DisabledLibraries []int64 `json:"disabled_libraries,omitempty"`
 }
 
 // BackfillMediaInferences 处理媒体影视信息批量回填请求。
@@ -114,21 +117,28 @@ func (h *Handler) enqueueInferenceBackfillTask(ctx context.Context, spaceID stri
 }
 
 func (h *Handler) enqueueInferenceBackfillTaskWithMode(ctx context.Context, spaceID string, libraryID int64, mode string) (*models.Task, error) {
-	payload, err := json.Marshal(inferenceBackfillPayload{SpaceID: spaceID, LibraryID: libraryID, Mode: mode})
+	payload := inferenceBackfillPayload{SpaceID: spaceID, LibraryID: libraryID, Mode: mode}
+	return h.enqueueInferenceTask(ctx, nil, payload)
+}
+
+func (h *Handler) enqueueInferenceTask(ctx context.Context, tx *gorm.DB, payload inferenceBackfillPayload) (*models.Task, error) {
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	return h.tasks.Enqueue(ctx, tasksvc.EnqueueInput{
-		Scope:          models.TaskScopeSpace,
-		SpaceID:        spaceID,
-		Type:           inferenceBackfillTaskType,
-		Priority:       0,
-		MaxAttempts:    1,
-		IdempotencyKey: fmt.Sprintf("inference-backfill:%s:%d:%s", spaceID, libraryID, mode),
-		PayloadJSON:    string(payload),
-		ResourceType:   "library",
-		ResourceID:     fmt.Sprintf("%d", libraryID),
-	})
+	key := fmt.Sprintf("inference-backfill:%s:%d:%s", payload.SpaceID, payload.LibraryID, payload.Mode)
+	if payload.Generation > 0 {
+		key = fmt.Sprintf("%s:%d", key, payload.Generation)
+	}
+	input := tasksvc.EnqueueInput{
+		Scope: models.TaskScopeSpace, SpaceID: payload.SpaceID, Type: inferenceBackfillTaskType,
+		Priority: 0, MaxAttempts: 1, IdempotencyKey: key, PayloadJSON: string(encoded),
+		ResourceType: "library", ResourceID: fmt.Sprintf("%d", payload.LibraryID),
+	}
+	if tx != nil {
+		return h.tasks.EnqueueTx(ctx, tx, input)
+	}
+	return h.tasks.Enqueue(ctx, input)
 }
 
 // RegisterInferenceBackfillWorker 注册离线推断回填处理器。
@@ -156,13 +166,29 @@ func inferenceBackfillHandler(lib *library.Service, registry *tasksvc.WorkerRegi
 				Checkpoint: fmt.Sprintf("media:%d", mediaID),
 			})
 		}
-		if payload.Mode == inferenceBackfillModeMissing {
+		if payload.Mode == inferenceBackfillModeMissing && payload.Generation > 0 {
+			cfg := library.InferenceConfig{
+				Enabled: payload.Enabled, Generation: payload.Generation,
+				DisabledLibraries: inferenceDisabledLibrarySet(payload.DisabledLibraries),
+			}
+			_, err = lib.BackfillMissingMediaInferencesWithConfigInSpace(ctx, payload.SpaceID, payload.LibraryID, cfg, progress)
+		} else if payload.Mode == inferenceBackfillModeMissing {
 			_, err = lib.BackfillMissingMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
 		} else {
 			_, err = lib.BackfillMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
 		}
 		return err
 	}
+}
+
+func inferenceDisabledLibrarySet(ids []int64) map[int64]bool {
+	result := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			result[id] = true
+		}
+	}
+	return result
 }
 
 func parseInferenceBackfillTask(task models.Task) (inferenceBackfillPayload, error) {

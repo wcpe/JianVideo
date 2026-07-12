@@ -3,7 +3,9 @@ package library
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -251,12 +253,106 @@ func TestListMediaFilesIncludesInferenceAndFiltersStatus(t *testing.T) {
 		t.Fatalf("自动推断筛选结果不正确: %+v", result.Items)
 	}
 
+	result, err = svc.ListMediaFilesPage(MediaFilter{SpaceID: models.DefaultSpaceID, InferenceStatus: InferenceStatusInferred}, MediaPageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("按已推断筛选失败: %v", err)
+	}
+	if result.Total != 2 || len(result.Items) != 2 {
+		t.Fatalf("已推断应包含自动与人工结果: total=%d items=%+v", result.Total, result.Items)
+	}
+
 	result, err = svc.ListMediaFilesPage(MediaFilter{SpaceID: models.DefaultSpaceID, InferenceStatus: InferenceStatusMissing}, MediaPageRequest{Page: 1, PageSize: 20})
 	if err != nil {
 		t.Fatalf("按待推断筛选失败: %v", err)
 	}
 	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != missing.ID || result.Items[0].Inference != nil {
 		t.Fatalf("待推断筛选结果不正确: %+v", result.Items)
+	}
+}
+
+func TestBackfillMissingMediaInferencesUsesCursorBatchesAndConfigSnapshot(t *testing.T) {
+	svc, db := newInferenceTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	for i := 1; i <= 250; i++ {
+		media := models.MediaFile{
+			SpaceID: models.DefaultSpaceID, LibraryID: lp.ID,
+			FilePath: filepath.Join(dir, fmt.Sprintf("Movie.%03d.2024.mkv", i)),
+			FileName: fmt.Sprintf("Movie.%03d.2024.mkv", i), Format: "mkv",
+			AddedAt: time.Now(), ModifiedAt: time.Now(),
+		}
+		if err := db.Create(&media).Error; err != nil {
+			t.Fatalf("创建第 %d 条媒体失败: %v", i, err)
+		}
+	}
+	providerCalls := 0
+	svc.WithInferenceConfigProvider(func(string, int64) InferenceConfig {
+		providerCalls++
+		return InferenceConfig{Enabled: true, Generation: 7}
+	})
+	var batchSizes []int
+	svc.inferenceBackfillBatchHook = func(size int) { batchSizes = append(batchSizes, size) }
+	updated, err := svc.BackfillMissingMediaInferencesWithConfigInSpace(
+		context.Background(), models.DefaultSpaceID, 0,
+		InferenceConfig{Enabled: true, Generation: 7}, nil,
+	)
+	if err != nil {
+		t.Fatalf("分页回填失败: %v", err)
+	}
+	if updated != 250 {
+		t.Fatalf("分页回填数量=%d，期望 250", updated)
+	}
+	if !reflect.DeepEqual(batchSizes, []int{100, 100, 50}) {
+		t.Fatalf("应按 cursor 分三批处理，实际 %v", batchSizes)
+	}
+	if providerCalls > len(batchSizes)+1 {
+		t.Fatalf("配置应按批快照校验，不得每媒体读取: calls=%d batches=%d", providerCalls, len(batchSizes))
+	}
+}
+
+func TestBackfillGenerationChangeStopsStaleTaskAndAllowsCompensation(t *testing.T) {
+	svc, db := newInferenceTestService(t)
+	dir := t.TempDir()
+	lp, err := svc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	for _, name := range []string{"First.Movie.2024.mkv", "Second.Movie.2025.mkv"} {
+		media := models.MediaFile{
+			SpaceID: models.DefaultSpaceID, LibraryID: lp.ID,
+			FilePath: filepath.Join(dir, name), FileName: name, Format: "mkv",
+			AddedAt: time.Now(), ModifiedAt: time.Now(),
+		}
+		if err := db.Create(&media).Error; err != nil {
+			t.Fatalf("创建媒体失败: %v", err)
+		}
+	}
+	generation := int64(1)
+	svc.WithInferenceConfigProvider(func(string, int64) InferenceConfig {
+		return InferenceConfig{Enabled: true, Generation: generation}
+	})
+	svc.inferenceBackfillBatchHook = func(int) { generation = 2 }
+	updated, err := svc.BackfillMissingMediaInferencesWithConfigInSpace(
+		context.Background(), models.DefaultSpaceID, 0,
+		InferenceConfig{Enabled: true, Generation: 1}, nil,
+	)
+	if err != nil || updated != 0 {
+		t.Fatalf("旧 generation 应无写入退出: updated=%d err=%v", updated, err)
+	}
+	var count int64
+	if err := db.Model(&models.MediaInference{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("旧任务不得在设置变化后写入: count=%d err=%v", count, err)
+	}
+	svc.inferenceBackfillBatchHook = nil
+	updated, err = svc.BackfillMissingMediaInferencesWithConfigInSpace(
+		context.Background(), models.DefaultSpaceID, 0,
+		InferenceConfig{Enabled: true, Generation: 2}, nil,
+	)
+	if err != nil || updated != 2 {
+		t.Fatalf("新 generation 补偿任务应补齐全部缺失项: updated=%d err=%v", updated, err)
 	}
 }
 

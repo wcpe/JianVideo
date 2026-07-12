@@ -87,7 +87,9 @@ export default function TimelinePage() {
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
   const [sizeMin, setSizeMin] = useState(0);
   // 本地影视信息筛选（FR2-031）：全局查看自动、人工或尚未推断的媒体
-  const [inferenceStatus, setInferenceStatus] = useState<'' | 'auto' | 'manual' | 'missing'>('');
+  const [inferenceStatus, setInferenceStatus] = useState<
+    '' | 'inferred' | 'auto' | 'manual' | 'missing'
+  >('');
   // 拍摄时间范围（FR-36 + FR-145）：从 ?date= 初始化为当天区间——下界当天零点、上界次日零点
   // （后端 <= 次日零点即含当天整天）；无 ?date= 时为空、不过滤。
   const [timeFrom, setTimeFrom] = useState(initialDate);
@@ -284,10 +286,13 @@ export default function TimelinePage() {
             size="xs"
             value={inferenceStatus}
             onChange={(e) =>
-              setInferenceStatus(e.currentTarget.value as '' | 'auto' | 'manual' | 'missing')
+              setInferenceStatus(
+                e.currentTarget.value as '' | 'inferred' | 'auto' | 'manual' | 'missing',
+              )
             }
             data={[
               { value: '', label: '全部影视信息' },
+              { value: 'inferred', label: '已推断' },
               { value: 'auto', label: '自动推断' },
               { value: 'manual', label: '人工纠正' },
               { value: 'missing', label: '待推断' },

@@ -16,7 +16,7 @@ interface UseInfiniteMediaOptions {
   timeFrom?: string;
   timeTo?: string;
   // 本地影视信息状态筛选（FR2-031）
-  inference?: 'auto' | 'manual' | 'missing' | '';
+  inference?: 'inferred' | 'auto' | 'manual' | 'missing' | '';
   // 初始搜索关键词（FR-132）：用于承接页眉全局搜索经 URL ?search= 传入，
   // 作为搜索框初值并使首屏即以该词请求；仅作初值，后续由用户输入接管。
   initialSearch?: string;

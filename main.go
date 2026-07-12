@@ -242,13 +242,11 @@ func main() {
 	libSvc := library.NewService(gormDB).WithAudit(auditSvc).WithInferenceConfigProvider(func(_ string, _ int64) library.InferenceConfig {
 		enabledRaw, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
 		disabledRaw, _ := settingsSvc.Get(settings.KeyMediaInferenceDisabledLibraries)
-		enabled := true
-		if enabledRaw != "" {
-			enabled = settings.ParseDebugLog(enabledRaw)
-		}
+		generationRaw, _ := settingsSvc.Get(settings.KeyMediaInferenceGeneration)
 		return library.InferenceConfig{
-			Enabled:           enabled,
+			Enabled:           settings.ParseBoolSetting(enabledRaw, true),
 			DisabledLibraries: library.ParseDisabledInferenceLibraries(disabledRaw),
+			Generation:        settings.ParseInt64Setting(generationRaw),
 		}
 	})
 	shareSvc := share.NewService(gormDB)

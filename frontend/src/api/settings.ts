@@ -34,8 +34,24 @@ export const SETTING_KEY_MAGICK_PATH = 'magick_path';
 export const SETTING_KEY_NETWORK_PROXY = 'network_proxy';
 // 运行时调试日志开关（FR-110），"1"=开启详细日志、其余=安静；与后端 settings 常量一致
 export const SETTING_KEY_DEBUG_LOG = 'debug_log';
-// 本地离线影视信息推断总开关（FR2-031），"1"=开启、"0"=关闭
+// 本地离线影视信息推断设置（FR2-031）
 export const SETTING_KEY_MEDIA_INFERENCE_ENABLED = 'media_inference_enabled';
+export const SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES =
+  'media_inference_disabled_libraries';
+
+/** 按后端设置注册表口径解析合法布尔值，非法值使用默认值。 */
+export function parseBooleanSetting(raw: string | undefined, defaultValue: boolean): boolean {
+  switch (raw?.trim().toLowerCase()) {
+    case '1':
+    case 'true':
+      return true;
+    case '0':
+    case 'false':
+      return false;
+    default:
+      return defaultValue;
+  }
+}
 // 目录浏览打开的标签列表（FR-151），JSON 数组：每项 {path,sort,displayMode}
 export const SETTING_KEY_OPEN_TABS = 'open_tabs';
 // 目录浏览上次浏览位置（FR-151），字符串路径，用于恢复时定位激活标签
@@ -83,6 +99,7 @@ const mockStore: SettingsMap = {
   [SETTING_KEY_TRANSCODE_HWACCEL_MODE]: 'auto',
   [SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK]: '1',
   [SETTING_KEY_MEDIA_INFERENCE_ENABLED]: '1',
+  [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]: '[]',
 };
 
 const mockDefinitions: SettingDefinition[] = [
@@ -216,6 +233,17 @@ const mockDefinitions: SettingDefinition[] = [
     layer: 'runtime',
     value_type: 'bool',
     default_value: '1',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.inference',
+  },
+  {
+    key: SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES,
+    label: '关闭推断的媒体库',
+    description: '不运行影视信息推断的媒体库。',
+    layer: 'runtime',
+    value_type: 'json',
+    default_value: '[]',
     sensitive: false,
     hot_apply: true,
     consumer: 'library.inference',

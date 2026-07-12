@@ -13,9 +13,10 @@ import (
 // MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
 // Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
 const (
-	InferenceStatusAuto    = "auto"
-	InferenceStatusManual  = "manual"
-	InferenceStatusMissing = "missing"
+	InferenceStatusInferred = "inferred"
+	InferenceStatusAuto     = "auto"
+	InferenceStatusManual   = "manual"
+	InferenceStatusMissing  = "missing"
 )
 
 type MediaFilter struct {

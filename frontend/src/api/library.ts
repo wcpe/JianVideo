@@ -202,7 +202,7 @@ export interface MediaListParams {
   // FR-39 照片地图：仅带 GPS 的媒体
   has_gps?: boolean;
   // FR2-031 本地影视信息筛选
-  inference?: 'auto' | 'manual' | 'missing';
+  inference?: 'inferred' | 'auto' | 'manual' | 'missing';
 }
 
 async function realGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
@@ -606,6 +606,7 @@ async function mockGetMediaFiles(params: MediaListParams = {}): Promise<MediaLis
   let items = mockMediaFiles.filter((m) => !mockDeletedIds.has(m.id));
   if (search) items = items.filter((m) => m.file_name.toLowerCase().includes(search.toLowerCase()));
   if (favorite) items = items.filter((m) => m.favorite);
+  if (inference === 'inferred') items = items.filter((m) => m.inference);
   if (inference === 'auto') items = items.filter((m) => m.inference && !m.inference.manual);
   if (inference === 'manual') items = items.filter((m) => m.inference?.manual);
   if (inference === 'missing') items = items.filter((m) => !m.inference);

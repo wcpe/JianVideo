@@ -74,6 +74,7 @@ type InferenceManualInput struct {
 type InferenceConfig struct {
 	Enabled           bool
 	DisabledLibraries map[int64]bool
+	Generation        int64
 }
 
 // InferenceConfigProvider 按 Space 与库读取推断开关。
@@ -304,78 +305,145 @@ func inferenceUpsertColumns() []string {
 // InferenceBackfillProgress 是批量推断的逐媒体进度回调。
 type InferenceBackfillProgress func(completed, total int, mediaID int64) error
 
+const inferenceBackfillBatchSize = 100
+
+type inferenceBackfillItem struct {
+	models.MediaFile
+	LibraryKind string `gorm:"column:library_kind"`
+}
+
 // BackfillMediaInferencesInSpace 批量重跑自动推断，跳过人工值和关闭的库。
 func (s *Service) BackfillMediaInferencesInSpace(spaceID string, libraryID int64) (int, error) {
 	return s.BackfillMediaInferencesWithProgressInSpace(context.Background(), spaceID, libraryID, nil)
 }
 
 // BackfillMediaInferencesWithProgressInSpace 支持逐媒体进度和协作取消的批量推断。
-func (s *Service) BackfillMediaInferencesWithProgressInSpace(
-	ctx context.Context,
-	spaceID string,
-	libraryID int64,
-	onProgress InferenceBackfillProgress,
-) (int, error) {
-	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID, false)
-	if err != nil {
-		return 0, err
-	}
-	return s.backfillInferenceFiles(ctx, files, onProgress)
+func (s *Service) BackfillMediaInferencesWithProgressInSpace(ctx context.Context, spaceID string, libraryID int64, onProgress InferenceBackfillProgress) (int, error) {
+	return s.backfillMediaInferences(ctx, spaceID, libraryID, false, s.inferenceConfigSnapshot(spaceID), onProgress)
 }
 
 // BackfillMissingMediaInferencesWithProgressInSpace 只为尚无推断记录的媒体补齐结果。
-func (s *Service) BackfillMissingMediaInferencesWithProgressInSpace(
-	ctx context.Context,
-	spaceID string,
-	libraryID int64,
-	onProgress InferenceBackfillProgress,
-) (int, error) {
-	files, err := s.listInferenceBackfillFiles(ctx, spaceID, libraryID, true)
+func (s *Service) BackfillMissingMediaInferencesWithProgressInSpace(ctx context.Context, spaceID string, libraryID int64, onProgress InferenceBackfillProgress) (int, error) {
+	return s.backfillMediaInferences(ctx, spaceID, libraryID, true, s.inferenceConfigSnapshot(spaceID), onProgress)
+}
+
+// BackfillMissingMediaInferencesWithConfigInSpace 使用任务配置快照分页补齐缺失推断。
+func (s *Service) BackfillMissingMediaInferencesWithConfigInSpace(ctx context.Context, spaceID string, libraryID int64, cfg InferenceConfig, onProgress InferenceBackfillProgress) (int, error) {
+	return s.backfillMediaInferences(ctx, spaceID, libraryID, true, cfg, onProgress)
+}
+
+func (s *Service) backfillMediaInferences(ctx context.Context, spaceID string, libraryID int64, missingOnly bool, cfg InferenceConfig, onProgress InferenceBackfillProgress) (int, error) {
+	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
+		return 0, nil
+	}
+	total, err := s.countInferenceBackfillFiles(ctx, spaceID, libraryID, missingOnly)
 	if err != nil {
 		return 0, err
 	}
-	return s.backfillInferenceFiles(ctx, files, onProgress)
-}
-
-func (s *Service) backfillInferenceFiles(ctx context.Context, files []models.MediaFile, onProgress InferenceBackfillProgress) (int, error) {
-	updated := 0
-	for i := range files {
+	updated, completed, cursor := 0, 0, int64(0)
+	for {
 		if err := ctx.Err(); err != nil {
 			return updated, err
 		}
-		_, stored, err := s.inferAndStoreMediaInSpace(files[i].SpaceID, files[i].ID)
-		if err != nil {
+		items, err := s.listInferenceBackfillBatch(ctx, spaceID, libraryID, missingOnly, cursor)
+		if err != nil || len(items) == 0 {
 			return updated, err
 		}
-		if stored {
-			updated++
+		if s.inferenceBackfillBatchHook != nil {
+			s.inferenceBackfillBatchHook(len(items))
 		}
-		if onProgress != nil {
-			if err := onProgress(i+1, len(files), files[i].ID); err != nil {
+		if s.inferenceGenerationChanged(spaceID, cfg.Generation) {
+			return updated, nil
+		}
+		for i := range items {
+			if err := ctx.Err(); err != nil {
 				return updated, err
+			}
+			stored, err := s.inferAndStoreBackfillItem(items[i], cfg, missingOnly)
+			if err != nil {
+				return updated, err
+			}
+			if stored {
+				updated++
+			}
+			completed++
+			cursor = items[i].ID
+			if onProgress != nil {
+				if err := onProgress(completed, total, items[i].ID); err != nil {
+					return updated, err
+				}
 			}
 		}
 	}
-	return updated, nil
 }
 
-func (s *Service) listInferenceBackfillFiles(ctx context.Context, spaceID string, libraryID int64, missingOnly bool) ([]models.MediaFile, error) {
-	if !s.db.Migrator().HasTable(&models.MediaInference{}) {
-		return nil, nil
+func (s *Service) inferAndStoreBackfillItem(item inferenceBackfillItem, cfg InferenceConfig, missingOnly bool) (bool, error) {
+	if !cfg.Enabled || cfg.DisabledLibraries[item.LibraryID] || item.LibraryKind == models.LibraryKindHomeVideo {
+		return false, nil
 	}
-	query := s.db.WithContext(ctx).Where("space_id = ? AND deleted_at IS NULL", normalizeSpaceID(spaceID))
+	var existing *models.MediaInference
+	if !missingOnly {
+		found, err := s.GetMediaInferenceInSpace(item.SpaceID, item.ID)
+		if err == nil && found.Manual {
+			return false, nil
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, err
+		}
+		if err == nil {
+			existing = found
+		}
+	}
+	result := InferMediaTitle(InferenceInput{FilePath: item.FilePath, FileName: item.FileName, LibraryKind: item.LibraryKind})
+	if strings.TrimSpace(result.Title) == "" {
+		return false, nil
+	}
+	inf := inferenceFromResult(item.ID, item.SpaceID, result)
+	return s.saveAutoInference(&inf, existing)
+}
+
+func (s *Service) inferenceConfigSnapshot(spaceID string) InferenceConfig {
+	if s.inferenceConfig == nil {
+		return InferenceConfig{Enabled: true}
+	}
+	return s.inferenceConfig(normalizeSpaceID(spaceID), 0)
+}
+
+func (s *Service) inferenceGenerationChanged(spaceID string, expected int64) bool {
+	if expected <= 0 || s.inferenceConfig == nil {
+		return false
+	}
+	return s.inferenceConfig(normalizeSpaceID(spaceID), 0).Generation != expected
+}
+
+func (s *Service) inferenceBackfillQuery(ctx context.Context, spaceID string, libraryID int64, missingOnly bool) *gorm.DB {
+	spaceID = normalizeSpaceID(spaceID)
+	query := s.db.WithContext(ctx).Table("media_files").
+		Joins("JOIN library_paths ON library_paths.id = media_files.library_id AND library_paths.space_id = media_files.space_id").
+		Where("media_files.space_id = ? AND media_files.deleted_at IS NULL", spaceID)
 	if libraryID > 0 {
-		query = query.Where("library_id = ?", libraryID)
+		query = query.Where("media_files.library_id = ?", libraryID)
 	}
 	if missingOnly {
-		inferred := s.db.Model(&models.MediaInference{}).Select("media_id").Where("space_id = ?", normalizeSpaceID(spaceID))
-		query = query.Where("id NOT IN (?)", inferred)
+		inferred := s.db.Model(&models.MediaInference{}).Select("media_id").Where("space_id = ?", spaceID)
+		query = query.Where("media_files.id NOT IN (?)", inferred)
 	}
-	var files []models.MediaFile
-	if err := query.Order("id ASC").Find(&files).Error; err != nil {
-		return nil, err
-	}
-	return files, nil
+	return query
+}
+
+func (s *Service) countInferenceBackfillFiles(ctx context.Context, spaceID string, libraryID int64, missingOnly bool) (int, error) {
+	var total int64
+	err := s.inferenceBackfillQuery(ctx, spaceID, libraryID, missingOnly).Count(&total).Error
+	return int(total), err
+}
+
+func (s *Service) listInferenceBackfillBatch(ctx context.Context, spaceID string, libraryID int64, missingOnly bool, cursor int64) ([]inferenceBackfillItem, error) {
+	var items []inferenceBackfillItem
+	err := s.inferenceBackfillQuery(ctx, spaceID, libraryID, missingOnly).
+		Select("media_files.*, library_paths.library_kind AS library_kind").
+		Where("media_files.id > ?", cursor).
+		Order("media_files.id ASC").Limit(inferenceBackfillBatchSize).Scan(&items).Error
+	return items, err
 }
 
 func parentDirectoryTitle(path string) string {

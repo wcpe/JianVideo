@@ -23,6 +23,20 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestParseBoolSettingAcceptsRegistryBooleanForms(t *testing.T) {
+	for _, tt := range []struct {
+		raw  string
+		want bool
+	}{
+		{"1", true}, {"0", false}, {"true", true}, {"TRUE", true},
+		{"false", false}, {"FALSE", false}, {" True ", true}, {" False ", false},
+	} {
+		if got := ParseBoolSetting(tt.raw, !tt.want); got != tt.want {
+			t.Fatalf("ParseBoolSetting(%q)=%v，期望 %v", tt.raw, got, tt.want)
+		}
+	}
+}
+
 func TestSetAndGet(t *testing.T) {
 	svc := NewService(setupTestDB(t))
 

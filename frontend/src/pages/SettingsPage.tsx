@@ -36,6 +36,8 @@ import {
   SETTING_KEY_NETWORK_PROXY,
   SETTING_KEY_DEBUG_LOG,
   SETTING_KEY_MEDIA_INFERENCE_ENABLED,
+  SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES,
+  parseBooleanSetting,
   SETTING_KEY_UPLOAD_TARGET_DIR,
   SETTING_KEY_UPLOAD_NAMING_RULE,
 } from '@/api/settings';
@@ -101,6 +103,20 @@ function taskProgress(task: TaskItem | null): number {
   return Math.max(0, Math.min(100, Math.round(task.progress * 100)));
 }
 
+function parseDisabledInferenceLibraries(raw: string | undefined): Set<number> {
+  try {
+    const values = JSON.parse(raw ?? '[]') as unknown;
+    if (!Array.isArray(values)) return new Set();
+    return new Set(values.filter((value): value is number => Number.isInteger(value) && value > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+function serializeDisabledInferenceLibraries(values: Set<number>): string {
+  return JSON.stringify([...values].sort((a, b) => a - b));
+}
+
 /** 设置页（FR-24/FR-56/FR-63/FR-87）：按扫描/网络/工具路径/回收站分区读写运行期键值设置，并只读查看环境变量 */
 export default function SettingsPage() {
   const [scanInterval, setScanInterval] = useState('');
@@ -115,6 +131,10 @@ export default function SettingsPage() {
   const [debugLog, setDebugLog] = useState(false);
   // 本地离线影视信息推断总开关（FR2-031）：关闭后扫描与回填不再产生新推断
   const [mediaInferenceEnabled, setMediaInferenceEnabled] = useState(true);
+  const [inferenceDisabledLibraries, setInferenceDisabledLibraries] = useState<Set<number>>(
+    new Set(),
+  );
+  const [inferenceLibraries, setInferenceLibraries] = useState<LibraryPath[]>([]);
   // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
   const [uploadTargetDir, setUploadTargetDir] = useState('');
   const [uploadNamingRule, setUploadNamingRule] = useState('');
@@ -197,8 +217,13 @@ export default function SettingsPage() {
         const proxy = data[SETTING_KEY_NETWORK_PROXY] ?? '';
         setNetworkProxy(proxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : proxy);
         setNetworkProxyMasked(proxy === SETTING_SENSITIVE_DISPLAY_VALUE);
-        setDebugLog((data[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
-        setMediaInferenceEnabled((data[SETTING_KEY_MEDIA_INFERENCE_ENABLED] ?? '1') !== '0');
+        setDebugLog(parseBooleanSetting(data[SETTING_KEY_DEBUG_LOG], false));
+        setMediaInferenceEnabled(
+          parseBooleanSetting(data[SETTING_KEY_MEDIA_INFERENCE_ENABLED], true),
+        );
+        setInferenceDisabledLibraries(
+          parseDisabledInferenceLibraries(data[SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]),
+        );
         setUploadTargetDir(data[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
         setUploadNamingRule(data[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       })
@@ -218,7 +243,9 @@ export default function SettingsPage() {
     let active = true;
     getLibraryPaths()
       .then((paths) => {
-        if (active) setLocalLibraryPaths(paths.filter((p) => p.type === 'local' && p.enabled));
+        if (!active) return;
+        setInferenceLibraries(paths.filter((p) => p.enabled));
+        setLocalLibraryPaths(paths.filter((p) => p.type === 'local' && p.enabled));
       })
       .catch(() => {
         /* 拉取库目录失败不阻塞设置页 */
@@ -373,6 +400,8 @@ export default function SettingsPage() {
         [SETTING_KEY_MAGICK_PATH]: magickPath,
         [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
         [SETTING_KEY_MEDIA_INFERENCE_ENABLED]: mediaInferenceEnabled ? '1' : '0',
+        [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]:
+          serializeDisabledInferenceLibraries(inferenceDisabledLibraries),
         [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
         [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
       };
@@ -389,8 +418,13 @@ export default function SettingsPage() {
       const nextProxy = updated[SETTING_KEY_NETWORK_PROXY] ?? '';
       setNetworkProxy(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE ? '' : nextProxy);
       setNetworkProxyMasked(nextProxy === SETTING_SENSITIVE_DISPLAY_VALUE);
-      setDebugLog((updated[SETTING_KEY_DEBUG_LOG] ?? '') === '1');
-      setMediaInferenceEnabled((updated[SETTING_KEY_MEDIA_INFERENCE_ENABLED] ?? '1') !== '0');
+      setDebugLog(parseBooleanSetting(updated[SETTING_KEY_DEBUG_LOG], false));
+      setMediaInferenceEnabled(
+        parseBooleanSetting(updated[SETTING_KEY_MEDIA_INFERENCE_ENABLED], true),
+      );
+      setInferenceDisabledLibraries(
+        parseDisabledInferenceLibraries(updated[SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]),
+      );
       setUploadTargetDir(updated[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
       setUploadNamingRule(updated[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       notifications.show({
@@ -418,6 +452,7 @@ export default function SettingsPage() {
     networkProxy,
     debugLog,
     mediaInferenceEnabled,
+    inferenceDisabledLibraries,
     uploadTargetDir,
     uploadNamingRule,
     networkProxyMasked,
@@ -696,16 +731,44 @@ export default function SettingsPage() {
               影视信息
             </Title>
             <Card withBorder padding="md" radius="md">
-              <Switch
-                label="本地影视信息推断"
-                aria-label="本地影视信息推断"
-                description={settingDescription(
-                  SETTING_KEY_MEDIA_INFERENCE_ENABLED,
-                  '仅根据文件名和目录离线推断片名、年份与季集信息；关闭后扫描和回填不再产生新推断。重新开启会为尚无结果的已有媒体创建增量刷新任务。',
+              <Stack gap="sm">
+                <Switch
+                  label="本地影视信息推断"
+                  aria-label="本地影视信息推断"
+                  description={settingDescription(
+                    SETTING_KEY_MEDIA_INFERENCE_ENABLED,
+                    '仅根据文件名和目录离线推断片名、年份与季集信息；重新开启会为尚无结果的已有媒体创建增量刷新任务。',
+                  )}
+                  checked={mediaInferenceEnabled}
+                  onChange={(e) => setMediaInferenceEnabled(e.currentTarget.checked)}
+                />
+                {inferenceLibraries.length > 0 && (
+                  <Stack gap="xs" pl="md">
+                    <Text size="sm" fw={500}>
+                      按媒体库启用
+                    </Text>
+                    {inferenceLibraries.map((libraryPath) => (
+                      <Switch
+                        key={libraryPath.id}
+                        size="sm"
+                        label={libraryPath.label || libraryPath.path}
+                        aria-label={`${libraryPath.label || libraryPath.path}影视信息推断`}
+                        checked={!inferenceDisabledLibraries.has(libraryPath.id)}
+                        disabled={!mediaInferenceEnabled}
+                        onChange={(event) => {
+                          const enabled = event.currentTarget.checked;
+                          setInferenceDisabledLibraries((current) => {
+                            const next = new Set(current);
+                            if (enabled) next.delete(libraryPath.id);
+                            else next.add(libraryPath.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    ))}
+                  </Stack>
                 )}
-                checked={mediaInferenceEnabled}
-                onChange={(e) => setMediaInferenceEnabled(e.currentTarget.checked)}
-              />
+              </Stack>
             </Card>
 
             {/* 上传分区（FR-149）：Web 上传默认落盘位置与命名规则；目标须为已注册本地库目录或其子目录 */}

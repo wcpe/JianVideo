@@ -158,7 +158,23 @@ func NormalizeStatus(status string) (string, error) {
 func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var task *models.Task
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		task, err = s.enqueueTxLocked(ctx, tx, input)
+		return err
+	})
+	return task, err
+}
 
+// EnqueueTx 在调用方事务内创建任务，供设置与补偿任务原子提交。
+func (s *Service) EnqueueTx(ctx context.Context, tx *gorm.DB, input EnqueueInput) (*models.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.enqueueTxLocked(ctx, tx, input)
+}
+
+func (s *Service) enqueueTxLocked(ctx context.Context, tx *gorm.DB, input EnqueueInput) (*models.Task, error) {
 	scope, spaceID, err := normalizeScope(input.Scope, input.SpaceID)
 	if err != nil {
 		return nil, err
@@ -169,47 +185,27 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Task
 	}
 	key := strings.TrimSpace(input.IdempotencyKey)
 	if key != "" {
-		existing, ok, err := s.findUnfinishedByKey(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
+		if existing, ok, findErr := findUnfinishedByKeyDB(ctx, tx, key); findErr != nil {
+			return nil, findErr
+		} else if ok {
 			return &existing, nil
 		}
 	}
-
 	now := s.now().UTC()
 	maxAttempts := input.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
 	task := models.Task{
-		Scope:          scope,
-		SpaceID:        spaceID,
-		Type:           taskType,
-		Status:         models.TaskStatusPending,
-		Priority:       input.Priority,
-		MaxAttempts:    maxAttempts,
-		IdempotencyKey: key,
-		PayloadJSON:    strings.TrimSpace(input.PayloadJSON),
-		ResourceType:   strings.TrimSpace(input.ResourceType),
-		ResourceID:     strings.TrimSpace(input.ResourceID),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		Scope: scope, SpaceID: spaceID, Type: taskType, Status: models.TaskStatusPending,
+		Priority: input.Priority, MaxAttempts: maxAttempts, IdempotencyKey: key,
+		PayloadJSON: strings.TrimSpace(input.PayloadJSON), ResourceType: strings.TrimSpace(input.ResourceType),
+		ResourceID: strings.TrimSpace(input.ResourceID), CreatedAt: now, UpdatedAt: now,
 	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&task).Error; err != nil {
-			return err
-		}
-		return s.recordAuditTx(ctx, tx, &task, "task.created", "")
-	})
-	if err != nil {
-		if key != "" {
-			existing, ok, findErr := s.findUnfinishedByKey(ctx, key)
-			if findErr == nil && ok {
-				return &existing, nil
-			}
-		}
+	if err := tx.WithContext(ctx).Create(&task).Error; err != nil {
+		return nil, err
+	}
+	if err := s.recordAuditTx(ctx, tx, &task, "task.created", ""); err != nil {
 		return nil, err
 	}
 	return &task, nil
@@ -668,8 +664,12 @@ func (s *Service) isCanceled(ctx context.Context, id int64) (bool, error) {
 }
 
 func (s *Service) findUnfinishedByKey(ctx context.Context, key string) (models.Task, bool, error) {
+	return findUnfinishedByKeyDB(ctx, s.db, key)
+}
+
+func findUnfinishedByKeyDB(ctx context.Context, db *gorm.DB, key string) (models.Task, bool, error) {
 	var task models.Task
-	err := s.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("idempotency_key = ? AND status IN ?", key, []string{models.TaskStatusPending, models.TaskStatusRunning}).
 		Order("created_at ASC, id ASC").
 		First(&task).Error

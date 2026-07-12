@@ -568,6 +568,66 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.media_inference_enabled).toBe('0');
   });
 
+  it('兼容合法布尔大小写并提供按媒体库关闭入口', async () => {
+    const user = userEvent.setup();
+    let putBody: { settings: Record<string, string> } | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            scan_interval: '3600',
+            recycle_bin_paths: '{"D":"D:/.recycle"}',
+            media_inference_enabled: 'FALSE',
+            media_inference_disabled_libraries: '[1]',
+          },
+        }),
+      ),
+      http.get('*/api/library/paths', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              path: 'D:/Movies',
+              type: 'local',
+              label: '电影库',
+              library_kind: 'movie',
+              enabled: true,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+            {
+              id: 2,
+              path: 'D:/Series',
+              type: 'local',
+              label: '剧集库',
+              library_kind: 'series',
+              enabled: true,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = (await request.json()) as { settings: Record<string, string> };
+        return HttpResponse.json({ settings: putBody.settings });
+      }),
+    );
+
+    renderPage();
+    const globalSwitch = await screen.findByRole('switch', { name: '本地影视信息推断' });
+    expect(globalSwitch).not.toBeChecked();
+    const movieSwitch = await screen.findByRole('switch', { name: '电影库影视信息推断' });
+    const seriesSwitch = screen.getByRole('switch', { name: '剧集库影视信息推断' });
+    expect(movieSwitch).not.toBeChecked();
+    expect(seriesSwitch).toBeChecked();
+
+    await user.click(globalSwitch);
+    await user.click(movieSwitch);
+    await user.click(seriesSwitch);
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(putBody).not.toBeNull());
+    expect(putBody!.settings.media_inference_disabled_libraries).toBe('[2]');
+  });
+
   it('渲染调试日志开关，默认按现有设置关闭（FR-110）', async () => {
     renderPage();
     const sw = await screen.findByRole('switch', { name: '调试日志' });

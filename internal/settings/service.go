@@ -60,6 +60,8 @@ const (
 	KeyMediaInferenceEnabled = "media_inference_enabled"
 	// KeyMediaInferenceDisabledLibraries 关闭影视推断的媒体库 ID JSON 数组（FR2-031）。
 	KeyMediaInferenceDisabledLibraries = "media_inference_disabled_libraries"
+	// KeyMediaInferenceGeneration 是推断设置有效变化的内部递增代次，不通过设置注册表对外暴露。
+	KeyMediaInferenceGeneration = "media_inference_generation"
 )
 
 // Service 运行期设置业务逻辑。
@@ -133,6 +135,15 @@ func ParseBoolSetting(raw string, defaultValue bool) bool {
 	}
 }
 
+// ParseInt64Setting 解析内部整型设置；空值或非法值返回 0。
+func ParseInt64Setting(raw string) int64 {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
+}
+
 // TranscodeHWAccelMode 读取默认硬件转码策略；缺失或读取失败时回退 auto。
 func (s *Service) TranscodeHWAccelMode() string {
 	raw, err := s.Get(KeyTranscodeHWAccelMode)
@@ -184,8 +195,16 @@ func (s *Service) Set(key, value string) error {
 	return s.upsert(s.db, key, value)
 }
 
+// TransactionHook 在设置事务内执行需要与设置原子提交的附加持久化操作。
+type TransactionHook func(context.Context, *gorm.DB, map[string]string, map[string]string) error
+
 // SetMany 批量写入设置，在单事务内原子完成。
 func (s *Service) SetMany(values map[string]string) error {
+	return s.SetManyWithHook(context.Background(), values, nil)
+}
+
+// SetManyWithHook 批量写入设置，并在同一事务内执行附加操作。
+func (s *Service) SetManyWithHook(ctx context.Context, values map[string]string, hook TransactionHook) error {
 	if len(values) == 0 {
 		return nil
 	}
@@ -194,7 +213,7 @@ func (s *Service) SetMany(values map[string]string) error {
 			return err
 		}
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		before, err := s.getValuesTx(tx, values)
 		if err != nil {
 			return err
@@ -204,19 +223,22 @@ func (s *Service) SetMany(values map[string]string) error {
 				return err
 			}
 		}
-		if s.audit != nil {
-			if err := s.audit.RecordTx(context.Background(), tx, audit.EventInput{
-				Scope:        audit.ScopeSystem,
-				ActorType:    audit.ActorSystem,
-				Action:       "settings.updated",
-				ResourceType: "settings",
-				Before:       redactedValues(before),
-				After:        redactedValues(values),
-			}); err != nil {
+		if hook != nil {
+			if err := hook(ctx, tx, before, values); err != nil {
 				return err
 			}
 		}
+		return s.recordSettingsAudit(ctx, tx, before, values)
+	})
+}
+
+func (s *Service) recordSettingsAudit(ctx context.Context, tx *gorm.DB, before, after map[string]string) error {
+	if s.audit == nil {
 		return nil
+	}
+	return s.audit.RecordTx(ctx, tx, audit.EventInput{
+		Scope: audit.ScopeSystem, ActorType: audit.ActorSystem, Action: "settings.updated",
+		ResourceType: "settings", Before: redactedValues(before), After: redactedValues(after),
 	})
 }
 

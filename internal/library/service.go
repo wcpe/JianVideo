@@ -39,14 +39,15 @@ var (
 
 // Service 媒体库业务逻辑。
 type Service struct {
-	db                      *gorm.DB
-	mediaRepo               MediaQueryRepository
-	audit                   audit.Recorder
-	changeHook              func(ScanChange)
-	inferenceConfig         InferenceConfigProvider
-	beforeAutoInferenceSave func()
-	smbCreds                *smb.CredentialStore
-	smbCredsMu              sync.RWMutex
+	db                         *gorm.DB
+	mediaRepo                  MediaQueryRepository
+	audit                      audit.Recorder
+	changeHook                 func(ScanChange)
+	inferenceConfig            InferenceConfigProvider
+	beforeAutoInferenceSave    func()
+	inferenceBackfillBatchHook func(int)
+	smbCreds                   *smb.CredentialStore
+	smbCredsMu                 sync.RWMutex
 }
 
 // 媒体类型常量。

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
@@ -349,6 +351,343 @@ func TestSettings_InferenceChangeEnqueuesIncrementalRefresh(t *testing.T) {
 	manualInference, err := libSvc.GetMediaInferenceInSpace(models.DefaultSpaceID, manual.ID)
 	if err != nil || manualInference == nil || manualInference.Source != library.InferenceSourceManual || manualInference.Title != "人工片名" {
 		t.Fatalf("人工推断 = %#v, %v，期望保持不变", manualInference, err)
+	}
+}
+
+func TestSettings_InferenceRefreshRunsWorkerForEveryMediaSpace(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings-multi-space.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	defer sqlDB.Close()
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "false"); err != nil {
+		t.Fatalf("预置关闭设置失败: %v", err)
+	}
+	libSvc := library.NewService(gdb).WithInferenceConfigProvider(func(string, int64) library.InferenceConfig {
+		raw, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+		generation, _ := settingsSvc.Get(settings.KeyMediaInferenceGeneration)
+		return library.InferenceConfig{Enabled: settings.ParseBoolSetting(raw, true), Generation: settings.ParseInt64Setting(generation)}
+	})
+	for _, spaceID := range []string{models.DefaultSpaceID, "space-b"} {
+		dir := t.TempDir()
+		lp, createErr := libSvc.CreateLibraryPathWithKindInSpace(spaceID, dir, "local", spaceID, models.LibraryKindMovie)
+		if createErr != nil {
+			t.Fatalf("创建 %s 媒体库失败: %v", spaceID, createErr)
+		}
+		if _, createErr = libSvc.CreateMediaFileInSpace(spaceID, lp.ID, filepath.Join(dir, spaceID+".Movie.2024.mkv"), 10); createErr != nil {
+			t.Fatalf("创建 %s 媒体失败: %v", spaceID, createErr)
+		}
+	}
+	taskSvc := tasksvc.NewService(gdb)
+	h := NewHandler(libSvc).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(tasksvc.NewWorkerRegistry(taskSvc))
+	r := gin.New()
+	RegisterRoutes(r, h)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"settings":{"media_inference_enabled":"TRUE"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("启用推断期望 200，实际 %d: %s", w.Code, w.Body.String())
+	}
+	executionWorkers := tasksvc.NewWorkerRegistry(taskSvc)
+	if err := RegisterInferenceBackfillWorker(executionWorkers, libSvc); err != nil {
+		t.Fatalf("注册推断 worker 失败: %v", err)
+	}
+	if err := executionWorkers.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行真实推断 worker 失败: %v", err)
+	}
+	var tasks []models.Task
+	if err := gdb.Where("type = ?", inferenceBackfillTaskType).Order("id").Find(&tasks).Error; err != nil {
+		t.Fatalf("查询任务失败: %v", err)
+	}
+	if len(tasks) != 2 || tasks[0].Status != models.TaskStatusSucceeded || tasks[1].Status != models.TaskStatusSucceeded {
+		t.Fatalf("两个存在媒体的 Space 应各完成一个任务: %+v", tasks)
+	}
+	spaces := map[string]bool{}
+	for _, task := range tasks {
+		if task.SpaceID != nil {
+			spaces[*task.SpaceID] = true
+		}
+	}
+	if !spaces[models.DefaultSpaceID] || !spaces["space-b"] {
+		t.Fatalf("任务 Space 不完整: %+v", spaces)
+	}
+	var count int64
+	if err := gdb.Model(&models.MediaInference{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("真实 worker 应处理两个 Space: count=%d err=%v", count, err)
+	}
+}
+
+func TestSettings_InferenceEffectiveChangeWithoutMissingMediaDoesNotRequireQueue(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
+		t.Fatalf("预置设置失败: %v", err)
+	}
+	h := NewHandler(library.NewService(gdb)).WithSettings(settingsSvc)
+	r := gin.New()
+	RegisterRoutes(r, h)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"settings":{"media_inference_enabled":"1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("无缺失媒体时不应要求任务队列: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSettings_InferenceNoEffectiveChangeDoesNotEnqueue(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "true"); err != nil {
+		t.Fatalf("预置设置失败: %v", err)
+	}
+	taskSvc := tasksvc.NewService(gdb)
+	h := NewHandler(library.NewService(gdb)).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(tasksvc.NewWorkerRegistry(taskSvc))
+	r := gin.New()
+	RegisterRoutes(r, h)
+	for _, body := range []string{
+		`{"settings":{"media_inference_enabled":"1"}}`,
+		`{"settings":{"scan_interval":"60"}}`,
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("无有效推断变化保存失败: %d %s", w.Code, w.Body.String())
+		}
+	}
+	var count int64
+	if err := gdb.Model(&models.Task{}).Where("type = ?", inferenceBackfillTaskType).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("无有效推断变化不得入队: count=%d err=%v", count, err)
+	}
+}
+
+func TestSettings_InferenceLibraryScopeChangeOnlyFillsNewlyEnabledLibrary(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings-library-scope.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	defer sqlDB.Close()
+	settingsSvc := settings.NewService(gdb)
+	libSvc := library.NewService(gdb).WithInferenceConfigProvider(func(string, int64) library.InferenceConfig {
+		enabled, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+		disabled, _ := settingsSvc.Get(settings.KeyMediaInferenceDisabledLibraries)
+		generation, _ := settingsSvc.Get(settings.KeyMediaInferenceGeneration)
+		return library.InferenceConfig{
+			Enabled:           settings.ParseBoolSetting(enabled, true),
+			DisabledLibraries: library.ParseDisabledInferenceLibraries(disabled),
+			Generation:        settings.ParseInt64Setting(generation),
+		}
+	})
+	dir := t.TempDir()
+	first, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, t.TempDir(), "local", "第一库", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建第一库失败: %v", err)
+	}
+	second, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, t.TempDir(), "local", "第二库", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建第二库失败: %v", err)
+	}
+	if err := settingsSvc.Set(settings.KeyMediaInferenceDisabledLibraries, fmt.Sprintf("[%d,%d]", first.ID, second.ID)); err != nil {
+		t.Fatalf("预置按库关闭设置失败: %v", err)
+	}
+	for _, item := range []struct {
+		libraryID int64
+		name      string
+	}{
+		{first.ID, "First.Movie.2024.mkv"},
+		{second.ID, "Second.Movie.2025.mkv"},
+	} {
+		media := models.MediaFile{
+			SpaceID: models.DefaultSpaceID, LibraryID: item.libraryID,
+			FilePath: filepath.Join(dir, item.name), FileName: item.name, Format: "mkv",
+			AddedAt: time.Now(), ModifiedAt: time.Now(),
+		}
+		if err := gdb.Create(&media).Error; err != nil {
+			t.Fatalf("创建媒体失败: %v", err)
+		}
+	}
+	taskSvc := tasksvc.NewService(gdb)
+	h := NewHandler(libSvc).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(tasksvc.NewWorkerRegistry(taskSvc))
+	r := gin.New()
+	RegisterRoutes(r, h)
+	put := func() {
+		body := fmt.Sprintf(`{"settings":{"media_inference_disabled_libraries":"[%d]"}}`, second.ID)
+		req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("调整按库范围失败: %d %s", w.Code, w.Body.String())
+		}
+	}
+	put()
+	executionWorkers := tasksvc.NewWorkerRegistry(taskSvc)
+	if err := RegisterInferenceBackfillWorker(executionWorkers, libSvc); err != nil {
+		t.Fatalf("注册 worker 失败: %v", err)
+	}
+	if err := executionWorkers.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行范围补齐 worker 失败: %v", err)
+	}
+	var inferred []models.MediaInference
+	if err := gdb.Find(&inferred).Error; err != nil || len(inferred) != 1 {
+		t.Fatalf("仅新启用库应补齐推断: items=%+v err=%v", inferred, err)
+	}
+	var media models.MediaFile
+	if err := gdb.First(&media, inferred[0].MediaID).Error; err != nil || media.LibraryID != first.ID {
+		t.Fatalf("推断应属于第一库: media=%+v err=%v", media, err)
+	}
+	put()
+	var taskCount int64
+	if err := gdb.Model(&models.Task{}).Where("type = ?", inferenceBackfillTaskType).Count(&taskCount).Error; err != nil || taskCount != 1 {
+		t.Fatalf("相同范围重复保存不得再次入队: count=%d err=%v", taskCount, err)
+	}
+}
+
+func TestSettings_InferenceRapidDisableEnableCreatesNewGenerationTask(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings-generation.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	defer sqlDB.Close()
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
+		t.Fatalf("预置设置失败: %v", err)
+	}
+	libSvc := library.NewService(gdb)
+	dir := t.TempDir()
+	lp, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	media := models.MediaFile{
+		SpaceID: models.DefaultSpaceID, LibraryID: lp.ID,
+		FilePath: filepath.Join(dir, "Rapid.Movie.2024.mkv"), FileName: "Rapid.Movie.2024.mkv",
+		Format: "mkv", AddedAt: time.Now(), ModifiedAt: time.Now(),
+	}
+	if err := gdb.Create(&media).Error; err != nil {
+		t.Fatalf("创建媒体失败: %v", err)
+	}
+	taskSvc := tasksvc.NewService(gdb)
+	workers := tasksvc.NewWorkerRegistry(taskSvc)
+	h := NewHandler(libSvc).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(workers)
+	r := gin.New()
+	RegisterRoutes(r, h)
+	put := func(value string) {
+		req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"settings":{"media_inference_enabled":"`+value+`"}}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("保存 %s 失败: %d %s", value, w.Code, w.Body.String())
+		}
+	}
+	put("1")
+	first, err := taskSvc.ClaimNext(context.Background(), tasksvc.ClaimQuery{Type: inferenceBackfillTaskType})
+	if err != nil {
+		t.Fatalf("领取首个任务失败: %v", err)
+	}
+	put("0")
+	put("1")
+	var tasks []models.Task
+	if err := gdb.Where("type = ?", inferenceBackfillTaskType).Order("id").Find(&tasks).Error; err != nil {
+		t.Fatalf("查询任务失败: %v", err)
+	}
+	if len(tasks) != 2 || tasks[0].Status != models.TaskStatusRunning || tasks[1].Status != models.TaskStatusPending {
+		t.Fatalf("快速关闭再开启应保留运行中任务并新增补偿任务: %+v", tasks)
+	}
+	var firstPayload, secondPayload inferenceBackfillPayload
+	_ = json.Unmarshal([]byte(first.PayloadJSON), &firstPayload)
+	_ = json.Unmarshal([]byte(tasks[1].PayloadJSON), &secondPayload)
+	if firstPayload.Generation == 0 || secondPayload.Generation <= firstPayload.Generation {
+		t.Fatalf("补偿任务 generation 应递增: first=%+v second=%+v", firstPayload, secondPayload)
+	}
+}
+
+func TestSettings_InferenceEnqueueFailureRollsBackSettings(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings-rollback.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取底层数据库失败: %v", err)
+	}
+	defer sqlDB.Close()
+	settingsSvc := settings.NewService(gdb)
+	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
+		t.Fatalf("预置设置失败: %v", err)
+	}
+	libSvc := library.NewService(gdb)
+	dir := t.TempDir()
+	lp, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("创建媒体库失败: %v", err)
+	}
+	media := models.MediaFile{
+		SpaceID: models.DefaultSpaceID, LibraryID: lp.ID,
+		FilePath: filepath.Join(dir, "Rollback.Movie.2024.mkv"), FileName: "Rollback.Movie.2024.mkv",
+		Format: "mkv", AddedAt: time.Now(), ModifiedAt: time.Now(),
+	}
+	if err := gdb.Create(&media).Error; err != nil {
+		t.Fatalf("创建媒体失败: %v", err)
+	}
+	taskSvc := tasksvc.NewService(gdb)
+	h := NewHandler(libSvc).WithSettings(settingsSvc).WithTasks(taskSvc).WithTaskWorkers(tasksvc.NewWorkerRegistry(taskSvc))
+	if err := gdb.Migrator().DropTable(&models.Task{}); err != nil {
+		t.Fatalf("删除任务表失败: %v", err)
+	}
+	r := gin.New()
+	RegisterRoutes(r, h)
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"settings":{"media_inference_enabled":"1"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("入队失败期望 500，实际 %d: %s", w.Code, w.Body.String())
+	}
+	got, err := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
+	if err != nil || got != "0" {
+		t.Fatalf("入队失败时设置必须同事务回滚: got=%q err=%v", got, err)
 	}
 }
 
