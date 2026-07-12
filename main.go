@@ -124,6 +124,38 @@ func thumbnailConcurrencyFromSettings(service *settings.Service) int {
 	return value
 }
 
+func transcodeConcurrencyFromSettings(service *settings.Service) int {
+	if service == nil {
+		return tasksvc.DefaultConcurrency(transcoder.TaskTypeHLSABR)
+	}
+	raw, _ := service.Get(settings.KeyTaskWorkerTranscodeConcurrency)
+	value := int(settings.ParseInt64Setting(raw))
+	if value <= 0 {
+		return tasksvc.DefaultConcurrency(transcoder.TaskTypeHLSABR)
+	}
+	return value
+}
+
+func registerABRAssets(ctx context.Context, cache *storage.Service, media *models.MediaFile, outputDir string, ladder []transcoder.QualityDefinition) error {
+	if _, err := cache.RegisterFile(ctx, storage.RegisterInput{
+		SpaceID: media.SpaceID, LibraryID: media.LibraryID, MediaID: media.ID,
+		Kind: storage.CacheKindHLS, ProfileID: transcoder.ABRProfileID, Variant: "master",
+		Path: filepath.Join(outputDir, "master.m3u8"),
+	}); err != nil {
+		return err
+	}
+	for _, variant := range ladder {
+		if _, err := cache.RegisterDirectory(ctx, storage.RegisterInput{
+			SpaceID: media.SpaceID, LibraryID: media.LibraryID, MediaID: media.ID,
+			Kind: storage.CacheKindHLS, ProfileID: transcoder.ABRProfileID, Variant: variant.Name,
+			Path: filepath.Join(outputDir, variant.Name),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service) {
 	if err := workers.Register(library.TaskTypeFileHashBackfill, tasksvc.DefaultConcurrency(library.TaskTypeFileHashBackfill), func(ctx context.Context, task models.Task) error {
 		return libSvc.HandleContentHashBackfillTask(ctx, taskSvc, task)
@@ -421,7 +453,43 @@ func main() {
 		log.Fatalf("[ERROR] 注册 HLS preview worker 失败: %v", err)
 	}
 
-	apiHandler := api.NewHandler(libSvc).WithHLSPreSlice(hlsDir, hlsMgr).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc)
+	abrService := transcoder.NewABRService(taskSvc, taskWorkers, hlsDir, func(ctx context.Context, taskID int64, payload transcoder.ABRPayload) error {
+		mf, err := libSvc.GetMediaFileByIDInSpace(payload.SpaceID, payload.MediaID)
+		if err != nil {
+			return fmt.Errorf("ABR 反查媒体失败: mediaID=%d: %w", payload.MediaID, err)
+		}
+		outputDir, err := transcoder.HLSProfileDir(hlsDir, payload.SpaceID, payload.MediaID, payload.ProfileID)
+		if err != nil {
+			return err
+		}
+		masterPath := filepath.Join(outputDir, "master.m3u8")
+		if !payload.ForceRebuild {
+			if _, statErr := os.Stat(masterPath); statErr == nil {
+				return registerABRAssets(ctx, cacheSvc, mf, outputDir, payload.Ladder)
+			}
+		}
+		if err := cacheSvc.PrepareHLSRebuild(ctx, payload.SpaceID, payload.MediaID, payload.ProfileID, outputDir); err != nil {
+			return fmt.Errorf("安全清理旧 ABR profile 失败: %w", err)
+		}
+		if err := taskSvc.UpdateProgress(ctx, taskID, tasksvc.ProgressInput{Progress: 20, Checkpoint: "已清理旧 ABR 产物"}); err != nil {
+			return err
+		}
+		policy := transcoder.HardwarePolicy{
+			Mode: transcoder.NormalizeHWAccelMode(payload.HWAccelPreference), Fallback: settingsSvc.TranscodeHWAccelFallback(),
+		}
+		if _, err := transcoder.PreSliceABRWithPolicyToDir(ctx, mf.ID, mf.FilePath, payload.Ladder, policy, outputDir); err != nil {
+			return err
+		}
+		if err := taskSvc.UpdateProgress(ctx, taskID, tasksvc.ProgressInput{Progress: 85, Checkpoint: "已生成全部 ABR 档位"}); err != nil {
+			return err
+		}
+		return registerABRAssets(ctx, cacheSvc, mf, outputDir, payload.Ladder)
+	})
+	if err := abrService.RegisterWorker(transcodeConcurrencyFromSettings(settingsSvc)); err != nil {
+		log.Fatalf("[ERROR] 注册 ABR worker 失败: %v", err)
+	}
+
+	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

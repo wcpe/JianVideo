@@ -117,6 +117,7 @@ const settingsStore: Record<string, string> = {
   transcode_codec_priority: '["h264"]',
   transcode_hwaccel_mode: 'auto',
   transcode_hwaccel_fallback: '1',
+  transcode_abr_ladder: '["1080p","720p","480p"]',
 };
 
 const toolStatuses: ToolStatus[] = [
@@ -466,7 +467,9 @@ const auditEvents: AuditEvent[] = [
   },
 ];
 
-function pushSystemAuditEvent(event: Omit<AuditEvent, 'id' | 'created_at' | 'scope' | 'space_id'>): void {
+function pushSystemAuditEvent(
+  event: Omit<AuditEvent, 'id' | 'created_at' | 'scope' | 'space_id'>,
+): void {
   auditEvents.unshift({
     ...event,
     id: Math.max(0, ...auditEvents.map((item) => item.id)) + 1,

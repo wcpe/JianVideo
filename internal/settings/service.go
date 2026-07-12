@@ -4,6 +4,7 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ const (
 	KeyTranscodeHWAccelMode = "transcode_hwaccel_mode"
 	// KeyTranscodeHWAccelFallback 指定硬件不可用或失败时是否允许软件回退。
 	KeyTranscodeHWAccelFallback = "transcode_hwaccel_fallback"
+	// KeyTranscodeABRLadder 多码率 HLS 实际消费的档位名称 JSON 数组。
+	KeyTranscodeABRLadder = "transcode_abr_ladder"
 	// KeyFFmpegPath ffmpeg 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
 	KeyFFmpegPath = "ffmpeg_path"
 	// KeyFFprobePath ffprobe 可执行文件路径（FR-56），非空时启动覆盖自动发现并应用到转码运行期。
@@ -160,6 +163,19 @@ func (s *Service) TranscodeHWAccelFallback() bool {
 		return true
 	}
 	return ParseBoolSetting(raw, true)
+}
+
+// TranscodeABRLadder 读取多码率 HLS 档位；缺失或解析失败时回退默认三档。
+func (s *Service) TranscodeABRLadder() []string {
+	raw, err := s.Get(KeyTranscodeABRLadder)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return []string{"1080p", "720p", "480p"}
+	}
+	var ladder []string
+	if err := json.Unmarshal([]byte(raw), &ladder); err != nil || len(ladder) == 0 {
+		return []string{"1080p", "720p", "480p"}
+	}
+	return ladder
 }
 
 // GetAll 读取已登记运行期设置，返回 key → 公开展示值映射。

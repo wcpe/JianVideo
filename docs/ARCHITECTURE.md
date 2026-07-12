@@ -670,12 +670,14 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 - HLS 目录生成成功后登记一条 `cache_assets(kind=hls, asset_level=directory, profile_id=...)`；`force_rebuild` 先经 `storage.PrepareHLSRebuild` 校验并只删除目标 profile，再原子重建和重新登记。通用缓存清理删除产物后，`GET /api/play/:id/hls-status` 返回不可用，重新入队即可重建。
 - 默认 H.264 profile 对外继续兼容 `/api/play/hls/:id/master`、`master.m3u8` 和历史 `hls/{media_id}/` 文件布局；显式 profile 使用 `/api/play/hls/:id/profiles/:profile_id/:file`。状态端点同时返回 `available/profile_id/url/task`，前端先尝试原文件直连，仅在直连加载失败且 HLS preview 已可用时切到该 URL；FR-53 高级编码协商仍保留原契约。
 
-### 5.5 多码率自适应（ABR，FR2-026 边界）
+### 5.5 多码率自适应（ABR，FR2-026）
 
-- 仓库保留 `MultiPipeline` 的 FFmpeg `filter_complex split` 多输出能力，可同时生成 1080p/720p/480p 三档 HLS；这是历史播放能力与 FR2-026 的实现基础，**FR2-008 HLS preview worker 不调用三档入口**。
-- 码率阶梯根据源分辨率裁剪，所有档位共享 GOP，切片文件带质量标识，`master.m3u8` 为每档写一个 `EXT-X-STREAM-INF`。
-- 前端 `VideoPlayer` 保留 hls.js ABR 分支及 mpegts.js 回退，不因 FR2-008 的单档默认路径删除；真正的“入库自动多档、弱网平滑降档、手动锁档”验收仍归 FR2-026。
-- 详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
+- **显式任务边界**：`ABRService` 把 Space/media 的多码率生成建模为 `transcode.hls.abr`，由 `POST /api/play/:id/hls-abr` 显式入队；扫描只负责媒体入库，不自动启动高成本转码。payload 快照固定 `abr-h264` profile、H.264 codec、裁剪后的 ladder、硬件偏好与 `force_rebuild`，最大尝试 3 次，取消经任务 context 传播到 ffmpeg。
+- **阶梯与设置**：运行期 registry 键 `transcode_abr_ladder` 默认 `1080p/720p/480p`，只接受已知且不重复的档位。`ABRLadderForSource` 跳过宽高超过源的档位；源低于 480p 时生成单个原尺寸 `source` 档，禁止上采样。
+- **单进程多输出**：`MultiPipeline` 以 FFmpeg `filter_complex split` 在一个进程内生成全部 H.264/TS variants，固定 GOP 与独立切片边界；每档写入 `{variant}/index.m3u8 + segment_NNN.ts`，成功校验后生成含对应 `EXT-X-STREAM-INF` 的 `master.m3u8`。硬件策略复用 FR2-056，指定硬件失败且允许 fallback 时清理半成品并改用 `libx264` 重试。
+- **缓存与重建**：产物目录为 `hls/{space_id}/{media_id}/abr-h264/`。master 按文件、各 variant 按目录逐档登记 `cache_assets(kind=hls, profile_id=abr-h264)`；`force_rebuild` 与通用缓存清理均通过缓存安全边界删除登记和文件，后续再次显式入队可重建。
+- **直连优先与前端 ABR**：H.264 播放继续先请求 `/api/play/:id/stream`，仅在播放器报告直连失败后查询 `hls-status?profile_id=abr-h264`，已有 master 才切换到 hls.js。`VideoPlayer` 监听 `LEVEL_SWITCHED` 展示当前分辨率档位，不提供 FR2-057 手动锁档；异步导入 hls.js 使用初始化令牌，使 URL 切换或卸载后的旧导入失效，避免残留内核覆盖新播放源。
+- **验收边界**：P2 以 hls.js 事件桩和专项 Playwright 验证 level 切换与直连失败回退；真实弱网平滑体验仍留 P3。真实 ffmpeg/ffprobe 单二进制验收覆盖多档、低分辨率 source-only、master/variant、缓存登记/清理重建和直连可用。详见 [ADR-0026](adr/0026-abr-adaptive-bitrate.md)。
 
 #### 5.5.1 前端客户端能力探测 + 自适应播放器（FR-52）
 
@@ -725,7 +727,7 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 
 - 设置以 SQLite `settings` 表为运行期真源，由 `settings.Service` 封装读写：`Get` 供内部消费者读取原始值，`GetAll` 只返回已登记运行期 key 与默认值，`Set`/`SetMany` 写入前经 registry 校验并走主键冲突 upsert，批量写在单事务内原子完成。ADR-0061 取代 ADR-0029 中“任意 key upsert”的部分，未知 key 直接拒绝。
 - `GET /api/settings` 保持 map 形态，返回已登记运行期设置；敏感项非空时只返回 `已设置`，不回显明文。`GET /api/settings/definitions` 返回 key、中文名称、分层、值类型、默认值、敏感性、热应用能力与消费模块，供前端设置页渲染。`PUT /api/settings` 只允许 `layer=runtime` 的 key，任一未知 key、启动固定项或非法类型都会返回 `400 INVALID_SETTING` 且整体不写入。
-- 已登记运行期键包含 `recycle_bin_paths`、`scan_interval`、`update_channel`、`transcode_codec_priority`、`transcode_hwaccel_mode`、`transcode_hwaccel_fallback`、`ffmpeg_path`、`ffprobe_path`、`magick_path`、`network_proxy`、`debug_log`、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`；转码执行器读硬件策略键决定 encoder 与软件回退。
+- 已登记运行期键包含 `recycle_bin_paths`、`scan_interval`、`update_channel`、`transcode_codec_priority`、`transcode_hwaccel_mode`、`transcode_hwaccel_fallback`、`transcode_abr_ladder`、`ffmpeg_path`、`ffprobe_path`、`magick_path`、`network_proxy`、`debug_log`、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`；转码执行器读硬件策略键决定 encoder 与软件回退，FR2-026 ABR 服务读 `transcode_abr_ladder` 决定显式多码率任务的候选档位。
 - **FFmpeg 路径持久化设置（FR-56）**：`ffmpeg_path`/`ffprobe_path` 让 ffmpeg/ffprobe 路径运行期可配置。`main.go` 启动时先 `resolveTool` 注入（环境变量→同目录捆绑版→PATH），随后若设置非空则覆盖（**持久化设置优先于自动发现**）；`PUT /api/settings` 含这两键时落库后即时调 `transcoder.SetFFmpegPath`/`SetFFprobePath`（ffprobe 同步给 `library`）应用到运行期，保存即生效、无需重启（api→transcoder 依赖方向允许）。
 - **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
 - **后端出站网络代理（FR-80）**：`network_proxy` 让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决直连 GitHub 下载 CDN 不可达。新增独立无业务依赖的 `netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h}（均为标准库 `net/http` Transport 原生支持，**无新依赖**）后原子更新、空串清空、非法不覆盖；`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 走直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各设 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，各自 Timeout 语义不变（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则 `SetProxy` 注入；`PUT /api/settings` 含 `network_proxy` 时先由 registry 校验协议和格式，落库后即时 `netproxy.SetProxy`。API 回读和审计事件只暴露存在性，不返回带凭据代理 URL。依赖方向单向（`api`/`update`/`main` → `netproxy`，`netproxy` 不依赖任何业务模块）。

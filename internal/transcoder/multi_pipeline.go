@@ -90,11 +90,11 @@ func isFFmpegPathAvailable(path string) bool {
 
 // QualityDefinition 定义一个码率档位。
 type QualityDefinition struct {
-	Name      string
-	Width     int
-	Height    int
-	VideoRate string
-	AudioRate string
+	Name      string `json:"name"` // 如 "1080p"
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	VideoRate string `json:"video_rate"` // 如 "5000k"
+	AudioRate string `json:"audio_rate"` // 如 "192k"
 }
 
 // qualityLadders 预定义的码率阶梯。

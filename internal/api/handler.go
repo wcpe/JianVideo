@@ -80,6 +80,7 @@ type Handler struct {
 	presets     *transcoder.PresetStore
 	pregenQueue *transcoder.PregenQueue
 	hlsPreview  *transcoder.HLSPreviewService
+	hlsABR      *transcoder.ABRService
 
 	// 系统指标采样器（FR-119）：未注入时 /api/system/metrics 返回 503。
 	metrics *metrics.Sampler
@@ -159,6 +160,12 @@ func (h *Handler) WithHLSPreview(service *transcoder.HLSPreviewService) *Handler
 	return h
 }
 
+// WithHLSABR 注入多码率 HLS 任务服务。
+func (h *Handler) WithHLSABR(service *transcoder.ABRService) *Handler {
+	h.hlsABR = service
+	return h
+}
+
 // WithMetrics 注入系统指标采样器（FR-119），启用 /api/system/metrics 端点。
 // 未注入时该端点返回 503，保持无采样器环境可用。
 func (h *Handler) WithMetrics(sampler *metrics.Sampler) *Handler {
@@ -206,9 +213,6 @@ func (h *Handler) WithThumbnail(svc *thumbsvc.Service) *Handler {
 // 未注入时 ScanLibrary 回退原直接异步执行、任务列表返回空，保持无队列环境可用。
 func (h *Handler) WithScanQueue(q *library.TaskQueue) *Handler {
 	h.scanQueue = q
-	if q != nil {
-		q.WithSuccessCallback(h.preSliceAfterScanSuccess)
-	}
 	return h
 }
 
@@ -867,10 +871,8 @@ func (h *Handler) ScanLibrary(c *gin.Context) {
 		return
 	}
 
-	// 未注入队列：回退直接异步扫描，成功后再启动预切片。
-	h.library.StartAsyncScanInSpaceWithSuccess(spaceID, id, lp.Path, lp.Type, mode, func() {
-		h.preSliceAfterScanSuccess(models.ScanTask{SpaceID: spaceID, LibraryID: id, Status: models.ScanTaskStatusCompleted})
-	})
+	// 未注入队列：回退直接异步扫描；扫描只负责入库，不自动创建高成本转码。
+	h.library.StartAsyncScanInSpace(spaceID, id, lp.Path, lp.Type, mode)
 	c.JSON(http.StatusOK, gin.H{"status": "scanning"})
 }
 

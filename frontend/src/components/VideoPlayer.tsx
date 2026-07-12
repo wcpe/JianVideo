@@ -159,6 +159,7 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const mpegtsPlayerRef = useRef<mpegts.Player | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const hlsInitTokenRef = useRef(0);
   // FR-44：续播 / 上报 / 看完状态。用 ref 持有最新回调与一次性标志，避免重建监听器。
   const initialPositionRef = useRef(initialPosition);
   const hasSeekedRef = useRef(false);
@@ -182,6 +183,8 @@ export default function VideoPlayer({
   const [isMuted, setIsMuted] = useState(false);
   const [bufferedProgress, setBufferedProgress] = useState(0);
   const [subtitleText, setSubtitleText] = useState('');
+  // 当前由 hls.js 实际切换到的 ABR 档位，仅用于状态展示，不提供手动锁档。
+  const [abrLevel, setAbrLevel] = useState<string | null>(null);
   // 末端缓冲等待（FR-18）：mpegts.js ERROR 或 video stalled 时进入等待，1s 后自动重载
   const [isWaiting, setIsWaiting] = useState(false);
   // FR-104：播放器内核与控件增强
@@ -222,7 +225,8 @@ export default function VideoPlayer({
     }
   }, []);
 
-  const destroyHlsPlayer = useCallback(async () => {
+  const destroyHlsPlayer = useCallback(() => {
+    hlsInitTokenRef.current += 1;
     const hls = hlsRef.current as { destroy: () => void } | null;
     if (hls) {
       hls.destroy();
@@ -292,8 +296,11 @@ export default function VideoPlayer({
     async (masterUrl: string) => {
       if (!videoRef.current) return;
       destroyHlsPlayer();
+      const initToken = hlsInitTokenRef.current;
       try {
         const Hls = (await import('hls.js')).default;
+        const videoElement = videoRef.current;
+        if (initToken !== hlsInitTokenRef.current || !videoElement) return;
         if (!Hls.isSupported()) {
           console.warn('[VideoPlayer] hls.js 不支持当前浏览器');
           initMpegtsPlayer(masterUrl);
@@ -301,13 +308,14 @@ export default function VideoPlayer({
         }
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
         hls.loadSource(masterUrl);
-        hls.attachMedia(videoRef.current);
+        hls.attachMedia(videoElement);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (autoPlay) attemptAutoPlay();
         });
         hls.on(Hls.Events.LEVEL_SWITCHED, (_e, d) => {
-          const l = hls.levels[d.level];
-          if (l) console.info(`[VideoPlayer] ABR: ${l.width}x${l.height}`);
+          const level = hls.levels[d.level];
+          if (level)
+            setAbrLevel(level.height > 0 ? `${level.height}p` : `${level.width}x${level.height}`);
         });
         hls.on(Hls.Events.ERROR, (_e, d) => {
           if (d.fatal) {
@@ -318,7 +326,7 @@ export default function VideoPlayer({
         });
         hlsRef.current = hls;
       } catch {
-        initMpegtsPlayer(masterUrl);
+        if (initToken === hlsInitTokenRef.current) initMpegtsPlayer(masterUrl);
       }
     },
     [autoPlay, destroyHlsPlayer, initMpegtsPlayer, attemptAutoPlay],
@@ -366,6 +374,7 @@ export default function VideoPlayer({
   // FR-44：URL 变化（切换媒体）时重置续播 / 上报 / 看完的一次性标志
   useEffect(() => {
     hasSeekedRef.current = false;
+    setAbrLevel(null);
     lastReportRef.current = 0;
     endedReportedRef.current = false;
   }, [resolved.url]);
@@ -1056,7 +1065,7 @@ export default function VideoPlayer({
 
         {isABR && (
           <Text size="xs" c="green" fw={500}>
-            ABR
+            {abrLevel ? `ABR · ${abrLevel}` : 'ABR'}
           </Text>
         )}
       </Box>

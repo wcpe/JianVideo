@@ -199,28 +199,21 @@ func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
 	close(releaseScan)
 
 	deadline := time.Now().Add(5 * time.Second)
+	var newMedia models.MediaFile
 	for time.Now().Before(deadline) {
-		mu.Lock()
-		count := len(generated)
-		mu.Unlock()
-		if count == 101 {
+		if err := gdb.Where("space_id = ? AND file_path = ?", "space-a", filepath.ToSlash(newPath)).First(&newMedia).Error; err == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	var newMedia models.MediaFile
-	if err := gdb.Where("space_id = ? AND file_path = ?", "space-a", filepath.ToSlash(newPath)).First(&newMedia).Error; err != nil {
-		t.Fatalf("扫描后新视频未入库: %v", err)
+	if newMedia.ID == 0 {
+		t.Fatal("扫描后新视频未入库")
 	}
 	mu.Lock()
-	_, includedNew := generated[newMedia.ID]
 	count := len(generated)
 	mu.Unlock()
-	if count != 101 {
-		t.Fatalf("预切片应跨页处理全部 101 个视频，实际 %d 个", count)
-	}
-	if !includedNew {
-		t.Fatal("预切片应包含本次扫描新入库的视频")
+	if count != 0 {
+		t.Fatalf("扫描完成后不得自动创建高成本转码，实际处理 %d 个", count)
 	}
 }
 

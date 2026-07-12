@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 import { server } from '@/mocks/beforeAll';
 import { useState } from 'react';
@@ -510,7 +511,15 @@ describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
 
     await user.click(screen.getByRole('button', { name: '更多操作' }));
 
-    for (const name of ['改显示名', '改文件名', '下载', '分享', '外部播放器', '加入预生成']) {
+    for (const name of [
+      '改显示名',
+      '改文件名',
+      '下载',
+      '分享',
+      '外部播放器',
+      '生成自适应版本',
+      '加入预生成',
+    ]) {
       expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument();
     }
   });
@@ -525,6 +534,36 @@ describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
 
     // 分享弹窗标题出现，确认菜单项正确触发对应弹窗
     expect(await screen.findByText('分享此媒体')).toBeInTheDocument();
+  });
+
+  it('菜单内点击「生成自适应版本」才显式创建 ABR 任务', async () => {
+    let enqueueBody: unknown;
+    const notificationSpy = vi.spyOn(notifications, 'show');
+    server.use(
+      http.post('*/api/play/1/hls-abr', async ({ request }) => {
+        enqueueBody = await request.json();
+        return HttpResponse.json(
+          {
+            task_id: 88,
+            profile_id: 'abr-h264',
+            url: '/api/play/hls/1/profiles/abr-h264/master.m3u8',
+          },
+          { status: 202 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    renderPlayPage('/play/1');
+    await waitFor(() => expect(screen.getByRole('heading')).toBeInTheDocument());
+    expect(enqueueBody).toBeUndefined();
+
+    await user.click(screen.getByRole('button', { name: '更多操作' }));
+    await user.click(await screen.findByRole('menuitem', { name: '生成自适应版本' }));
+
+    await waitFor(() => expect(enqueueBody).toEqual({}));
+    expect(notificationSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '已加入自适应版本生成队列', color: 'green' }),
+    );
   });
 
   it('菜单内点击「加入预生成」触发预生成弹窗（FR-77 回归）', async () => {

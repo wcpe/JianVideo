@@ -87,6 +87,7 @@ export default function PlayPage() {
   const [extPlayerOpened, setExtPlayerOpened] = useState(false);
   // 加入预生成队列弹窗开关（FR-77）
   const [pregenOpened, setPregenOpened] = useState(false);
+  const [abrEnqueueing, setABREnqueueing] = useState(false);
   // 媒体信息抽屉开关（FR-103）：信息移出文档流、收进右侧抽屉，经「更多」菜单「详情」打开
   const [infoOpened, setInfoOpened] = useState(false);
   const [nameEditSaving, setNameEditSaving] = useState(false);
@@ -208,7 +209,7 @@ export default function PlayPage() {
   const handlePlaybackError = useCallback(() => {
     if (!media || playerIsABR) return;
     void playApi
-      .getHLSStatus(media.id)
+      .getHLSStatus(media.id, 'abr-h264')
       .then((status) => {
         if (!status.available) return;
         setPlayerUrl(status.url);
@@ -216,6 +217,29 @@ export default function PlayPage() {
       })
       .catch(() => {});
   }, [media, playerIsABR]);
+
+  const enqueueABR = async () => {
+    if (!media || abrEnqueueing) return;
+    setABREnqueueing(true);
+    try {
+      await playApi.createHLSABR(media.id);
+      notifications.show({
+        title: '已加入自适应版本生成队列',
+        message: '生成完成后，直连失败可自动回退到多码率播放',
+        color: 'green',
+        autoClose: 3000,
+      });
+    } catch (err) {
+      notifications.show({
+        title: '创建自适应版本失败',
+        message: err instanceof Error ? err.message : '请稍后重试',
+        color: 'red',
+        autoClose: 3000,
+      });
+    } finally {
+      setABREnqueueing(false);
+    }
+  };
 
   // 确认改名（FR-30）：display 仅改库内显示名，real 走磁盘改名
   const confirmNameEdit = async (value: string) => {
@@ -422,6 +446,13 @@ export default function PlayPage() {
                 onClick={() => setExtPlayerOpened(true)}
               >
                 外部播放器
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconMovie size={14} />}
+                disabled={abrEnqueueing}
+                onClick={() => void enqueueABR()}
+              >
+                生成自适应版本
               </Menu.Item>
               {/* 加入预生成（FR-77）：选预设把本媒体加入预生成队列预热首播 */}
               <Menu.Item

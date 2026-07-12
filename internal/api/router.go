@@ -166,8 +166,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sub.PUT("/:id/position", h.UpdateWatchPosition)
 		sub.PUT("/:id/watched", h.MarkWatched)
 
-		// HLS preview 状态（FR2-008）：默认 profile 可用性与统一任务状态。
+		// HLS 状态与显式 ABR 生成：状态查询不入队，高成本任务仅由 POST 创建。
 		sub.GET("/:id/hls-status", h.HLSStatus)
+		sub.POST("/:id/hls-abr", h.CreateHLSABR)
 
 		// 端到端编码协商（FR-53）：客户端上报能力，后端协商实际编码与播放路径
 		sub.POST("/:id/negotiate", h.Negotiate)

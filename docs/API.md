@@ -1151,11 +1151,11 @@
   - 支持 `Content-Range` 响应头
 - **错误**：`404` 媒体文件不存在，`500` 转码启动失败
 
-### 查询 HLS 预览状态（FR2-008）
+### 查询 HLS 预览 / ABR 状态（FR2-008 / FR2-026）
 
 - **方法 / 路径**：`GET /api/play/:id/hls-status`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
-- **查询参数**：`profile_id` 可选；缺省为兼容 profile `h264`
+- **查询参数**：`profile_id` 可选；缺省为兼容 profile `h264`，多码率 H.264 使用 `abr-h264`
 - **响应**（200）：
   ```json
   {
@@ -1171,14 +1171,33 @@
     }
   }
   ```
-- **说明**：`available` 只按当前 Space、媒体与 profile 的目标清单判定；`task` 是该 profile 最近一条统一任务，无任务时为 `null`。默认 H.264/TS profile 返回兼容 URL `master.m3u8`；非默认 profile 返回 `/api/play/hls/:id/profiles/:profile_id/:manifest`。服务未启用返回 `503`，媒体不存在返回 `404`，非法 profile 返回 `400`。
+- **说明**：`available` 只按当前 Space、媒体与 profile 的目标清单判定；`task` 是该 profile 最近一条统一任务，无任务时为 `null`。默认 H.264/TS profile 返回兼容 URL `master.m3u8`；`abr-h264` 返回 `/api/play/hls/:id/profiles/abr-h264/master.m3u8`，对应最近一条 `transcode.hls.abr` 任务。服务未启用返回 `503`，媒体不存在返回 `404`，非法 profile 返回 `400`。
+
+### 显式创建多码率 HLS 任务（FR2-026）
+
+- **方法 / 路径**：`POST /api/play/:id/hls-abr`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求体**：
+  ```json
+  { "priority": 8, "force_rebuild": false }
+  ```
+- **响应**（202）：
+  ```json
+  {
+    "task_id": 19,
+    "profile_id": "abr-h264",
+    "url": "/api/play/hls/42/profiles/abr-h264/master.m3u8"
+  }
+  ```
+- **说明**：仅显式调用时入队，扫描入库不会自动创建高成本 ABR 任务。任务类型固定为 `transcode.hls.abr`，最大尝试 3 次；`priority` 进入通用任务队列，取消、重试与详情使用 `/api/tasks/:id`。实际 ladder 从运行期设置 `transcode_abr_ladder` 读取，默认 `1080p/720p/480p`，高于源分辨率的档位会跳过，源低于 480p 时仅生成原尺寸 `source` 档。`force_rebuild=true` 会先经缓存安全边界清理当前 Space/media 的 `abr-h264` profile，再生成并登记 master 与各 variant。原文件直连仍是播放页首选，只有直连加载失败且本 profile 已可用时才回退该 URL。
+- **错误**：服务未启用返回 `503`，媒体不存在或不属于当前 Space 返回 `404`，请求或入队参数非法返回 `400`。
 
 ### 获取 HLS 清单与切片
 
 - **默认兼容路径**：
   - `GET /api/play/hls/:id/master` 或 `GET /api/play/hls/:id/master.m3u8`：默认 `h264` profile 的 TS master 清单；FR2-008 单档任务只含一个 `EXT-X-STREAM-INF`，不等同于 FR2-026 多码率 ABR。
   - `GET /api/play/hls/:id/index.m3u8`：默认 profile 的 fMP4/CMAF 清单兼容路径。
-- **显式 profile 路径**：`GET /api/play/hls/:id/profiles/:profile_id/:file`
+- **显式 profile 路径**：`GET /api/play/hls/:id/profiles/:profile_id/:file`；`abr-h264` 的 `:file` 可为 `master.m3u8` 或 `:variant/index.m3u8`、`:variant/segment_NNN.ts`
 - **旧文件布局兼容**：若 Space/profile 新目录中不存在目标文件，默认路径继续回退读取历史 `hls/:media_id/:file` 产物。
 - **响应类型**：`.m3u8` 为 `application/vnd.apple.mpegurl`，`.ts` 为 `video/mp2t`，`.m4s` 为 `video/iso.segment`，fMP4 初始化段 `.mp4` 为 `video/mp4`。
 - **安全边界**：请求必须通过当前 Space owner 校验，且媒体必须属于该 Space；路径必须位于受控 HLS 根目录内。

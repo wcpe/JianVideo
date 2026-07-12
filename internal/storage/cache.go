@@ -561,8 +561,23 @@ func (s *Service) PrepareHLSRebuild(ctx context.Context, spaceID string, mediaID
 	if err := deleteAssetPath(absPath, CacheAssetLevelDirectory); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return s.db.WithContext(ctx).Where("space_id = ? AND media_id = ? AND kind = ? AND profile_id = ? AND relative_path = ?",
-		normalizeSpace(spaceID), mediaID, CacheKindHLS, strings.TrimSpace(profileID), relPath).Delete(&models.CacheAsset{}).Error
+	var assets []models.CacheAsset
+	if err := s.db.WithContext(ctx).Where("space_id = ? AND media_id = ? AND kind = ? AND profile_id = ?",
+		normalizeSpace(spaceID), mediaID, CacheKindHLS, strings.TrimSpace(profileID)).Find(&assets).Error; err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(assets))
+	prefix := strings.TrimSuffix(filepath.ToSlash(relPath), "/") + "/"
+	for _, item := range assets {
+		itemPath := filepath.ToSlash(item.RelativePath)
+		if itemPath == filepath.ToSlash(relPath) || strings.HasPrefix(itemPath, prefix) {
+			ids = append(ids, item.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&models.CacheAsset{}).Error
 }
 
 func (s *Service) deleteRegisteredAssets(ctx context.Context, assets []models.CacheAsset, libraryRoots []string, result *CleanResult) error {

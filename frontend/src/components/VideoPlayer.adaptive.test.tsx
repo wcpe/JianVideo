@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MantineProvider } from '@mantine/core';
 import VideoPlayer from './VideoPlayer';
@@ -7,6 +7,7 @@ import type { PlaybackDescriptor } from '@/types';
 // 记录各内核被构造时收到的 URL，断言分发走向
 const mpegtsCreate = vi.fn();
 const hlsLoadSource = vi.fn();
+const hlsHandlers = new Map<string, (...args: unknown[]) => void>();
 
 vi.mock('mpegts.js', () => ({
   default: {
@@ -36,9 +37,14 @@ vi.mock('hls.js', () => {
       hlsLoadSource(url);
     }
     attachMedia() {}
-    on() {}
+    on(event: string, handler: (...args: unknown[]) => void) {
+      hlsHandlers.set(event, handler);
+    }
     destroy() {}
-    levels = [];
+    levels = [
+      { width: 1280, height: 720 },
+      { width: 854, height: 480 },
+    ];
   }
   return { default: FakeHls };
 });
@@ -56,20 +62,43 @@ function renderWithDescriptor(descriptor: PlaybackDescriptor) {
   );
 }
 
+async function waitForHlsSource(url?: string) {
+  await vi.dynamicImportSettled();
+  await waitFor(() => {
+    if (url) expect(hlsLoadSource).toHaveBeenCalledWith(url);
+    else expect(hlsLoadSource).toHaveBeenCalled();
+  });
+}
+
 beforeEach(() => {
   mpegtsCreate.mockClear();
   hlsLoadSource.mockClear();
+  hlsHandlers.clear();
   stubIsTypeSupported(() => true);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  cleanup();
+  await vi.dynamicImportSettled();
   vi.unstubAllGlobals();
+  hlsHandlers.clear();
 });
 
 describe('自适应播放器按描述符分发（FR-52）', () => {
+  it('LEVEL_SWITCHED 后展示当前 ABR 档位', async () => {
+    render(
+      <MantineProvider>
+        <VideoPlayer url="/api/play/hls/7/profiles/abr-h264/master.m3u8" isABR autoPlay={false} />
+      </MantineProvider>,
+    );
+    await waitForHlsSource();
+    act(() => hlsHandlers.get('l')?.('l', { level: 1 }));
+    expect(screen.getByText('ABR · 480p')).toBeInTheDocument();
+  });
+
   it('fmp4 描述符（编码受支持）走 hls.js 加载 index.m3u8', async () => {
     renderWithDescriptor({ codec: 'av1', url: '/api/play/hls/7/index.m3u8', path: 'fmp4' });
-    await waitFor(() => expect(hlsLoadSource).toHaveBeenCalledWith('/api/play/hls/7/index.m3u8'));
+    await waitForHlsSource('/api/play/hls/7/index.m3u8');
     expect(mpegtsCreate).not.toHaveBeenCalled();
   });
 

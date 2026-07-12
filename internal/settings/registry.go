@@ -116,6 +116,11 @@ var registry = []Definition{
 		Validate: validateBool,
 	},
 	{
+		Key: KeyTranscodeABRLadder, Label: "自适应码率档位", Description: "显式生成多码率 HLS 时使用的档位名称 JSON 数组。",
+		Layer: LayerRuntime, ValueType: ValueJSON, DefaultValue: `["1080p","720p","480p"]`, HotApply: true, Consumer: "transcoder.abr",
+		Validate: validateABRLadder,
+	},
+	{
 		Key: KeyFFmpegPath, Label: "FFmpeg 路径", Description: "ffmpeg 可执行文件路径；留空时按自动发现结果使用。",
 		Layer: LayerRuntime, ValueType: ValuePath, DefaultValue: "", HotApply: true, Consumer: "transcoder",
 		Validate: validateAny,
@@ -350,6 +355,25 @@ func validateStringArrayJSON(value string) error {
 	var arr []string
 	if err := json.Unmarshal([]byte(value), &arr); err != nil || len(arr) == 0 {
 		return fmt.Errorf("必须是非空字符串数组 JSON")
+	}
+	return nil
+}
+
+func validateABRLadder(value string) error {
+	var ladder []string
+	if err := json.Unmarshal([]byte(value), &ladder); err != nil || len(ladder) == 0 {
+		return fmt.Errorf("必须是非空档位名称数组 JSON")
+	}
+	allowed := map[string]bool{"1080p": true, "720p": true, "480p": true}
+	seen := map[string]bool{}
+	for _, item := range ladder {
+		if !allowed[item] {
+			return fmt.Errorf("包含未知 ABR 档位")
+		}
+		if seen[item] {
+			return fmt.Errorf("ABR 档位不能重复")
+		}
+		seen[item] = true
 	}
 	return nil
 }

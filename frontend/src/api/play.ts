@@ -17,6 +17,17 @@ export interface HLSPreviewStatus {
   task: { id: string; status: string; progress: number } | null;
 }
 
+export interface HLSABRTaskResponse {
+  task_id: number;
+  profile_id: 'abr-h264';
+  url: string;
+}
+
+export interface HLSABRTaskInput {
+  priority?: number;
+  force_rebuild?: boolean;
+}
+
 interface NegotiateResponse {
   codec: string;
   path: 'ts' | 'fmp4' | 'mp4';
@@ -33,6 +44,14 @@ export async function getHLSStatus(mediaID: number, profileID = 'h264'): Promise
   const res = await client.get<HLSPreviewStatus>(`/api/play/${mediaID}/hls-status`, {
     params: { profile_id: profileID },
   });
+  return { ...res.data, url: new URL(res.data.url, window.location.href).toString() };
+}
+
+export async function createHLSABR(
+  mediaID: number,
+  input: HLSABRTaskInput = {},
+): Promise<HLSABRTaskResponse> {
+  const res = await client.post<HLSABRTaskResponse>(`/api/play/${mediaID}/hls-abr`, input);
   return { ...res.data, url: new URL(res.data.url, window.location.href).toString() };
 }
 

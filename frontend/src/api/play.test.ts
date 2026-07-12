@@ -1,7 +1,31 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '@/mocks/beforeAll';
-import { negotiate } from './play';
+import { createHLSABR, negotiate } from './play';
+
+describe('ABR 显式生成 API', () => {
+  it('仅在调用时 POST hls-abr 并返回任务信息', async () => {
+    let body: unknown;
+    server.use(
+      http.post('*/api/play/9/hls-abr', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(
+          {
+            task_id: 77,
+            profile_id: 'abr-h264',
+            url: '/api/play/hls/9/profiles/abr-h264/master.m3u8',
+          },
+          { status: 202 },
+        );
+      }),
+    );
+    const result = await createHLSABR(9, { priority: 8, force_rebuild: true });
+    expect(body).toEqual({ priority: 8, force_rebuild: true });
+    expect(result.task_id).toBe(77);
+    expect(result.profile_id).toBe('abr-h264');
+    expect(result.url).toMatch(/\/api\/play\/hls\/9\/profiles\/abr-h264\/master\.m3u8$/);
+  });
+});
 
 describe('negotiate（FR-53 编码协商 API）', () => {
   it('上报客户端能力并把相对 URL 绝对化', async () => {

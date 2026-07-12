@@ -47,15 +47,15 @@
 
 ## 4. 任务拆分
 
-- [ ] 定义默认 ladder 与配置 registry。
-- [ ] 将多码率转码封装为统一任务处理器。
-- [ ] 接入硬件选择 fallback 与缓存登记。
-- [ ] 播放协商返回 ABR master 状态。
-- [ ] 前端播放端补 ABR 状态/事件断言。
-- [ ] 补单元测试：ladder 过滤、ffmpeg 参数、master playlist。
-- [ ] 补集成测试：多档生成、失败重试、取消、缓存清理后重建。
-- [ ] 补 E2E：HLS ABR 播放与弱网降档。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义默认 ladder 与配置 registry。
+- [x] 将多码率转码封装为统一任务处理器。
+- [x] 接入硬件选择 fallback 与缓存登记。
+- [x] 播放协商返回 ABR master 状态。
+- [x] 前端播放端补 ABR 状态/事件断言。
+- [x] 补单元测试：ladder 过滤、ffmpeg 参数、master playlist。
+- [x] 补集成测试：多档生成、失败重试、取消、缓存清理后重建。
+- [x] 补 E2E：HLS ABR 播放与弱网降档。
+- [x] 文档同步：ARCHITECTURE、API、CHANGELOG；PRD 验收状态留待最终全量门禁后更新。
 
 ## 5. 验收标准
 

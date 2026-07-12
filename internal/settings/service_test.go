@@ -200,7 +200,7 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	for _, def := range defs {
 		seen[def.Key] = def
 	}
-	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency, KeyMediaInferenceEnabled, KeyMediaInferenceDisabledLibraries, KeyTranscodeHWAccelMode, KeyTranscodeHWAccelFallback} {
+	for _, key := range []string{KeyScanInterval, KeyNetworkProxy, KeyOpenTabs, KeyLastOpenedPath, KeyTaskWorkerThumbnailConcurrency, KeyMediaInferenceEnabled, KeyMediaInferenceDisabledLibraries, KeyTranscodeHWAccelMode, KeyTranscodeHWAccelFallback, KeyTranscodeABRLadder} {
 		if _, ok := seen[key]; !ok {
 			t.Fatalf("definitions 缺少 key=%s", key)
 		}
@@ -219,6 +219,22 @@ func TestDefinitionsExposeRegisteredRuntimeKeys(t *testing.T) {
 	}
 	if def := seen[KeyTranscodeHWAccelFallback]; def.DefaultValue != "1" || def.ValueType != ValueBool || def.Consumer != "transcoder" {
 		t.Fatalf("硬件加速回退配置异常: %+v", def)
+	}
+	if def := seen[KeyTranscodeABRLadder]; def.DefaultValue != `["1080p","720p","480p"]` || def.ValueType != ValueJSON || def.Consumer != "transcoder.abr" {
+		t.Fatalf("ABR ladder 配置异常: %+v", def)
+	}
+}
+
+func TestTranscodeABRLadderPersistsAndRejectsUnknownVariant(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+	if err := svc.Set(KeyTranscodeABRLadder, `["720p","480p"]`); err != nil {
+		t.Fatalf("写入 ABR ladder 失败: %v", err)
+	}
+	if got := svc.TranscodeABRLadder(); len(got) != 2 || got[0] != "720p" || got[1] != "480p" {
+		t.Fatalf("读取 ABR ladder 异常: %v", got)
+	}
+	if err := svc.Set(KeyTranscodeABRLadder, `["720p","未知档位"]`); err == nil || !IsValidationError(err) {
+		t.Fatalf("未知 ABR 档位应被拒绝, 实际 %v", err)
 	}
 }
 

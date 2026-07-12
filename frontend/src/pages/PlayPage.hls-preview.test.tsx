@@ -26,8 +26,10 @@ function renderPage() {
   );
 }
 
-describe('PlayPage HLS preview fallback', () => {
-  it('先直连播放，直连失败后才切换已生成 HLS', async () => {
+describe('PlayPage ABR fallback', () => {
+  it('先直连播放，失败后只查询已生成 ABR，不自动入队', async () => {
+    let requestedProfile = '';
+    let enqueueCount = 0;
     server.use(
       http.get('*/api/library/media/1', () =>
         HttpResponse.json({
@@ -48,14 +50,19 @@ describe('PlayPage HLS preview fallback', () => {
           modified_at: '',
         }),
       ),
-      http.get('*/api/play/1/hls-status', () =>
-        HttpResponse.json({
+      http.get('*/api/play/1/hls-status', ({ request }) => {
+        requestedProfile = new URL(request.url).searchParams.get('profile_id') || '';
+        return HttpResponse.json({
           available: true,
-          profile_id: 'h264',
-          url: '/api/play/hls/1/master.m3u8',
+          profile_id: 'abr-h264',
+          url: '/api/play/hls/1/profiles/abr-h264/master.m3u8',
           task: null,
-        }),
-      ),
+        });
+      }),
+      http.post('*/api/play/1/hls-abr', () => {
+        enqueueCount += 1;
+        return HttpResponse.json({}, { status: 202 });
+      }),
     );
 
     renderPage();
@@ -66,8 +73,10 @@ describe('PlayPage HLS preview fallback', () => {
     await waitFor(() =>
       expect(screen.getByTestId('video-player')).toHaveAttribute(
         'data-url',
-        expect.stringContaining('/api/play/hls/1/master.m3u8'),
+        expect.stringContaining('/api/play/hls/1/profiles/abr-h264/master.m3u8'),
       ),
     );
+    expect(requestedProfile).toBe('abr-h264');
+    expect(enqueueCount).toBe(0);
   });
 });
