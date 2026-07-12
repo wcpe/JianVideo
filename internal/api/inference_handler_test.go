@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -229,6 +230,75 @@ func TestCreateMediaFilePersistsInferenceCompensationAndRealWorkerCompletes(t *t
 	}
 	if inference.Title != "Retry Movie" || inference.Manual {
 		t.Fatalf("补偿推断结果不正确: %+v", inference)
+	}
+}
+
+func TestInferenceMissingWorkerPreservesZeroGenerationSnapshot(t *testing.T) {
+	tests := []struct {
+		name              string
+		payloadJSON       string
+		currentGeneration int64
+		wantInferences    int64
+	}{
+		{
+			name:              "显式零代次在当前代次递增后停止",
+			payloadJSON:       `{"space_id":"%s","library_id":0,"mode":"missing","generation":0,"enabled":true}`,
+			currentGeneration: 1,
+			wantInferences:    0,
+		},
+		{
+			name:              "负代次按设置解析语义归一为零",
+			payloadJSON:       `{"space_id":"%s","library_id":0,"mode":"missing","generation":-7,"enabled":true}`,
+			currentGeneration: 0,
+			wantInferences:    1,
+		},
+		{
+			name:              "旧任务缺少快照字段沿用设置默认值",
+			payloadJSON:       `{"space_id":"%s","library_id":0,"mode":"missing"}`,
+			currentGeneration: 0,
+			wantInferences:    1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, libSvc, db := setupInferenceRouter(t)
+			libSvc.WithInferenceConfigProvider(func(string, int64) library.InferenceConfig {
+				return library.InferenceConfig{Enabled: true, Generation: tt.currentGeneration}
+			})
+			dir := t.TempDir()
+			lp, err := libSvc.CreateLibraryPathWithKindInSpace(models.DefaultSpaceID, dir, "local", "电影", models.LibraryKindMovie)
+			if err != nil {
+				t.Fatalf("创建媒体库失败: %v", err)
+			}
+			media := models.MediaFile{
+				SpaceID: models.DefaultSpaceID, LibraryID: lp.ID,
+				FilePath: filepath.Join(dir, "Snapshot.Movie.2024.mkv"), FileName: "Snapshot.Movie.2024.mkv",
+				Format: "mkv", AddedAt: time.Now(), ModifiedAt: time.Now(),
+			}
+			if err := db.Create(&media).Error; err != nil {
+				t.Fatalf("创建待补齐媒体失败: %v", err)
+			}
+			taskSvc := tasksvc.NewService(db)
+			workers := tasksvc.NewWorkerRegistry(taskSvc)
+			if err := RegisterInferenceBackfillWorker(workers, libSvc); err != nil {
+				t.Fatalf("注册推断 worker 失败: %v", err)
+			}
+			payloadJSON := fmt.Sprintf(tt.payloadJSON, models.DefaultSpaceID)
+			payload := inferenceBackfillPayload{SpaceID: models.DefaultSpaceID, Mode: inferenceBackfillModeMissing}
+			if _, err := taskSvc.Enqueue(context.Background(), inferenceTaskInput(payload, payloadJSON)); err != nil {
+				t.Fatalf("入队推断任务失败: %v", err)
+			}
+			if err := workers.RunPending(context.Background()); err != nil {
+				t.Fatalf("执行推断 worker 失败: %v", err)
+			}
+			var count int64
+			if err := db.Model(&models.MediaInference{}).Count(&count).Error; err != nil {
+				t.Fatalf("查询推断数量失败: %v", err)
+			}
+			if count != tt.wantInferences {
+				t.Fatalf("worker 写入推断数=%d，期望 %d", count, tt.wantInferences)
+			}
+		})
 	}
 }
 

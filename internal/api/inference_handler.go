@@ -196,14 +196,12 @@ func inferenceBackfillHandler(lib *library.Service, registry *tasksvc.WorkerRegi
 		}
 		if payload.Mode == inferenceBackfillModeMedia {
 			_, err = lib.InferAndStoreMediaInSpace(payload.SpaceID, payload.MediaID)
-		} else if payload.Mode == inferenceBackfillModeMissing && payload.Generation > 0 {
+		} else if payload.Mode == inferenceBackfillModeMissing {
 			cfg := library.InferenceConfig{
 				Enabled: payload.Enabled, Generation: payload.Generation,
 				DisabledLibraries: inferenceDisabledLibrarySet(payload.DisabledLibraries),
 			}
 			_, err = lib.BackfillMissingMediaInferencesWithConfigInSpace(ctx, payload.SpaceID, payload.LibraryID, cfg, progress)
-		} else if payload.Mode == inferenceBackfillModeMissing {
-			_, err = lib.BackfillMissingMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
 		} else {
 			_, err = lib.BackfillMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
 		}
@@ -225,7 +223,7 @@ func parseInferenceBackfillTask(task models.Task) (inferenceBackfillPayload, err
 	if task.Scope != models.TaskScopeSpace || task.SpaceID == nil {
 		return inferenceBackfillPayload{}, errors.New("推断回填任务必须归属 Space")
 	}
-	var payload inferenceBackfillPayload
+	payload := inferenceBackfillPayload{Enabled: true}
 	if err := json.Unmarshal([]byte(task.PayloadJSON), &payload); err != nil {
 		return payload, fmt.Errorf("解析推断回填任务参数失败: %w", err)
 	}
@@ -241,6 +239,9 @@ func parseInferenceBackfillTask(task models.Task) (inferenceBackfillPayload, err
 	}
 	if payload.Mode != inferenceBackfillModeFull && payload.Mode != inferenceBackfillModeMissing && payload.Mode != inferenceBackfillModeMedia {
 		return payload, errors.New("推断回填任务模式无效")
+	}
+	if payload.Generation < 0 {
+		payload.Generation = 0
 	}
 	if payload.Mode == inferenceBackfillModeMedia && payload.MediaID <= 0 {
 		return payload, errors.New("推断补偿任务参数缺少媒体 ID")
