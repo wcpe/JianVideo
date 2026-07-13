@@ -6,6 +6,8 @@
 
 ## 未发布
 
+## 0.23.0（2026-07-13）
+
 ### 新增
 - **FR2-026 多码率自动转码与自适应播放**：新增显式 `transcode.hls.abr` 通用任务与 `POST /api/play/:id/hls-abr`，默认从运行期 `transcode_abr_ladder` 读取 1080p/720p/480p 阶梯，按源分辨率跳过高档，低于 480p 时仅生成不放大的 `source` 档；扫描入库不自动触发高成本转码。单个 ffmpeg 进程通过 `filter_complex split` 生成共享 GOP 的 H.264/TS variants 与 `master.m3u8`，支持优先级、进度、取消、失败重试、硬件策略及软件回退；master 与逐档目录登记为 `cache_assets`，通用缓存清理或强制重建后可重新生成。播放页继续原文件直连优先，仅在直连失败且 `abr-h264` 已可用时切到 hls.js ABR，并展示实际 `LEVEL_SWITCHED` 档位；异步加载 hls.js 时增加失效令牌，避免媒体切换/卸载后残留初始化。新增 ladder/任务/API/缓存单测、前端事件与直连回退测试、串行 Playwright 专项，以及真实 ffmpeg/ffprobe 单二进制多档、source-only、清理重建和直连验收。
 - **FR2-008 视频 HLS 预览与转码任务队列**：新增 `transcode.hls.preview` 通用任务类型，以 Space/media/profile 隔离产物和幂等键，支持优先级、进度、取消、失败重试、最多三次尝试与强制重建；旧 `POST/GET /api/transcode/tasks` 保持响应兼容，但运行期真源改为通用任务中心。H.264 preview 只生成一个 TS 质量档与单 variant master，高级编码沿用单档 fMP4/CMAF，明确不混入 FR2-026 多码率 ABR。新增 `GET /api/play/:id/hls-status`、显式 profile HLS URL 与旧 master/历史文件布局兼容；播放页保留 FR-53 高级编码协商，H.264 改为直连优先、加载失败后仅在已有 preview 时回退 HLS。HLS 产物按 profile 目录登记 `cache_assets`，缓存清理后可重新入队重建，强制重建只删除目标 profile。新增独立 migration 转换旧转码镜像而不改既有 migration ID，并补 Go 单元/迁移/API/缓存回归、前端回退测试及真实 ffmpeg Playwright 验收。
@@ -29,6 +31,12 @@
 ### 修复
 - **FR2-031 离线影视推断复核阻断**：媒体列表现已接受 `inference=inferred` 并返回自动推断与人工纠正的并集、排除未推断媒体；媒体落库后的即时推断若失败，会持久化单媒体补偿任务并唤醒通用 worker，后续自动补齐且不改变人工纠正、全局关闭或按库禁用语义。
 - **FR2-022 可信工具镜像发布**：修复原子发布阶段的资产列表解析语法错误，以及回下载请求混用 JSON/二进制 `Accept` 头导致 `SHA256SUMS` 下载为错误响应的问题；六平台工具包已通过来源证明与回下载校验并正式发布为 `tools-v1.0.0`。
+- **服务退出清理与扫描职责边界**：主入口改为在 `run` 返回后再退出进程，确保播放服务、指标采样、任务 worker、扫描调度与目录监听的 defer 清理完整执行；移除扫描完成后自动全库预切片死链，保持扫描只负责入库、高成本 HLS 由显式任务触发。
+
+### 工程 / 质量
+- **静态检查与覆盖率门禁收口**：清零 32 个 golangci-lint 问题，补齐资源关闭、导出注释和精确 gosec 信任边界；Go 覆盖率默认门槛为 60%，组合根与 SMB 的显式例外集中声明并由策略测试锁定。
+- **Playwright E2E 发布门禁**：真实服务端到端测试固定单 worker 串行执行，并在每次启动前重建专用数据根，避免共享 SQLite、任务队列和运行期设置造成跨场景互扰；`pnpm run quality` 现已包含完整 Playwright E2E。
+- **控制台异步测试稳定性**：设置区异步加载断言使用 5 秒等待窗口，连续复验与全量前端测试通过，消除正式门禁中的时序抖动。
 
 ## 0.22.0（2026-07-08）
 
