@@ -156,10 +156,11 @@ func enqueueInferenceTask(ctx context.Context, tasks *tasksvc.Service, tx *gorm.
 func inferenceTaskInput(payload inferenceBackfillPayload, encoded string) tasksvc.EnqueueInput {
 	key := fmt.Sprintf("inference-backfill:%s:%d:%s", payload.SpaceID, payload.LibraryID, payload.Mode)
 	resourceType, resourceID, maxAttempts := "library", fmt.Sprintf("%d", payload.LibraryID), 1
-	if payload.Mode == inferenceBackfillModeMedia {
+	switch {
+	case payload.Mode == inferenceBackfillModeMedia:
 		key = fmt.Sprintf("inference-media:%s:%d", payload.SpaceID, payload.MediaID)
 		resourceType, resourceID, maxAttempts = "media", fmt.Sprintf("%d", payload.MediaID), 3
-	} else if payload.Generation > 0 {
+	case payload.Generation > 0:
 		key = fmt.Sprintf("%s:%d", key, payload.Generation)
 	}
 	return tasksvc.EnqueueInput{
@@ -194,15 +195,16 @@ func inferenceBackfillHandler(lib *library.Service, registry *tasksvc.WorkerRegi
 				Checkpoint: fmt.Sprintf("media:%d", mediaID),
 			})
 		}
-		if payload.Mode == inferenceBackfillModeMedia {
+		switch payload.Mode {
+		case inferenceBackfillModeMedia:
 			_, err = lib.InferAndStoreMediaInSpace(payload.SpaceID, payload.MediaID)
-		} else if payload.Mode == inferenceBackfillModeMissing {
+		case inferenceBackfillModeMissing:
 			cfg := library.InferenceConfig{
 				Enabled: payload.Enabled, Generation: payload.Generation,
 				DisabledLibraries: inferenceDisabledLibrarySet(payload.DisabledLibraries),
 			}
 			_, err = lib.BackfillMissingMediaInferencesWithConfigInSpace(ctx, payload.SpaceID, payload.LibraryID, cfg, progress)
-		} else {
+		default:
 			_, err = lib.BackfillMediaInferencesWithProgressInSpace(ctx, payload.SpaceID, payload.LibraryID, progress)
 		}
 		return err

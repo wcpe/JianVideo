@@ -343,19 +343,6 @@ func TryGenerateThumbnail(filePath string) error {
 	})
 }
 
-// tryRunThumbnailFFmpeg 带超时执行一次 ffmpeg 缩略图命令并返回错误（含超时区分），供同步生成入口复用。
-func tryRunThumbnailFFmpeg(args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
-	defer cancel()
-	if err := realRunFFmpegThumbnail(ctx, args); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("缩略图生成超时: %w", err)
-		}
-		return err
-	}
-	return nil
-}
-
 // matteFilterComplex 构造「缩放至宽 width 后合成到中性灰底」的 ffmpeg filter_complex（FR-81 P1）。
 // 以 color 源生成灰底，经 scale2ref 适配前景尺寸后 overlay 合成：
 // 带 alpha 的源透明区透出灰底（消除纯黑），无 alpha 的源叠加灰底不可见、结果不变。
@@ -402,10 +389,6 @@ func generateMagickThumbnail(filePath string, size int) error {
 	return nil
 }
 
-func generateImageThumbnail(filePath string, size int) {
-	_ = generateImageThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
-}
-
 func generateImageThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) error {
 	outputPath := thumbnailPathForSize(filePath, size)
 	ctx, cancel := context.WithTimeout(context.Background(), thumbnailFFmpegTimeout)
@@ -421,10 +404,6 @@ func generateImageThumbnailWithRunner(filePath string, size int, runner func(con
 		return err
 	}
 	return nil
-}
-
-func generateVideoThumbnail(filePath string, size int) {
-	_ = generateVideoThumbnailWithRunner(filePath, size, realRunFFmpegThumbnail)
 }
 
 func generateVideoThumbnailWithRunner(filePath string, size int, runner func(context.Context, []string) error) error {

@@ -76,7 +76,7 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     await expect(page.getByRole('heading', { name: '存储与 Space' })).toBeVisible();
     await expect(page.getByText('默认 Space')).toBeVisible();
     await expect(page.getByText('space-default')).toBeVisible();
-    await expect(page.getByText(/\.tmp[\\/]e2e\.db/).first()).toBeVisible();
+    await expect(page.getByText(/\.tmp[\\/]e2e-run[\\/]e2e\.db/).first()).toBeVisible();
 
     await page.getByRole('link', { name: '管理媒体库目录' }).click();
     await expect(page).toHaveURL(/\/library-manager/);

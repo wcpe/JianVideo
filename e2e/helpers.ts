@@ -1,7 +1,7 @@
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 
 // E2E 公共前置：账户初始化与登录。
-// FR-109 起取消 admin/admin 默认账户，全新 .tmp/e2e.db 首访为「初始化引导」（/setup）而非登录。
+// FR-109 起取消 admin/admin 默认账户，全新 E2E 专用数据库首访为「初始化引导」（/setup）而非登录。
 // 故所有需要登录的用例必须先经初始化引导建号，再走登录流程。
 
 export const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8080';

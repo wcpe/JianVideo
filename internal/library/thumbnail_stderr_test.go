@@ -21,8 +21,8 @@ func TestGenerateThumbnail_LogsFFmpegStderr(t *testing.T) {
 		name string
 		run  func(string)
 	}{
-		{"图片缩略图", func(p string) { generateImageThumbnailWithRunner(p, thumbnailWidth, runner) }},
-		{"视频缩略图", func(p string) { generateVideoThumbnailWithRunner(p, thumbnailWidth, runner) }},
+		{"图片缩略图", func(p string) { _ = generateImageThumbnailWithRunner(p, thumbnailWidth, runner) }},
+		{"视频缩略图", func(p string) { _ = generateVideoThumbnailWithRunner(p, thumbnailWidth, runner) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

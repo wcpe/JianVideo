@@ -319,7 +319,7 @@ func (s *Service) validateSpace(ctx context.Context, spaceID string) error {
 		return err
 	}
 	if count != 1 {
-		return fmt.Errorf("Space 不存在: %s", spaceID)
+		return fmt.Errorf("指定 Space 不存在: %s", spaceID)
 	}
 	return nil
 }

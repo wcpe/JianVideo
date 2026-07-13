@@ -251,9 +251,10 @@ func toLegacyTranscodeTask(task models.Task) (legacyTranscodeTaskResponse, bool)
 		return legacyTranscodeTaskResponse{}, false
 	}
 	status := task.Status
-	if status == models.TaskStatusSucceeded {
+	switch status {
+	case models.TaskStatusSucceeded:
 		status = models.TranscodeTaskStatusCompleted
-	} else if status == models.TaskStatusFailed {
+	case models.TaskStatusFailed:
 		status = models.TranscodeTaskStatusError
 	}
 	spaceID := models.DefaultSpaceID

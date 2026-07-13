@@ -23,8 +23,9 @@ test.describe("存储与缓存管理端到端（FR2-048）", () => {
   });
 
   test("真实服务支持异步盘点、dry-run 与清理终态闭环", async ({ page }) => {
-    const cachePath = join(".tmp", "metadata_temp", "fr2-048-e2e.cache");
-    mkdirSync(join(".tmp", "metadata_temp"), { recursive: true });
+    const metadataTempDir = join(".tmp", "e2e-run", "metadata_temp");
+    const cachePath = join(metadataTempDir, "fr2-048-e2e.cache");
+    mkdirSync(metadataTempDir, { recursive: true });
     writeFileSync(cachePath, "cache-temp");
 
     await login(page);

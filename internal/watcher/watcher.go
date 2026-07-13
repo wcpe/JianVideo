@@ -310,11 +310,6 @@ func (w *Watcher) findLibraryID(filePath string) int64 {
 	return id
 }
 
-func (w *Watcher) findSpaceID(filePath string) string {
-	_, spaceID := w.findLibrary(filePath)
-	return spaceID
-}
-
 func (w *Watcher) findLibrary(filePath string) (int64, string) {
 	bindings := w.findBindings(filePath)
 	if len(bindings) == 0 {

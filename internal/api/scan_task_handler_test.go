@@ -1,14 +1,12 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/player"
-	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
 // setupScanQueueRouter 构造注入了扫描任务队列的测试路由。
@@ -91,8 +88,8 @@ func TestScanLibrary_Enqueues(t *testing.T) {
 	}
 }
 
-// TestListScanTasks 列任务端点返回任务列表与当前进行中任务。
-func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
+// TestScanLibrary_DoesNotCreateCostlyTranscodesAfterSuccess 验证扫描仅负责入库，不自动生成 HLS 转码产物。
+func TestScanLibrary_DoesNotCreateCostlyTranscodesAfterSuccess(t *testing.T) {
 	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
@@ -122,29 +119,11 @@ func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建媒体库失败: %v", err)
 	}
-	for i := 0; i < 100; i++ {
-		path := filepath.Join(mediaDir, "old-"+strconv.Itoa(i)+".mp4")
-		if err := os.WriteFile(path, []byte("video"), 0o644); err != nil {
-			t.Fatalf("写入旧视频失败: %v", err)
-		}
-		mf := models.MediaFile{
-			SpaceID:   "space-a",
-			LibraryID: lp.ID,
-			FilePath:  filepath.ToSlash(path),
-			FileName:  filepath.Base(path),
-			Format:    "mp4",
-			FileState: models.MediaFileStateAvailable,
-			AddedAt:   time.Now().Add(-time.Duration(i+1) * time.Second),
-		}
-		if err := gdb.Create(&mf).Error; err != nil {
-			t.Fatalf("创建旧视频记录失败: %v", err)
-		}
-	}
-
 	newPath := filepath.Join(mediaDir, "new-after-scan.mp4")
 	if err := os.WriteFile(newPath, []byte("new video"), 0o644); err != nil {
 		t.Fatalf("写入新视频失败: %v", err)
 	}
+
 	scanStarted := make(chan struct{})
 	releaseScan := make(chan struct{})
 	q := library.NewTaskQueue(gdb, func(_ int64, _, _, _ string) (int, error) {
@@ -164,15 +143,6 @@ func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
 
 	hlsDir := t.TempDir()
 	h := NewHandler(svc).WithHLSPreSlice(hlsDir, player.NewHLSManager(hlsDir)).WithScanQueue(q)
-	h.preSliceAvailable = func() bool { return true }
-	var mu sync.Mutex
-	generated := make(map[int64]struct{})
-	h.preSliceMedia = func(_ context.Context, mf models.MediaFile) (*transcoder.PreSliceResult, error) {
-		mu.Lock()
-		generated[mf.ID] = struct{}{}
-		mu.Unlock()
-		return nil, nil
-	}
 	q.Start()
 	defer q.Stop()
 
@@ -190,18 +160,24 @@ func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("扫描任务未开始")
 	}
-	mu.Lock()
-	beforeSuccess := len(generated)
-	mu.Unlock()
-	if beforeSuccess != 0 {
-		t.Fatalf("扫描成功前不得启动预切片，实际已处理 %d 个", beforeSuccess)
+	entries, err := os.ReadDir(hlsDir)
+	if err != nil {
+		t.Fatalf("读取 HLS 目录失败: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("扫描完成前不得自动创建高成本转码，实际生成 %d 项", len(entries))
 	}
 	close(releaseScan)
 
 	deadline := time.Now().Add(5 * time.Second)
 	var newMedia models.MediaFile
+	completed := false
 	for time.Now().Before(deadline) {
-		if err := gdb.Where("space_id = ? AND file_path = ?", "space-a", filepath.ToSlash(newPath)).First(&newMedia).Error; err == nil {
+		mediaErr := gdb.Where("space_id = ? AND file_path = ?", "space-a", filepath.ToSlash(newPath)).First(&newMedia).Error
+		var completedCount int64
+		gdb.Model(&models.ScanTask{}).Where("status = ?", models.ScanTaskStatusCompleted).Count(&completedCount)
+		if mediaErr == nil && completedCount == 1 {
+			completed = true
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -209,11 +185,15 @@ func TestScanLibrary_PreSlicesAfterSuccessAcrossAllPages(t *testing.T) {
 	if newMedia.ID == 0 {
 		t.Fatal("扫描后新视频未入库")
 	}
-	mu.Lock()
-	count := len(generated)
-	mu.Unlock()
-	if count != 0 {
-		t.Fatalf("扫描完成后不得自动创建高成本转码，实际处理 %d 个", count)
+	if !completed {
+		t.Fatal("扫描任务未完成")
+	}
+	entries, err = os.ReadDir(hlsDir)
+	if err != nil {
+		t.Fatalf("读取 HLS 目录失败: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("扫描完成后不得自动创建高成本转码，实际生成 %d 项", len(entries))
 	}
 }
 

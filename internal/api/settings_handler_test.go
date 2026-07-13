@@ -284,7 +284,7 @@ func TestSettings_InferenceChangeEnqueuesIncrementalRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("获取测试数据库连接失败: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	if err := gdb.AutoMigrate(&models.Setting{}, &models.Task{}, &models.LibraryPath{}, &models.MediaFile{}, &models.MediaInference{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestSettings_InferenceRefreshRunsWorkerForEveryMediaSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("获取底层数据库失败: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	settingsSvc := settings.NewService(gdb)
 	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "false"); err != nil {
 		t.Fatalf("预置关闭设置失败: %v", err)
@@ -496,7 +496,7 @@ func TestSettings_InferenceLibraryScopeChangeOnlyFillsNewlyEnabledLibrary(t *tes
 	if err != nil {
 		t.Fatalf("获取底层数据库失败: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	settingsSvc := settings.NewService(gdb)
 	libSvc := library.NewService(gdb).WithInferenceConfigProvider(func(string, int64) library.InferenceConfig {
 		enabled, _ := settingsSvc.Get(settings.KeyMediaInferenceEnabled)
@@ -585,7 +585,7 @@ func TestSettings_InferenceRapidDisableEnableCreatesNewGenerationTask(t *testing
 	if err != nil {
 		t.Fatalf("获取底层数据库失败: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	settingsSvc := settings.NewService(gdb)
 	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
 		t.Fatalf("预置设置失败: %v", err)
@@ -652,7 +652,7 @@ func TestSettings_InferenceEnqueueFailureRollsBackSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("获取底层数据库失败: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	settingsSvc := settings.NewService(gdb)
 	if err := settingsSvc.Set(settings.KeyMediaInferenceEnabled, "0"); err != nil {
 		t.Fatalf("预置设置失败: %v", err)

@@ -28,8 +28,10 @@ const (
 	// TaskTypeCoverRefresh 表示显式重新抽帧并替换旧候选的任务。
 	TaskTypeCoverRefresh = "cover.refresh"
 
+	// CoverSourceVideoFrame 表示从视频帧生成封面。
 	CoverSourceVideoFrame = "video_frame"
-	CoverSourceImage      = "image"
+	// CoverSourceImage 表示从图片生成封面。
+	CoverSourceImage = "image"
 
 	coverSize        = 640
 	coverMaxAttempts = 3

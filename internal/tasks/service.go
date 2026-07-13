@@ -663,10 +663,6 @@ func (s *Service) isCanceled(ctx context.Context, id int64) (bool, error) {
 	return task.Status == models.TaskStatusCanceled, nil
 }
 
-func (s *Service) findUnfinishedByKey(ctx context.Context, key string) (models.Task, bool, error) {
-	return findUnfinishedByKeyDB(ctx, s.db, key)
-}
-
 func findUnfinishedByKeyDB(ctx context.Context, db *gorm.DB, key string) (models.Task, bool, error) {
 	var task models.Task
 	err := db.WithContext(ctx).

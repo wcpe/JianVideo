@@ -162,7 +162,7 @@ func (s *Service) Backfill(ctx context.Context, spaceID string, sizes []int) (Re
 	if exists, err := s.library.SpaceExists(spaceID); err != nil {
 		return Result{}, err
 	} else if !exists {
-		return Result{}, fmt.Errorf("Space 不存在: %s", spaceID)
+		return Result{}, fmt.Errorf("指定 Space 不存在: %s", spaceID)
 	}
 	payload := backfillPayload{SpaceID: normalizeSpace(spaceID), Sizes: normalized}
 	task, err := s.enqueue(ctx, TaskTypeBackfill, payload.SpaceID, payload, backfillPriority, "thumbnail", "backfill", backfillKey(payload.SpaceID, normalized))
@@ -176,7 +176,7 @@ func (s *Service) Backfill(ctx context.Context, spaceID string, sizes []int) (Re
 func PathFor(dataDir, spaceID string, mediaID int64, size int) (string, error) {
 	spaceID = strings.TrimSpace(spaceID)
 	if !safeSegment(spaceID) {
-		return "", errors.New("Space ID 不能用于缩略图路径")
+		return "", errors.New("指定 Space ID 不能用于缩略图路径")
 	}
 	if mediaID <= 0 {
 		return "", errors.New("媒体 ID 必须大于 0")

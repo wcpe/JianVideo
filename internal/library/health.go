@@ -47,10 +47,12 @@ type HealthService struct {
 	states map[string]healthSpaceState
 }
 
+// NewHealthService 使用指定健康检查器创建健康巡检服务。
 func NewHealthService(db *gorm.DB, checks mediaHealthChecks) *HealthService {
 	return &HealthService{db: db, checks: checks, states: make(map[string]healthSpaceState)}
 }
 
+// NewDefaultHealthService 使用默认健康检查器创建健康巡检服务。
 func NewDefaultHealthService(db *gorm.DB) *HealthService {
 	return NewHealthService(db, defaultHealthChecks())
 }

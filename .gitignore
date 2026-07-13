@@ -17,6 +17,7 @@ node_modules/
 dist/
 build/
 .cache/
+.turbo/
 *.tsbuildinfo
 
 # 日志
@@ -35,6 +36,7 @@ Thumbs.db
 
 # 备份文件（不入库）
 *.bak
+/backups/
 
 # 过程性文档与临时文件（不入库）
 /.tmp/

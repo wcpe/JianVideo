@@ -83,7 +83,7 @@ func BuildABRMasterM3U8(ladder []QualityDefinition) string {
 	builder.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
 	for _, variant := range ladder {
 		bandwidth := parseBitrate(variant.VideoRate) + parseBitrate(variant.AudioRate)
-		builder.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n", bandwidth, variant.Width, variant.Height))
+		fmt.Fprintf(&builder, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n", bandwidth, variant.Width, variant.Height)
 		builder.WriteString(variant.Name + "/index.m3u8\n")
 	}
 	return builder.String()

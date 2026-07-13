@@ -10,8 +10,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
-// MediaFilter 媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
-// Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
+// InferenceStatusInferred 等常量表示媒体推断状态筛选值。
 const (
 	InferenceStatusInferred = "inferred"
 	InferenceStatusAuto     = "auto"
@@ -19,6 +18,8 @@ const (
 	InferenceStatusMissing  = "missing"
 )
 
+// MediaFilter 表示媒体列表筛选条件（FR-41 起，FR-35 扩展结构化筛选）。
+// Favorite 为 nil 表示不按收藏过滤；TagID>0 表示仅返回打了该标签的媒体。
 type MediaFilter struct {
 	SpaceID         string
 	LibraryID       int64

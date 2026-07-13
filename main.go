@@ -200,6 +200,10 @@ func startTaskWorkers(ctx context.Context, workers *tasksvc.WorkerRegistry) {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	migrationDryRun := flag.Bool("migration-dry-run", false, "只读输出数据库迁移计划后退出")
 	flag.Parse()
 
@@ -245,9 +249,9 @@ func main() {
 			log.Fatalf("输出数据库迁移 dry-run JSON 失败: %v", err)
 		}
 		if len(plan.Blockers) > 0 {
-			os.Exit(1)
+			return 1
 		}
-		return
+		return 0
 	}
 	migrationResult, err := runner.Run(context.Background())
 	if err != nil {
@@ -360,11 +364,13 @@ func main() {
 	libSvc.WithScanChangeHook(libSvc.MetadataScanChangeHook(taskSvc, taskWorkers.Wake))
 	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
-		log.Fatalf("[ERROR] 注册缓存任务 worker 失败: %v", err)
+		log.Printf("[ERROR] 注册缓存任务处理器失败: %v", err)
+		return 1
 	}
 	thumbnailSvc := thumbsvc.NewService(libSvc, taskSvc, cacheSvc, dataDir).WithAudit(auditSvc)
 	if err := thumbnailSvc.RegisterWorkers(taskWorkers, thumbnailConcurrencyFromSettings(settingsSvc)); err != nil {
-		log.Fatalf("[ERROR] 注册缩略图任务 worker 失败: %v", err)
+		log.Printf("[ERROR] 注册缩略图任务处理器失败: %v", err)
+		return 1
 	}
 	toolsManager := toolsvc.NewManager(toolsvc.ManagerOptions{
 		Installer: toolsvc.NewInstaller(filepath.Join(filepath.Dir(cfg.DBPath), "tools"), nil),
@@ -450,7 +456,8 @@ func main() {
 		return err
 	})
 	if err := hlsPreview.RegisterWorker(); err != nil {
-		log.Fatalf("[ERROR] 注册 HLS preview worker 失败: %v", err)
+		log.Printf("[ERROR] 注册 HLS 预览任务处理器失败: %v", err)
+		return 1
 	}
 
 	abrService := transcoder.NewABRService(taskSvc, taskWorkers, hlsDir, func(ctx context.Context, taskID int64, payload transcoder.ABRPayload) error {
@@ -486,7 +493,8 @@ func main() {
 		return registerABRAssets(ctx, cacheSvc, mf, outputDir, payload.Ladder)
 	})
 	if err := abrService.RegisterWorker(transcodeConcurrencyFromSettings(settingsSvc)); err != nil {
-		log.Fatalf("[ERROR] 注册 ABR worker 失败: %v", err)
+		log.Printf("[ERROR] 注册 ABR 任务处理器失败: %v", err)
+		return 1
 	}
 
 	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc)
@@ -522,7 +530,7 @@ func main() {
 	ln, err := listenWithRetry(addr, 10*time.Second)
 	if err != nil {
 		log.Printf("[ERROR] 监听端口失败: %v", err)
-		return
+		return 0
 	}
 	server := &http.Server{
 		Handler:           r,
@@ -531,8 +539,9 @@ func main() {
 	}
 	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 		log.Printf("[ERROR] 服务启动失败: %v", err)
-		return
+		return 0
 	}
+	return 0
 }
 
 // listenWithRetry 在 addr 上监听 TCP；遇端口被占用（自更新重启时旧实例尚未退出）时

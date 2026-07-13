@@ -70,7 +70,6 @@ func TestDefaultRegistryReturnsIndependentCopies(t *testing.T) {
 	}
 	originalID := first[0].ID
 	first[0].ID = "已修改"
-	first = append(first, Source{ID: "外部追加"})
 
 	second := DefaultRegistry()
 	if len(second) != 3 || second[0].ID != originalID {

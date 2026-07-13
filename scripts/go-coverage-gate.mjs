@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+import { minimumForPackage } from "./go-coverage-policy.mjs";
+
 const defaultMinimum = Number(process.env.GO_COVERAGE_MIN ?? "60");
-const packageMinimums = new Map([
-  ["github.com/wcpe/JianVideo/internal/smb", 25],
-]);
 
 const goEnv = { ...process.env, GIN_MODE: "release" };
 const listed = spawnSync("go", ["list", "./..."], {
@@ -49,7 +48,7 @@ let checked = 0;
 for (const match of result.stdout.matchAll(coverageLine)) {
   const pkg = match[1];
   const coverage = Number(match[2]);
-  const minimum = packageMinimums.get(pkg) ?? defaultMinimum;
+  const minimum = minimumForPackage(pkg, defaultMinimum);
   checked += 1;
   if (coverage < minimum) {
     failures.push({ pkg, coverage, minimum });

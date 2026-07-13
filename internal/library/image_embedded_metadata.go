@@ -3,7 +3,6 @@ package library
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -320,8 +319,4 @@ func mergeStringMap(target, source map[string]string) {
 			target[key] = value
 		}
 	}
-}
-
-func validMetadataJSON(raw string) bool {
-	return json.Valid([]byte(raw))
 }

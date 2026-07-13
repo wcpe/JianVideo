@@ -124,7 +124,7 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
   });
 
   test.afterAll(async () => {
-    // 清理：撤销分享、删相册、删库、删临时样片（隔离库 .tmp/e2e.db，清理失败仅告警不致命）
+    // 清理：撤销分享、删相册、删库、删临时样片（E2E 专用数据库，清理失败仅告警不致命）
     try {
       const api = await pwRequest.newContext({ baseURL: BASE_URL });
       await api.post('/api/auth/login', { data: { username: 'admin', password: 'admin' } });

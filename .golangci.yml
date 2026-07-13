@@ -46,6 +46,16 @@ linters:
         linters:
           - gosec
         text: "G304:"
+      # 内嵌元数据解析只执行配置解析后的 ffprobe，输入路径来自已入库媒体记录
+      - path: internal/library/embedded_metadata_parser\.go
+        linters:
+          - gosec
+        text: "G204:"
+      # 图片内嵌元数据只读取已入库媒体文件，调用入口已绑定媒体记录
+      - path: internal/library/image_embedded_metadata\.go
+        linters:
+          - gosec
+        text: "G304:"
       - path: internal/transcoder/(codec|encoder_probe)\.go
         linters:
           - gosec
@@ -58,6 +68,16 @@ linters:
         linters:
           - gosec
         text: "G304:"
+      # 能力服务只读取配置解析后的 FFmpeg 可执行文件，用于本地身份摘要
+      - path: internal/transcoder/capability_service\.go
+        linters:
+          - gosec
+        text: "G304:"
+      # ABR 与 HLS 清单只写入经过 profile 路径校验的应用私有输出目录
+      - path: internal/transcoder/(abr_pipeline|hls_pre_slice)\.go
+        linters:
+          - gosec
+        text: "G306:"
       # HLS 文件只在应用私有 HLS 根目录下按 mediaID/档位读写，由路由层做路径清理
       - path: internal/player/(hls|hls_manager)\.go
         linters:

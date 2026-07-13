@@ -2,7 +2,6 @@ package api
 
 import (
 	"archive/zip"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,16 +46,14 @@ type SubtitleTrack struct {
 
 // Handler API 请求处理器。
 type Handler struct {
-	library           *library.Service
-	settings          *settings.Service  // 运行期设置读写（FR-24）
-	scanQueue         *library.TaskQueue // 扫描任务队列（FR-29），未注入时扫描回退直接异步执行
-	hlsDir            string             // HLS 切片输出根目录
-	hlsMgr            *player.HLSManager // 用于写入 master.m3u8
-	preSliceAvailable func() bool
-	preSliceMedia     func(context.Context, models.MediaFile) (*transcoder.PreSliceResult, error)
-	version           string          // 应用版本号，由 main 经 ldflags 注入
-	share             *share.Service  // 分享链接读写（FR-43），未注入时分享端点不可用
-	updateSvc         *update.Service // 二进制自更新服务（FR-46），无外部依赖恒可用
+	library   *library.Service
+	settings  *settings.Service  // 运行期设置读写（FR-24）
+	scanQueue *library.TaskQueue // 扫描任务队列（FR-29），未注入时扫描回退直接异步执行
+	hlsDir    string             // HLS 切片输出根目录
+	hlsMgr    *player.HLSManager // 用于写入 master.m3u8
+	version   string             // 应用版本号，由 main 经 ldflags 注入
+	share     *share.Service     // 分享链接读写（FR-43），未注入时分享端点不可用
+	updateSvc *update.Service    // 二进制自更新服务（FR-46），无外部依赖恒可用
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，未注入时回退冷态默认
 	capability *transcoder.CapabilityService
@@ -104,15 +101,10 @@ type Handler struct {
 
 // NewHandler 创建处理器。
 func NewHandler(lib *library.Service) *Handler {
-	h := &Handler{
-		library:           lib,
-		updateSvc:         update.NewService(),
-		preSliceAvailable: transcoder.IsFFmpegAvailable,
+	return &Handler{
+		library:   lib,
+		updateSvc: update.NewService(),
 	}
-	h.preSliceMedia = func(ctx context.Context, mf models.MediaFile) (*transcoder.PreSliceResult, error) {
-		return transcoder.PreSliceWithPolicy(ctx, mf.ID, mf.FilePath, mf.Width, mf.Height, h.hardwarePolicy(), h.hlsMgr, h.hlsDir)
-	}
-	return h
 }
 
 // WithVersion 注入应用版本号，供系统诊断接口展示。
@@ -270,8 +262,8 @@ func (h *Handler) versionOrDefault() string {
 	return h.version
 }
 
-// WithHLSPreSlice 注入 HLS 预切片所需的目录与 HLSManager。
-// 任一参数为空则禁用预切片（用于测试或无 ffmpeg 环境）。
+// WithHLSPreSlice 注入按需 HLS 生成所需的目录与 HLSManager。
+// 任一参数为空则禁用按需 HLS 生成（用于测试或无 ffmpeg 环境）。
 func (h *Handler) WithHLSPreSlice(hlsDir string, hlsMgr *player.HLSManager) *Handler {
 	h.hlsDir = hlsDir
 	h.hlsMgr = hlsMgr
@@ -993,65 +985,6 @@ func (h *Handler) ScanProgressSSE(c *gin.Context) {
 		case <-c.Request.Context().Done():
 			return
 		}
-	}
-}
-
-func (h *Handler) preSliceAfterScanSuccess(task models.ScanTask) {
-	if task.Status != models.ScanTaskStatusCompleted || h.hlsDir == "" || h.hlsMgr == nil || h.preSliceAvailable == nil || !h.preSliceAvailable() {
-		return
-	}
-	h.preSliceAllVideos(context.Background(), task.SpaceID)
-}
-
-// preSliceAllVideos 按 Space 游标分页处理全部视频，避免一次性加载全库。
-func (h *Handler) preSliceAllVideos(ctx context.Context, spaceID string) {
-	h.refreshHWAccelSnapshot(ctx)
-	cursor := ""
-	for {
-		page, err := h.library.ListMediaFilesPage(
-			library.MediaFilter{SpaceID: spaceID, MediaType: library.MediaTypeVideo},
-			library.MediaPageRequest{Page: 1, PageSize: 100, Cursor: cursor},
-		)
-		if err != nil {
-			log.Printf("[WARN] 预切片：获取媒体列表失败: spaceID=%s, err=%v", spaceID, err)
-			return
-		}
-		for _, mf := range page.Items {
-			h.preSliceMediaFile(ctx, mf)
-		}
-		if page.NextCursor == "" {
-			return
-		}
-		cursor = page.NextCursor
-	}
-}
-
-func (h *Handler) preSliceMediaFile(ctx context.Context, mf models.MediaFile) {
-	if strings.HasPrefix(mf.FilePath, "smb://") {
-		return
-	}
-	if _, err := os.Stat(mf.FilePath); err != nil {
-		return
-	}
-	if h.preSliceMedia == nil {
-		return
-	}
-	result, err := h.preSliceMedia(ctx, mf)
-	if err != nil {
-		log.Printf("[WARN] 预切片失败: mediaID=%d, err=%v", mf.ID, err)
-		return
-	}
-	if h.cache == nil || result == nil {
-		return
-	}
-	if _, err := h.cache.RegisterDirectory(ctx, storage.RegisterInput{
-		SpaceID:   mf.SpaceID,
-		LibraryID: mf.LibraryID,
-		MediaID:   mf.ID,
-		Kind:      storage.CacheKindHLS,
-		Path:      result.OutputDir,
-	}); err != nil {
-		log.Printf("[WARN] HLS 缓存登记失败: mediaID=%d, err=%v", mf.ID, err)
 	}
 }
 
