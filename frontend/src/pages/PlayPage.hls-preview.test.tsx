@@ -79,4 +79,54 @@ describe('PlayPage ABR fallback', () => {
     expect(requestedProfile).toBe('abr-h264');
     expect(enqueueCount).toBe(0);
   });
+
+  it('ABR 不可用时继续回退到已生成的单档 HLS', async () => {
+    const requestedProfiles: string[] = [];
+    server.use(
+      http.get('*/api/library/media/1', () =>
+        HttpResponse.json({
+          id: 1,
+          library_id: 1,
+          file_path: 'D:/video/source.mp4',
+          file_name: 'source.mp4',
+          file_size: 100,
+          format: 'mp4',
+          video_codec: 'h264',
+          audio_codec: 'aac',
+          duration: 1,
+          width: 640,
+          height: 360,
+          bitrate: 1000,
+          subtitle_tracks: '',
+          added_at: '',
+          modified_at: '',
+        }),
+      ),
+      http.get('*/api/play/1/hls-status', ({ request }) => {
+        const profileID = new URL(request.url).searchParams.get('profile_id') || '';
+        requestedProfiles.push(profileID);
+        return HttpResponse.json({
+          available: profileID === 'h264',
+          profile_id: profileID,
+          url:
+            profileID === 'h264'
+              ? '/api/play/hls/1/master.m3u8'
+              : '/api/play/hls/1/profiles/abr-h264/master.m3u8',
+          task: null,
+        });
+      }),
+    );
+
+    renderPage();
+    await screen.findByTestId('video-player');
+    playbackError?.();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('video-player')).toHaveAttribute(
+        'data-url',
+        expect.stringContaining('/api/play/hls/1/master.m3u8'),
+      ),
+    );
+    expect(requestedProfiles).toEqual(['abr-h264', 'h264']);
+  });
 });

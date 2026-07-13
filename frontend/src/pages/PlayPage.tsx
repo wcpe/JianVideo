@@ -208,14 +208,16 @@ export default function PlayPage() {
 
   const handlePlaybackError = useCallback(() => {
     if (!media || playerIsABR) return;
-    void playApi
-      .getHLSStatus(media.id, 'abr-h264')
-      .then((status) => {
-        if (!status.available) return;
+    void (async () => {
+      for (const profileID of ['abr-h264', 'h264']) {
+        const status = await playApi.getHLSStatus(media.id, profileID);
+        if (!status.available) continue;
+        setDescriptor(null);
         setPlayerUrl(status.url);
         setPlayerIsABR(true);
-      })
-      .catch(() => {});
+        return;
+      }
+    })().catch(() => {});
   }, [media, playerIsABR]);
 
   const enqueueABR = async () => {
