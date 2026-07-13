@@ -1,6 +1,6 @@
 # 功能规格：视频 HLS 预览与转码任务队列
 
-> 状态：已审核接受　·　关联 PRD：FR2-008　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已验收　·　关联 PRD：FR2-008　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-008-complete`
 
 ## 1. 背景与目标
 
@@ -48,15 +48,15 @@ API：
 
 ## 4. 任务拆分
 
-- [ ] 定义 HLS preview profile 与任务 payload。
-- [ ] 将旧预生成队列适配到统一任务中心。
-- [ ] 生成 HLS 时登记缓存资产。
-- [ ] 播放协商接入 HLS 状态查询。
-- [ ] 保留旧转码任务 API 兼容层。
-- [ ] 补单元测试：ffmpeg 参数、任务 payload、错误映射。
-- [ ] 补集成测试：入队、生成、失败重试、取消、缓存登记。
-- [ ] 补 E2E：转码页入队、任务进度、播放页 HLS fallback。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义 HLS preview profile 与任务 payload。
+- [x] 将旧预生成队列适配到统一任务中心。
+- [x] 生成 HLS 时登记缓存资产。
+- [x] 播放协商接入 HLS 状态查询。
+- [x] 保留旧转码任务 API 兼容层。
+- [x] 补单元测试：ffmpeg 参数、任务 payload、错误映射。
+- [x] 补集成测试：入队、生成、失败重试、取消、缓存登记。
+- [x] 补 E2E：转码页入队、任务进度、播放页 HLS fallback。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

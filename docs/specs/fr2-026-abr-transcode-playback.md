@@ -1,6 +1,6 @@
 # 功能规格：多码率自动转码与自适应播放
 
-> 状态：已审核接受　·　关联 PRD：FR2-026　·　阶段：P2 `0.23.x`　·　分支：待定
+> 状态：已验收　·　关联 PRD：FR2-026　·　阶段：P2 `0.23.x`　·　分支：`feature/p2-fr2-026-complete`
 
 ## 1. 背景与目标
 
@@ -55,7 +55,7 @@
 - [x] 补单元测试：ladder 过滤、ffmpeg 参数、master playlist。
 - [x] 补集成测试：多档生成、失败重试、取消、缓存清理后重建。
 - [x] 补 E2E：HLS ABR 播放与弱网降档。
-- [x] 文档同步：ARCHITECTURE、API、CHANGELOG；PRD 验收状态留待最终全量门禁后更新。
+- [x] 文档同步：ARCHITECTURE、API、CHANGELOG，并在最终全量门禁通过后同步 PRD 验收状态。
 
 ## 5. 验收标准
 
