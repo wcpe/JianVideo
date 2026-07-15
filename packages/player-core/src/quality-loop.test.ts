@@ -12,7 +12,7 @@ import {
   type QualitySelection,
   type SeekRequest,
 } from './index';
-import { EMPTY_CAPABILITIES, FakePlaybackBackend, createSnapshot } from './test-utils';
+import { Deferred, EMPTY_CAPABILITIES, FakePlaybackBackend, createSnapshot } from './test-utils';
 
 const SOURCE_A: PlaybackSource = { id: 'source-a', mode: 'adaptive' };
 const SOURCE_B: PlaybackSource = { id: 'source-b', mode: 'adaptive' };
@@ -83,16 +83,17 @@ class FakeQualityFacet implements QualityFacet {
 
 class FakeLoadControlFacet implements LoadControlFacet {
   readonly calls: Array<{ readonly command: PlaybackCommandContext; readonly type: 'start' | 'stop' }> = [];
+  startHandler: (() => Promise<void>) | undefined;
   private loading = true;
 
   getLoadingState(): 'loading' | 'stopped' {
     return this.loading ? 'loading' : 'stopped';
   }
 
-  startLoading(command: PlaybackCommandContext): Promise<void> {
+  async startLoading(command: PlaybackCommandContext): Promise<void> {
     this.loading = true;
     this.calls.push({ command, type: 'start' });
-    return Promise.resolve();
+    await this.startHandler?.();
   }
 
   stopLoading(command: PlaybackCommandContext): Promise<void> {
@@ -282,6 +283,24 @@ describe('PlaybackCore 清晰度与省流量', () => {
     expect(core.getSnapshot().currentTime).toBe(12);
   });
 
+  it('省流量 play 等待启动加载时，后发 pause 取代旧播放意图', async () => {
+    const { backend, core, loadControl } = await createLoadedCore();
+    await core.setDataSaver(true);
+    const startGate = new Deferred<void>();
+    loadControl.startHandler = () => startGate.promise;
+    backend.calls.length = 0;
+
+    const play = core.play();
+    await Promise.resolve();
+    const pause = core.pause();
+    await expect(pause).resolves.toMatchObject({ status: 'completed' });
+    startGate.resolve();
+
+    await expect(play).resolves.toMatchObject({ status: 'superseded' });
+    expect(backend.calls.some((call) => call.method === 'play')).toBe(false);
+    expect(core.getSnapshot().state).toBe('paused');
+  });
+
   it('清单刷新时按语义重匹配手动档，省流量下无合规档位立即阻断', async () => {
     const { core, quality, loadControl } = await createLoadedCore();
     await core.selectQuality(manualQuality(QUALITY_480_LOW));
@@ -310,6 +329,7 @@ describe('PlaybackCore 清晰度与省流量', () => {
 describe('PlaybackCore 倍速', () => {
   it('只接受固定七档并仅调用 QualityFacet.setPlaybackRate', async () => {
     const { core, quality } = await createLoadedCore();
+    quality.calls.length = 0;
 
     for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const) {
       await expect(core.setPlaybackRate(rate)).resolves.toMatchObject({ status: 'completed' });
@@ -338,6 +358,19 @@ describe('PlaybackCore 倍速', () => {
     await core.setPlaybackRate(1.75);
     await core.load(SOURCE_B);
     expect(core.getQualityState().playbackRate).toBe(1);
+  });
+
+  it('同 sourceId 重新加载后恢复原倍速而不是保留后端重置的 1x', async () => {
+    const { backend, core, quality } = await createLoadedCore();
+    await core.setPlaybackRate(1.5);
+    backend.loadHandler = async (_source, command) => {
+      quality.replaceState({ playbackRate: 1 }, command);
+    };
+
+    await core.load(SOURCE_A);
+
+    expect(quality.calls.filter((call) => call.type === 'rate').at(-1)).toMatchObject({ rate: 1.5 });
+    expect(core.getQualityState().playbackRate).toBe(1.5);
   });
 });
 
@@ -410,6 +443,37 @@ describe('PlaybackCore A-B 循环', () => {
     expect(core.getSnapshot().state).toBe('playing');
   });
 
+  it('B 等于 duration 时原生 ended 不终止循环且回跳后保持播放', async () => {
+    const { backend, core } = await createLoadedCore({ state: 'playing' });
+    const backendRequestId = core.getSnapshot().requestId;
+    backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 5, duration: 10, state: 'playing' });
+    await core.setAbLoopA();
+    backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 10, state: 'playing' });
+    await core.setAbLoopB();
+
+    const ended = { ...backend.getSnapshot(), currentTime: 10, requestId: backendRequestId, state: 'ended' as const };
+    backend.setSnapshot(ended);
+    backend.emit({
+      eventId: 110,
+      requestId: backendRequestId,
+      snapshot: ended,
+      sourceEpoch: ended.sourceEpoch,
+      sourceId: ended.sourceId!,
+      type: 'snapshotChanged',
+    });
+    backend.emit({
+      eventId: 111,
+      requestId: backendRequestId,
+      sourceEpoch: ended.sourceEpoch,
+      sourceId: ended.sourceId!,
+      type: 'ended',
+    });
+    await flushTasks();
+
+    expect(backend.seekRequests.at(-1)).toMatchObject({ reason: 'ab_loop', targetTime: 5 });
+    expect(core.getSnapshot()).toMatchObject({ currentTime: 5, state: 'playing' });
+  });
+
   it('用户 seek 到 B 后立即回 A，seek 到 A 前不清除区间', async () => {
     const { backend, core } = await createLoadedCore();
     backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 10, duration: 60 });
@@ -423,6 +487,26 @@ describe('PlaybackCore A-B 循环', () => {
     await core.seek(25, 'user');
     expect(backend.seekRequests.slice(-2).map((request) => request.reason)).toEqual(['user', 'ab_loop']);
     expect(backend.seekRequests.at(-1)?.targetTime).toBe(10);
+  });
+
+  it('媒体解码错误会清除 A-B 区间', async () => {
+    const { backend, core } = await createLoadedCore();
+    const backendRequestId = core.getSnapshot().requestId;
+    backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 10, duration: 60 });
+    await core.setAbLoopA();
+    backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 20 });
+    await core.setAbLoopB();
+
+    backend.emit({
+      error: { category: 'decode', message: '媒体解码失败' },
+      eventId: 120,
+      requestId: backendRequestId,
+      sourceEpoch: core.getSnapshot().sourceEpoch,
+      sourceId: SOURCE_A.id,
+      type: 'error',
+    });
+
+    expect(core.getAbLoopState()).toEqual({ a: null, b: null, enabled: false });
   });
 
   it('清晰度切换保持区间，清除和切换媒体重置区间', async () => {

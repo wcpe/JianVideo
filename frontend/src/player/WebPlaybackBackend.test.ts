@@ -29,6 +29,7 @@ interface FakeHlsInstance {
   levels: Array<{ bitrate: number; height: number; width: number }>;
   loadSource: ReturnType<typeof vi.fn>;
   loadingEnabled: boolean;
+  recoverMediaError: ReturnType<typeof vi.fn>;
   startLoad: ReturnType<typeof vi.fn>;
   stopLoad: ReturnType<typeof vi.fn>;
 }
@@ -65,6 +66,7 @@ vi.mock('@/api/play', () => ({
 
 vi.mock('hls.js', () => {
   class FakeHls {
+    static ErrorTypes = { MEDIA_ERROR: 'mediaError' };
     static Events = { ERROR: 'error', LEVEL_SWITCHED: 'level', MANIFEST_PARSED: 'manifest' };
     static isSupported() {
       return hlsMock.supported;
@@ -84,6 +86,7 @@ vi.mock('hls.js', () => {
     ];
     loadSource = vi.fn();
     loadingEnabled = false;
+    recoverMediaError = vi.fn();
     startLoad = vi.fn(() => {
       this.loadingEnabled = true;
     });
@@ -414,6 +417,36 @@ describe('WebPlaybackBackend ready 时序', () => {
     expect(hls.stopLoad).toHaveBeenCalledOnce();
   });
 
+  it('手动档 fatal level 降级后重新启动加载并恢复媒体', async () => {
+    const video = createVideo();
+    const backend = new WebPlaybackBackend(video);
+    const loading = backend.load(createSource('fallback-hls', 'hls'), createCommand('fallback-hls', 1));
+    const hls = await waitForHlsInstance();
+    hls.handlers.get('manifest')?.();
+    await loading;
+    await backend.quality.selectQuality(
+      { mode: 'manual', quality: { height: 720 } },
+      createCommand('fallback-hls', 1, 2),
+    );
+    hls.startLoad.mockClear();
+
+    hls.handlers.get('error')?.('error', { fatal: true, level: 0, type: 'mediaError' });
+
+    expect(hls.currentLevel).toBe(1);
+    expect(hls.startLoad).toHaveBeenCalledOnce();
+    expect(hls.recoverMediaError).toHaveBeenCalledOnce();
+    expect(backend.getSnapshot().state).not.toBe('error');
+
+    await backend.quality.setAutoQualityCap(480, createCommand('fallback-hls', 1, 3));
+    hls.startLoad.mockClear();
+    hls.stopLoad.mockClear();
+    hls.recoverMediaError.mockClear();
+    hls.handlers.get('error')?.('error', { fatal: true, level: 1, type: 'mediaError' });
+    expect(hls.stopLoad).toHaveBeenCalledOnce();
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    expect(hls.recoverMediaError).not.toHaveBeenCalled();
+  });
+
   it('HLS 不支持、导入失败、fatal 与超时均严格拒绝且不创建 mpegts', async () => {
     hlsMock.supported = false;
     const unsupported = new WebPlaybackBackend(createVideo());
@@ -451,6 +484,36 @@ describe('WebPlaybackBackend ready 时序', () => {
 });
 
 describe('WebPlaybackBackend 音轨源事务', () => {
+  it('省流量切换 HLS 音轨时先恢复 480p cap 再启动分片加载', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+    const loading = backend.load(createSource('source', 'hls', '/master.m3u8'), createCommand('source', 1));
+    const original = await waitForHlsInstance();
+    original.handlers.get('manifest')?.();
+    await loading;
+    await backend.quality.setAutoQualityCap(480, createCommand('source', 1, 2));
+    await backend.pause(createCommand('source', 1, 3));
+
+    const transaction = backend.transactAudioSource(
+      '/audio-b.m3u8',
+      'space-a',
+      createCommand('source', 1, 3),
+      new AbortController().signal,
+    );
+    const candidate = await waitForHlsInstance();
+    let capAtStart: number | null = null;
+    candidate.startLoad.mockImplementation(() => {
+      capAtStart = candidate.autoLevelCapping;
+      candidate.loadingEnabled = true;
+    });
+    completeHls(video, candidate);
+    await transaction;
+
+    expect(capAtStart).toBe(1);
+    expect(candidate.startLoad).toHaveBeenCalledOnce();
+  });
+
   it('成功切换后恢复时间、倍速和播放意图，并传播 Space/Auth 请求头', async () => {
     const video = createVideo();
     stubTimeline(video);

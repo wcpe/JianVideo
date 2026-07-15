@@ -542,18 +542,24 @@ export class WebPlaybackBackend implements PlaybackBackend {
       this.publishCapabilities(token);
       if (readyMode === 'manifest') this.completeReady(token);
       else {
-        hls.startLoad();
+        this.quality.restartLoading();
         completeIfReady();
       }
     });
     hls.on(HlsConstructor.Events.LEVEL_SWITCHED, (_event, data) => {
-      if (this.active) this.quality.handleLevelSwitched(data.level, this.active.command);
+      this.quality.handleLevelSwitched(data.level);
       this.publishAbrLevel(hls, data.level, token);
     });
     hls.on(HlsConstructor.Events.ERROR, (_event, data) => {
       if (!this.isActiveToken(token) || this.hls !== hls) return;
       const level = 'level' in data && typeof data.level === 'number' ? data.level : null;
-      if (level !== null && this.active && this.quality.handleLevelError(level, this.active.command)) return;
+      const recovery = level === null ? false : this.quality.handleLevelError(level);
+      if (recovery === 'blocked') return;
+      if (recovery === 'fallback') {
+        this.quality.restartLoading();
+        if (data.fatal && data.type === HlsConstructor.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        return;
+      }
       if (!data.fatal) return;
       const error = new Error('HLS 播放发生致命错误');
       const transactionPending = this.hlsFailureGuard?.token === token;

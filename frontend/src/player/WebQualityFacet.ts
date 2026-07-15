@@ -71,14 +71,16 @@ export class WebQualityFacet implements QualityFacet, LoadControlFacet {
     this.emit(command);
   }
 
-  handleLevelSwitched(levelIndex: number, command: PlaybackCommandContext): void {
-    if (!this.isCurrentSource(command)) return;
+  handleLevelSwitched(levelIndex: number): void {
+    if (this.command === null || this.hls === null) return;
     this.actualQualityId = qualityAt(this.indexed, levelIndex)?.id ?? null;
-    this.emit(command);
+    this.emit(this.command);
   }
 
-  handleLevelError(levelIndex: number, command: PlaybackCommandContext): boolean {
-    const hls = this.requireHls(command);
+  handleLevelError(levelIndex: number): 'blocked' | 'fallback' | false {
+    if (this.command === null || this.hls === null) return false;
+    const command = this.command;
+    const hls = this.hls;
     const failed = this.indexed.find((entry) => entry.index === levelIndex);
     if (failed === undefined) return false;
     this.unavailable.add(levelIndex);
@@ -96,12 +98,12 @@ export class WebQualityFacet implements QualityFacet, LoadControlFacet {
         hls.stopLoad();
       }
       this.emit(command);
-      return true;
+      return this.maxHeight === null ? 'fallback' : 'blocked';
     }
     this.selection = { mode: 'manual', quality: toTarget(fallback.quality) };
     hls.currentLevel = fallback.index;
     this.emit(command);
-    return true;
+    return 'fallback';
   }
 
   getState(): QualityFacetState {
@@ -161,9 +163,16 @@ export class WebQualityFacet implements QualityFacet, LoadControlFacet {
   }
 
   startLoading(command: PlaybackCommandContext): Promise<void> {
-    const hls = this.requireHls(command);
-    hls.startLoad();
+    this.requireHls(command);
+    this.restartLoading();
     return Promise.resolve();
+  }
+
+  restartLoading(): void {
+    if (this.hls === null) return;
+    this.applySelection(this.hls);
+    this.applyCap(this.hls);
+    this.hls.startLoad();
   }
 
   stopLoading(command: PlaybackCommandContext): Promise<void> {

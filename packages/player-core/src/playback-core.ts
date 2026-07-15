@@ -200,6 +200,7 @@ export class PlaybackCore {
       return this.publishCommandResult(this.result(requestId, 'canceled'), this.identity(requestId));
     }
     const sourceChanged = this.snapshot.sourceId !== null && this.snapshot.sourceId !== source.id;
+    const playbackRate = sourceChanged ? 1 : this.qualityState.playbackRate;
     const command = this.createLoadCommand(source, requestId);
     const startedTerminalRevision = this.terminalRevision;
     this.acceptCommand(requestId);
@@ -209,7 +210,7 @@ export class PlaybackCore {
     const operation = this.runOperation(requestId, () => this.backend.load(source, command));
     this.updateSnapshot(loadingSnapshot(this.snapshot, source, command));
     const result = this.finishLoad(command, startedTerminalRevision, await operation);
-    if (result.status === 'completed') await this.restoreQualityAfterLoad(command, sourceChanged);
+    if (result.status === 'completed') await this.restoreQualityAfterLoad(command, playbackRate);
     return result;
   }
 
@@ -220,8 +221,10 @@ export class PlaybackCore {
       const error = { category: 'unsupported' as const, message: '当前视频无 480p 或更低档位，请关闭省流量后播放' };
       return this.publishCommandResult(this.result(requestId, 'unsupported', error), identity);
     }
-    if (this.qualityState.dataSaver) await this.startLoadingForCurrentSource();
-    return this.runStateCommand('playing', (command) => this.backend.play(command));
+    return this.runStateCommand('playing', async (command) => {
+      if (this.qualityState.dataSaver) await this.startLoading(command);
+      if (this.isCurrentCommand(command)) await this.backend.play(command);
+    });
   }
 
   async pause(): Promise<PlaybackCommandResult> {
@@ -468,12 +471,17 @@ export class PlaybackCore {
     };
   }
 
-  private async restoreQualityAfterLoad(command: PlaybackCommandContext, sourceChanged: boolean): Promise<void> {
-    if (this.qualityFacet === undefined || this.snapshot.capabilities.quality !== 'available') return;
+  private async restoreQualityAfterLoad(command: PlaybackCommandContext, playbackRate: number): Promise<void> {
+    if (this.qualityFacet === undefined || !this.isCurrentSource(command)) return;
     const state = this.readQualityFacetState();
     if (state !== null) this.acceptQualityFacetState(state, command);
-    if (sourceChanged) await this.invokeFeatureOperation(() => this.qualityFacet!.setPlaybackRate(1, command));
-    await this.reconcileQualityState(command);
+    const rateError = await this.invokeFeatureOperation(() => this.qualityFacet!.setPlaybackRate(playbackRate, command));
+    if (!this.isCurrentSource(command)) return;
+    this.applyQualityState(
+      { ...this.qualityState, playbackRate: rateError === null ? playbackRate : 1 },
+      command.requestId,
+    );
+    if (this.snapshot.capabilities.quality === 'available') await this.reconcileQualityState(command);
   }
 
   private beginFeatureCommand(): PlaybackCommandContext | null {
@@ -706,23 +714,24 @@ export class PlaybackCore {
     return outcome.kind === 'completed' ? outcome.value : null;
   }
 
-  private handleAbLoopSnapshot(snapshot: PlaybackSnapshot): void {
+  private handleAbLoopSnapshot(snapshot: PlaybackSnapshot, previousState: PlaybackState): void {
     const { a, b, enabled } = this.abLoopState;
     if (a !== null && b !== null && !validLoopRange(a, b, snapshot.duration)) {
       this.applyAbLoopState(createAbLoopState(), snapshot.requestId);
       return;
     }
-    if (enabled) void this.enforceAbLoop(snapshot.currentTime);
+    const resumeState = snapshot.state === 'ended' && previousState === 'playing' ? 'playing' : undefined;
+    if (enabled) void this.enforceAbLoop(snapshot.currentTime, resumeState);
   }
 
-  private async enforceAbLoop(currentTime: number): Promise<void> {
+  private async enforceAbLoop(currentTime: number, resumeState?: PlaybackState): Promise<void> {
     const { a, b, enabled } = this.abLoopState;
     if (!enabled || a === null || b === null || currentTime < b || this.abLoopSeekPending) return;
     this.abLoopSeekPending = true;
     try {
       const requestId = this.allocateRequestId();
       this.interruptFrameCommands(requestId);
-      await this.performSeek(a, 'ab_loop', this.identity(requestId));
+      await this.performSeek(a, 'ab_loop', this.identity(requestId), resumeState);
     } finally {
       this.abLoopSeekPending = false;
     }
@@ -730,11 +739,6 @@ export class PlaybackCore {
 
   private isCurrentSource(command: PlaybackCommandContext): boolean {
     return command.sourceEpoch === this.snapshot.sourceEpoch && command.sourceId === this.snapshot.sourceId;
-  }
-
-  private async startLoadingForCurrentSource(): Promise<void> {
-    const command = this.currentFeatureCommand();
-    if (command !== null) await this.invokeFeatureOperation(() => this.startLoading(command));
   }
 
   private async stopLoadingForCurrentSource(): Promise<void> {
@@ -760,7 +764,12 @@ export class PlaybackCore {
     return this.loadControlFacet?.stopLoading(command) ?? Promise.resolve();
   }
 
-  private async performSeek(requestedTime: number, reason: SeekReason, identity: CommandIdentity): Promise<SeekResult> {
+  private async performSeek(
+    requestedTime: number,
+    reason: SeekReason,
+    identity: CommandIdentity,
+    resumeState?: PlaybackState,
+  ): Promise<SeekResult> {
     const rejected = this.rejectSeek(requestedTime, identity);
     if (rejected !== null) {
       return rejected;
@@ -769,7 +778,7 @@ export class PlaybackCore {
     if (snapshotOutcome.kind === 'failed') {
       return this.failSeekSnapshotRead(requestedTime, identity, snapshotOutcome.error);
     }
-    return this.performSeekFromSnapshot(requestedTime, reason, identity, snapshotOutcome.value);
+    return this.performSeekFromSnapshot(requestedTime, reason, identity, snapshotOutcome.value, false, resumeState);
   }
 
   private async performSeekFromSnapshot(
@@ -778,6 +787,7 @@ export class PlaybackCore {
     identity: CommandIdentity,
     snapshot: PlaybackSnapshot,
     skipBoundaryRequest = false,
+    resumeState?: PlaybackState,
   ): Promise<SeekResult> {
     const ranges = normalizeRanges(snapshot.seekable);
     if (ranges.length === 0) {
@@ -787,7 +797,7 @@ export class PlaybackCore {
     if (skipBoundaryRequest && targetTime === snapshot.currentTime) {
       return this.completeClampedSeek(requestedTime, targetTime, identity, snapshot);
     }
-    return this.submitSeek(requestedTime, targetTime, reason, identity);
+    return this.submitSeek(requestedTime, targetTime, reason, identity, resumeState);
   }
 
   private async submitSeek(
@@ -795,6 +805,7 @@ export class PlaybackCore {
     targetTime: number,
     reason: SeekReason,
     identity: CommandIdentity,
+    resumeState?: PlaybackState,
   ): Promise<SeekResult> {
     const command = this.requireCommand(identity);
     const base = seekResultBase(identity.requestId, requestedTime, targetTime);
@@ -802,7 +813,7 @@ export class PlaybackCore {
     const startedTerminalRevision = this.terminalRevision;
     this.acceptCommand(identity.requestId);
     const operation = this.runOperation(identity.requestId, () => this.backend.seek(request));
-    this.beginSeek(identity.requestId);
+    this.beginSeek(identity.requestId, resumeState);
     return this.finishSeek(command, startedTerminalRevision, base, await operation);
   }
 
@@ -1132,8 +1143,10 @@ export class PlaybackCore {
     return hasLeftMediaEnd(result.confirmedTime, this.snapshot.duration) ? 'paused' : 'ended';
   }
 
-  private beginSeek(requestId: number): void {
-    if (this.snapshot.state !== 'seeking') {
+  private beginSeek(requestId: number, resumeState?: PlaybackState): void {
+    if (resumeState !== undefined) {
+      this.seekResumeState = resumeState;
+    } else if (this.snapshot.state !== 'seeking') {
       this.seekResumeState = seekResumeState(this.snapshot.state);
     }
     this.updateSnapshot({ ...this.snapshot, error: null, requestId, state: 'seeking' });
@@ -1485,8 +1498,9 @@ export class PlaybackCore {
       return;
     }
     if (event.type === 'snapshotChanged') {
+      const previousState = this.snapshot.state;
       this.applyBackendSnapshot(event);
-      this.handleAbLoopSnapshot(event.snapshot);
+      this.handleAbLoopSnapshot(event.snapshot, previousState);
       return;
     }
     if (event.type === 'capabilitiesChanged') {
@@ -1498,6 +1512,9 @@ export class PlaybackCore {
       const terminal = this.recordTerminalSignal(event);
       this.restoreTerminal(terminal);
       return;
+    }
+    if ((event.error.category === 'media' || event.error.category === 'decode') && this.abLoopState.a !== null) {
+      this.applyAbLoopState(createAbLoopState(), Math.max(this.snapshot.requestId, event.requestId));
     }
     const terminal = this.recordTerminalSignal(event);
     this.restoreTerminal(terminal);

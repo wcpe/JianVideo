@@ -108,7 +108,7 @@ describe('WebQualityFacet HLS 层级适配', () => {
     facet.refreshLevels(command());
     await facet.selectQuality({ mode: 'manual', quality: { bandwidth: 800_000, height: 480 } }, command(2));
 
-    facet.handleLevelSwitched(4, command(2));
+    facet.handleLevelSwitched(4);
 
     expect(facet.getState()).toMatchObject({
       actualQualityId: expect.stringContaining('360'),
@@ -124,12 +124,16 @@ describe('WebQualityFacet HLS 层级适配', () => {
     facet.refreshLevels(command());
     await facet.selectQuality({ mode: 'manual', quality: { height: 720 } }, command(2));
 
-    expect(facet.handleLevelError(1, command(2))).toBe(true);
+    expect(facet.handleLevelError(1)).toBe('fallback');
     expect(hls.currentLevel).toBe(3);
 
     await facet.setAutoQualityCap(480, command(3));
-    expect(facet.handleLevelError(3, command(3))).toBe(true);
+    expect(facet.handleLevelError(3)).toBe('fallback');
     expect(hls.currentLevel).toBe(2);
+    expect(facet.handleLevelError(2)).toBe('fallback');
+    expect(hls.currentLevel).toBe(4);
+    expect(facet.handleLevelError(4)).toBe('blocked');
+    expect(hls.stopLoad).toHaveBeenCalledOnce();
   });
 
   it('倍速、加载启停与状态订阅均映射公共 API', async () => {

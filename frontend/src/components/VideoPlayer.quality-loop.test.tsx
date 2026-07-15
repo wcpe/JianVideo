@@ -245,6 +245,18 @@ describe('VideoPlayer 倍速与 A-B 循环', () => {
     });
     await waitFor(() => expect(seek).toHaveBeenCalledWith(expect.objectContaining({ reason: 'ab_loop', targetTime: 10 })));
 
+    const onEnded = vi.fn();
+    view.rerender(
+      <MantineProvider>
+        <VideoPlayer url="/master.m3u8" isABR autoPlay={false} onEnded={onEnded} />
+      </MantineProvider>,
+    );
+    act(() => {
+      video.currentTime = 12;
+      video.dispatchEvent(new Event('ended'));
+    });
+    expect(onEnded).not.toHaveBeenCalled();
+
     await userEvent.click(screen.getByRole('button', { name: 'A-B 循环' }));
     await userEvent.click(screen.getByRole('menuitem', { name: '清除 A-B' }));
     expect(screen.getByText('A/B 未设置')).toBeInTheDocument();

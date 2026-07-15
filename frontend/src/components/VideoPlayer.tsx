@@ -743,7 +743,11 @@ export default function VideoPlayer({
       void seekToInitialOnce();
     };
     const onPause = () => reportPausedPosition(video);
-    const onNativeEnded = () => reportEndedOnce();
+    const onNativeEnded = () => {
+      const loop = abLoopStateRef.current;
+      if (loop.enabled) return;
+      reportEndedOnce();
+    };
     const onVolume = () => {
       setVolume(video.volume);
       setIsMuted(video.muted);
