@@ -173,14 +173,16 @@ func TestWatchStatesMigration建立Space媒体唯一键和查询索引(t *testin
 }
 
 func TestDefaultMigrations包含FR2045观看状态迁移(t *testing.T) {
-	migrations := DefaultMigrations()
-	last := migrations[len(migrations)-1]
-	if last.ID != "20260712_0021_fr2_045_watch_states" {
-		t.Fatalf("FR2-045 应追加为新迁移，实际最后迁移为 %s", last.ID)
+	for _, migration := range DefaultMigrations() {
+		if migration.ID != "20260712_0021_fr2_045_watch_states" {
+			continue
+		}
+		if migration.Estimate == nil || migration.Up == nil || migration.Validate == nil || !migration.SafeToRetry {
+			t.Fatalf("FR2-045 迁移定义不完整: %+v", migration)
+		}
+		return
 	}
-	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
-		t.Fatalf("FR2-045 迁移定义不完整: %+v", last)
-	}
+	t.Fatal("默认迁移缺少 FR2-045")
 }
 
 func newWatchStateMigrationDB(t *testing.T) *gorm.DB {
