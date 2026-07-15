@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,14 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
+
+func expectedHLSPreviewOutputDir(root string, taskID int64, payload HLSPreviewPayload) string {
+	dir := filepath.Join(root, payload.SpaceID, strconv.FormatInt(payload.MediaID, 10), payload.ProfileID)
+	if IsAudioReloadProfileID(payload.ProfileID) {
+		return filepath.Join(dir, "tasks", strconv.FormatInt(taskID, 10))
+	}
+	return dir
+}
 
 func newHLSPreviewTestService(t *testing.T, exec HLSPreviewExecFunc) (*HLSPreviewService, *tasksvc.Service, *tasksvc.WorkerRegistry, *gorm.DB, string) {
 	t.Helper()
@@ -171,6 +181,164 @@ func TestHLSPreviewStatusUsesCodecManifestForCustomProfile(t *testing.T) {
 	}
 	if !status.Available || status.URL != "/api/play/hls/9/profiles/mobile/master.m3u8" {
 		t.Fatalf("自定义 H.264 profile 状态异常: %+v", status)
+	}
+}
+
+func TestEffectiveTrackIDRequiresSucceededTaskAndAvailableManifest(t *testing.T) {
+	payload, err := json.Marshal(HLSPreviewPayload{AudioTrackID: "audio-track"})
+	if err != nil {
+		t.Fatalf("编码测试 payload 失败: %v", err)
+	}
+	for _, status := range []string{models.TaskStatusPending, models.TaskStatusRunning, models.TaskStatusFailed, models.TaskStatusCanceled} {
+		task := &models.Task{Status: status, PayloadJSON: string(payload)}
+		if got := effectiveTrackID(task, true); got != "" {
+			t.Fatalf("非成功任务不得输出有效音轨: status=%s got=%s", status, got)
+		}
+	}
+	succeeded := &models.Task{Status: models.TaskStatusSucceeded, PayloadJSON: string(payload)}
+	if got := effectiveTrackID(succeeded, false); got != "" {
+		t.Fatalf("manifest 不可用时不得输出有效音轨: %s", got)
+	}
+	if got := effectiveTrackID(succeeded, true); got != "audio-track" {
+		t.Fatalf("成功任务且 manifest 可用时应输出有效音轨: %s", got)
+	}
+}
+
+func TestHLSPreviewStatusTaskRejectsFailedTaskWithManifest(t *testing.T) {
+	var root string
+	svc, _, _, db, returnedRoot := newHLSPreviewTestService(t, func(context.Context, int64, HLSPreviewPayload) error { return nil })
+	root = returnedRoot
+	request := AudioReloadRequest{SpaceID: "space-a", MediaID: 42, AudioTrackID: "audio-track", AudioStreamIndex: 2, SourceFingerprint: "fingerprint"}
+	task, err := svc.EnqueueAudioReload(context.Background(), request)
+	if err != nil {
+		t.Fatalf("创建音轨任务失败: %v", err)
+	}
+	if err := db.Model(&models.Task{}).Where("id = ?", task.ID).Update("status", models.TaskStatusFailed).Error; err != nil {
+		t.Fatalf("设置音轨任务失败状态失败: %v", err)
+	}
+	payload, err := decodeHLSPreviewTask(*task)
+	if err != nil {
+		t.Fatalf("解析音轨任务失败: %v", err)
+	}
+	dir := expectedHLSPreviewOutputDir(root, task.ID, payload)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("创建音轨任务产物目录失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "master.m3u8"), []byte("#EXTM3U\n"), 0o640); err != nil {
+		t.Fatalf("写入音轨任务 manifest 失败: %v", err)
+	}
+
+	status, err := svc.StatusTask(context.Background(), "space-a", 42, AudioReloadProfileID(request.AudioTrackID), task.ID)
+	if err != nil {
+		t.Fatalf("查询失败音轨任务状态失败: %v", err)
+	}
+	if status.Available || status.EffectiveTrackID != "" {
+		t.Fatalf("失败音轨任务即使存在 manifest 也不得可用: %+v", status)
+	}
+}
+
+func TestHLSPreviewStatusTaskIsExactAndEffectiveTrackRequiresSucceededManifest(t *testing.T) {
+	var root string
+	svc, _, workers, _, returnedRoot := newHLSPreviewTestService(t, func(_ context.Context, taskID int64, payload HLSPreviewPayload) error {
+		dir := expectedHLSPreviewOutputDir(root, taskID, payload)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, "master.m3u8"), []byte("#EXTM3U\n"), 0o640)
+	})
+	root = returnedRoot
+	request := AudioReloadRequest{SpaceID: "space-a", MediaID: 42, AudioTrackID: "audio-track", AudioStreamIndex: 2, SourceFingerprint: "fingerprint-1"}
+	first, err := svc.EnqueueAudioReload(context.Background(), request)
+	if err != nil {
+		t.Fatalf("创建首个音轨任务失败: %v", err)
+	}
+	if err := workers.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行首个音轨任务失败: %v", err)
+	}
+	request.SourceFingerprint = "fingerprint-2"
+	second, err := svc.EnqueueAudioReload(context.Background(), request)
+	if err != nil || second.ID == first.ID {
+		t.Fatalf("源变化后必须创建同 profile 的新任务: first=%d second=%v err=%v", first.ID, second, err)
+	}
+	if _, err := svc.Status(context.Background(), "space-a", 42, AudioReloadProfileID(request.AudioTrackID)); err == nil {
+		t.Fatal("音轨状态不得按 profile 猜测最新任务")
+	}
+	exactFirst, err := svc.StatusTask(context.Background(), "space-a", 42, AudioReloadProfileID(request.AudioTrackID), first.ID)
+	if err != nil || exactFirst.Task == nil || exactFirst.Task.ID != first.ID || exactFirst.EffectiveTrackID != request.AudioTrackID {
+		t.Fatalf("精确 succeeded 任务应返回自身有效音轨: %+v err=%v", exactFirst, err)
+	}
+	exactSecond, err := svc.StatusTask(context.Background(), "space-a", 42, AudioReloadProfileID(request.AudioTrackID), second.ID)
+	if err != nil || exactSecond.EffectiveTrackID != "" {
+		t.Fatalf("精确 pending 任务不得输出有效音轨: %+v err=%v", exactSecond, err)
+	}
+	if _, err := svc.StatusTask(context.Background(), "space-b", 42, AudioReloadProfileID(request.AudioTrackID), first.ID); !errors.Is(err, tasksvc.ErrTaskNotFound) {
+		t.Fatalf("跨 Space 精确任务必须拒绝: %v", err)
+	}
+	if _, err := svc.StatusTask(context.Background(), "space-a", 42, "h264", first.ID); err == nil {
+		t.Fatal("profile 不匹配的精确任务必须拒绝")
+	}
+}
+
+func TestHLSPreviewServiceReservesAudioNamespaceForDedicatedEnqueue(t *testing.T) {
+	svc, _, _, _, _ := newHLSPreviewTestService(t, func(context.Context, int64, HLSPreviewPayload) error { return nil })
+	trackID := "audio-track"
+	streamIndex := 2
+	request := HLSPreviewRequest{
+		SpaceID: "space-a", MediaID: 42, ProfileID: AudioReloadProfileID(trackID), Codec: DefaultTargetCodec,
+		AudioTrackID: trackID, AudioStreamIndex: &streamIndex, SourceFingerprint: "fingerprint",
+	}
+	if _, err := svc.Enqueue(context.Background(), request); err == nil {
+		t.Fatal("通用 HLS 入队不得占用音轨 reload 保留命名空间")
+	}
+	for _, invalid := range []AudioReloadRequest{
+		{SpaceID: "space-a", MediaID: 42, AudioTrackID: trackID, AudioStreamIndex: 2},
+		{SpaceID: "space-a", MediaID: 42, AudioTrackID: " ", AudioStreamIndex: 2, SourceFingerprint: "fingerprint"},
+		{SpaceID: "space-a", MediaID: 42, AudioTrackID: trackID, AudioStreamIndex: -1, SourceFingerprint: "fingerprint"},
+	} {
+		if _, err := svc.EnqueueAudioReload(context.Background(), invalid); err == nil {
+			t.Fatalf("专用音轨入队必须要求完整绑定与源指纹: %+v", invalid)
+		}
+	}
+	alias := strings.ToUpper(AudioReloadProfileID(trackID))
+	if _, err := svc.Enqueue(context.Background(), HLSPreviewRequest{SpaceID: "space-a", MediaID: 42, ProfileID: alias, Codec: DefaultTargetCodec}); err == nil {
+		t.Fatal("大小写别名不得绕过音轨 reload 保留命名空间")
+	}
+}
+
+func TestHLSPreviewWorkerCountsOnlyCurrentAudioTaskAssets(t *testing.T) {
+	var root string
+	svc, tasks, workers, _, returnedRoot := newHLSPreviewTestService(t, func(_ context.Context, taskID int64, payload HLSPreviewPayload) error {
+		dir := expectedHLSPreviewOutputDir(root, taskID, payload)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, "master.m3u8"), []byte("#EXTM3U\n"), 0o640)
+	})
+	root = returnedRoot
+	request := AudioReloadRequest{SpaceID: "space-a", MediaID: 42, AudioTrackID: "audio-track", AudioStreamIndex: 2, SourceFingerprint: "fingerprint-1"}
+	first, err := svc.EnqueueAudioReload(context.Background(), request)
+	if err != nil {
+		t.Fatalf("创建首个音轨任务失败: %v", err)
+	}
+	if err := workers.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行首个音轨任务失败: %v", err)
+	}
+	request.SourceFingerprint = "fingerprint-2"
+	second, err := svc.EnqueueAudioReload(context.Background(), request)
+	if err != nil {
+		t.Fatalf("创建第二个音轨任务失败: %v", err)
+	}
+	if err := workers.RunPending(context.Background()); err != nil {
+		t.Fatalf("执行第二个音轨任务失败: %v", err)
+	}
+	for _, taskID := range []int64{first.ID, second.ID} {
+		task, err := tasks.Get(context.Background(), taskID, tasksvc.Query{SpaceID: "space-a"})
+		if err != nil {
+			t.Fatalf("读取音轨任务失败: %v", err)
+		}
+		if task.Checkpoint != "已生成 1 个 HLS 产物文件" {
+			t.Fatalf("音轨任务计数必须绑定自身 task_id: task=%d checkpoint=%q", taskID, task.Checkpoint)
+		}
 	}
 }
 

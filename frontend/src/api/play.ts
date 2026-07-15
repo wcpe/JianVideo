@@ -10,11 +10,34 @@ import type { PlaybackDescriptor } from '@/types';
  */
 
 /** 后端协商响应（snake_case）；前端转为 PlaybackDescriptor。 */
+export type HLSTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled';
+
 export interface HLSPreviewStatus {
   available: boolean;
   profile_id: string;
   url: string;
-  task: { id: string; status: string; progress: number } | null;
+  effective_track_id?: string | null;
+  task: { id: string; status: HLSTaskStatus; progress: number } | null;
+}
+
+export interface AudioReloadTaskResponse {
+  task_id: string;
+  profile_id: string;
+  requested_track_id: string;
+  space_id: string;
+  url: string;
+}
+
+export interface TimelinePreviewStatus {
+  duration: number;
+  generation_id?: string;
+  profile_id: string;
+  source_fingerprint?: string;
+  sprite_urls?: Readonly<Record<string, string>>;
+  status: 'available' | 'pending';
+  task_id?: number;
+  version: number;
+  vtt_url?: string;
 }
 
 export interface HLSABRTaskResponse {
@@ -40,11 +63,32 @@ interface NegotiateResponse {
  * 请求后端协商，返回播放描述符。
  * 后端 url 为相对路径，此处绝对化以兼容 mpegts.js/hls.js 在 Web Worker 中的 fetch。
  */
-export async function getHLSStatus(mediaID: number, profileID = 'h264'): Promise<HLSPreviewStatus> {
+export async function getHLSStatus(
+  mediaID: number,
+  profileID = 'h264',
+  taskIDOrSignal?: string | AbortSignal,
+  signal?: AbortSignal,
+): Promise<HLSPreviewStatus> {
+  const taskID = typeof taskIDOrSignal === 'string' ? taskIDOrSignal : undefined;
+  const requestSignal = typeof taskIDOrSignal === 'string' ? signal : taskIDOrSignal;
   const res = await client.get<HLSPreviewStatus>(`/api/play/${mediaID}/hls-status`, {
-    params: { profile_id: profileID },
+    params: { profile_id: profileID, ...(taskID ? { task_id: taskID } : {}) },
+    signal: requestSignal,
   });
   return { ...res.data, url: new URL(res.data.url, window.location.href).toString() };
+}
+
+export async function createAudioReload(
+  mediaID: number,
+  trackID: string,
+  signal?: AbortSignal,
+): Promise<AudioReloadTaskResponse> {
+  const response = await client.post<AudioReloadTaskResponse>(
+    `/api/play/${mediaID}/audio-reload`,
+    { track_id: trackID },
+    { signal },
+  );
+  return { ...response.data, url: new URL(response.data.url, window.location.href).toString() };
 }
 
 export async function createHLSABR(
@@ -55,13 +99,63 @@ export async function createHLSABR(
   return { ...res.data, url: new URL(res.data.url, window.location.href).toString() };
 }
 
+export async function getTimelinePreviewStatus(
+  mediaID: number,
+  profileID?: string,
+  signal?: AbortSignal,
+): Promise<TimelinePreviewStatus> {
+  const params = profileID ? { profile: profileID } : undefined;
+  const response = await client.get<TimelinePreviewStatus>(`/api/play/${mediaID}/timeline-preview`, {
+    params,
+    signal,
+  });
+  return absoluteTimelinePreviewUrls(response.data);
+}
+
+export async function getTimelinePreview(
+  mediaID: number,
+  profileID?: string,
+  signal?: AbortSignal,
+): Promise<TimelinePreviewStatus> {
+  return getTimelinePreviewStatus(mediaID, profileID, signal);
+}
+
+export async function rebuildTimelinePreview(
+  mediaID: number,
+  profileID?: string,
+  signal?: AbortSignal,
+): Promise<TimelinePreviewStatus> {
+  const body = profileID ? { profile_id: profileID } : {};
+  const response = await client.post<TimelinePreviewStatus>(
+    `/api/play/${mediaID}/timeline-preview/rebuild`,
+    body,
+    { signal },
+  );
+  return absoluteTimelinePreviewUrls(response.data);
+}
+
+function absoluteTimelinePreviewUrls(status: TimelinePreviewStatus): TimelinePreviewStatus {
+  const absolute = (value: string) => new URL(value, window.location.href).toString();
+  const spriteUrls = status.sprite_urls === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(status.sprite_urls).map(([name, url]) => [name, absolute(url)]));
+  return {
+    ...status,
+    ...(spriteUrls === undefined ? {} : { sprite_urls: spriteUrls }),
+    ...(status.vtt_url === undefined ? {} : { vtt_url: absolute(status.vtt_url) }),
+  };
+}
+
 export async function negotiate(
   mediaID: number,
   caps: ClientCapabilities,
+  signal?: AbortSignal,
 ): Promise<PlaybackDescriptor> {
-  const res = await client.post<NegotiateResponse>(`/api/play/${mediaID}/negotiate`, {
-    client_caps: caps,
-  });
+  const res = await client.post<NegotiateResponse>(
+    `/api/play/${mediaID}/negotiate`,
+    { client_caps: caps },
+    { signal },
+  );
   const data = res.data;
   const toAbsolute = (path: string) => new URL(path, window.location.href).toString();
   return {

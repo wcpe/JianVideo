@@ -35,6 +35,15 @@ func NormalizeHWAccelMode(mode string) string {
 	}
 }
 
+// SelectCurrentEncoderForCodecWithPolicy 读取当前实测快照并按策略选择编码器。
+func SelectCurrentEncoderForCodecWithPolicy(codec string, policy HardwarePolicy) (encoder, deviceType string, hardware bool, err error) {
+	var results []EncoderProbeResult
+	if snapshot := probeSnapshot.Load(); snapshot != nil {
+		results = *snapshot
+	}
+	return SelectEncoderForCodecWithPolicy(results, codec, policy)
+}
+
 // SelectEncoderForCodecWithPolicy 按用户硬件策略选择编码器。
 func SelectEncoderForCodecWithPolicy(results []EncoderProbeResult, codec string, policy HardwarePolicy) (encoder, deviceType string, hardware bool, err error) {
 	c := normalizePolicyCodec(codec)

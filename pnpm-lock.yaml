@@ -175,6 +175,15 @@ importers:
         specifier: workspace:*
         version: link:../typescript-config
 
+  packages/player-core:
+    devDependencies:
+      '@jianvideo/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@jianvideo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+
   packages/render-pixi:
     dependencies:
       pixi.js:

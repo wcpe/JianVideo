@@ -102,6 +102,18 @@ func TestIsBrowserCompatible_Nil(t *testing.T) {
 	assert.False(t, result)
 }
 
+type symlinkDirEntry struct{}
+
+func (symlinkDirEntry) Name() string               { return "video.srt" }
+func (symlinkDirEntry) IsDir() bool                { return false }
+func (symlinkDirEntry) Type() os.FileMode          { return os.ModeSymlink }
+func (symlinkDirEntry) Info() (os.FileInfo, error) { return nil, nil }
+
+func TestSidecarFormatRejectsSymlinkDirEntry(t *testing.T) {
+	_, ok := sidecarFormat(symlinkDirEntry{}, map[string]string{"srt": "srt"})
+	assert.False(t, ok, "符号链接目录项不得被枚举为外挂字幕")
+}
+
 // TestFindSubtitleFiles 测试查找同名字幕文件。
 func TestFindSubtitleFiles(t *testing.T) {
 	tmp := t.TempDir()
@@ -110,7 +122,8 @@ func TestFindSubtitleFiles(t *testing.T) {
 	videoPath := filepath.Join(tmp, "video.mp4")
 	require.NoError(t, os.WriteFile(videoPath, []byte("fake"), 0o644))
 
-	// 创建匹配的字幕文件
+	// 创建匹配的字幕文件，允许语言等后缀并要求稳定排序
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "video.zh.vtt"), []byte("vtt"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(tmp, "video.srt"), []byte("srt"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(tmp, "video.ass"), []byte("ass"), 0o644))
 
@@ -122,7 +135,10 @@ func TestFindSubtitleFiles(t *testing.T) {
 
 	subs, err := FindSubtitleFiles(videoPath)
 	require.NoError(t, err)
-	assert.Len(t, subs, 2)
+	assert.Len(t, subs, 3)
+	assert.Equal(t, "video.ass", filepath.Base(subs[0].Path))
+	assert.Equal(t, "video.srt", filepath.Base(subs[1].Path))
+	assert.Equal(t, "video.zh.vtt", filepath.Base(subs[2].Path))
 
 	// 验证格式正确
 	formatSet := make(map[string]bool)

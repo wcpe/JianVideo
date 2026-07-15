@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { PreparedPreviewTrack } from '@jianvideo/player-core';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Button,
@@ -20,7 +21,6 @@ import { notifications } from '@mantine/notifications';
 import {
   IconArrowLeft,
   IconAlertCircle,
-  IconSubtitles,
   IconPencil,
   IconFileText,
   IconDownload,
@@ -37,24 +37,102 @@ import NameEditModal from '@/components/NameEditModal';
 import ShareDialog from '@/components/ShareDialog';
 import ExternalPlayerDialog from '@/components/ExternalPlayerDialog';
 import PregenDialog from '@/components/PregenDialog';
-import { parseWebVTT } from '@/utils/subtitle';
+import { parseTimelinePreviewVtt } from '@/utils/timeline-preview';
 import { mediaDisplayName } from '@/utils/media';
 import { mediaStreamUrl } from '@/utils/media-url';
 import { probeClientCapabilities } from '@/utils/codec-capability';
 import { useCinemaMode } from '@/hooks/cinema-context';
 import * as libApi from '@/api/library';
 import * as playApi from '@/api/play';
+import { getTask } from '@/api/tasks';
 import * as subtitleApi from '@/api/subtitle';
-import type {
-  MediaFile,
-  MediaInference,
-  SubtitleTrack,
-  SubtitleEntry,
-  PlaybackDescriptor,
-} from '@/types';
+import type { TrackResponse } from '@/api/subtitle';
+import type { MediaFile, MediaInference, PlaybackDescriptor } from '@/types';
 
 // 双模式改名弹窗类型：显示名（仅库内）/ 真实文件名（磁盘改名）
 type NameEditKind = 'display' | 'real';
+
+type TimelinePreviewData = {
+  track: PreparedPreviewTrack;
+  spriteUrls: Readonly<Record<string, string>>;
+};
+
+type MediaRequest = {
+  controller: AbortController;
+  generation: number;
+  mediaId: number;
+};
+
+const TIMELINE_TASK_POLL_INTERVAL = 1000;
+const TIMELINE_TASK_POLL_MAX_INTERVAL = 8000;
+
+function abortError(): DOMException {
+  return new DOMException('请求已取消', 'AbortError');
+}
+
+function waitForTimelinePoll(signal: AbortSignal, interval: number): Promise<void> {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, interval);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function waitForTimelineTask(taskID: number, signal: AbortSignal): Promise<boolean> {
+  let interval = TIMELINE_TASK_POLL_INTERVAL;
+  while (!signal.aborted) {
+    await waitForTimelinePoll(signal, interval);
+    try {
+      const task = await getTask(String(taskID), signal);
+      if (task.status === 'succeeded') return true;
+      if (task.status === 'failed' || task.status === 'canceled') return false;
+      interval = TIMELINE_TASK_POLL_INTERVAL;
+    } catch {
+      if (signal.aborted) throw abortError();
+      interval = Math.min(interval * 2, TIMELINE_TASK_POLL_MAX_INTERVAL);
+    }
+  }
+  throw abortError();
+}
+
+async function loadTimelinePreview(
+  mediaID: number,
+  signal: AbortSignal,
+): Promise<TimelinePreviewData | null> {
+  let status = await playApi.getTimelinePreviewStatus(mediaID, undefined, signal);
+  if (status.status === 'pending' && status.task_id) {
+    if (!(await waitForTimelineTask(status.task_id, signal))) return null;
+    status = await playApi.getTimelinePreviewStatus(mediaID, status.profile_id, signal);
+  }
+  if (
+    status.status !== 'available' ||
+    !status.vtt_url ||
+    !status.generation_id ||
+    !status.source_fingerprint ||
+    !status.sprite_urls
+  )
+    return null;
+  const response = await fetch(status.vtt_url, { signal });
+  if (!response.ok) return null;
+  const vtt = await response.text();
+  return {
+    track: parseTimelinePreviewVtt(vtt, {
+      generationId: status.generation_id,
+      mediaId: String(mediaID),
+      profileId: status.profile_id,
+      sourceFingerprint: status.source_fingerprint,
+      spriteUrls: status.sprite_urls,
+    }),
+    spriteUrls: status.sprite_urls,
+  };
+}
 
 /** 视频播放页 — Mantine + VideoPlayer */
 export default function PlayPage() {
@@ -66,17 +144,19 @@ export default function PlayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 字幕状态
-  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
-  const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
-  const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([]);
-  const [subtitleVisible, setSubtitleVisible] = useState(false);
-  const [subtitleMenuOpened, setSubtitleMenuOpened] = useState(false);
+  const [trackManifest, setTrackManifest] = useState<TrackResponse | null | undefined>();
 
   // 播放直连优先；仅在原文件直连失败时查询并切换已生成的 HLS preview。
   const [playerUrl, setPlayerUrl] = useState<string | null>(null);
   const [playerIsABR, setPlayerIsABR] = useState<boolean | null>(null);
   const [descriptor, setDescriptor] = useState<PlaybackDescriptor | null>(null);
+  const [previewTrack, setPreviewTrack] = useState<PreparedPreviewTrack | undefined>();
+  const [previewSpriteUrls, setPreviewSpriteUrls] = useState<
+    Readonly<Record<string, string>> | undefined
+  >();
+  const previewGenerationRef = useRef(0);
+  const mediaGenerationRef = useRef(0);
+  const mediaRequestRef = useRef<MediaRequest | null>(null);
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
   const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null);
@@ -111,50 +191,113 @@ export default function PlayPage() {
     setInferenceEpisodeTitle(data?.episode_title || '');
   };
 
+  const isCurrentMediaRequest = useCallback((request: MediaRequest): boolean => {
+    const current = mediaRequestRef.current;
+    return (
+      !request.controller.signal.aborted &&
+      current?.generation === request.generation &&
+      current.mediaId === request.mediaId
+    );
+  }, []);
+
   useEffect(() => {
     if (!id) return;
     const mediaId = parseInt(id, 10);
+    const request: MediaRequest = {
+      controller: new AbortController(),
+      generation: ++mediaGenerationRef.current,
+      mediaId,
+    };
+    mediaRequestRef.current?.controller.abort();
+    mediaRequestRef.current = request;
+    setLoading(true);
+    setError(null);
+    setMedia(null);
+    setInference(null);
+    setTrackManifest(undefined);
+    setDescriptor(null);
+    setPlayerUrl(null);
+    setPlayerIsABR(null);
+
     if (isNaN(mediaId) || mediaId <= 0) {
       setError('无效的媒体 ID');
       setLoading(false);
-      return;
+      return () => request.controller.abort();
     }
 
-    libApi
-      .getMediaFile(mediaId)
-      .then((data) => setMedia(data))
-      .catch(() => setError('媒体文件不存在'))
-      .finally(() => setLoading(false));
-    libApi
-      .getMediaInference(mediaId)
+    const signal = request.controller.signal;
+    void libApi
+      .getMediaFile(mediaId, signal)
       .then((data) => {
+        if (isCurrentMediaRequest(request)) setMedia(data);
+      })
+      .catch(() => {
+        if (isCurrentMediaRequest(request)) setError('媒体文件不存在');
+      })
+      .finally(() => {
+        if (isCurrentMediaRequest(request)) setLoading(false);
+      });
+    void libApi
+      .getMediaInference(mediaId, signal)
+      .then((data) => {
+        if (!isCurrentMediaRequest(request)) return;
         setInference(data);
         setInferenceDraft(data);
       })
-      .catch(() => setInference(null));
+      .catch(() => {
+        if (isCurrentMediaRequest(request)) setInference(null);
+      });
 
     // 记录最近查看（FR-120）：进入播放页即标记 last_viewed_at，失败静默不阻塞播放
-    void libApi.setMediaViewed(mediaId).catch(() => {});
+    void libApi.setMediaViewed(mediaId, signal).catch(() => undefined);
 
-    // 加载字幕轨道列表
-    subtitleApi
-      .getSubtitles(mediaId)
-      .then((tracks) => setSubtitleTracks(tracks))
-      .catch(() => setSubtitleTracks([]));
+    void subtitleApi
+      .getTracks(mediaId, signal)
+      .then((response) => {
+        if (isCurrentMediaRequest(request)) setTrackManifest(response);
+      })
+      .catch(() => {
+        if (isCurrentMediaRequest(request)) setTrackManifest(null);
+      });
 
     // H.264 默认直连优先；保留 FR-53 高级编码协商，避免破坏既有 fMP4 播放契约。
-    setDescriptor(null);
     setPlayerUrl(mediaStreamUrl(mediaId));
     setPlayerIsABR(false);
     void playApi
-      .negotiate(mediaId, probeClientCapabilities())
+      .negotiate(mediaId, probeClientCapabilities(), signal)
       .then((nextDescriptor) => {
-        if (nextDescriptor.path !== 'fmp4') return;
+        if (!isCurrentMediaRequest(request) || nextDescriptor.path !== 'fmp4') return;
         setDescriptor(nextDescriptor);
         setPlayerUrl(nextDescriptor.url);
         setPlayerIsABR(true);
       })
+      .catch(() => undefined);
+
+    return () => {
+      request.controller.abort();
+      if (mediaRequestRef.current === request) mediaRequestRef.current = null;
+    };
+  }, [id, isCurrentMediaRequest]);
+
+  useEffect(() => {
+    const generation = ++previewGenerationRef.current;
+    const mediaID = Number(id);
+    setPreviewTrack(undefined);
+    setPreviewSpriteUrls(undefined);
+    if (!Number.isInteger(mediaID) || mediaID <= 0) return undefined;
+    const controller = new AbortController();
+    void loadTimelinePreview(mediaID, controller.signal)
+      .then((preview) => {
+        if (!preview || controller.signal.aborted || generation !== previewGenerationRef.current)
+          return;
+        setPreviewTrack(preview.track);
+        setPreviewSpriteUrls(preview.spriteUrls);
+      })
       .catch(() => {});
+    return () => {
+      previewGenerationRef.current += 1;
+      controller.abort();
+    };
   }, [id]);
 
   // 影院模式（FR-85）：离开播放页（卸载）时自动恢复全站导航，避免影院态泄漏到其它页面
@@ -169,28 +312,14 @@ export default function PlayPage() {
     return () => document.body.classList.remove('play-immersive');
   }, []);
 
-  // 选择字幕轨道
-  const selectTrack = async (trackIndex: number) => {
-    if (!media) return;
-    setSelectedTrack(trackIndex);
-    setSubtitleVisible(true);
-    setSubtitleMenuOpened(false);
-
-    try {
-      const vttContent = await subtitleApi.getSubtitleContent(media.id, trackIndex);
-      setSubtitleEntries(parseWebVTT(vttContent));
-    } catch {
-      setSubtitleEntries([]);
-    }
-  };
-
-  // 关闭字幕
-  const disableSubtitles = () => {
-    setSelectedTrack(null);
-    setSubtitleVisible(false);
-    setSubtitleEntries([]);
-    setSubtitleMenuOpened(false);
-  };
+  const refreshTrackManifest = useCallback(async (): Promise<TrackResponse> => {
+    const request = mediaRequestRef.current;
+    if (!media || !request || request.mediaId !== media.id) throw abortError();
+    const response = await subtitleApi.getTracks(media.id, request.controller.signal);
+    if (!isCurrentMediaRequest(request)) throw abortError();
+    setTrackManifest(response);
+    return response;
+  }, [isCurrentMediaRequest, media]);
 
   // 续播与观看状态（FR-44）：上报播放位置、看完标记。失败仅静默忽略，不打断播放。
   const handlePositionReport = useCallback(
@@ -207,18 +336,24 @@ export default function PlayPage() {
   }, [media]);
 
   const handlePlaybackError = useCallback(() => {
-    if (!media || playerIsABR) return;
+    const request = mediaRequestRef.current;
+    if (!media || playerIsABR || !request || request.mediaId !== media.id) return;
     void (async () => {
       for (const profileID of ['abr-h264', 'h264']) {
-        const status = await playApi.getHLSStatus(media.id, profileID);
+        const status = await playApi.getHLSStatus(
+          media.id,
+          profileID,
+          request.controller.signal,
+        );
+        if (!isCurrentMediaRequest(request)) throw abortError();
         if (!status.available) continue;
         setDescriptor(null);
         setPlayerUrl(status.url);
         setPlayerIsABR(true);
         return;
       }
-    })().catch(() => {});
-  }, [media, playerIsABR]);
+    })().catch(() => undefined);
+  }, [isCurrentMediaRequest, media, playerIsABR]);
 
   const enqueueABR = async () => {
     if (!media || abrEnqueueing) return;
@@ -466,44 +601,23 @@ export default function PlayPage() {
             </Menu.Dropdown>
           </Menu>
         </Group>
-
-        {/* 字幕选择菜单 */}
-        {subtitleTracks.length > 0 && (
-          <Menu opened={subtitleMenuOpened} onChange={setSubtitleMenuOpened}>
-            <Menu.Target>
-              <Button
-                variant="subtle"
-                color="gray"
-                size="sm"
-                leftSection={<IconSubtitles size={14} />}
-              >
-                {selectedTrack !== null ? subtitleTracks[selectedTrack]?.file_name : '字幕'}
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item onClick={disableSubtitles}>关闭字幕</Menu.Item>
-              {subtitleTracks.map((track) => (
-                <Menu.Item key={track.index} onClick={() => selectTrack(track.index)}>
-                  {track.file_name} ({track.format.toUpperCase()})
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        )}
       </Group>
 
       {/* 视频区（FR-103）：flex:1 + minHeight:0 吃满头部/控件之外的全部高度，
           VideoPlayer 传 fill 让视频以 object-fit:contain 填满（letterbox 黑边）。 */}
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {/* H.264 先直连原文件，失败时查询 HLS preview；高级编码保留协商描述符播放。 */}
-        {playerUrl && playerIsABR !== null && (
+        {playerUrl && playerIsABR !== null && trackManifest !== undefined && (
           <VideoPlayer
             url={playerUrl}
             descriptor={descriptor ?? undefined}
+            mediaId={media.id}
+            trackResponse={trackManifest ?? undefined}
+            onTrackManifestRefresh={refreshTrackManifest}
             autoPlay
             fill
-            subtitleEntries={subtitleEntries}
-            subtitleVisible={subtitleVisible}
+            previewTrack={previewTrack}
+            previewSpriteUrls={previewSpriteUrls}
             isABR={playerIsABR}
             streamType={playerIsABR ? 'mpegts' : 'mp4'}
             initialPosition={media.last_position}

@@ -46,13 +46,14 @@
 | 模块 | 职责 | 依赖方向 |
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
-| `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback` |
+| `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback`, `subtitle` |
 | `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
-| `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、字幕转换与转码预设存储 | → `tasks`, `storage`, `db` |
+| `subtitle` | 统一字幕/音轨聚合、稳定轨道 ID、上传持久化与删除、受限根读取、按请求 WebVTT 转换和来源能力表达（FR2-044） | → `db`, `audit`, `transcoder` |
+| `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、底层字幕格式转换与转码预设存储 | → `tasks`, `storage`, `db` |
 | `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；承载 `transcode.hls.preview` | → `db`, `audit` |
-| `storage` | 可重建缓存资产登记、Space/profile 路径边界、盘点与异步安全清理；HLS 按 profile 目录登记 | → `tasks`, `db`, `audit` |
+| `storage` | 可重建缓存资产登记、Space/profile/task 路径边界、盘点与异步安全清理；普通 HLS 按 profile、音轨重载按 task 目录登记 | → `tasks`, `db`, `audit` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
 | `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
@@ -64,7 +65,7 @@
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
 | `dblog` | 可运行时切级别的 GORM 日志器（FR-110，`SetEnabled` 原子开关：默认安静、开启 Info 级） | 仅依赖 gorm logger |
 
-**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `transcoder` → `db`，严格单向，禁止反向。`config` 和 `auth` 为横切关注点。
+**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `subtitle` / `transcoder` → `db`，严格单向，禁止反向。`subtitle` 仅向下复用 `transcoder` 的无状态格式转换与工具路径，不允许 `transcoder` 反向依赖字幕聚合服务；`config` 和 `auth` 为横切关注点。
 
 ### 2.1 代码目录结构
 
@@ -98,7 +99,8 @@ jianvideo/
 │   ├── share/                分享链接 token 生命周期
 │   ├── smb/                  SMB(CIFS) 客户端
 │   ├── storage/              可重建缓存资产登记、盘点、统计与安全清理
-│   ├── transcoder/          FFmpeg 转码、多码率、硬件加速、字幕、预生成队列
+│   ├── subtitle/             统一字幕/音轨、上传持久化、受限读取与按请求转换
+│   ├── transcoder/          FFmpeg 转码、多码率、硬件加速、底层字幕转换、预生成队列
 │   ├── update/              自更新
 │   ├── watcher/             文件系统事件监听（fsnotify）
 │   └── web/                 HTTP 服务、静态资源服务、认证中间件
@@ -245,6 +247,22 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 
 唯一键 `UNIQUE(space_id, media_id, source)` 保证刷新覆盖当前来源结果，不无限追加历史。扫描新增媒体通过 `ScanChange(added)` 幂等入队 `metadata.parse`；修改事件仅在文件大小或 mtime 指纹变化时标记 stale 并入队刷新，移除事件只标记 stale。`metadata.backfill` 以媒体 ID checkpoint 流式推进，进度写入 FR2-037 通用任务；失败保留最后成功 checkpoint 并按队列退避自动重试。解析器只读取源文件，规范化结果记录解析时的真实 size/mtime，并复用 `media_files` 中非 stale 的可信内容哈希；不会为提取元数据改写、复制回或触碰原媒体。视频通过配置注入的 ffprobe JSON 解析容器与全部视频/音频/字幕流，图片复用现有 `imagemeta` 与标准库解析 EXIF、IPTC、XMP 可得子集。
 
+**字幕轨道索引（media_subtitle_tracks）（FR2-044）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | 服务端稳定 `track_id`；上传轨同时用于受控文件名 |
+| space_id / media_id | TEXT / INTEGER, INDEX | Space 与媒体归属，所有读写同时校验 |
+| source | TEXT, INDEX | `embedded` / `sidecar` / `uploaded` |
+| source_ref | TEXT | 外挂规范化相对引用，或上传时清理后的原文件名；不向客户端暴露磁盘绝对路径 |
+| storage_relative_path | TEXT | 仅上传轨使用，固定为 `subtitles/{space}/{media}/{track_id}.{format}` |
+| stream_index | INTEGER | 内嵌字幕流索引；非内嵌轨固定为 `-1` |
+| format / language / title | TEXT | 字幕格式、语言与展示标题 |
+| is_default / is_forced | BOOLEAN | 默认轨与强制字幕标记 |
+| created_at / updated_at | DATETIME | 创建与更新时间 |
+
+来源唯一性由 partial unique index 分开保证：内嵌轨按 `(space_id, media_id, stream_index)`，外挂轨按 `(space_id, media_id, source_ref)`，上传轨按稳定 `id + space_id` 归属。`internal/subtitle` 每次列表把本表、FR2-030 最新 stream 元数据与本地外挂发现聚合为统一 DTO；音轨不写入本表，而从 ffprobe stream 元数据派生稳定 ID。上传字幕是 `subtitles/` 下的用户持久数据，不登记 `cache_assets`；删除时先隔离文件，再在同一事务删除记录并写审计，最终文件删除失败会补偿恢复。外挂读取以媒体目录为受限根且入口只接受 basename：枚举阶段跳过符号链接和非普通文件，读取使用 `os.OpenInRoot`，打开后再次确认仍为普通文件；消失、逃逸链接与非普通文件统一按不存在处理。上传轨只按数据库记录与服务端生成文件名对应的受控应用数据相对路径读取。
+
 **影视信息推断（media_inferences）（FR2-031）**
 
 | 字段 | 类型 | 说明 |
@@ -384,7 +402,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | rebuildable | BOOLEAN | 是否可按需重建；首批缓存均为可重建 |
 | created_at / accessed_at / missing_at / updated_at | DATETIME | 创建、访问、磁盘缺失和更新时间 |
 
-FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记并聚合 `size_bytes` 与 `file_count`，segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过 `PrepareHLSRebuild` 仅删除目标 Space/media/profile 的受控目录与资产行，不影响同媒体其他 profile 或原媒体。
+FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；普通 FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记，FR2-044 音轨重载按 `hls/{space_id}/{media_id}/{profile_id}/tasks/{task_id}/` 登记并把 `variant` 固定为字符串 `task_id`，两者均聚合 `size_bytes` 与 `file_count`。segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过缓存安全边界只删除目标 Space/media/profile 或精确任务目录与资产行，不影响同媒体其他 profile、同 profile 其他任务或原媒体。
 
 **媒体当前封面（media_covers）** — FR2-059
 
@@ -703,9 +721,18 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 #### 5.4.2 单档 HLS preview 与统一任务队列（FR2-008）
 
 - `HLSPreviewService` 把每个 Space/media/profile 建模为通用任务 `transcode.hls.preview`，payload 快照 `preset_id/profile_id/codec/width/height/force_rebuild`，优先级交 `tasks.Service` 领取，最大尝试 3 次、默认单 worker；取消通过 context 终止 ffmpeg，失败或取消可从通用任务 API 重试。
-- 产物目录固定为 `hls/{space_id}/{media_id}/{profile_id}/`。默认 profile 为 `h264`：TS 路径只从分辨率档位中选择**一个**质量，生成一个 variant 与只含一个 `EXT-X-STREAM-INF` 的 `master.m3u8`；高级编码生成单档 `index.m3u8 + init.mp4 + .m4s`。这一定义故意不包含 FR2-026 的多码率阶梯。
-- HLS 目录生成成功后登记一条 `cache_assets(kind=hls, asset_level=directory, profile_id=...)`；`force_rebuild` 先经 `storage.PrepareHLSRebuild` 校验并只删除目标 profile，再原子重建和重新登记。通用缓存清理删除产物后，`GET /api/play/:id/hls-status` 返回不可用，重新入队即可重建。
-- 默认 H.264 profile 对外继续兼容 `/api/play/hls/:id/master`、`master.m3u8` 和历史 `hls/{media_id}/` 文件布局；显式 profile 使用 `/api/play/hls/:id/profiles/:profile_id/:file`。状态端点同时返回 `available/profile_id/url/task`，前端先尝试原文件直连，仅在直连加载失败且 HLS preview 已可用时切到该 URL；FR-53 高级编码协商仍保留原契约。
+- 普通 preview 产物目录保持 `hls/{space_id}/{media_id}/{profile_id}/` 不变。默认 profile 为 `h264`：TS 路径只从分辨率档位中选择**一个**质量，生成一个 variant 与只含一个 `EXT-X-STREAM-INF` 的 `master.m3u8`；高级编码生成单档 `index.m3u8 + init.mp4 + .m4s`。这一定义故意不包含 FR2-026 的多码率阶梯。
+- 普通 HLS 目录生成成功后登记一条 `cache_assets(kind=hls, asset_level=directory, profile_id=...)`；`force_rebuild` 先经 `storage.PrepareHLSRebuild` 校验并只删除目标 profile，再原子重建和重新登记。通用缓存清理删除产物后，`GET /api/play/:id/hls-status` 返回不可用，重新入队即可重建。
+- 默认 H.264 profile 对外继续兼容 `/api/play/hls/:id/master`、`master.m3u8` 和历史 `hls/{media_id}/` 文件布局；普通显式 profile 继续使用 `/api/play/hls/:id/profiles/:profile_id/:file`。这些普通 profile 路径不因 FR2-044 改变。状态端点同时返回 `available/profile_id/url/task`，前端先尝试原文件直连，仅在直连加载失败且 HLS preview 已可用时切到该 URL；FR-53 高级编码协商仍保留原契约。
+
+#### 5.4.3 统一字幕与多音轨（FR2-044）
+
+- **统一轨道服务**：`internal/subtitle` 聚合 FR2-030 的音频/字幕 stream、本地外挂字幕和 `media_subtitle_tracks` 上传记录，输出稳定 `track_id`、来源、格式/codec、语言、标题、默认/强制标记、可用性与 `seamless/reload/unsupported` 能力。选择状态按 kind 分开维护 `selected_track_id`（用户意图）与 `effective_track_id`（后端确认）；初始实际音轨未确认时允许为 `null`。
+- **字幕持久化与读取边界**：上传只接受 SRT/ASS/SSA/VTT 和 10 MiB 硬上限，原子写入 `subtitles/{space}/{media}`，不写媒体目录、不登记缓存。外挂、上传、内嵌文本字幕都按请求规范化为 WebVTT；转换临时文件请求后清理。外挂只以媒体所在目录为受限根并接收 basename，枚举时跳过 symlink/非普通文件，读取通过 `os.OpenInRoot` 且打开后复验普通文件；路径逃逸、链接替换与文件消失统一按 404 处理。上传轨只读取数据库登记的受控应用数据相对路径。SMB 外挂与不支持的图片/codec 字幕通过来源能力和结构化原因显式拒绝。
+- **音轨任务身份**：本地至少两个可确认内嵌音频 stream 的媒体可创建 audio reload；服务端按目标稳定轨道 ID 与 `stream_index` 生成固定 H.264/AAC profile。音轨 profile 保留命名空间只允许专用 audio reload 入口创建，普通 preview 入队不能伪造。每个任务写入 `hls/{space_id}/{media_id}/{profile_id}/tasks/{task_id}/`，公开 URL 为 `/api/play/hls/{media_id}/profiles/{profile_id}/tasks/{task_id}/master.m3u8`，缓存登记 `kind=hls`、`profile_id=<派生 profile>`、`variant=<字符串 task_id>`。worker 在删除旧产物和转码前同时校验数据库快照与本地文件当前 size/mtime，真实源变化不会被未刷新的数据库记录掩盖。普通 HLS profile 的目录和 URL 保持 §5.4.2 原样。
+- **状态与资产隔离**：音轨 `GET /api/play/:id/hls-status` 必须携创建响应的 `task_id`，按 Space/media/profile/task/payload 精确校验；`available`、`url` 与 `effective_track_id` 只来自该任务。任务清单与切片路由读取前再次查询同一 `succeeded` 任务，随后使用 `os.OpenInRoot` 返回的同一普通文件句柄完成 `Stat` 与 HTTP Range 响应，不按 profile 回退到其他任务、不走旧 HLS 布局兼容，也不留下路径检查后再打开的 symlink 竞态窗口。
+- **前端提交协议**：`TrackFacet` 发起音轨事务时固定原 source，但播放控制态按事务期间最新的 play/pause/seek/ratechange revision 收敛。候选 HLS 必须经 hls.js 支持、manifest parsed、媒体 `canplay` 和状态端点的目标 `effective_track_id` 确认后才提交；后发选择以请求代次抢占旧结果。当前清单刷新若移除或禁用正在加载的轨道，会取消对应请求并失效 generation，迟到结果不能重新提交。
+- **fatal 分流**：候选提交前发生 hls.js fatal、媒体元素 `error`、加载失败或就绪超时，销毁候选并按最新控制态恢复原 source 与完整 selected/effective 快照，不发布终态播放错误、不创建 mpegts.js 伪降级。候选提交后当前 HLS 再发生 fatal，不回滚到原 source；销毁当前 HLS，并且只发布一次 `PlaybackError{category=media, code=HLS_FATAL}`。
 
 ### 5.5 多码率自适应（ABR，FR2-026）
 

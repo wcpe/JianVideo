@@ -1,12 +1,17 @@
 package player
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// ErrInvalidHLSPath 表示 HLS 相对路径无效或目标不是普通文件。
+var ErrInvalidHLSPath = errors.New("非法 HLS 路径")
 
 // HLSManager 管理所有媒体文件的 HLS 会话，每个媒体可包含多个码率 writer。
 type HLSManager struct {
@@ -89,31 +94,19 @@ func (m *HLSManager) GetM3U8(mediaID int64, quality string) (string, error) {
 	_, hasQuality := mediaWriters[quality]
 	m.mu.Unlock()
 
-	// 追播模式：内存里有 writer 就走 in-memory 路径（writer 维护 m3u8 文本）
+	relPath := fmt.Sprintf("%d/%s.m3u8", mediaID, quality)
+	// 追播模式：内存里有 writer 就走受限文件句柄读取。
 	if hasMedia && hasQuality {
-		m3u8Path, err := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s.m3u8", mediaID, quality))
-		if err != nil {
-			return "", err
-		}
-		data, err := os.ReadFile(m3u8Path)
+		data, err := readHLSFile(m.baseDir, relPath)
 		if err != nil {
 			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
 		}
 		return string(data), nil
 	}
 
-	// 预切片模式：直接读文件系统（ffmpeg 写出的 m3u8）
-	m3u8Path, pathErr := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s.m3u8", mediaID, quality))
+	// 预切片模式：直接从受限文件句柄读取 ffmpeg 产物。
+	data, pathErr := readHLSFile(m.baseDir, relPath)
 	if pathErr == nil {
-		if _, err := os.Stat(m3u8Path); err != nil {
-			pathErr = err
-		}
-	}
-	if pathErr == nil {
-		data, err := os.ReadFile(m3u8Path)
-		if err != nil {
-			return "", fmt.Errorf("读取 m3u8 失败: %w", err)
-		}
 		return string(data), nil
 	}
 
@@ -132,19 +125,15 @@ func (m *HLSManager) GetSegment(mediaID int64, quality string, name string) ([]b
 	_, hasQuality := mediaWriters[quality]
 	m.mu.Unlock()
 
-	segPath, pathErr := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/%s", mediaID, name))
-	if pathErr != nil {
-		return nil, pathErr
-	}
-
-	// 追播模式：必须内存里还有对应 writer 才允许读
+	relPath := fmt.Sprintf("%d/%s", mediaID, name)
+	// 追播模式：必须内存里还有对应 writer 才允许读。
 	if hasMedia && hasQuality {
-		return os.ReadFile(segPath)
+		return readHLSFile(m.baseDir, relPath)
 	}
 
-	// 预切片模式：直接从文件系统读
-	if _, err := os.Stat(segPath); err == nil {
-		return os.ReadFile(segPath)
+	// 预切片模式：直接从受限文件句柄读取。
+	if data, err := readHLSFile(m.baseDir, relPath); err == nil {
+		return data, nil
 	}
 
 	if hasMedia {
@@ -155,11 +144,7 @@ func (m *HLSManager) GetSegment(mediaID int64, quality string, name string) ([]b
 
 // GetMasterM3U8 读取指定媒体文件的 master.m3u8 索引内容。
 func (m *HLSManager) GetMasterM3U8(mediaID int64) (string, error) {
-	masterPath, err := ResolveContainedPath(m.baseDir, fmt.Sprintf("%d/master.m3u8", mediaID))
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(masterPath)
+	data, err := readHLSFile(m.baseDir, fmt.Sprintf("%d/master.m3u8", mediaID))
 	if err != nil {
 		return "", fmt.Errorf("读取 master.m3u8 失败: %w", err)
 	}
@@ -176,15 +161,52 @@ func (m *HLSManager) SaveMasterM3U8(mediaID int64, content string) error {
 	return os.WriteFile(masterPath, []byte(content), 0o644)
 }
 
-// ResolveContainedPath 解析 HLS 相对路径，并拒绝绝对路径、平台分隔符混用、路径穿越与越界符号链接。
-func ResolveContainedPath(baseDir, relPath string) (string, error) {
+// OpenHLSFile 在根目录约束内打开 HLS 普通文件，并返回同一句柄的文件信息。
+func OpenHLSFile(baseDir, relPath string) (*os.File, os.FileInfo, error) {
+	if err := validateHLSRelativePath(relPath); err != nil {
+		return nil, nil, err
+	}
+	file, err := os.OpenInRoot(filepath.Clean(baseDir), filepath.FromSlash(relPath))
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, ErrInvalidHLSPath
+	}
+	return file, info, nil
+}
+
+func readHLSFile(baseDir, relPath string) ([]byte, error) {
+	file, _, err := OpenHLSFile(baseDir, relPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	return io.ReadAll(file)
+}
+
+func validateHLSRelativePath(relPath string) error {
 	if relPath == "" || filepath.IsAbs(relPath) || strings.Contains(relPath, "\\") {
-		return "", fmt.Errorf("非法 HLS 路径")
+		return ErrInvalidHLSPath
 	}
 	for _, part := range strings.Split(filepath.ToSlash(relPath), "/") {
 		if part == "" || part == "." || part == ".." {
-			return "", fmt.Errorf("非法 HLS 路径")
+			return ErrInvalidHLSPath
 		}
+	}
+	return nil
+}
+
+// ResolveContainedPath 解析 HLS 相对路径，并拒绝绝对路径、平台分隔符混用、路径穿越与越界符号链接。
+func ResolveContainedPath(baseDir, relPath string) (string, error) {
+	if err := validateHLSRelativePath(relPath); err != nil {
+		return "", err
 	}
 	baseAbs, err := filepath.Abs(baseDir)
 	if err != nil {

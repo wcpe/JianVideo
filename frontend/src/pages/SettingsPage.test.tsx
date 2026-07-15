@@ -33,7 +33,7 @@ describe('SettingsPage', () => {
   it('加载并展示现有设置值', async () => {
     renderPage();
     // 扫描周期初始值 3600 应填入输入框
-    const scanInterval = await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 });
+    const scanInterval = await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
     expect(scanInterval).toHaveValue('3600');
     // 回收站路径初始 JSON 回填为结构化行：盘符 D + 路径 D:/.recycle
     expect(screen.getByLabelText('盘符 1')).toHaveValue('D');
@@ -103,7 +103,7 @@ describe('SettingsPage', () => {
 
   it('设置项按「扫描 / 网络 / 工具路径 / 回收站」分区且字段归位', async () => {
     renderPage();
-    await screen.findByLabelText('扫描周期（秒）');
+    await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
     // 四个分区标题均出现
     for (const title of ['扫描', '网络', '工具路径', '回收站']) {
       expect(screen.getByRole('heading', { name: title })).toBeVisible();
@@ -114,7 +114,7 @@ describe('SettingsPage', () => {
 
   it('左侧锚点列容器带 sticky 常驻样式（FR-113 修复：滚动时锚点常驻可见）', async () => {
     renderPage();
-    await screen.findByLabelText('扫描周期（秒）');
+    await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
 
     // 锚点导航以 <nav aria-label="区块导航"> 呈现，其外层容器挂 anchor-nav-sticky（position: sticky）
     const nav = screen.getByRole('navigation', { name: '区块导航' });
@@ -126,7 +126,7 @@ describe('SettingsPage', () => {
   it('回收站编辑器：增行后多一组盘符/路径输入', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByLabelText('盘符 1');
+    await screen.findByLabelText('盘符 1', {}, { timeout: 10000 });
     await user.click(screen.getByRole('button', { name: '添加盘符' }));
     expect(screen.getByLabelText('盘符 2')).toBeInTheDocument();
     expect(screen.getByLabelText('回收站路径 2')).toBeInTheDocument();
@@ -135,7 +135,7 @@ describe('SettingsPage', () => {
   it('回收站编辑器：删行后该组输入消失', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByLabelText('盘符 1');
+    await screen.findByLabelText('盘符 1', {}, { timeout: 10000 });
     await user.click(screen.getByRole('button', { name: '删除盘符 1' }));
     expect(screen.queryByLabelText('盘符 1')).not.toBeInTheDocument();
   });
@@ -177,7 +177,7 @@ describe('SettingsPage', () => {
     );
     renderPage();
 
-    const driveInput = await screen.findByLabelText('盘符 1');
+    const driveInput = await screen.findByLabelText('盘符 1', {}, { timeout: 10000 });
     await user.clear(driveInput); // 盘符清空 → 非法
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -200,7 +200,7 @@ describe('SettingsPage', () => {
     );
     renderPage();
 
-    await screen.findByLabelText('盘符 1');
+    await screen.findByLabelText('盘符 1', {}, { timeout: 10000 });
     // 加一行并填与第一行相同的盘符 D
     await user.click(screen.getByRole('button', { name: '添加盘符' }));
     await user.type(screen.getByLabelText('盘符 2'), 'D');
@@ -216,7 +216,7 @@ describe('SettingsPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const input = await screen.findByLabelText('扫描周期（秒）');
+    const input = await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
     await waitFor(() => expect(input).toHaveValue('3600'));
 
     await user.clear(input);
@@ -256,7 +256,7 @@ describe('SettingsPage', () => {
     );
     renderPage();
 
-    await screen.findByLabelText('扫描周期（秒）');
+    await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {

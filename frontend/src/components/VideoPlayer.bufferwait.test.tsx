@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MantineProvider } from '@mantine/core';
 import VideoPlayer from './VideoPlayer';
@@ -22,10 +22,11 @@ function renderPlayer() {
 }
 
 describe('VideoPlayer 末端缓冲等待（FR-18）', () => {
-  it('收到 waiting 事件展示「等待新数据…」横幅，canplay 后隐藏', () => {
+  it('收到 waiting 事件展示「等待新数据…」横幅，canplay 后隐藏', async () => {
     const { container } = renderPlayer();
     const video = container.querySelector('video')!;
     expect(video).toBeTruthy();
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/dummy.mp4'));
     // 初始无等待
     expect(screen.queryByRole('status', { name: '缓冲等待' })).toBeNull();
     // 触发 waiting 事件 → 横幅出现
@@ -41,9 +42,10 @@ describe('VideoPlayer 末端缓冲等待（FR-18）', () => {
     expect(screen.queryByRole('status', { name: '缓冲等待' })).toBeNull();
   });
 
-  it('stalled 事件同样触发等待', () => {
+  it('stalled 事件同样触发等待', async () => {
     const { container } = renderPlayer();
     const video = container.querySelector('video')!;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/dummy.mp4'));
     act(() => {
       video.dispatchEvent(new Event('stalled'));
     });

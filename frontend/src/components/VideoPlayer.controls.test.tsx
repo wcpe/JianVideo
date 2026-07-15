@@ -1,4 +1,5 @@
-import { render, screen, act } from '@testing-library/react';
+import { PlaybackCore } from '@jianvideo/player-core';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MantineProvider } from '@mantine/core';
@@ -44,6 +45,14 @@ function stubVideoTime(video: HTMLVideoElement, duration: number) {
     },
   });
   Object.defineProperty(video, 'duration', { configurable: true, get: () => duration });
+  Object.defineProperty(video, 'seekable', {
+    configurable: true,
+    get: () => ({
+      length: 1,
+      start: () => 0,
+      end: () => duration,
+    }),
+  });
 }
 
 function renderPlayer(props?: Partial<React.ComponentProps<typeof VideoPlayer>>) {
@@ -105,6 +114,44 @@ describe('音量滑块域（FR-104 修复 IndexSizeError）', () => {
   });
 });
 
+describe('VideoPlayer 当前时间精度', () => {
+  beforeEach(() => {
+    stubVideoPlay();
+    localStorage.clear();
+  });
+
+  it('暂停态显示三位毫秒，避免逐帧结果重复显示为 0:00', async () => {
+    const { container } = renderPlayer();
+    const video = container.querySelector('video') as HTMLVideoElement;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/api/play/1/stream'));
+    stubVideoTime(video, 10);
+
+    act(() => {
+      video.currentTime = 0.033;
+      video.dispatchEvent(new Event('durationchange'));
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+
+    expect(screen.getByTestId('video-current-time')).toHaveTextContent('0:00.033');
+  });
+
+  it('播放态保持整秒显示，避免毫秒数字持续抖动', async () => {
+    const { container } = renderPlayer();
+    const video = container.querySelector('video') as HTMLVideoElement;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/api/play/1/stream'));
+    stubVideoTime(video, 10);
+
+    act(() => {
+      video.currentTime = 5.987;
+      video.dispatchEvent(new Event('durationchange'));
+      video.dispatchEvent(new Event('playing'));
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+
+    expect(screen.getByTestId('video-current-time')).toHaveTextContent('0:05');
+  });
+});
+
 describe('VideoPlayer 倍速（FR-104）', () => {
   beforeEach(() => {
     stubVideoPlay();
@@ -126,34 +173,200 @@ describe('VideoPlayer 倍速（FR-104）', () => {
   });
 });
 
-describe('VideoPlayer ±10s 快进快退（FR-104）', () => {
+describe('VideoPlayer 六档定位（FR2-034）', () => {
   beforeEach(() => {
     stubVideoPlay();
     localStorage.clear();
   });
 
-  it('快进 +10s 增加 currentTime', async () => {
+  it('默认 5 秒档双向按钮通过 core.seekByTier 定位', async () => {
     const { container } = renderPlayer();
     const video = container.querySelector('video') as HTMLVideoElement;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/api/play/1/stream'));
+    stubVideoTime(video, 600);
+    act(() => {
+      video.currentTime = 100;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: '后退 5 秒' }));
+    await waitFor(() => expect(video.currentTime).toBe(95));
+    await userEvent.click(screen.getByRole('button', { name: '前进 5 秒' }));
+    await waitFor(() => expect(video.currentTime).toBe(100));
+  });
+
+  it('菜单包含六档，切档只调用 setSeekTier 且不位移', async () => {
+    const setTier = vi.spyOn(PlaybackCore.prototype, 'setSeekTier');
+    const seekByTier = vi.spyOn(PlaybackCore.prototype, 'seekByTier');
+    const { container } = renderPlayer();
+    const video = container.querySelector('video') as HTMLVideoElement;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/api/play/1/stream'));
     stubVideoTime(video, 600);
     video.currentTime = 100;
 
-    await act(async () => {
-      await userEvent.click(screen.getByRole('button', { name: '快进 10 秒' }));
-    });
-    expect(video.currentTime).toBe(110);
+    await userEvent.click(screen.getByRole('button', { name: '定位档位：5 秒' }));
+    for (const label of ['1 帧', '0.5 秒', '1 秒', '5 秒', '30 秒', '60 秒']) {
+      expect(screen.getByRole('menuitem', { name: label })).toBeInTheDocument();
+    }
+    await userEvent.click(screen.getByRole('menuitem', { name: '30 秒' }));
+
+    expect(setTier).toHaveBeenLastCalledWith({ kind: 'seconds', value: 30 });
+    expect(seekByTier).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(100);
+    expect(screen.getByRole('button', { name: '后退 30 秒' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '前进 30 秒' })).toBeInTheDocument();
   });
 
-  it('快退 -10s 减少 currentTime 且不为负', async () => {
-    const { container } = renderPlayer();
-    const video = container.querySelector('video') as HTMLVideoElement;
-    stubVideoTime(video, 600);
-    video.currentTime = 5;
+  it('独立帧按钮调用双向 core.stepFrame', async () => {
+    const stepFrame = vi.spyOn(PlaybackCore.prototype, 'stepFrame');
+    renderPlayer();
 
-    await act(async () => {
-      await userEvent.click(screen.getByRole('button', { name: '快退 10 秒' }));
+    await userEvent.click(screen.getByRole('button', { name: '前一帧' }));
+    await userEvent.click(screen.getByRole('button', { name: '后一帧' }));
+
+    expect(stepFrame).toHaveBeenNthCalledWith(1, 'previous');
+    expect(stepFrame).toHaveBeenNthCalledWith(2, 'next');
+  });
+
+  it('近似能力首次执行前即持续显示，逐帧失败后仍显示', async () => {
+    vi.spyOn(PlaybackCore.prototype, 'stepFrame').mockResolvedValueOnce({
+      clamped: false,
+      confirmedMediaTime: 0,
+      correctionCount: 0,
+      direction: 'next',
+      error: { category: 'media', message: '定位失败' },
+      frameDuration: 1 / 30,
+      precision: 'approximate',
+      requestId: 2,
+      startMediaTime: 0,
+      status: 'failed',
+      targetMediaTime: 1 / 30,
+      timestampError: 1 / 30,
     });
-    expect(video.currentTime).toBe(0);
+    renderPlayer({ url: '/approximate.mp4' });
+
+    expect(await screen.findByText('近似逐帧')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '后一帧' }));
+    expect(screen.getByText('近似逐帧')).toBeInTheDocument();
+  });
+
+  it('exact 能力下近似结果持续提示，仅后续 exact-verified 成功清除', async () => {
+    let coreListener: Parameters<PlaybackCore['subscribe']>[0] | undefined;
+    let getActiveSnapshot: PlaybackCore['getSnapshot'] | undefined;
+    const originalSubscribe = PlaybackCore.prototype.subscribe;
+    vi.spyOn(PlaybackCore.prototype, 'subscribe').mockImplementation(function (
+      this: PlaybackCore,
+      listener,
+    ) {
+      getActiveSnapshot = this.getSnapshot.bind(this);
+      coreListener = listener;
+      return originalSubscribe.call(this, listener);
+    });
+    let frameCallback: VideoFrameRequestCallback | undefined;
+    const view = renderPlayer({
+      frameTimeline: [
+        { mediaTime: 0, sourceFrameIndex: 0 },
+        { mediaTime: 1 / 30, sourceFrameIndex: 1 },
+      ],
+      resolvePresentedFrameIdentity: () => ({ sourceFrameIndex: 0 }),
+      url: '/runtime-approximate.mp4',
+    });
+    const video = view.container.querySelector('video') as HTMLVideoElement;
+    Object.assign(video, {
+      cancelVideoFrameCallback: vi.fn(),
+      requestVideoFrameCallback: vi.fn((callback: VideoFrameRequestCallback) => {
+        frameCallback = callback;
+        return 1;
+      }),
+    });
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/runtime-approximate.mp4'));
+    act(() => frameCallback?.(performance.now(), { mediaTime: 0 } as VideoFrameCallbackMetadata));
+    await waitFor(() => expect(screen.queryByText('近似逐帧')).not.toBeInTheDocument());
+    const snapshot = getActiveSnapshot!();
+    const result = {
+      clamped: false,
+      confirmedMediaTime: 0,
+      correctionCount: 0,
+      direction: 'next' as const,
+      frameDuration: 1 / 30,
+      precision: 'approximate' as const,
+      requestId: snapshot.requestId,
+      startMediaTime: 0,
+      status: 'completed' as const,
+      targetMediaTime: 1 / 30,
+      timestampError: 0,
+    };
+
+    act(() => coreListener?.({
+      requestId: result.requestId,
+      result,
+      sourceEpoch: snapshot.sourceEpoch,
+      sourceId: snapshot.sourceId,
+      type: 'frameStepCompleted',
+    }));
+    expect(screen.getByText('近似逐帧')).toBeInTheDocument();
+    act(() => coreListener?.({
+      requestId: result.requestId,
+      result: { ...result, precision: 'unsupported', status: 'canceled' },
+      sourceEpoch: snapshot.sourceEpoch,
+      sourceId: snapshot.sourceId,
+      type: 'frameStepCompleted',
+    }));
+    expect(screen.getByText('近似逐帧')).toBeInTheDocument();
+    act(() => coreListener?.({
+      requestId: result.requestId,
+      result: { ...result, precision: 'exact-verified' },
+      sourceEpoch: snapshot.sourceEpoch,
+      sourceId: snapshot.sourceId,
+      type: 'frameStepCompleted',
+    }));
+    expect(screen.queryByText('近似逐帧')).not.toBeInTheDocument();
+  });
+
+  it('切源时按当前 core 能力在 approximate、exact、unavailable 间同步提示', async () => {
+    let frameCallback: VideoFrameRequestCallback | undefined;
+    const requestVideoFrameCallback = vi.fn((callback: VideoFrameRequestCallback) => {
+      frameCallback = callback;
+      return 1;
+    });
+    const cancelVideoFrameCallback = vi.fn();
+    const view = renderPlayer({ url: '/approximate.mp4' });
+    const video = view.container.querySelector('video') as HTMLVideoElement;
+    Object.assign(video, { cancelVideoFrameCallback, requestVideoFrameCallback });
+    expect(await screen.findByText('近似逐帧')).toBeInTheDocument();
+
+    view.rerender(
+      <MantineProvider>
+        <VideoPlayer
+          url="/exact.mp4"
+          streamType="mp4"
+          autoPlay={false}
+          frameTimeline={[
+            { mediaTime: 0, sourceFrameIndex: 0 },
+            { mediaTime: 1 / 30, sourceFrameIndex: 1 },
+          ]}
+          resolvePresentedFrameIdentity={() => ({ sourceFrameIndex: 0 })}
+        />
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/exact.mp4'));
+    expect(screen.getByText('近似逐帧')).toBeInTheDocument();
+    act(() => {
+      frameCallback?.(performance.now(), { mediaTime: 0 } as VideoFrameCallbackMetadata);
+    });
+    await waitFor(() => expect(screen.queryByText('近似逐帧')).not.toBeInTheDocument());
+
+    view.rerender(
+      <MantineProvider>
+        <VideoPlayer
+          url="/unsupported.mp4"
+          descriptor={{ codec: 'unknown', path: 'fmp4', url: '/unsupported.mp4' }}
+          autoPlay={false}
+        />
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(screen.queryByText('近似逐帧')).not.toBeInTheDocument();
   });
 });
 
@@ -188,22 +401,27 @@ describe('VideoPlayer 键盘快捷键（FR-104）', () => {
     expect(video.muted).toBe(true);
   });
 
-  it('→ 键快进 10s、← 键快退 10s', async () => {
+  it('箭头按当前 5 秒档双向定位，逗号句号双向逐帧', async () => {
+    const stepFrame = vi.spyOn(PlaybackCore.prototype, 'stepFrame');
     const { container } = renderPlayer();
     const video = container.querySelector('video') as HTMLVideoElement;
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/api/play/1/stream'));
     stubVideoTime(video, 600);
-    video.currentTime = 100;
+    act(() => {
+      video.currentTime = 100;
+      video.dispatchEvent(new Event('timeupdate'));
+    });
     const root = screen.getByTestId('video-player-root');
     root.focus();
 
-    await act(async () => {
-      await userEvent.keyboard('{ArrowRight}');
-    });
-    expect(video.currentTime).toBe(110);
-    await act(async () => {
-      await userEvent.keyboard('{ArrowLeft}');
-    });
-    expect(video.currentTime).toBe(100);
+    await userEvent.keyboard('{ArrowRight}');
+    await waitFor(() => expect(video.currentTime).toBe(105));
+    await userEvent.keyboard('{ArrowLeft}');
+    await waitFor(() => expect(video.currentTime).toBe(100));
+    await userEvent.keyboard(',.');
+
+    expect(stepFrame).toHaveBeenNthCalledWith(1, 'previous');
+    expect(stepFrame).toHaveBeenNthCalledWith(2, 'next');
   });
 
   it('焦点在输入框时不触发快捷键', async () => {

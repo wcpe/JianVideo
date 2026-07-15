@@ -21,6 +21,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
 	"github.com/wcpe/JianVideo/internal/settings"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 )
 
 // NewRouter 创建并配置路由
@@ -88,7 +89,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	// HLS 路由：master 动态读取 + 其余静态文件服务挂载 hlsDir
 	hlsDir := filepath.Join(filepath.Dir(cfg.DBPath), "hls")
 	if hlsMgr != nil {
-		api.RegisterHLSRoutes(r, hlsMgr, hlsDir, libSvc)
+		api.RegisterHLSRoutes(r, hlsMgr, hlsDir, libSvc, tasksvc.NewService(db))
 	}
 
 	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，

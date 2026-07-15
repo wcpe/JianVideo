@@ -1209,19 +1209,21 @@
   - 支持 `Content-Range` 响应头
 - **错误**：`404` 媒体文件不存在，`500` 转码启动失败
 
-### 查询 HLS 预览 / ABR 状态（FR2-008 / FR2-026）
+### 查询 HLS 预览 / ABR / 音轨重载状态（FR2-008 / FR2-026 / FR2-044）
 
 - **方法 / 路径**：`GET /api/play/:id/hls-status`
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
-- **查询参数**：`profile_id` 可选；缺省为兼容 profile `h264`，多码率 H.264 使用 `abr-h264`
-- **响应**（200）：
+- **查询参数**：
+  - `profile_id` 可选；缺省为兼容 profile `h264`，多码率 H.264 使用 `abr-h264`。查询 FR2-044 音轨任务时必须显式携带创建响应中的完整 canonical profile ID，不能只传 `task_id` 或使用大小写别名。
+  - `task_id`：普通 preview 不要求；`abr-h264` 不接受；FR2-044 音轨重载 profile **必填**，值必须是 `POST /api/play/:id/audio-reload` 返回的字符串任务 ID。
+- **普通 preview 响应**（200）：
   ```json
   {
     "available": true,
     "profile_id": "h264",
     "url": "/api/play/hls/42/master.m3u8",
     "task": {
-      "id": 7,
+      "id": "7",
       "type": "transcode.hls.preview",
       "status": "succeeded",
       "priority": 10,
@@ -1229,7 +1231,23 @@
     }
   }
   ```
-- **说明**：`available` 只按当前 Space、媒体与 profile 的目标清单判定；`task` 是该 profile 最近一条统一任务，无任务时为 `null`。默认 H.264/TS profile 返回兼容 URL `master.m3u8`；`abr-h264` 返回 `/api/play/hls/:id/profiles/abr-h264/master.m3u8`，对应最近一条 `transcode.hls.abr` 任务。服务未启用返回 `503`，媒体不存在返回 `404`，非法 profile 返回 `400`。
+- **音轨重载响应**（200）：
+  ```json
+  {
+    "available": true,
+    "profile_id": "audio-h264-aac-0123456789abcdef01234567",
+    "url": "/api/play/hls/42/profiles/audio-h264-aac-0123456789abcdef01234567/tasks/91/master.m3u8",
+    "effective_track_id": "emb-0123456789abcdef01234567",
+    "task": {
+      "id": "91",
+      "type": "transcode.hls.preview",
+      "status": "succeeded",
+      "progress": 1
+    }
+  }
+  ```
+- **说明**：普通 preview 的 `task` 仍是当前 Space/media/profile 最近一条统一任务；默认 H.264/TS profile 返回兼容 URL `master.m3u8`，`abr-h264` 返回 `/api/play/hls/:id/profiles/abr-h264/master.m3u8`。音轨重载不按 profile 猜“最新任务”，而是按 `task_id` 精确交叉校验 Space、media、profile、任务类型和 payload；其 `available`、`url` 与 `effective_track_id` 只对应这一任务。只有任务成功且任务目录内清单存在时才返回 `available=true` 和目标 `effective_track_id`。
+- **错误**：`400 INVALID_ID`（媒体 ID 不是整数）、`400 INVALID_HLS_TASK_ID`（任务 ID 非正整数，或 ABR 错带 `task_id`）、`400 HLS_TASK_ID_REQUIRED`（音轨 profile 缺少 `task_id`）、`404 HLS_TASK_NOT_FOUND`、`404 NOT_FOUND`（媒体不存在）、`500 HLS_STATUS_FAILED`（任务信封、payload、媒体/profile/task 身份不一致，profile 未使用创建响应中的 canonical 值，或状态读取失败；响应不泄露内部细节）、`503 HLS_PREVIEW_UNAVAILABLE`、`503 HLS_ABR_UNAVAILABLE`。
 
 ### 显式创建多码率 HLS 任务（FR2-026）
 
@@ -1255,10 +1273,11 @@
 - **默认兼容路径**：
   - `GET /api/play/hls/:id/master` 或 `GET /api/play/hls/:id/master.m3u8`：默认 `h264` profile 的 TS master 清单；FR2-008 单档任务只含一个 `EXT-X-STREAM-INF`，不等同于 FR2-026 多码率 ABR。
   - `GET /api/play/hls/:id/index.m3u8`：默认 profile 的 fMP4/CMAF 清单兼容路径。
-- **显式 profile 路径**：`GET /api/play/hls/:id/profiles/:profile_id/:file`；`abr-h264` 的 `:file` 可为 `master.m3u8` 或 `:variant/index.m3u8`、`:variant/segment_NNN.ts`
-- **旧文件布局兼容**：若 Space/profile 新目录中不存在目标文件，默认路径继续回退读取历史 `hls/:media_id/:file` 产物。
+- **普通显式 profile 路径**：`GET /api/play/hls/:id/profiles/:profile_id/:file`；`abr-h264` 的 `:file` 可为 `master.m3u8` 或 `:variant/index.m3u8`、`:variant/segment_NNN.ts`。
+- **FR2-044 音轨任务路径**：`GET /api/play/hls/:id/profiles/:profile_id/tasks/:task_id/:file`。`POST /api/play/:id/audio-reload` 和同一任务的 `hls-status` 均返回该受鉴权 URL；读取前必须确认数据库中存在同 Space/media/profile/payload 的 `succeeded` `transcode.hls.preview` 任务，master、variant 清单与切片只从对应任务目录读取，不回退到同 profile 的其他任务。音轨 profile 通过不带 `tasks/:task_id` 的普通显式 profile 路径直连会被拒绝；任务不存在、身份不匹配、未成功或资产不存在均返回受控 `404`。
+- **旧文件布局兼容**：仅默认兼容路径在 Space/profile 新目录中不存在目标文件时，继续回退读取历史 `hls/:media_id/:file` 产物；任务级音轨路径不参与旧布局回退。
 - **响应类型**：`.m3u8` 为 `application/vnd.apple.mpegurl`，`.ts` 为 `video/mp2t`，`.m4s` 为 `video/iso.segment`，fMP4 初始化段 `.mp4` 为 `video/mp4`。
-- **安全边界**：请求必须通过当前 Space owner 校验，且媒体必须属于该 Space；路径必须位于受控 HLS 根目录内。
+- **安全边界**：请求必须通过当前 Space owner 校验，媒体必须属于该 Space；路径必须位于受控 HLS 根目录内。HLS 文件通过受限根打开的同一普通文件句柄完成校验与 Range 响应，避免路径检查与实际打开之间的符号链接竞态。任务级路径还必须匹配当前 Space/media/profile 下已成功的 `transcode.hls.preview` 任务身份。
 
 ### 上报观看位置（FR-44）
 
@@ -1513,30 +1532,117 @@
   ```
 - **说明**：供前端在自更新（`POST /api/system/update/apply`，FR-46）进行中轮询展示下载进度条。`state` 取 `idle`（空闲，未在更新）/`downloading`（下载二进制中）/`verifying`（校验 sha256 中）/`done`（替换已触发，进程即将重启）/`failed`（下载或校验失败）。`downloaded`/`total` 为字节数，`total` 取响应 `Content-Length`，**为 0 表示总字节未知**（响应无 `Content-Length`），此时 `percent` 为 0、前端退化为展示已下载字节。进度为**进程内单例**（互斥量保护、不落库，自更新本就用户显式触发、单次互斥），无外部依赖恒可用；服务重启后归零为 `idle`。鉴权随 `/api/*` 的 APIGuard。
 
-### 获取字幕轨道列表
+### 获取统一字幕与音轨列表（FR2-044）
 
-- **方法 / 路径**：`GET /api/play/:id/subtitles`
+- **方法 / 路径**：`GET /api/play/:id/tracks`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **响应**（200）：
   ```json
   {
     "tracks": [
       {
-        "index": 0,
-        "file_name": "电影名.srt",
+        "id": "emb-0123456789abcdef01234567",
+        "kind": "audio",
+        "label": "日语 2.0",
+        "source": "embedded",
+        "codec": "aac",
+        "language": "jpn",
+        "title": "日语",
+        "channels": 2,
+        "channel_layout": "stereo",
+        "is_default": false,
+        "is_forced": false,
+        "available": true,
+        "capability": "reload",
+        "stream_index": 2
+      },
+      {
+        "id": "sid-fedcba9876543210fedcba98",
+        "kind": "subtitle",
+        "label": "电影名.zh.srt",
+        "source": "sidecar",
         "format": "srt",
-        "url": "/api/play/1/subtitles/0"
+        "language": "zh",
+        "title": "zh",
+        "is_default": false,
+        "is_forced": false,
+        "available": true,
+        "capability": "seamless"
       }
-    ]
+    ],
+    "selection": {
+      "audio": {
+        "selected_track_id": "emb-0123456789abcdef01234567",
+        "effective_track_id": null
+      },
+      "subtitle": {
+        "selected_track_id": null,
+        "effective_track_id": null
+      }
+    },
+    "sources": {
+      "embedded": {"available": true, "capability": "seamless"},
+      "sidecar": {"available": true, "capability": "seamless"},
+      "uploaded": {"available": true, "capability": "seamless"}
+    },
+    "backend": {
+      "audio": {"available": true, "capability": "reload"},
+      "subtitle": {"available": true, "capability": "seamless"}
+    }
   }
   ```
-- **说明**：返回媒体文件同目录下的外挂字幕轨道列表（SRT/ASS/SSA/SUP），按文件名匹配
+- **说明**：统一返回容器内嵌音轨/字幕、媒体同目录外挂字幕与用户上传字幕。`id` 是同一 Space/media/source/来源引用下的稳定 `track_id`，客户端不得把数组下标当身份。`selected_track_id` 表示用户选择意图，`effective_track_id` 表示播放后端已确认的实际轨道；切换中二者可以不同，初始音轨尚未由当前播放源确认时 `effective_track_id` 为 `null`。能力只取 `seamless` / `reload` / `unsupported`：`available` 表示轨道或来源本身是否可读取/枚举，存在但当前播放后端无法切换的音轨可以是 `available=true + capability=unsupported`；`unsupported_reason` 解释来源不可用或切换能力不支持的原因。SMB 媒体的外挂来源返回 `SMB_SIDECAR_UNSUPPORTED`，不以空列表伪装为“没有字幕”。
+- **错误**：`400 INVALID_ID`（媒体 ID 不是整数）、`400 INVALID_SUBTITLE`、`404 SUBTITLE_NOT_FOUND`、`503 SUBTITLE_SERVICE_UNAVAILABLE`。
 
-### 获取字幕内容
+### 上传字幕（FR2-044）
 
-- **方法 / 路径**：`GET /api/play/:id/subtitles/:index`
-- **响应**（200）：`Content-Type: text/vtt; charset=utf-8`
-- **说明**：返回指定字幕轨道的 WebVTT 转换内容，SUP 格式返回空 WebVTT 占位
-- **错误**：`400` 索引格式无效，`404` 索引超出范围
+- **方法 / 路径**：`POST /api/play/:id/subtitles`
+- **请求头**：`Content-Type: multipart/form-data`；Space 头同统一轨道列表。
+- **请求**：恰好一个名为 `file` 的文件字段；支持 SRT、ASS、SSA、VTT，单文件最大 10 MiB。
+- **响应**（201）：返回新增的统一字幕轨对象，`id` 即后续内容读取和删除使用的稳定 `track_id`。
+- **说明**：文件保存到应用数据目录 `subtitles/{space_id}/{media_id}/{track_id}.{format}`，文件名由服务端生成；不写媒体原目录、不登记 `cache_assets`。扩展名、文本结构、空文件、二进制伪装、路径穿越和 multipart 多文件都会在提交前拒绝，失败不留下部分文件。
+- **错误**：`400 INVALID_SUBTITLE`、`404 SUBTITLE_NOT_FOUND`、`413 SUBTITLE_TOO_LARGE`、`422 SUBTITLE_UNPROCESSABLE`、`503 SUBTITLE_SERVICE_UNAVAILABLE`。
+
+### 获取稳定字幕内容（FR2-044）
+
+- **方法 / 路径**：`GET /api/play/:id/subtitles/:track_id/content`
+- **响应**（200）：`Content-Type: text/vtt; charset=utf-8`，返回规范化 WebVTT。
+- **说明**：外挂、上传和受支持的内嵌文本字幕统一按稳定 `track_id` 读取。SRT/ASS/SSA 转换为 WebVTT，VTT 重新解析并规范化；内嵌文本字幕按 `stream_index` 通过配置的 ffmpeg 临时提取。转换按请求执行，临时文件在响应后清理，不持久化 WebVTT 缓存。外挂字幕仅以媒体目录为受限根、以已枚举 basename 打开，枚举时跳过 symlink，打开后还会复验普通文件；路径逃逸、链接、文件消失或非普通文件统一返回不存在且不泄露内容。上传字幕则只按数据库中与服务端生成文件名一致的受控应用数据相对路径读取。图片字幕或不支持 codec 返回结构化不支持错误，不返回空 WebVTT 伪成功。
+- **错误**：`400 INVALID_SUBTITLE`、`404 SUBTITLE_NOT_FOUND`、`422 IMAGE_SUBTITLE_UNSUPPORTED` / `SUBTITLE_CODEC_UNSUPPORTED` / `SUBTITLE_UNPROCESSABLE`、`503 SUBTITLE_SERVICE_UNAVAILABLE`。
+
+### 删除上传字幕（FR2-044）
+
+- **方法 / 路径**：`DELETE /api/play/:id/subtitles/:track_id`
+- **响应**（204）：空。
+- **说明**：仅接受当前 Space/media 下 `source=uploaded` 的稳定 `track_id`。服务端先隔离应用数据文件，再在事务中删除 `media_subtitle_tracks` 记录并写 `subtitle.deleted` 审计；最终文件删除失败时恢复记录、审计和原路径。外挂与内嵌轨道没有删除源文件入口。
+- **错误**：`400 INVALID_ID`（媒体 ID 不是整数）、`400 INVALID_SUBTITLE`、`404 SUBTITLE_NOT_FOUND`、`503 SUBTITLE_SERVICE_UNAVAILABLE`。
+
+### 创建音轨 HLS 重载任务（FR2-044）
+
+- **方法 / 路径**：`POST /api/play/:id/audio-reload`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **请求**：
+  ```json
+  {"track_id":"emb-0123456789abcdef01234567"}
+  ```
+- **响应**（202）：
+  ```json
+  {
+    "task_id": "91",
+    "profile_id": "audio-h264-aac-0123456789abcdef01234567",
+    "requested_track_id": "emb-0123456789abcdef01234567",
+    "space_id": "space-default",
+    "url": "/api/play/hls/42/profiles/audio-h264-aac-0123456789abcdef01234567/tasks/91/master.m3u8"
+  }
+  ```
+- **说明**：只为本地、至少两个可确认内嵌音频 stream、目标轨具有有效 `stream_index` 且当前 ffmpeg/硬件策略可执行的媒体创建任务。任务固定输出单音轨 H.264/AAC HLS，并按 `task_id` 使用独立目录和 URL；客户端必须携同一个 `task_id` 查询 `hls-status`，不得按 profile 或媒体猜测最新任务。重复的未完成同身份请求可复用同一任务 ID。
+- **错误**：`400 INVALID_ID`（媒体 ID 不是整数）、`400 INVALID_AUDIO_RELOAD_REQUEST`、`404 NOT_FOUND`、`422 AUDIO_RELOAD_UNSUPPORTED`（响应含 `reason`，例如 `SMB_AUDIO_RELOAD_UNSUPPORTED`、`AUDIO_STREAM_INDEX_UNAVAILABLE`、`AUDIO_RELOAD_FFMPEG_UNAVAILABLE`、`AUDIO_RELOAD_HARDWARE_UNAVAILABLE`）、`503 HLS_PREVIEW_UNAVAILABLE`、`500 AUDIO_RELOAD_ENQUEUE_FAILED`。
+
+### 旧字幕路径兼容
+
+- **列表**：`GET /api/play/:id/subtitles` 继续返回 `{tracks:[{index,file_name,format,url}]}`，仅表示旧式本地外挂字幕数组；SMB 响应附 `sources.sidecar.available=false` 与 `SMB_SIDECAR_UNSUPPORTED`。
+- **内容**：`GET /api/play/:id/subtitles/:index` 继续按旧列表数组索引返回 `text/vtt`。该路径只服务旧客户端，不提供稳定身份；新客户端必须使用 `/tracks` 与 `/:track_id/content`。
+- **错误**：索引非法返回 `400 INVALID_SUBTITLE`，越界或媒体不存在返回 `404 SUBTITLE_NOT_FOUND`；不支持/转换失败使用与稳定内容端点相同的 `422`/`503` 错误。
 
 ### 保存 SMB 凭据
 

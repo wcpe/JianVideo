@@ -1,8 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
+	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 )
 
@@ -163,8 +167,13 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	// 字幕与观看状态路由（不需要 playback 服务，作用于 media_files）
 	sub := r.Group("/api/play")
 	{
+		sub.GET("/:id/tracks", h.GetTracks)
+		sub.POST("/:id/audio-reload", h.CreateAudioReload)
 		sub.GET("/:id/subtitles", h.GetSubtitles)
-		sub.GET("/:id/subtitles/:index", h.GetSubtitleContent)
+		sub.POST("/:id/subtitles", h.UploadSubtitle)
+		sub.GET("/:id/subtitles/:track_id", h.GetSubtitleContent)
+		sub.GET("/:id/subtitles/:track_id/content", h.GetSubtitleTrackContent)
+		sub.DELETE("/:id/subtitles/:track_id", h.DeleteSubtitleTrack)
 
 		// 续播与观看状态（FR-44）：用户观看位置，区别于 playback 的转码/缓冲进度
 		sub.PUT("/:id/position", h.UpdateWatchPosition)
@@ -173,6 +182,11 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		// HLS 状态与显式 ABR 生成：状态查询不入队，高成本任务仅由 POST 创建。
 		sub.GET("/:id/hls-status", h.HLSStatus)
 		sub.POST("/:id/hls-abr", h.CreateHLSABR)
+
+		// 时间轴预览：缺失查询幂等入队，重建显式创建新 generation，资源按完整身份读取。
+		sub.GET("/:id/timeline-preview", h.GetTimelinePreview)
+		sub.POST("/:id/timeline-preview/rebuild", h.RebuildTimelinePreview)
+		sub.GET("/:id/timeline-preview/resources/:profile/:fingerprint/:generation/:resource", h.GetTimelinePreviewResource)
 
 		// 端到端编码协商（FR-53）：客户端上报能力，后端协商实际编码与播放路径
 		sub.POST("/:id/negotiate", h.Negotiate)
@@ -336,32 +350,55 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 //
 // master 内容里的 playlist 路径写 "{quality}.m3u8"（与 master 同目录），
 // hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。
-func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service) {
+// taskServices 可选；未传入时会安全拒绝所有 task-scoped 音轨 HLS URL。
+func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, taskServices ...*tasksvc.Service) {
+	var taskService *tasksvc.Service
+	if len(taskServices) > 0 {
+		taskService = taskServices[0]
+	}
 	r.GET("/api/play/hls/*path", func(c *gin.Context) {
-		mediaID, rest, ok := parseHLSRequestPath(c)
-		if !ok || !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
-			return
-		}
-		spaceID := c.GetString("space_id")
-		if spaceID == "" {
-			spaceID = models.DefaultSpaceID
-		}
-		fullPath, servedPath, err := resolveHLSFile(hlsDir, spaceID, mediaID, rest)
-		if err == nil {
-			c.Header("Content-Type", detectHLSMimeType(servedPath))
-			c.File(fullPath)
-			return
-		}
-		if rest == "master" || rest == "master.m3u8" {
-			serveLegacyMaster(c, hlsMgr, mediaID)
-			return
-		}
-		if os.IsNotExist(err) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的 HLS 路径"})
+		handleHLSRequest(c, hlsMgr, hlsDir, libraryService, taskService)
 	})
+}
+
+func handleHLSRequest(c *gin.Context, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, taskService *tasksvc.Service) {
+	mediaID, rest, ok := parseHLSRequestPath(c)
+	if !ok || !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
+		return
+	}
+	spaceID := c.GetString("space_id")
+	if spaceID == "" {
+		spaceID = models.DefaultSpaceID
+	}
+	audioRoute, err := parseAudioHLSRoute(rest)
+	if err != nil {
+		writeInvalidHLSPath(c)
+		return
+	}
+	if audioRoute != nil && !audioHLSTaskPlayable(c, taskService, spaceID, mediaID, *audioRoute) {
+		writeHLSUnavailable(c)
+		return
+	}
+	serveHLSAsset(c, hlsMgr, hlsDir, spaceID, mediaID, rest)
+}
+
+func serveHLSAsset(c *gin.Context, hlsMgr *player.HLSManager, hlsDir, spaceID string, mediaID int64, rest string) {
+	file, info, servedPath, err := openHLSFile(hlsDir, spaceID, mediaID, rest)
+	if err == nil {
+		defer func() { _ = file.Close() }()
+		c.Header("Content-Type", detectHLSMimeType(servedPath))
+		http.ServeContent(c.Writer, c.Request, filepath.Base(servedPath), info.ModTime(), file)
+		return
+	}
+	if rest == "master" || rest == "master.m3u8" {
+		serveLegacyMaster(c, hlsMgr, mediaID)
+		return
+	}
+	if os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "文件不存在"})
+		return
+	}
+	writeInvalidHLSPath(c)
 }
 
 func parseHLSRequestPath(c *gin.Context) (int64, string, bool) {
@@ -379,33 +416,41 @@ func parseHLSRequestPath(c *gin.Context) (int64, string, bool) {
 	return mediaID, parts[1], true
 }
 
-func resolveHLSFile(root, spaceID string, mediaID int64, rest string) (string, string, error) {
+func openHLSFile(root, spaceID string, mediaID int64, rest string) (*os.File, os.FileInfo, string, error) {
 	candidates, err := hlsRelativeCandidates(spaceID, mediaID, rest)
 	if err != nil {
-		return "", "", err
+		return nil, nil, "", err
 	}
 	var lastErr error
 	for _, candidate := range candidates {
-		fullPath, err := player.ResolveContainedPath(root, candidate)
-		if err == nil {
-			return fullPath, candidate, nil
+		file, info, openErr := player.OpenHLSFile(root, candidate)
+		if openErr == nil {
+			return file, info, candidate, nil
 		}
-		lastErr = err
+		lastErr = openErr
 	}
-	return "", "", lastErr
+	return nil, nil, "", lastErr
 }
 
 func hlsRelativeCandidates(spaceID string, mediaID int64, rest string) ([]string, error) {
 	media := strconv.FormatInt(mediaID, 10)
 	if strings.HasPrefix(rest, "profiles/") {
-		parts := strings.SplitN(rest, "/", 3)
-		if len(parts) != 3 {
-			return nil, os.ErrNotExist
-		}
-		if _, err := transcoder.HLSProfileDir(".", spaceID, mediaID, parts[1]); err != nil {
+		audioRoute, err := parseAudioHLSRoute(rest)
+		if err != nil {
 			return nil, err
 		}
-		return []string{strings.Join([]string{spaceID, media, parts[1], parts[2]}, "/")}, nil
+		if audioRoute != nil {
+			return []string{strings.Join([]string{spaceID, media, audioRoute.profileID, "tasks", strconv.FormatInt(audioRoute.taskID, 10), audioRoute.asset}, "/")}, nil
+		}
+		parts := strings.Split(rest, "/")
+		if len(parts) < 3 || parts[1] == "" {
+			return nil, os.ErrNotExist
+		}
+		profileID := parts[1]
+		if _, err := transcoder.HLSProfileDir(".", spaceID, mediaID, profileID); err != nil {
+			return nil, err
+		}
+		return []string{strings.Join([]string{spaceID, media, profileID, strings.Join(parts[2:], "/")}, "/")}, nil
 	}
 	if rest == "master" {
 		rest = "master.m3u8"
@@ -416,10 +461,80 @@ func hlsRelativeCandidates(spaceID string, mediaID int64, rest string) ([]string
 	}, nil
 }
 
+type audioHLSRoute struct {
+	profileID string
+	taskID    int64
+	asset     string
+}
+
+func parseAudioHLSRoute(rest string) (*audioHLSRoute, error) {
+	if !strings.HasPrefix(rest, "profiles/") {
+		return nil, nil
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || !transcoder.IsAudioReloadProfileNamespace(parts[1]) {
+		return nil, nil
+	}
+	profileID := parts[1]
+	if !transcoder.IsAudioReloadProfileID(profileID) || len(parts) < 5 || parts[2] != "tasks" {
+		return nil, os.ErrInvalid
+	}
+	taskID, err := strconv.ParseInt(parts[3], 10, 64)
+	asset := strings.Join(parts[4:], "/")
+	if err != nil || taskID <= 0 || strconv.FormatInt(taskID, 10) != parts[3] || asset == "" {
+		return nil, os.ErrInvalid
+	}
+	return &audioHLSRoute{profileID: profileID, taskID: taskID, asset: asset}, nil
+}
+
+func audioHLSTaskPlayable(c *gin.Context, tasks *tasksvc.Service, spaceID string, mediaID int64, route audioHLSRoute) bool {
+	if tasks == nil {
+		return false
+	}
+	resourceID := strconv.FormatInt(mediaID, 10)
+	task, err := tasks.Get(c.Request.Context(), route.taskID, tasksvc.Query{
+		Scope: models.TaskScopeSpace, SpaceID: spaceID, Type: transcoder.TaskTypeHLSPreview,
+		ResourceType: "media", ResourceID: resourceID,
+	})
+	if err != nil || task.Status != models.TaskStatusSucceeded {
+		return false
+	}
+	return validAudioHLSTask(*task, spaceID, mediaID, route.profileID)
+}
+
+func validAudioHLSTask(task models.Task, spaceID string, mediaID int64, profileID string) bool {
+	if task.Scope != models.TaskScopeSpace || task.SpaceID == nil || *task.SpaceID != spaceID ||
+		task.Type != transcoder.TaskTypeHLSPreview || task.Status != models.TaskStatusSucceeded || task.ResourceType != "media" ||
+		task.ResourceID != strconv.FormatInt(mediaID, 10) {
+		return false
+	}
+	var payload transcoder.HLSPreviewPayload
+	decoder := json.NewDecoder(strings.NewReader(task.PayloadJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return false
+	}
+	trackID := strings.TrimSpace(payload.AudioTrackID)
+	fingerprint := strings.TrimSpace(payload.SourceFingerprint)
+	return payload.SpaceID == spaceID && payload.MediaID == mediaID && payload.ProfileID == profileID &&
+		payload.Codec == transcoder.DefaultTargetCodec && payload.Width >= 0 && payload.Height >= 0 &&
+		trackID != "" && trackID == payload.AudioTrackID && profileID == transcoder.AudioReloadProfileID(trackID) &&
+		payload.AudioStreamIndex != nil && *payload.AudioStreamIndex >= 0 &&
+		fingerprint != "" && fingerprint == payload.SourceFingerprint
+}
+
+func writeHLSUnavailable(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "HLS 文件不可用"})
+}
+
+func writeInvalidHLSPath(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PATH", "message": "无效的 HLS 路径"})
+}
+
 func serveLegacyMaster(c *gin.Context, hlsMgr *player.HLSManager, mediaID int64) {
 	content, err := hlsMgr.GetMasterM3U8(mediaID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "HLS 主清单不存在"})
 		return
 	}
 	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))

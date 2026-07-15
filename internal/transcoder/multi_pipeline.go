@@ -145,6 +145,18 @@ func (mp *MultiPipeline) RunMulti(ctx context.Context, inputPath string, qualiti
 // 目录不存在会自动创建；outputDir 为空时使用 ffmpeg 默认 cwd。
 // qualities 为码率档位名列表（如 ["1080p","720p","480p"]）。
 func (mp *MultiPipeline) RunMultiToDir(ctx context.Context, inputPath string, qualities []string, outputDir string) error {
+	return mp.runMultiToDir(ctx, inputPath, qualities, outputDir, nil)
+}
+
+// RunMultiToDirWithAudioStream 使用全局流索引精确映射单条音轨。
+func (mp *MultiPipeline) RunMultiToDirWithAudioStream(ctx context.Context, inputPath string, qualities []string, outputDir string, audioStreamIndex int) error {
+	if audioStreamIndex < 0 {
+		return fmt.Errorf("音轨流索引不能为负数")
+	}
+	return mp.runMultiToDir(ctx, inputPath, qualities, outputDir, &audioStreamIndex)
+}
+
+func (mp *MultiPipeline) runMultiToDir(ctx context.Context, inputPath string, qualities []string, outputDir string, audioStreamIndex *int) error {
 	qualityDefs := make([]QualityDefinition, 0, len(qualities))
 	for _, name := range qualities {
 		found := false
@@ -166,7 +178,7 @@ func (mp *MultiPipeline) RunMultiToDir(ctx context.Context, inputPath string, qu
 		}
 	}
 
-	args := mp.buildMultiArgs(inputPath, qualityDefs)
+	args := mp.buildMultiArgsForAudio(inputPath, qualityDefs, audioStreamIndex)
 	return mp.runFFmpeg(ctx, args, outputDir)
 }
 
@@ -209,21 +221,33 @@ func (mp *MultiPipeline) runFFmpeg(ctx context.Context, args []string, dir strin
 
 // BuildArgs 构建多码率 ffmpeg 命令行参数（公开，供测试和外部调用）。
 func (mp *MultiPipeline) BuildArgs(inputPath string, qualityNames []string) []string {
-	// 构建码率定义映射
+	return mp.buildMultiArgs(inputPath, qualityDefinitionsForNames(qualityNames))
+}
+
+// BuildArgsWithAudioStream 构建精确映射全局音轨流索引的 ffmpeg 参数。
+func (mp *MultiPipeline) BuildArgsWithAudioStream(inputPath string, qualityNames []string, audioStreamIndex int) []string {
+	return mp.buildMultiArgsForAudio(inputPath, qualityDefinitionsForNames(qualityNames), &audioStreamIndex)
+}
+
+func qualityDefinitionsForNames(qualityNames []string) []QualityDefinition {
 	qualityDefs := make([]QualityDefinition, 0, len(qualityNames))
 	for _, name := range qualityNames {
-		for _, q := range qualityLadders {
-			if q.Name == name {
-				qualityDefs = append(qualityDefs, q)
+		for _, quality := range qualityLadders {
+			if quality.Name == name {
+				qualityDefs = append(qualityDefs, quality)
 				break
 			}
 		}
 	}
-	return mp.buildMultiArgs(inputPath, qualityDefs)
+	return qualityDefs
 }
 
 // buildMultiArgs 构建多码率 ffmpeg 命令行参数。
 func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDefinition) []string {
+	return mp.buildMultiArgsForAudio(inputPath, qualities, nil)
+}
+
+func (mp *MultiPipeline) buildMultiArgsForAudio(inputPath string, qualities []QualityDefinition, audioStreamIndex *int) []string {
 	n := len(qualities)
 	args := []string{
 		"-hide_banner",
@@ -259,6 +283,10 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 	filterComplex := splitPart + "; " + strings.Join(scaleParts, "; ")
 
 	// 构建输出映射
+	audioMap := "0:a"
+	if audioStreamIndex != nil {
+		audioMap = fmt.Sprintf("0:%d", *audioStreamIndex)
+	}
 	outputParts := make([]string, 0, n*6)
 	for i, q := range qualities {
 		outLabel := fmt.Sprintf("[v%dout]", i+1)
@@ -278,9 +306,18 @@ func (mp *MultiPipeline) buildMultiArgs(inputPath string, qualities []QualityDef
 			"-g", "48",
 			"-keyint_min", "48",
 			"-sc_threshold", "0",
-			"-map", "0:a",
+			"-map", audioMap,
 			"-c:a", "aac",
 			"-b:a", q.AudioRate,
+		)
+		if audioStreamIndex != nil {
+			metadataInput := fmt.Sprintf("0:s:%d", *audioStreamIndex)
+			outputParts = append(outputParts,
+				"-map_metadata", metadataInput,
+				"-map_metadata:s:a:0", metadataInput,
+			)
+		}
+		outputParts = append(outputParts,
 			"-f", "hls",
 			"-hls_time", "3",
 			"-hls_playlist_type", "event",

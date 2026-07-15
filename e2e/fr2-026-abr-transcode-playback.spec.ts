@@ -1,9 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { login } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -12,7 +10,9 @@ test.use({ serviceWorkers: "block" });
 test("显式任务生成多档 HLS、逐档登记缓存并在直连失败后回退 ABR", async ({
   page,
 }) => {
-  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-fr2-026-"));
+  const fixtureRoot = resolve(".tmp/e2e-run/fixtures");
+  await mkdir(fixtureRoot, { recursive: true });
+  const mediaDir = await mkdtemp(join(fixtureRoot, "fr2-026-"));
   const mediaPath = join(mediaDir, "fr2-026-abr.mp4");
   let libraryID = 0;
   try {
@@ -102,8 +102,6 @@ test("显式任务生成多档 HLS、逐档登记缓存并在直连失败后回�
     await expect.poll(() => requestedABR, { timeout: 15000 }).toBe(true);
   } finally {
     if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
-    if (existsSync(mediaDir))
-      rmSync(mediaDir, { recursive: true, force: true });
   }
 });
 

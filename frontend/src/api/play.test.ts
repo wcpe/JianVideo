@@ -1,7 +1,160 @@
 import { describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '@/mocks/beforeAll';
-import { createHLSABR, negotiate } from './play';
+import {
+  createAudioReload,
+  createHLSABR,
+  getHLSStatus,
+  getTimelinePreviewStatus,
+  negotiate,
+  rebuildTimelinePreview,
+} from './play';
+
+describe('时间轴预览 API', () => {
+  it('将 202 作为正常状态并透传查询参数', async () => {
+    let requestedProfile = '';
+    server.use(
+      http.get('*/api/play/9/timeline-preview', ({ request }) => {
+        requestedProfile = new URL(request.url).searchParams.get('profile') ?? '';
+        return HttpResponse.json(
+          { duration: 0, profile_id: 'desktop', status: 'pending', task_id: 42, version: 1 },
+          { status: 202 },
+        );
+      }),
+    );
+
+    const status = await getTimelinePreviewStatus(9, 'desktop');
+
+    expect(status).toMatchObject({ profile_id: 'desktop', status: 'pending', task_id: 42 });
+    expect(requestedProfile).toBe('desktop');
+  });
+
+  it('signal 取消时拒绝状态请求', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(getTimelinePreviewStatus(9, 'desktop', controller.signal)).rejects.toBeDefined();
+  });
+
+  it('把 VTT 与 sprite URL 绝对化', async () => {
+    server.use(
+      http.get('*/api/play/9/timeline-preview', () =>
+        HttpResponse.json({
+          duration: 12,
+          generation_id: 'generation-a',
+          profile_id: 'desktop',
+          source_fingerprint: 'source-a',
+          sprite_urls: { 'sprite-000.jpg': '/api/play/9/timeline-preview/sprite-000.jpg' },
+          status: 'available',
+          task_id: 0,
+          version: 1,
+          vtt_url: '/api/play/9/timeline-preview/index.vtt',
+        }),
+      ),
+    );
+
+    const status = await getTimelinePreviewStatus(9, 'desktop');
+
+    expect(status.vtt_url).toMatch(/^https?:\/\/.+\/api\/play\/9\/timeline-preview\/index\.vtt$/);
+    expect(status.sprite_urls?.['sprite-000.jpg']).toMatch(/^https?:\/\/.+\/api\/play\/9\/timeline-preview\/sprite-000\.jpg$/);
+  });
+
+  it('POST rebuild 并返回正常 202 状态', async () => {
+    let body: unknown;
+    server.use(
+      http.post('*/api/play/9/timeline-preview/rebuild', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(
+          {
+            duration: 0,
+            generation_id: 'generation-new',
+            profile_id: 'mobile',
+            status: 'pending',
+            task_id: 77,
+            version: 1,
+          },
+          { status: 202 },
+        );
+      }),
+    );
+
+    const status = await rebuildTimelinePreview(9, 'mobile');
+
+    expect(body).toEqual({ profile_id: 'mobile' });
+    expect(status).toMatchObject({ generation_id: 'generation-new', task_id: 77 });
+  });
+
+  it('POST rebuild 未指定 profile 时不传空参数', async () => {
+    let body = '未收到请求';
+    server.use(
+      http.post('*/api/play/9/timeline-preview/rebuild', async ({ request }) => {
+        body = await request.text();
+        return HttpResponse.json(
+          { duration: 0, profile_id: 'timeline-v1', status: 'pending', version: 1 },
+          { status: 202 },
+        );
+      }),
+    );
+
+    await rebuildTimelinePreview(9);
+
+    expect(JSON.parse(body)).toEqual({});
+  });
+});
+
+describe('音轨重载 API', () => {
+  it('按修订契约解析 202，并用 task_id 精确查询状态', async () => {
+    let body: unknown;
+    let statusQuery: URLSearchParams | undefined;
+    server.use(
+      http.post('*/api/play/9/audio-reload', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(
+          {
+            task_id: '81',
+            profile_id: 'audio-track-b',
+            url: '/api/play/hls/9/profiles/audio-track-b/tasks/81/master.m3u8',
+            requested_track_id: 'audio-b',
+            space_id: 'space-a',
+          },
+          { status: 202 },
+        );
+      }),
+      http.get('*/api/play/9/hls-status', ({ request }) => {
+        statusQuery = new URL(request.url).searchParams;
+        return HttpResponse.json({
+          available: true,
+          profile_id: 'audio-track-b',
+          url: '/api/play/hls/9/profiles/audio-track-b/tasks/81/master.m3u8',
+          requested_track_id: 'audio-b',
+          effective_track_id: 'audio-b',
+          task: { id: '81', status: 'succeeded', progress: 100 },
+        });
+      }),
+    );
+
+    const created = await createAudioReload(9, 'audio-b');
+    const status = await getHLSStatus(9, created.profile_id, created.task_id);
+
+    expect(body).toEqual({ track_id: 'audio-b' });
+    expect(created).toMatchObject({
+      task_id: '81',
+      requested_track_id: 'audio-b',
+      space_id: 'space-a',
+    });
+    expect(created).not.toHaveProperty('effective_track_id');
+    expect(statusQuery?.get('profile_id')).toBe('audio-track-b');
+    expect(statusQuery?.get('task_id')).toBe('81');
+    expect(status).toMatchObject({ effective_track_id: 'audio-b', task: { status: 'succeeded' } });
+    expect(status.url).toMatch(/^https?:\/\/.+\/profiles\/audio-track-b\/tasks\/81\/master\.m3u8$/);
+  });
+
+  it('signal 取消时拒绝创建请求', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(createAudioReload(9, 'audio-b', controller.signal)).rejects.toBeDefined();
+  });
+});
 
 describe('ABR 显式生成 API', () => {
   it('仅在调用时 POST hls-abr 并返回任务信息', async () => {

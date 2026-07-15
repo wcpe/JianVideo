@@ -50,14 +50,10 @@ func TestSRTToWebVTT(t *testing.T) {
 	}
 }
 
-// TestSRTToWebVTT_Empty 测试空内容。
+// TestSRTToWebVTT_Empty 测试空内容拒绝伪成功。
 func TestSRTToWebVTT_Empty(t *testing.T) {
-	vtt, err := SRTToWebVTT("")
-	if err != nil {
-		t.Fatalf("转换失败: %v", err)
-	}
-	if !strings.HasPrefix(vtt, "WEBVTT") {
-		t.Error("即使空内容也应有 WebVTT 头")
+	if _, err := SRTToWebVTT(""); err == nil {
+		t.Fatal("空 SRT 应返回错误")
 	}
 }
 
@@ -212,19 +208,14 @@ func TestConvertSubtitleFile_ASS(t *testing.T) {
 	}
 }
 
-// TestConvertSubtitleFile_SUP 测试 SUP 占位。
+// TestConvertSubtitleFile_SUP 测试图片字幕不伪装为成功。
 func TestConvertSubtitleFile_SUP(t *testing.T) {
 	tmp := t.TempDir()
 	supPath := filepath.Join(tmp, "test.sup")
 	_ = os.WriteFile(supPath, []byte("fake"), 0o644)
 
-	vtt, err := ConvertSubtitleFile(supPath)
-	if err != nil {
-		t.Fatalf("转换失败: %v", err)
-	}
-	// SUP 占位：返回空 WebVTT
-	if !strings.HasPrefix(vtt, "WEBVTT") {
-		t.Error("应以 WEBVTT 开头")
+	if _, err := ConvertSubtitleFile(supPath); err == nil {
+		t.Fatal("SUP 图片字幕必须返回不支持错误")
 	}
 }
 
@@ -237,6 +228,108 @@ func TestConvertSubtitleFile_Unsupported(t *testing.T) {
 	_, err := ConvertSubtitleFile(txtPath)
 	if err == nil {
 		t.Error("不支持的格式应返回错误")
+	}
+}
+
+func TestConvertSubtitleFile_VTTNormalizesUnsafeMarkup(t *testing.T) {
+	tmp := t.TempDir()
+	vttPath := filepath.Join(tmp, "test.vtt")
+	content := "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<script>alert(1)</script><b>安全文本</b>\n"
+	if err := os.WriteFile(vttPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入 VTT 失败: %v", err)
+	}
+	vtt, err := ConvertSubtitleFile(vttPath)
+	if err != nil {
+		t.Fatalf("转换 VTT 失败: %v", err)
+	}
+	if strings.Contains(strings.ToLower(vtt), "<script") || strings.Contains(vtt, "<b>") {
+		t.Fatalf("不安全标记未转义: %s", vtt)
+	}
+	if !strings.Contains(vtt, "安全文本") {
+		t.Fatalf("安全文本丢失: %s", vtt)
+	}
+}
+
+func TestConvertSubtitleFileRejectsTraversalPath(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "media")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatalf("创建媒体目录失败: %v", err)
+	}
+	outside := filepath.Join(parent, "outside.srt")
+	if err := os.WriteFile(outside, []byte("1\n00:00:01,000 --> 00:00:02,000\n越界内容\n"), 0o600); err != nil {
+		t.Fatalf("创建目录外字幕失败: %v", err)
+	}
+	content, err := ConvertSubtitleFileInRoot(root, filepath.Join("..", "outside.srt"))
+	if err == nil || strings.Contains(content, "越界内容") {
+		t.Fatalf("路径穿越 basename 必须拒绝且不得泄露内容: err=%v content=%s", err, content)
+	}
+}
+
+func TestConvertSubtitleFileInRootKeepsSupportedFormats(t *testing.T) {
+	root := t.TempDir()
+	samples := map[string]string{
+		"srt": "1\n00:00:01,000 --> 00:00:02,000\nSRT正文\n",
+		"ass": "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,ASS正文\n",
+		"ssa": "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,SSA正文\n",
+		"vtt": "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nVTT正文\n",
+	}
+	for format, sample := range samples {
+		t.Run(format, func(t *testing.T) {
+			name := "movie." + format
+			if err := os.WriteFile(filepath.Join(root, name), []byte(sample), 0o600); err != nil {
+				t.Fatalf("创建 %s 字幕失败: %v", format, err)
+			}
+			content, err := ConvertSubtitleFileInRoot(root, name)
+			if err != nil || !strings.Contains(content, strings.ToUpper(format)+"正文") {
+				t.Fatalf("受限读取 %s 字幕失败: err=%v content=%s", format, err, content)
+			}
+		})
+	}
+}
+
+func TestConvertSubtitleFileDoesNotFollowEscapingSymlinkAfterEnumeration(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "media")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatalf("创建媒体目录失败: %v", err)
+	}
+	videoPath := filepath.Join(root, "movie.mkv")
+	sidecarPath := filepath.Join(root, "movie.srt")
+	outsidePath := filepath.Join(parent, "outside.srt")
+	for path, content := range map[string]string{
+		videoPath:   "media",
+		sidecarPath: "1\n00:00:01,000 --> 00:00:02,000\n原字幕\n",
+		outsidePath: "1\n00:00:01,000 --> 00:00:02,000\n目录外秘密\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("创建测试文件失败: %v", err)
+		}
+	}
+	files, err := FindSubtitleFiles(videoPath)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("枚举外挂字幕失败: files=%#v err=%v", files, err)
+	}
+	if err := os.Remove(sidecarPath); err != nil {
+		t.Fatalf("删除已枚举字幕失败: %v", err)
+	}
+	if err := os.Symlink(outsidePath, sidecarPath); err != nil {
+		t.Skipf("当前环境不支持创建符号链接: %v", err)
+	}
+	content, err := ConvertSubtitleFileInRoot(root, filepath.Base(files[0].Path))
+	if err == nil || strings.Contains(content, "目录外秘密") {
+		t.Fatalf("枚举后替换的越界符号链接必须拒绝且不得泄露内容: err=%v content=%s", err, content)
+	}
+}
+
+func TestASSToWebVTT_PreservesLineBreakAndEscapesMarkup(t *testing.T) {
+	content := "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,第一行\\N<script>alert(1)</script>第二行\n"
+	vtt, err := ASSToWebVTT(content)
+	if err != nil {
+		t.Fatalf("转换 ASS 失败: %v", err)
+	}
+	if !strings.Contains(vtt, "第一行\n&lt;script&gt;alert(1)&lt;/script&gt;第二行") {
+		t.Fatalf("ASS 换行或转义错误: %s", vtt)
 	}
 }
 

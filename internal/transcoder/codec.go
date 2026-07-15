@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -182,48 +183,49 @@ func generateTestVideo(outputPath string) error {
 	return nil
 }
 
-// FindSubtitleFiles 查找视频文件同目录下的外挂字幕。
+// FindSubtitleFiles 确定性查找视频同目录下同基础名或带语言后缀的文本外挂字幕。
 func FindSubtitleFiles(videoPath string) ([]SubtitleFile, error) {
 	dir := filepath.Dir(videoPath)
 	baseName := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
-
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	subtitleExts := map[string]string{
-		"srt": "srt",
-		"ass": "ass",
-		"ssa": "ass",
-		"sup": "sup",
-	}
-
-	var results []SubtitleFile
+	formats := map[string]string{"srt": "srt", "ass": "ass", "ssa": "ssa", "vtt": "vtt"}
+	results := make([]SubtitleFile, 0)
 	for _, entry := range entries {
-		if entry.IsDir() {
+		format, ok := sidecarFormat(entry, formats)
+		if !ok || !matchesSubtitleBase(entry.Name(), baseName) {
 			continue
 		}
-
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(entry.Name()), "."))
-		format, ok := subtitleExts[ext]
-		if !ok {
-			continue
-		}
-
-		// 检查是否是同名文件（去掉扩展名后匹配）
-		entryBase := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		if !strings.EqualFold(entryBase, baseName) {
-			continue
-		}
-
-		results = append(results, SubtitleFile{
-			Path:   filepath.Join(dir, entry.Name()),
-			Format: format,
-		})
+		results = append(results, SubtitleFile{Path: filepath.Join(dir, entry.Name()), Format: format})
 	}
-
+	sort.SliceStable(results, func(i, j int) bool {
+		return strings.ToLower(filepath.Base(results[i].Path)) < strings.ToLower(filepath.Base(results[j].Path))
+	})
 	return results, nil
+}
+
+func sidecarFormat(entry os.DirEntry, formats map[string]string) (string, bool) {
+	if entry.Type()&os.ModeSymlink != 0 {
+		return "", false
+	}
+	info, err := entry.Info()
+	if err != nil || info == nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(entry.Name())), ".")
+	format, ok := formats[extension]
+	return format, ok
+}
+
+func matchesSubtitleBase(name, mediaBase string) bool {
+	candidate := strings.TrimSuffix(name, filepath.Ext(name))
+	if strings.EqualFold(candidate, mediaBase) {
+		return true
+	}
+	return len(candidate) > len(mediaBase) && strings.EqualFold(candidate[:len(mediaBase)], mediaBase) && candidate[len(mediaBase)] == '.'
 }
 
 // ProbeAndCacheResult 探测视频元数据并返回兼容性信息。

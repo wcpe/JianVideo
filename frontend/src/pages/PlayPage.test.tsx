@@ -18,6 +18,9 @@ vi.mock('@/components/VideoPlayer', () => ({
     streamType?: string;
     initialPosition?: number;
     fill?: boolean;
+    mediaId?: number;
+    trackResponse?: { tracks: unknown[] };
+    onTrackManifestRefresh?: () => Promise<{ tracks: unknown[] }>;
     descriptor?: { codec: string; path: string; url: string };
   }) => (
     <div
@@ -27,6 +30,9 @@ vi.mock('@/components/VideoPlayer', () => ({
       data-stream-type={props.streamType || ''}
       data-initial-position={props.initialPosition ?? ''}
       data-fill={String(!!props.fill)}
+      data-media-id={props.mediaId ?? ''}
+      data-track-count={props.trackResponse?.tracks.length ?? ''}
+      data-has-track-refresh={String(Boolean(props.onTrackManifestRefresh))}
       data-desc-codec={props.descriptor?.codec ?? ''}
       data-desc-path={props.descriptor?.path ?? ''}
       data-desc-url={props.descriptor?.url ?? ''}
@@ -38,10 +44,40 @@ function renderPlayPage(route: string) {
   const router = createMemoryRouter([{ path: '/play/:id', element: <PlayPage /> }], {
     initialEntries: [route],
   });
-  return render(
-    <MantineProvider>
-      <RouterProvider router={router} />
-    </MantineProvider>,
+  return {
+    router,
+    ...render(
+      <MantineProvider>
+        <RouterProvider router={router} />
+      </MantineProvider>,
+    ),
+  };
+}
+
+function useTrackManifest() {
+  server.use(
+    http.get('*/api/play/:id/tracks', () =>
+      HttpResponse.json({
+        tracks: [],
+        selection: {
+          audio: { selected_track_id: null, effective_track_id: null },
+          subtitle: { selected_track_id: null, effective_track_id: null },
+        },
+        sources: {},
+        backend: {},
+      }),
+    ),
+  );
+}
+
+function usePendingTimelinePreview() {
+  server.use(
+    http.get('*/api/play/:id/timeline-preview', () =>
+      HttpResponse.json(
+        { duration: 0, profile_id: 'timeline-v1', status: 'pending', version: 1 },
+        { status: 202 },
+      ),
+    ),
   );
 }
 
@@ -82,12 +118,91 @@ function renderPlayPageWithCinema(route: string) {
 describe('PlayPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    usePendingTimelinePreview();
+    useTrackManifest();
   });
 
   it('渲染加载状态', () => {
     renderPlayPage('/play/1');
     const skeleton = document.querySelector('.mantine-Skeleton-root');
     expect(skeleton).toBeInTheDocument();
+  });
+
+  it('预载统一轨道清单并把刷新回调交给播放器', async () => {
+    renderPlayPage('/play/1');
+
+    const player = await screen.findByTestId('video-player');
+    expect(player).toHaveAttribute('data-media-id', '1');
+    expect(player).toHaveAttribute('data-track-count', '0');
+    expect(player).toHaveAttribute('data-has-track-refresh', 'true');
+  });
+
+  it('快速切换路由时旧媒体迟到的轨道清单不能注入新播放器', async () => {
+    let releaseOldTracks!: () => void;
+    let markOldTracksStarted!: () => void;
+    const oldTracksGate = new Promise<void>((resolve) => (releaseOldTracks = resolve));
+    const oldTracksStarted = new Promise<void>((resolve) => (markOldTracksStarted = resolve));
+    const media = (mediaId: number) => ({
+      id: mediaId,
+      library_id: 1,
+      file_path: `D:/V/${mediaId}.mp4`,
+      file_name: `${mediaId}.mp4`,
+      file_size: 0,
+      format: 'mp4',
+      video_codec: 'h264',
+      audio_codec: 'aac',
+      duration: 0,
+      width: 0,
+      height: 0,
+      bitrate: 0,
+      subtitle_tracks: '',
+      added_at: '',
+      modified_at: '',
+    });
+    const tracks = (count: number) => ({
+      tracks: Array.from({ length: count }, (_, index) => ({
+        id: `sub-${index}`,
+        kind: 'subtitle',
+        label: `字幕 ${index}`,
+        available: true,
+        capability: 'seamless',
+      })),
+      selection: {
+        audio: { selected_track_id: null, effective_track_id: null },
+        subtitle: { selected_track_id: null, effective_track_id: null },
+      },
+      sources: {},
+      backend: {},
+    });
+    server.use(
+      http.get('*/api/library/media/:id', ({ params }) =>
+        HttpResponse.json(media(Number(params.id))),
+      ),
+      http.get('*/api/play/:id/tracks', async ({ params }) => {
+        if (params.id === '1') {
+          markOldTracksStarted();
+          await oldTracksGate;
+          return HttpResponse.json(tracks(2));
+        }
+        return HttpResponse.json(tracks(1));
+      }),
+    );
+
+    const { router } = renderPlayPage('/play/1');
+    await oldTracksStarted;
+    await act(async () => {
+      await router.navigate('/play/2');
+    });
+
+    const player = await screen.findByTestId('video-player');
+    expect(player).toHaveAttribute('data-media-id', '2');
+    expect(player).toHaveAttribute('data-track-count', '1');
+
+    releaseOldTracks();
+    await waitFor(() => {
+      expect(player).toHaveAttribute('data-media-id', '2');
+      expect(player).toHaveAttribute('data-track-count', '1');
+    });
   });
 
   it('无效 ID 显示错误提示', async () => {
@@ -487,6 +602,8 @@ describe('PlayPage', () => {
 describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    usePendingTimelinePreview();
+    useTrackManifest();
   });
 
   it('头部仅外露返回 + 影院 + 更多，次要操作不平铺为按钮', async () => {
@@ -618,6 +735,8 @@ describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
 describe('PlayPage 全屏沉浸布局（FR-103）', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    usePendingTimelinePreview();
+    useTrackManifest();
   });
 
   it('根容器 100dvh + overflow hidden（铺满视口、不可纵向滚动）', async () => {

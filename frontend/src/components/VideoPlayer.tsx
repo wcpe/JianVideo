@@ -1,4 +1,17 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { createPreviewFacet, PlaybackCore, SEEK_TIERS } from '@jianvideo/player-core';
+import type {
+  FrameStepDirection,
+  PlaybackCommandContext,
+  PlaybackSnapshot,
+  PlaybackSource,
+  PlaybackTrack,
+  PreparedPreviewTrack,
+  PreviewFacet,
+  PreviewHit,
+  SeekTier,
+  TrackKind,
+} from '@jianvideo/player-core';
 import { Text, Box, ActionIcon, Slider, Menu } from '@mantine/core';
 import {
   IconPlayerPlay,
@@ -8,15 +21,32 @@ import {
   IconMaximize,
   IconMinimize,
   IconPictureInPicture,
-  IconRewindBackward10,
-  IconRewindForward10,
+  IconPlayerSkipBack,
+  IconPlayerSkipForward,
+  IconPlayerTrackNext,
+  IconPlayerTrackPrev,
   IconAdjustments,
 } from '@tabler/icons-react';
-import mpegts from 'mpegts.js';
-import type Hls from 'hls.js';
 import type { SubtitleEntry, PlaybackDescriptor } from '@/types';
+import type { TrackResponse } from '@/api/subtitle';
+import { deleteSubtitle, uploadSubtitle } from '@/api/subtitle';
+import VideoTrackControls, {
+  SubtitleOverlay,
+  type TrackSelections,
+} from '@/components/VideoTrackControls';
+import {
+  loadSubtitlePreferences,
+  type SubtitlePreferences,
+} from '@/components/VideoTrackControls.helpers';
 import { isCodecSupported } from '@/utils/codec-capability';
+import { notifyError } from '@/utils/notify';
+import { useAuthStore } from '@/stores/auth';
 import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
+import { WebPlaybackBackend, type WebPlaybackSourcePayload } from '@/player/WebPlaybackBackend';
+import type {
+  ResolvePresentedFrameIdentity,
+  WebFrameTimelineEntry,
+} from '@/player/WebFramePresentationFacet';
 
 interface VideoPlayerProps {
   /** 流 URL（支持 master.m3u8 触发 ABR 模式）。传入 descriptor 时由其覆盖。 */
@@ -28,6 +58,22 @@ interface VideoPlayerProps {
   descriptor?: PlaybackDescriptor;
   /** 可选视频海报；只传给原生 video，不参与播放状态机。 */
   poster?: string;
+  /** 后端准备的稳定帧时间线；仅用于取得相邻目标。 */
+  frameTimeline?: readonly WebFrameTimelineEntry[];
+  /** 独立的已呈现帧身份源；缺省时逐帧自动降级为近似。 */
+  resolvePresentedFrameIdentity?: ResolvePresentedFrameIdentity;
+  /** 名义帧率；缺省且无时间线时按 30fps 近似。 */
+  nominalFrameRate?: number;
+  /** 当前源的已准备时间轴预览轨道。 */
+  previewTrack?: PreparedPreviewTrack;
+  /** 精灵资源名到可加载 URL 的映射。 */
+  previewSpriteUrls?: Readonly<Record<string, string>>;
+  /** 统一轨道 API 对应的媒体 ID。 */
+  mediaId?: number;
+  /** 播放前预载的统一轨道清单。 */
+  trackResponse?: TrackResponse;
+  /** 上传或删除后刷新统一轨道清单。 */
+  onTrackManifestRefresh?: () => Promise<TrackResponse>;
   /** 自动播放 */
   autoPlay?: boolean;
   /** 当前播放路径发生不可恢复错误时通知调用方切换 fallback。 */
@@ -69,8 +115,8 @@ interface VideoPlayerProps {
 const POSITION_REPORT_INTERVAL = 10;
 // 「看完」判定：剩余时长小于该秒数即视为已看完（FR-44）
 const WATCHED_REMAINING_THRESHOLD = 15;
-// 快进 / 快退步长（秒，FR-104）
-const SEEK_STEP = 10;
+// 默认定位档位与核心初始档保持一致。
+const DEFAULT_SEEK_TIER = { kind: 'seconds', value: 5 } as const satisfies SeekTier;
 // 键盘音量调节步长（FR-104）
 const VOLUME_STEP = 0.1;
 // 控件自动隐藏延迟（毫秒，FR-104）：播放中鼠标静止超过该时长则淡出控件
@@ -84,6 +130,72 @@ const SUBTITLE_SCALES = {
   large: 'var(--mantine-font-size-lg)',
 } as const;
 type SubtitleScale = keyof typeof SUBTITLE_SCALES;
+
+const PREVIEW_LONG_PRESS_MS = 400;
+const PREVIEW_VERTICAL_CANCEL_PX = 12;
+const PREVIEW_FALLBACK_MARGIN_PERCENT = 5;
+
+type PreviewState = {
+  readonly hit: PreviewHit | null;
+  readonly imageUrl: string | null;
+  readonly leftPercent: number;
+  readonly mediaTime: number;
+};
+
+type PreviewPointerSession = {
+  active: boolean;
+  canceled: boolean;
+  clientX: number;
+  pointerId: number;
+  startY: number;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+function createPointerSession(): PreviewPointerSession {
+  return { active: false, canceled: false, clientX: 0, pointerId: -1, startY: 0, timer: null };
+}
+
+function commandFromSnapshot(snapshot: PlaybackSnapshot): PlaybackCommandContext | null {
+  return snapshot.sourceId === null
+    ? null
+    : {
+        requestId: snapshot.requestId,
+        sourceEpoch: snapshot.sourceEpoch,
+        sourceId: snapshot.sourceId,
+      };
+}
+
+function mediaTimeAtClientX(element: HTMLElement, clientX: number, duration: number): number {
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || duration <= 0) return 0;
+  const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  return fraction * duration;
+}
+
+function previewLeftPercent(
+  element: HTMLElement,
+  rawPercent: number,
+  spriteWidth: number,
+  hasImage: boolean,
+): number {
+  const trackWidth = element.getBoundingClientRect().width;
+  const spriteMargin = hasImage && trackWidth > 0 ? (spriteWidth / 2 / trackWidth) * 100 : 0;
+  const marginPercent = Math.min(50, Math.max(PREVIEW_FALLBACK_MARGIN_PERCENT, spriteMargin));
+  return Math.min(100 - marginPercent, Math.max(marginPercent, rawPercent));
+}
+
+function loadImage(url: string, cache: Map<string, Promise<void>>): Promise<void> {
+  const cached = cache.get(url);
+  if (cached) return cached;
+  const loading = new Promise<void>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('预览图片加载失败'));
+    image.src = url;
+  });
+  cache.set(url, loading);
+  return loading;
+}
 
 /** 解析后的有效播放输入（FR-52）。 */
 interface ResolvedPlayback {
@@ -138,16 +250,80 @@ function resolveDescriptor(
   return { url: descriptor.url, isABR: undefined, streamType: 'mpegts', unsupported: false };
 }
 
-/**
- * 视频播放组件
- *
- * - URL 为 master.m3u8 时启用 ABR 模式（hls.js 动态加载）
- * - 其他 URL 使用 mpegts.js 播放
- */
+function createPlaybackSource(
+  url: string,
+  streamType: ResolvedPlayback['streamType'],
+  unsupported: boolean,
+  isABR: boolean,
+  mediaId?: number,
+  trackResponse?: TrackResponse,
+  frameTimeline?: readonly WebFrameTimelineEntry[],
+  nominalFrameRate?: number,
+  resolvePresentedFrameIdentity?: ResolvePresentedFrameIdentity,
+): PlaybackSource {
+  const kind: WebPlaybackSourcePayload['kind'] = unsupported
+    ? 'unsupported'
+    : streamType === 'mp4'
+      ? 'native'
+      : isABR
+        ? 'hls'
+        : 'mpegts';
+  const mode = kind === 'hls' ? 'adaptive' : kind === 'mpegts' ? 'stream' : 'direct';
+  return {
+    id: `${kind}:${url}`,
+    mode,
+    payload: {
+      kind,
+      url,
+      ...(mediaId === undefined ? {} : { mediaId }),
+      ...(trackResponse === undefined ? {} : { trackResponse }),
+      ...(frameTimeline === undefined ? {} : { frameTimeline }),
+      ...(nominalFrameRate === undefined ? {} : { nominalFrameRate }),
+      ...(resolvePresentedFrameIdentity === undefined ? {} : { resolvePresentedFrameIdentity }),
+    } satisfies WebPlaybackSourcePayload,
+  };
+}
+
+function seekTierLabel(tier: SeekTier): string {
+  return tier.kind === 'frame' ? '1 帧' : `${tier.value} 秒`;
+}
+
+function bufferedPercent(snapshot: PlaybackSnapshot): number {
+  const bufferedEnd = snapshot.buffered.at(-1)?.end ?? 0;
+  if (snapshot.duration <= 0) return 0;
+  return Math.min(100, (bufferedEnd / snapshot.duration) * 100);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '请稍后重试';
+}
+
+function hasSameTracks(left: TrackResponse | undefined, right: TrackResponse): boolean {
+  if (left === right) return true;
+  if (!left || left.tracks.length !== right.tracks.length) return false;
+  const rightTracks = new Set(right.tracks.map((track) => `${track.kind}:${track.id}`));
+  return left.tracks.every((track) => rightTracks.has(`${track.kind}:${track.id}`));
+}
+
+function isSameSource(left: PlaybackCommandContext, right: PlaybackCommandContext | null): boolean {
+  return Boolean(
+    right && left.sourceEpoch === right.sourceEpoch && left.sourceId === right.sourceId,
+  );
+}
+
 export default function VideoPlayer({
+
   url,
   descriptor,
   poster,
+  frameTimeline,
+  nominalFrameRate,
+  previewTrack,
+  previewSpriteUrls,
+  resolvePresentedFrameIdentity,
+  mediaId,
+  trackResponse,
+  onTrackManifestRefresh,
   autoPlay = true,
   subtitleEntries,
   subtitleVisible = false,
@@ -160,12 +336,34 @@ export default function VideoPlayer({
   onPlaybackError,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const mpegtsPlayerRef = useRef<mpegts.Player | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const hlsInitTokenRef = useRef(0);
+  const coreRef = useRef<PlaybackCore | null>(null);
+  const backendRef = useRef<WebPlaybackBackend | null>(null);
+  const previewFacetRef = useRef<PreviewFacet>(createPreviewFacet());
+  const previewImageCacheRef = useRef(new Map<string, Promise<void>>());
+  const previewRequestRef = useRef(0);
+  const previewPointerRef = useRef<PreviewPointerSession>(createPointerSession());
+  const suppressSliderSeekRef = useRef(false);
+  const seekPreviewRequestRef = useRef(0);
+  const previewTrackRef = useRef(previewTrack);
+  const previewSpriteUrlsRef = useRef(previewSpriteUrls);
+  const trackResponseRef = useRef(trackResponse);
+  const trackResponsePropRef = useRef(trackResponse);
+  const pendingTrackResponseRef = useRef<TrackResponse | null>(null);
+  const manifestGenerationRef = useRef(0);
+  const manifestContextRef = useRef<string | null>(null);
+  const mediaIdRef = useRef(mediaId);
+  previewTrackRef.current = previewTrack;
+  trackResponsePropRef.current = trackResponse;
+  mediaIdRef.current = mediaId;
+  previewSpriteUrlsRef.current = previewSpriteUrls;
   // FR-44：续播 / 上报 / 看完状态。用 ref 持有最新回调与一次性标志，避免重建监听器。
   const initialPositionRef = useRef(initialPosition);
   const hasSeekedRef = useRef(false);
+  const restoreGenerationRef = useRef(0);
+  const restoreInFlightRef = useRef<number | null>(null);
+  const restoreRetryPendingRef = useRef(false);
+  const seekableAvailableRef = useRef(false);
+  const retryInitialSeekRef = useRef<() => void>(() => undefined);
   const onPositionReportRef = useRef(onPositionReport);
   const onEndedRef = useRef(onEnded);
   const onPlaybackErrorRef = useRef(onPlaybackError);
@@ -181,15 +379,27 @@ export default function VideoPlayer({
   // 在角落展示「点击取消静音」入口，用户主动调音量 / 切静音时清除该标记。
   const [autoMuted, setAutoMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [bufferedProgress, setBufferedProgress] = useState(0);
   const [subtitleText, setSubtitleText] = useState('');
+  const [trackCues, setTrackCues] = useState<readonly SubtitleEntry[]>([]);
+  const [tracks, setTracks] = useState<readonly PlaybackTrack[]>([]);
+  const [trackSelections, setTrackSelections] = useState<TrackSelections | null>(null);
+  const [subtitlePreferences, setSubtitlePreferences] = useState<SubtitlePreferences>(() =>
+    loadSubtitlePreferences(),
+  );
   // 当前由 hls.js 实际切换到的 ABR 档位，仅用于状态展示，不提供手动锁档。
   const [abrLevel, setAbrLevel] = useState<string | null>(null);
   // 末端缓冲等待（FR-18）：mpegts.js ERROR 或 video stalled 时进入等待，1s 后自动重载
   const [isWaiting, setIsWaiting] = useState(false);
+  const [seekTier, setSeekTier] = useState<SeekTier>(DEFAULT_SEEK_TIER);
+  const [framePresentationCapability, setFramePresentationCapability] = useState<
+    PlaybackSnapshot['capabilities']['framePresentation'] | null
+  >(null);
+  const [approximateFrameStep, setApproximateFrameStep] = useState(false);
   // FR-104：播放器内核与控件增强
   const containerRef = useRef<HTMLDivElement>(null);
   // 全屏态：由 fullscreenchange 同步
@@ -198,6 +408,7 @@ export default function VideoPlayer({
   const [rate, setRate] = useState(1);
   // 进度条 hover 时间预览：null 表示未 hover
   const [hoverPct, setHoverPct] = useState<number | null>(null);
+  const [timelinePreview, setTimelinePreview] = useState<PreviewState | null>(null);
   // 控件可见性：播放中鼠标静止数秒后淡出
   const [controlsVisible, setControlsVisible] = useState(true);
   // 字幕字号档（FR-104）
@@ -214,276 +425,292 @@ export default function VideoPlayer({
 
   // 判断是否为 ABR 模式
   const isABR = resolved.isABR ?? resolved.url.endsWith('master.m3u8');
-
-  const destroyMpegtsPlayer = useCallback(() => {
-    const player = mpegtsPlayerRef.current;
-    if (player) {
-      player.off('loadeddata', () => {});
-      player.off('playing', () => {});
-      player.off('pause', () => {});
-      player.pause();
-      player.unload();
-      player.destroy();
-      mpegtsPlayerRef.current = null;
-    }
-  }, []);
-
-  const destroyHlsPlayer = useCallback(() => {
-    hlsInitTokenRef.current += 1;
-    const hls = hlsRef.current as { destroy: () => void } | null;
-    if (hls) {
-      hls.destroy();
-      hlsRef.current = null;
-    }
-  }, []);
-
-  // FR-102：统一的静音自动播。先置 muted=true（浏览器允许 muted autoplay）再触发播放，
-  // 进页即出画面并标记 autoMuted（展示取消静音入口）；muted 仍被拦时落到「点击播放」兜底遮罩。
-  // mpegts.js 经由 player.play() 播放，故允许传入自定义 play 触发器；缺省走原生 video.play()。
-  const attemptAutoPlay = useCallback((play?: () => Promise<void> | void) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = true;
-    setIsMuted(true);
-    setAutoMuted(true);
-    const result = play ? play() : v.play();
-    void (result as Promise<void> | undefined)?.catch?.(() => setAutoPlayBlocked(true));
-  }, []);
-
-  const initMpegtsPlayer = useCallback(
-    (streamUrl: string) => {
-      if (!videoRef.current) return;
-      destroyMpegtsPlayer();
-      const player = mpegts.createPlayer(
-        { type: 'mpegts', url: streamUrl, isLive: true },
-        {
-          enableWorker: true,
-          enableStashBuffer: true,
-          stashInitialSize: 1024 * 1024,
-          accurateSeek: true,
-          seekType: 'range',
-        },
-      );
-      player.attachMediaElement(videoRef.current);
-      player.load();
-      player.on('loadeddata', () => {
-        if (autoPlay) attemptAutoPlay(() => player.play() as Promise<void>);
-      });
-      player.on('playing', () => {
-        setIsPlaying(true);
-        setIsWaiting(false);
-      });
-      player.on('pause', () => setIsPlaying(false));
-      // FR-18：mpegts.js 报错（常见于追上文件写入末端、TS 流暂时断流）→ 标记等待，
-      // 1s 后重载播放器；新数据可用时 loadeddata/playing 会自动复位 isWaiting。
-      // 使用 'error' 字符串避免依赖 mpegts.Events 类型常量。
-      player.on('error', () => {
-        setIsWaiting(true);
-        setTimeout(() => {
-          if (mpegtsPlayerRef.current === player) {
-            try {
-              player.unload();
-              player.load();
-            } catch {
-              /* 静默 */
-            }
-          }
-        }, 1000);
-      });
-      mpegtsPlayerRef.current = player;
-    },
-    [autoPlay, destroyMpegtsPlayer, attemptAutoPlay],
-  );
-
-  const initHlsPlayer = useCallback(
-    async (masterUrl: string) => {
-      if (!videoRef.current) return;
-      destroyHlsPlayer();
-      const initToken = hlsInitTokenRef.current;
-      try {
-        const Hls = (await import('hls.js')).default;
-        const videoElement = videoRef.current;
-        if (initToken !== hlsInitTokenRef.current || !videoElement) return;
-        if (!Hls.isSupported()) {
-          console.warn('[VideoPlayer] hls.js 不支持当前浏览器');
-          initMpegtsPlayer(masterUrl);
-          return;
-        }
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-        hls.loadSource(masterUrl);
-        hls.attachMedia(videoElement);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (autoPlay) attemptAutoPlay();
-        });
-        hls.on(Hls.Events.LEVEL_SWITCHED, (_e, d) => {
-          const level = hls.levels[d.level];
-          if (level)
-            setAbrLevel(level.height > 0 ? `${level.height}p` : `${level.width}x${level.height}`);
-        });
-        hls.on(Hls.Events.ERROR, (_e, d) => {
-          if (d.fatal) {
-            hls.destroy();
-            hlsRef.current = null;
-            initMpegtsPlayer(masterUrl);
-          }
-        });
-        hlsRef.current = hls;
-      } catch {
-        if (initToken === hlsInitTokenRef.current) initMpegtsPlayer(masterUrl);
-      }
-    },
-    [autoPlay, destroyHlsPlayer, initMpegtsPlayer, attemptAutoPlay],
-  );
-
-  // 挂载 / URL 变化
-  useEffect(() => {
-    // FR-52：目标编码不受支持且无回退源 → 不初始化任一内核，仅展示提示（不抛 Network Error）。
-    if (resolved.unsupported) {
-      destroyMpegtsPlayer();
-      void destroyHlsPlayer();
-      return;
-    }
-    if (resolved.streamType === 'mp4' && videoRef.current) {
-      // 把 video 元素复制到局部变量，供 cleanup 使用：cleanup 执行时 videoRef.current 可能已变更，
-      // 用 effect 期捕获的元素引用才能可靠移除 src（消除 react-hooks/exhaustive-deps 告警）。
-      const videoEl = videoRef.current;
-      destroyMpegtsPlayer();
-      void destroyHlsPlayer();
-      videoEl.src = resolved.url;
-      if (autoPlay) attemptAutoPlay();
-      return () => {
-        videoEl.removeAttribute('src');
-      };
-    }
-    if (isABR) void initHlsPlayer(resolved.url);
-    else initMpegtsPlayer(resolved.url);
-    return () => {
-      void destroyHlsPlayer();
-      destroyMpegtsPlayer();
-    };
-  }, [
+  const expectedSourceId = createPlaybackSource(
     resolved.url,
     resolved.streamType,
     resolved.unsupported,
     isABR,
+  ).id;
+  const manifestContext = `${mediaId ?? ''}:${expectedSourceId}`;
+  if (manifestContextRef.current !== manifestContext) {
+    manifestContextRef.current = manifestContext;
+    manifestGenerationRef.current = 0;
+    pendingTrackResponseRef.current = null;
+    trackResponseRef.current = trackResponse;
+  }
+
+  const seekToInitialOnce = useCallback(async () => {
+    const core = coreRef.current;
+    const video = videoRef.current;
+    if (!core || !video || hasSeekedRef.current || restoreInFlightRef.current !== null) return;
+    const position = initialPositionRef.current;
+    if (!position || position <= 1 || !isFinite(video.duration) || video.duration <= 0) return;
+    if (video.duration - position <= WATCHED_REMAINING_THRESHOLD) {
+      hasSeekedRef.current = true;
+      restoreRetryPendingRef.current = false;
+      return;
+    }
+    const generation = restoreGenerationRef.current;
+    restoreInFlightRef.current = generation;
+    restoreRetryPendingRef.current = false;
+    try {
+      const result = await core.seek(position, 'restore');
+      if (generation === restoreGenerationRef.current && result.status === 'completed') {
+        hasSeekedRef.current = true;
+      }
+    } finally {
+      if (restoreInFlightRef.current === generation) restoreInFlightRef.current = null;
+      if (
+        generation === restoreGenerationRef.current &&
+        restoreRetryPendingRef.current &&
+        !hasSeekedRef.current
+      ) {
+        retryInitialSeekRef.current();
+      }
+    }
+  }, []);
+  retryInitialSeekRef.current = () => {
+    void seekToInitialOnce();
+  };
+
+  const syncPreviewFacet = useCallback((snapshot: PlaybackSnapshot) => {
+    const command = commandFromSnapshot(snapshot);
+    if (!command) return;
+    const facet = previewFacetRef.current;
+    const state = facet.getState();
+    const track = previewTrackRef.current;
+    const sourceChanged =
+      state.sourceEpoch !== command.sourceEpoch || state.sourceId !== command.sourceId;
+    const trackChanged = track?.generationId !== state.generationId;
+    if (sourceChanged) facet.setTrack(null, command);
+    if (sourceChanged || trackChanged) facet.setTrack(track ?? null, command);
+  }, []);
+
+  const syncCoreSnapshot = useCallback(
+    (snapshot: PlaybackSnapshot) => {
+      syncPreviewFacet(snapshot);
+      const seekableAvailable = snapshot.seekable.length > 0;
+      const becameSeekable = !seekableAvailableRef.current && seekableAvailable;
+      seekableAvailableRef.current = seekableAvailable;
+      setIsPlaying(snapshot.state === 'playing');
+      setCurrentTime(snapshot.currentTime);
+      setDuration(snapshot.duration);
+      setBufferedProgress(bufferedPercent(snapshot));
+      setFramePresentationCapability(snapshot.capabilities.framePresentation);
+      if (becameSeekable) {
+        restoreRetryPendingRef.current = true;
+        void seekToInitialOnce();
+      }
+    },
+    [seekToInitialOnce, syncPreviewFacet],
+  );
+
+  const syncTrackState = useCallback((core: PlaybackCore) => {
+    const audio = core.getTrackSelection('audio');
+    const subtitle = core.getTrackSelection('subtitle');
+    setTracks([...core.getTracks('subtitle'), ...core.getTracks('audio')]);
+    if (audio && subtitle) setTrackSelections({ audio, subtitle });
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const backend = new WebPlaybackBackend(video, {
+      getHlsRequestHeaders: () => {
+        const headers: Record<string, string> = {};
+        const token = useAuthStore.getState().token as string | undefined;
+        if (token) headers.Authorization = `Bearer ${token}`;
+        return headers;
+      },
+      onAbrLevelChange: setAbrLevel,
+      onPlaybackError: () => onPlaybackErrorRef.current?.(),
+      onWaitingChange: setIsWaiting,
+    });
+    const core = new PlaybackCore({
+      backend,
+      facets: { framePresentation: backend.framePresentation, tracks: backend.tracks },
+      initialSeekTier: DEFAULT_SEEK_TIER,
+    });
+    backendRef.current = backend;
+    coreRef.current = core;
+    setSeekTier(core.getSeekTier() ?? DEFAULT_SEEK_TIER);
+    syncCoreSnapshot(core.getSnapshot());
+    const unsubscribeCues = backend.tracks.subscribeCues(setTrackCues);
+    const unsubscribe = core.subscribe((event) => {
+      if (event.type === 'snapshotChanged') syncCoreSnapshot(event.snapshot);
+      if (event.type === 'trackSelectionChanged' || event.type === 'trackSelectionCompleted') {
+        syncTrackState(core);
+      }
+      if (event.type === 'seekTierChanged') setSeekTier(event.tier);
+      if (event.type === 'frameStepCompleted') {
+        const snapshot = core.getSnapshot();
+        const isCurrentSource =
+          event.sourceEpoch === snapshot.sourceEpoch && event.sourceId === snapshot.sourceId;
+        if (!isCurrentSource) return;
+        if (event.result.precision === 'approximate') setApproximateFrameStep(true);
+        if (event.result.precision === 'exact-verified' && event.result.status === 'completed') {
+          setApproximateFrameStep(false);
+        }
+      }
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeCues();
+      core.dispose();
+      backendRef.current = null;
+      coreRef.current = null;
+    };
+  }, [syncCoreSnapshot, syncTrackState]);
+
+  useEffect(() => {
+    const core = coreRef.current;
+    if (core) syncPreviewFacet(core.getSnapshot());
+    previewRequestRef.current += 1;
+    setTimelinePreview(null);
+  }, [previewTrack, previewSpriteUrls, syncPreviewFacet]);
+
+  useEffect(() => {
+    const backend = backendRef.current;
+    const core = coreRef.current;
+    if (!backend || !core || !trackResponse) return;
+    const pendingResponse = pendingTrackResponseRef.current;
+    if (pendingResponse && !hasSameTracks(trackResponse, pendingResponse)) return;
+    pendingTrackResponseRef.current = null;
+    trackResponseRef.current = trackResponse;
+    const command = commandFromSnapshot(core.getSnapshot());
+    if (!command || command.sourceId !== expectedSourceId) return;
+    backend.tracks.updateResponse(trackResponse, command);
+    syncTrackState(core);
+  }, [expectedSourceId, syncTrackState, trackResponse]);
+
+  // FR-102：自动播放仍由壳层先静音，但播放命令统一进入 PlaybackCore。
+  const attemptAutoPlay = useCallback(async (core: PlaybackCore) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = true;
+    setIsMuted(true);
+    setAutoMuted(true);
+    const result = await core.play();
+    if (result.status === 'failed') setAutoPlayBlocked(true);
+  }, []);
+
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    const source = createPlaybackSource(
+      resolved.url,
+      resolved.streamType,
+      resolved.unsupported,
+      isABR,
+      mediaId,
+      trackResponseRef.current,
+      frameTimeline,
+      nominalFrameRate,
+      resolvePresentedFrameIdentity,
+    );
+    let current = true;
+    restoreGenerationRef.current += 1;
+    restoreInFlightRef.current = null;
+    restoreRetryPendingRef.current = false;
+    seekableAvailableRef.current = false;
+    hasSeekedRef.current = false;
+    setAutoPlayBlocked(false);
+    setFramePresentationCapability(null);
+    setApproximateFrameStep(false);
+    previewRequestRef.current += 1;
+    setTimelinePreview(null);
+    void core.load(source).then(async (result) => {
+      if (!current || result.status !== 'completed') return;
+      syncTrackState(core);
+      await seekToInitialOnce();
+      if (current && autoPlay && !resolved.unsupported) await attemptAutoPlay(core);
+    });
+    return () => {
+      current = false;
+    };
+  }, [
     autoPlay,
-    initHlsPlayer,
-    initMpegtsPlayer,
-    destroyHlsPlayer,
-    destroyMpegtsPlayer,
     attemptAutoPlay,
+    frameTimeline,
+    isABR,
+    mediaId,
+    nominalFrameRate,
+    resolvePresentedFrameIdentity,
+    resolved.streamType,
+    resolved.unsupported,
+    resolved.url,
+    seekToInitialOnce,
+    syncTrackState,
   ]);
 
-  // FR-44：URL 变化（切换媒体）时重置续播 / 上报 / 看完的一次性标志
+  // FR-44：URL 变化（切换媒体）时重置上报 / 看完的一次性标志。
   useEffect(() => {
-    hasSeekedRef.current = false;
     setAbrLevel(null);
     lastReportRef.current = 0;
     endedReportedRef.current = false;
   }, [resolved.url]);
 
-  // 续播定位（FR-44）：媒体可定位后 seek 到上次位置一次。
-  // 接近片尾的位置不回跳（剩余小于阈值时忽略），避免「看完」后又跳回末尾。
-  const seekToInitialOnce = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (hasSeekedRef.current) return;
-    const pos = initialPositionRef.current;
-    if (!pos || pos <= 1 || !isFinite(v.duration) || v.duration <= 0) return;
-    if (v.duration - pos <= WATCHED_REMAINING_THRESHOLD) {
-      hasSeekedRef.current = true;
-      return;
-    }
-    try {
-      v.currentTime = pos;
-    } catch {
-      /* 静默：部分流尚不可定位 */
-    }
-    hasSeekedRef.current = true;
+  const reportEndedOnce = useCallback(() => {
+    const ended = onEndedRef.current;
+    if (!ended || endedReportedRef.current) return;
+    endedReportedRef.current = true;
+    ended();
   }, []);
 
-  // 监听时间/音量/缓冲/等待
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onTime = () => {
-      setCurrentTime(v.currentTime);
-      // FR-44：约每 10s 上报一次播放位置
+  const reportPausedPosition = useCallback((video: HTMLVideoElement) => {
+    const report = onPositionReportRef.current;
+    if (!report || video.currentTime <= 0) return;
+    lastReportRef.current = video.currentTime;
+    report(video.currentTime);
+  }, []);
+
+  const reportWatchProgress = useCallback(
+    (video: HTMLVideoElement) => {
       const report = onPositionReportRef.current;
-      if (report && v.currentTime - lastReportRef.current >= POSITION_REPORT_INTERVAL) {
-        lastReportRef.current = v.currentTime;
-        report(v.currentTime);
+      if (report && video.currentTime - lastReportRef.current >= POSITION_REPORT_INTERVAL) {
+        lastReportRef.current = video.currentTime;
+        report(video.currentTime);
       }
-      // FR-44：接近片尾（剩余小于阈值）视为看完，仅回调一次
-      const ended = onEndedRef.current;
       if (
-        ended &&
-        !endedReportedRef.current &&
-        isFinite(v.duration) &&
-        v.duration > 0 &&
-        v.duration - v.currentTime <= WATCHED_REMAINING_THRESHOLD
+        isFinite(video.duration) &&
+        video.duration > 0 &&
+        video.duration - video.currentTime <= WATCHED_REMAINING_THRESHOLD
       ) {
-        endedReportedRef.current = true;
-        ended();
+        reportEndedOnce();
       }
+    },
+    [reportEndedOnce],
+  );
+
+  // 观看上报与音量仍属于 Web 壳层；播放状态、时间和缓冲只订阅 core 快照。
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onTime = () => reportWatchProgress(video);
+    const onDuration = () => {
+      void seekToInitialOnce();
     };
-    const onDur = () => {
-      setDuration(v.duration);
-      seekToInitialOnce();
+    const onPause = () => reportPausedPosition(video);
+    const onNativeEnded = () => reportEndedOnce();
+    const onVolume = () => {
+      setVolume(video.volume);
+      setIsMuted(video.muted);
     };
-    const onLoadedMeta = () => seekToInitialOnce();
-    // FR-44：暂停时补报一次当前位置，避免离开页面丢失最新进度
-    const onPause = () => {
-      const report = onPositionReportRef.current;
-      if (report && v.currentTime > 0) {
-        lastReportRef.current = v.currentTime;
-        report(v.currentTime);
-      }
-    };
-    // FR-44：原生 ended 事件兜底标记看完
-    const onNativeEnded = () => {
-      const ended = onEndedRef.current;
-      if (ended && !endedReportedRef.current) {
-        endedReportedRef.current = true;
-        ended();
-      }
-    };
-    const onVol = () => {
-      setVolume(v.volume);
-      setIsMuted(v.muted);
-    };
-    const onBuf = () => {
-      if (v.buffered.length > 0 && v.duration > 0)
-        setBufferedProgress((v.buffered.end(v.buffered.length - 1) / v.duration) * 100);
-    };
-    // FR-18：原生 video stalled/waiting → 进入末端缓冲等待；playing/canplay 自动复位
-    const onWaiting = () => setIsWaiting(true);
-    const onCanPlay = () => setIsWaiting(false);
-    v.addEventListener('timeupdate', onTime);
-    v.addEventListener('durationchange', onDur);
-    v.addEventListener('loadedmetadata', onLoadedMeta);
-    v.addEventListener('pause', onPause);
-    v.addEventListener('ended', onNativeEnded);
-    v.addEventListener('volumechange', onVol);
-    v.addEventListener('progress', onBuf);
-    v.addEventListener('waiting', onWaiting);
-    v.addEventListener('stalled', onWaiting);
-    v.addEventListener('canplay', onCanPlay);
-    v.addEventListener('playing', onCanPlay);
+    video.addEventListener('timeupdate', onTime);
+    video.addEventListener('durationchange', onDuration);
+    video.addEventListener('loadedmetadata', onDuration);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('ended', onNativeEnded);
+    video.addEventListener('volumechange', onVolume);
     return () => {
-      v.removeEventListener('timeupdate', onTime);
-      v.removeEventListener('durationchange', onDur);
-      v.removeEventListener('loadedmetadata', onLoadedMeta);
-      v.removeEventListener('pause', onPause);
-      v.removeEventListener('ended', onNativeEnded);
-      v.removeEventListener('volumechange', onVol);
-      v.removeEventListener('progress', onBuf);
-      v.removeEventListener('waiting', onWaiting);
-      v.removeEventListener('stalled', onWaiting);
-      v.removeEventListener('canplay', onCanPlay);
-      v.removeEventListener('playing', onCanPlay);
+      video.removeEventListener('timeupdate', onTime);
+      video.removeEventListener('durationchange', onDuration);
+      video.removeEventListener('loadedmetadata', onDuration);
+      video.removeEventListener('pause', onPause);
+      video.removeEventListener('ended', onNativeEnded);
+      video.removeEventListener('volumechange', onVolume);
     };
-  }, [seekToInitialOnce]);
+  }, [reportEndedOnce, reportPausedPosition, reportWatchProgress, seekToInitialOnce]);
 
   // 字幕同步
   useEffect(() => {
@@ -525,18 +752,127 @@ export default function VideoPlayer({
   }, []);
 
   const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (isPlaying) v.pause();
-    else {
-      setAutoPlayBlocked(false);
-      void v.play()?.catch?.(() => {});
+    const core = coreRef.current;
+    if (!core) return;
+    if (isPlaying) {
+      void core.pause();
+      return;
     }
+    setAutoPlayBlocked(false);
+    void core.play();
+  };
+
+  const hideTimelinePreview = useCallback(() => {
+    previewRequestRef.current += 1;
+    setTimelinePreview(null);
+  }, []);
+
+  const clearTimelinePreviewImage = useCallback(() => {
+    setTimelinePreview((current) => (current ? { ...current, imageUrl: null } : null));
+  }, []);
+
+  const showTimelinePreview = useCallback((element: HTMLElement, clientX: number) => {
+    const core = coreRef.current;
+    if (!core) return;
+    const snapshot = core.getSnapshot();
+    const command = commandFromSnapshot(snapshot);
+    if (!command || snapshot.duration <= 0) return;
+    const mediaTime = mediaTimeAtClientX(element, clientX, snapshot.duration);
+    const hit = previewFacetRef.current.hitTest(mediaTime, command);
+    const imageUrl = hit ? previewSpriteUrlsRef.current?.[hit.sprite.assetId] : undefined;
+    const rawPercent = (mediaTime / snapshot.duration) * 100;
+    const spriteWidth = hit?.sprite.width ?? 0;
+    const leftPercent = previewLeftPercent(element, rawPercent, spriteWidth, Boolean(imageUrl));
+    const request = ++previewRequestRef.current;
+    setTimelinePreview({ hit, imageUrl: null, leftPercent, mediaTime });
+    if (!hit || !imageUrl) return;
+    void loadImage(imageUrl, previewImageCacheRef.current).then(
+      () => {
+        if (previewRequestRef.current === request) {
+          setTimelinePreview({ hit, imageUrl, leftPercent, mediaTime });
+        }
+      },
+      () => undefined,
+    );
+  }, []);
+
+  const clearPreviewPointerTimer = () => {
+    const session = previewPointerRef.current;
+    if (session.timer) clearTimeout(session.timer);
+    session.timer = null;
+  };
+
+  const resetPreviewPointer = (hide = true) => {
+    clearPreviewPointerTimer();
+    previewPointerRef.current = createPointerSession();
+    if (hide) hideTimelinePreview();
+  };
+
+  const handlePreviewPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse') suppressSliderSeekRef.current = true;
+  };
+
+  const handlePreviewPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse') return;
+    resetPreviewPointer(false);
+    const session = previewPointerRef.current;
+    session.clientX = event.clientX;
+    session.pointerId = event.pointerId;
+    session.startY = event.clientY;
+    const element = event.currentTarget;
+    session.timer = setTimeout(() => {
+      if (session.canceled) return;
+      session.active = true;
+      showTimelinePreview(element, session.clientX);
+    }, PREVIEW_LONG_PRESS_MS);
+  };
+
+  const handlePreviewPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = previewPointerRef.current;
+    if (event.pointerId !== session.pointerId) return;
+    session.clientX = event.clientX;
+    if (Math.abs(event.clientY - session.startY) > PREVIEW_VERTICAL_CANCEL_PX) {
+      session.canceled = true;
+      clearPreviewPointerTimer();
+      if (session.active) hideTimelinePreview();
+      return;
+    }
+    if (!session.active) return;
+    event.preventDefault();
+    showTimelinePreview(event.currentTarget, event.clientX);
+  };
+
+  const handlePreviewPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = previewPointerRef.current;
+    if (event.pointerId !== session.pointerId) return;
+    const core = coreRef.current;
+    if (session.active && !session.canceled && core) {
+      const snapshot = core.getSnapshot();
+      const mediaTime = mediaTimeAtClientX(event.currentTarget, event.clientX, snapshot.duration);
+      void core.seek(mediaTime, 'user');
+    }
+    resetPreviewPointer();
+    suppressSliderSeekRef.current = false;
+  };
+
+  const handlePreviewPointerCancel = () => {
+    resetPreviewPointer();
+    suppressSliderSeekRef.current = false;
   };
 
   const handleSeek = (val: number) => {
-    const v = videoRef.current;
-    if (v && duration) v.currentTime = (val / 100) * duration;
+    if (suppressSliderSeekRef.current || duration <= 0) return;
+    const targetTime = (val / 100) * duration;
+    const request = ++seekPreviewRequestRef.current;
+    setSeekPreviewTime(targetTime);
+    const core = coreRef.current;
+    if (!core) {
+      setSeekPreviewTime(null);
+      return;
+    }
+    void core.seek(targetTime, 'user').finally(() => {
+      if (seekPreviewRequestRef.current === request) setSeekPreviewTime(null);
+    });
   };
   const handleVolume = (val: number) => {
     const v = videoRef.current;
@@ -571,13 +907,133 @@ export default function VideoPlayer({
     saveVolumePref({ volume, muted: false });
   };
 
-  // FR-104：相对快进 / 快退，夹取到 [0, duration]
-  const seekBy = (delta: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    const dur = isFinite(v.duration) && v.duration > 0 ? v.duration : duration;
-    const max = dur > 0 ? dur : Number.MAX_SAFE_INTEGER;
-    v.currentTime = Math.min(max, Math.max(0, v.currentTime + delta));
+  const seekByTier = (direction: FrameStepDirection) => {
+    const core = coreRef.current;
+    if (core) void core.seekByTier(direction);
+  };
+
+  const stepFrame = (direction: FrameStepDirection) => {
+    const core = coreRef.current;
+    if (core) void core.stepFrame(direction);
+  };
+
+  const changeSeekTier = (tier: SeekTier) => {
+    const core = coreRef.current;
+    if (core) void core.setSeekTier(tier);
+  };
+
+  const isCurrentTrackOperation = (core: PlaybackCore, operationMediaId: number): boolean =>
+    coreRef.current === core && mediaIdRef.current === operationMediaId;
+
+  const isCurrentManifestRefresh = (
+    core: PlaybackCore,
+    backend: WebPlaybackBackend,
+    operationMediaId: number,
+    generation: number,
+    source: PlaybackCommandContext,
+  ): boolean =>
+    manifestGenerationRef.current === generation &&
+    backendRef.current === backend &&
+    isCurrentTrackOperation(core, operationMediaId) &&
+    isSameSource(source, commandFromSnapshot(core.getSnapshot()));
+
+  const selectTrack = async (
+    kind: TrackKind,
+    trackId: string | null,
+    failureTitle = kind === 'subtitle' ? '切换字幕失败' : '切换音轨失败',
+  ): Promise<boolean> => {
+    const core = coreRef.current;
+    if (!core) return false;
+    const result = await core.selectTrack(kind, trackId);
+    if (result.status === 'failed' || result.status === 'unsupported') {
+      notifyError(result.error?.message ?? '请稍后重试', failureTitle);
+      return false;
+    }
+    return result.status === 'completed';
+  };
+
+  const refreshTracks = async (
+    core: PlaybackCore,
+    operationMediaId: number,
+  ): Promise<TrackResponse | null> => {
+    const generation = ++manifestGenerationRef.current;
+    const backend = backendRef.current;
+    const source = commandFromSnapshot(core.getSnapshot());
+    if (!backend || !source || !onTrackManifestRefresh) return null;
+    let response: TrackResponse;
+    try {
+      response = await onTrackManifestRefresh();
+    } catch (error: unknown) {
+      if (!isCurrentManifestRefresh(core, backend, operationMediaId, generation, source))
+        return null;
+      throw error;
+    }
+    if (!isCurrentManifestRefresh(core, backend, operationMediaId, generation, source)) return null;
+    const command = commandFromSnapshot(core.getSnapshot());
+    if (!command) return null;
+    trackResponseRef.current = response;
+    pendingTrackResponseRef.current = hasSameTracks(trackResponsePropRef.current, response)
+      ? null
+      : response;
+    backend.tracks.updateResponse(response, command);
+    syncTrackState(core);
+    return response;
+  };
+
+  const handleSubtitleUpload = async (file: File) => {
+    const core = coreRef.current;
+    const operationMediaId = mediaId;
+    if (!core || operationMediaId === undefined) return;
+    let uploaded;
+    try {
+      uploaded = await uploadSubtitle(operationMediaId, file);
+    } catch (error: unknown) {
+      if (isCurrentTrackOperation(core, operationMediaId))
+        notifyError(errorMessage(error), '上传字幕失败');
+      return;
+    }
+    if (!isCurrentTrackOperation(core, operationMediaId)) return;
+    let response: TrackResponse | null;
+    try {
+      response = await refreshTracks(core, operationMediaId);
+    } catch (error: unknown) {
+      if (isCurrentTrackOperation(core, operationMediaId))
+        notifyError(errorMessage(error), '已上传但刷新失败');
+      return;
+    }
+    if (response && isCurrentTrackOperation(core, operationMediaId))
+      await selectTrack('subtitle', uploaded.id);
+  };
+
+  const handleSubtitleDelete = async (trackId: string) => {
+    const core = coreRef.current;
+    const operationMediaId = mediaId;
+    if (!core || operationMediaId === undefined) return;
+    const selection = core.getTrackSelection('subtitle');
+    const uploaded = tracks.find((track) => track.id === trackId && track.source === 'uploaded');
+    const shouldClose = Boolean(
+      uploaded &&
+        selection &&
+        (selection.selectedTrackId === trackId || selection.effectiveTrackId === trackId),
+    );
+    const restoreTrackId = selection?.effectiveTrackId ?? selection?.selectedTrackId ?? null;
+    if (shouldClose && !(await selectTrack('subtitle', null, '关闭字幕失败'))) return;
+    try {
+      await deleteSubtitle(operationMediaId, trackId);
+    } catch (error: unknown) {
+      if (!isCurrentTrackOperation(core, operationMediaId)) return;
+      notifyError(errorMessage(error), '删除字幕失败');
+      if (shouldClose && restoreTrackId)
+        await selectTrack('subtitle', restoreTrackId, '恢复字幕失败');
+      return;
+    }
+    if (!isCurrentTrackOperation(core, operationMediaId)) return;
+    try {
+      await refreshTracks(core, operationMediaId);
+    } catch (error: unknown) {
+      if (isCurrentTrackOperation(core, operationMediaId))
+        notifyError(errorMessage(error), '字幕已删除但刷新失败');
+    }
   };
 
   // FR-104：调整倍速
@@ -617,11 +1073,10 @@ export default function VideoPlayer({
     }
   };
 
-  // FR-104：按百分比跳转（数字键 0-9）
+  // FR-104：按百分比跳转（数字键 0-9）也统一进入 core。
   const seekToPercent = (pct: number) => {
-    const v = videoRef.current;
-    if (!v || !duration) return;
-    v.currentTime = (pct / 100) * duration;
+    const core = coreRef.current;
+    if (core && duration > 0) void core.seek((pct / 100) * duration, 'user');
   };
 
   // FR-104：控件自动隐藏——鼠标移动时显示并重置定时器，播放中静止超时淡出
@@ -637,6 +1092,8 @@ export default function VideoPlayer({
   useEffect(
     () => () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      const timer = previewPointerRef.current.timer;
+      if (timer) clearTimeout(timer);
     },
     [],
   );
@@ -661,11 +1118,19 @@ export default function VideoPlayer({
         break;
       case 'ArrowRight':
         e.preventDefault();
-        seekBy(SEEK_STEP);
+        seekByTier('next');
         break;
       case 'ArrowLeft':
         e.preventDefault();
-        seekBy(-SEEK_STEP);
+        seekByTier('previous');
+        break;
+      case ',':
+        e.preventDefault();
+        stepFrame('previous');
+        break;
+      case '.':
+        e.preventDefault();
+        stepFrame('next');
         break;
       case 'ArrowUp':
         e.preventDefault();
@@ -690,14 +1155,23 @@ export default function VideoPlayer({
     }
   };
 
-  const fmt = (s: number) => {
-    if (!isFinite(s) || isNaN(s)) return '0:00';
-    const m = Math.floor(s / 60);
-    return `${m}:${Math.floor(s % 60)
+  const fmt = (s: number, precise = false) => {
+    if (!Number.isFinite(s)) return precise ? '0:00.000' : '0:00';
+    if (!precise) {
+      const totalSeconds = Math.floor(Math.max(0, s));
+      return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+    }
+    const totalMilliseconds = Math.round(Math.max(0, s) * 1000);
+    const minutes = Math.floor(totalMilliseconds / 60000);
+    const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
+    const milliseconds = totalMilliseconds % 1000;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds
       .toString()
-      .padStart(2, '0')}`;
+      .padStart(3, '0')}`;
   };
-  const playPct = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const displayedCurrentTime = seekPreviewTime ?? currentTime;
+  const showPreciseCurrentTime = seekPreviewTime !== null || !isPlaying;
+  const playPct = duration > 0 ? (displayedCurrentTime / duration) * 100 : 0;
 
   // FR-104：hover 进度条时的时间气泡定位（百分比）
   const hoverTime = hoverPct !== null && duration > 0 ? (hoverPct / 100) * duration : 0;
@@ -738,7 +1212,6 @@ export default function VideoPlayer({
           poster={poster}
           style={{ width: '100%', height: '100%', backgroundColor: 'black', objectFit: 'contain' }}
           playsInline
-          onError={() => onPlaybackErrorRef.current?.()}
         />
         {/* FR-52：目标编码不受支持且无回退源时的提示（不抛 Network Error） */}
         {resolved.unsupported && (
@@ -825,7 +1298,14 @@ export default function VideoPlayer({
             </Text>
           </Box>
         )}
-        {subtitleVisible && subtitleText && (
+        {trackResponse && (
+          <SubtitleOverlay
+            currentTime={currentTime}
+            cues={trackCues}
+            preferences={subtitlePreferences}
+          />
+        )}
+        {!trackResponse && subtitleVisible && subtitleText && (
           <Box
             style={{
               position: 'absolute',
@@ -878,22 +1358,63 @@ export default function VideoPlayer({
           {isPlaying ? <IconPlayerPause size={22} /> : <IconPlayerPlay size={22} />}
         </ActionIcon>
 
-        {/* FR-104：快退 / 快进 10 秒 */}
         <ActionIcon
           variant="subtle"
           color="gray"
-          onClick={() => seekBy(-SEEK_STEP)}
-          aria-label="快退 10 秒"
+          onClick={() => seekByTier('previous')}
+          aria-label={`后退 ${seekTierLabel(seekTier)}`}
         >
-          <IconRewindBackward10 size={20} />
+          <IconPlayerSkipBack size={20} />
         </ActionIcon>
         <ActionIcon
           variant="subtle"
           color="gray"
-          onClick={() => seekBy(SEEK_STEP)}
-          aria-label="快进 10 秒"
+          onClick={() => seekByTier('next')}
+          aria-label={`前进 ${seekTierLabel(seekTier)}`}
         >
-          <IconRewindForward10 size={20} />
+          <IconPlayerSkipForward size={20} />
+        </ActionIcon>
+        <Menu position="top" withinPortal>
+          <Menu.Target>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              aria-label={`定位档位：${seekTierLabel(seekTier)}`}
+              style={{ width: 'auto', paddingInline: 6 }}
+            >
+              <Text size="xs" fw={600}>
+                {seekTierLabel(seekTier)}
+              </Text>
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>定位档位</Menu.Label>
+            {SEEK_TIERS.map((tier) => (
+              <Menu.Item
+                key={seekTierLabel(tier)}
+                onClick={() => changeSeekTier(tier)}
+                fw={seekTierLabel(tier) === seekTierLabel(seekTier) ? 700 : 400}
+              >
+                {seekTierLabel(tier)}
+              </Menu.Item>
+            ))}
+          </Menu.Dropdown>
+        </Menu>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          onClick={() => stepFrame('previous')}
+          aria-label="前一帧"
+        >
+          <IconPlayerTrackPrev size={20} />
+        </ActionIcon>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          onClick={() => stepFrame('next')}
+          aria-label="后一帧"
+        >
+          <IconPlayerTrackNext size={20} />
         </ActionIcon>
 
         <Box
@@ -904,26 +1425,44 @@ export default function VideoPlayer({
             gap: 'var(--mantine-spacing-xs)',
           }}
         >
-          <Text size="xs" c="dimmed" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {fmt(currentTime)}
+          <Text
+            data-testid="video-current-time"
+            size="xs"
+            c="dimmed"
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
+            {fmt(displayedCurrentTime, showPreciseCurrentTime)}
           </Text>
           {/* FR-104：进度条加大热区（容器高度抬升）+ hover 时间气泡；FR-93 修偏配色由蓝转品牌紫 */}
           <Box
+            data-testid="video-progress-preview"
             style={{
               flex: 1,
               position: 'relative',
               height: 16,
               display: 'flex',
               alignItems: 'center',
+              touchAction: timelinePreview ? 'none' : 'auto',
             }}
-            onMouseMove={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              if (rect.width > 0)
-                setHoverPct(
-                  Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
-                );
+            onMouseMove={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              if (rect.width <= 0) return;
+              const percent = Math.min(
+                100,
+                Math.max(0, ((event.clientX - rect.left) / rect.width) * 100),
+              );
+              setHoverPct(percent);
+              showTimelinePreview(event.currentTarget, event.clientX);
             }}
-            onMouseLeave={() => setHoverPct(null)}
+            onMouseLeave={() => {
+              setHoverPct(null);
+              hideTimelinePreview();
+            }}
+            onPointerDownCapture={handlePreviewPointerDownCapture}
+            onPointerDown={handlePreviewPointerDown}
+            onPointerMove={handlePreviewPointerMove}
+            onPointerUp={handlePreviewPointerUp}
+            onPointerCancel={handlePreviewPointerCancel}
           >
             <Slider
               value={Math.min(bufferedProgress, 100)}
@@ -934,6 +1473,8 @@ export default function VideoPlayer({
               style={{ position: 'absolute', width: '100%', pointerEvents: 'none' }}
             />
             <Slider
+              aria-label="播放进度"
+              thumbLabel="播放进度"
               value={playPct}
               onChange={handleSeek}
               size={4}
@@ -942,8 +1483,51 @@ export default function VideoPlayer({
               thumbSize={12}
               style={{ position: 'absolute', width: '100%' }}
             />
-            {/* hover 时间气泡 */}
-            {hoverPct !== null && (
+            {timelinePreview && (
+              <Box
+                data-testid="timeline-preview-overlay"
+                role="status"
+                style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: `${timelinePreview.leftPercent}%`,
+                  transform: 'translateX(-50%)',
+                  marginBottom: 6,
+                  padding: 4,
+                  borderRadius: 'var(--mantine-radius-sm)',
+                  backgroundColor: 'rgba(0,0,0,0.85)',
+                  color: 'white',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                }}
+              >
+                {timelinePreview.imageUrl && timelinePreview.hit && (
+                  <Box
+                    data-testid="timeline-preview-sprite"
+                    style={{
+                      height: timelinePreview.hit.sprite.height,
+                      overflow: 'hidden',
+                      width: timelinePreview.hit.sprite.width,
+                    }}
+                  >
+                    <img
+                      alt=""
+                      src={timelinePreview.imageUrl}
+                      onError={clearTimelinePreviewImage}
+                      style={{
+                        display: 'block',
+                        maxWidth: 'none',
+                        transform: `translate(-${timelinePreview.hit.sprite.x}px, -${timelinePreview.hit.sprite.y}px)`,
+                      }}
+                    />
+                  </Box>
+                )}
+                <Text c="white" size="xs" ta="center">
+                  {fmt(timelinePreview.mediaTime)}
+                </Text>
+              </Box>
+            )}
+            {!timelinePreview && hoverPct !== null && (
               <Box
                 style={{
                   position: 'absolute',
@@ -994,7 +1578,7 @@ export default function VideoPlayer({
         </Menu>
 
         {/* FR-104：字幕字号档（仅在有字幕时展示） */}
-        {subtitleVisible && (
+        {!trackResponse && subtitleVisible && (
           <Menu position="top" withinPortal>
             <Menu.Target>
               <ActionIcon variant="subtle" color="gray" aria-label="字幕字号">
@@ -1023,6 +1607,18 @@ export default function VideoPlayer({
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>
+        )}
+
+        {trackResponse && trackSelections && (
+          <VideoTrackControls
+            tracks={tracks}
+            selections={trackSelections}
+            preferences={subtitlePreferences}
+            onPreferencesChange={setSubtitlePreferences}
+            onSelect={(kind, trackId) => void selectTrack(kind, trackId)}
+            onUpload={(file) => void handleSubtitleUpload(file)}
+            onDelete={(trackId) => void handleSubtitleDelete(trackId)}
+          />
         )}
 
         <Box style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1066,6 +1662,12 @@ export default function VideoPlayer({
         >
           {isFullscreen ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
         </ActionIcon>
+
+        {(framePresentationCapability === 'approximate' || approximateFrameStep) && (
+          <Text size="xs" c="yellow" fw={500} role="status">
+            近似逐帧
+          </Text>
+        )}
 
         {isABR && (
           <Text size="xs" c="green" fw={500}>

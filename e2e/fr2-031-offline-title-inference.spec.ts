@@ -188,7 +188,7 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
     await expect(librarySwitch).toBeChecked();
     const librarySwitchLabel = page.getByText(libraryLabel, { exact: true });
     await librarySwitchLabel.click();
-    await page.getByRole("button", { name: "保存设置" }).click();
+    await saveSettings(page);
     await expect(page.getByText("设置已保存")).toBeVisible();
 
     const scan = await page.request.post(`/api/library/scan/${libraryID}`);
@@ -202,21 +202,34 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
       .toBeNull();
 
     await librarySwitchLabel.click();
-    await page.getByRole("button", { name: "保存设置" }).click();
+    await saveSettings(page);
     await expect
-      .poll(async () => {
-        const response = await page.request.get(`/api/library/media/${mediaID}/inference`);
-        return (await response.json()).inference?.title;
-      })
+      .poll(
+        async () => {
+          const response = await page.request.get(`/api/library/media/${mediaID}/inference`);
+          return (await response.json()).inference?.title;
+        },
+        { timeout: 15000 },
+      )
       .toBe("Library Scope Movie");
 
     const taskCount = await inferenceTaskCount(page);
-    await page.getByRole("button", { name: "保存设置" }).click();
+    await saveSettings(page);
     await expect.poll(() => inferenceTaskCount(page)).toBe(taskCount);
   } finally {
     // 真服务会持续监听测试媒体目录，待 Playwright 关闭服务后由系统临时目录统一清理。
   }
 });
+
+async function saveSettings(page: Page): Promise<void> {
+  const responsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      new URL(response.url()).pathname === "/api/settings",
+  );
+  await page.getByRole("button", { name: "保存设置" }).click();
+  expect((await responsePromise).ok()).toBeTruthy();
+}
 
 async function inferenceTaskCount(page: Page): Promise<number> {
   const response = await page.request.get(

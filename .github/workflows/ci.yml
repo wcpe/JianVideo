@@ -75,6 +75,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: 安装并校验 ffmpeg/ffprobe（FR2-044 真实素材）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:

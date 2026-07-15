@@ -83,3 +83,14 @@ API：
 
 - 已确认：本规格只做手动清理和盘点，自动保留策略后续增强。
 - 缓存登记可能与已有磁盘文件不一致，首批必须提供盘点修复。
+
+## 7. P3 扩展：timeline_preview（FR2-029）
+
+本节只记录 P3 [FR2-029](fr2-029-timeline-preview.md) 对已交付缓存框架的增量接入要求，不改写本规格 P2 `v0.23.0` 的状态、任务勾选或既有验收历史。
+
+- FR2-029 新增缓存类型 `kind=timeline_preview`，对应唯一白名单根 `timeline_previews/`；该资产仍使用 `cache_assets`，按 generation 目录级登记为可重建缓存。
+- 类型与路径必须维护双向白名单：`timeline_preview` 只能解析到 `timeline_previews/`，`timeline_previews/` 下的合规资产也只能盘点为 `timeline_preview`。禁止仅凭传入 kind 或相对路径绕过另一侧校验。
+- 盘点仅接受 FR2-029 定义的 Space/media/profile/source_fingerprint/generation 目录层级，能够从路径还原并交叉校验登记身份；未知层级、身份不一致、越界链接或其他 kind 混入一律拒绝登记和删除。
+- dry-run、清理、缺失标记、占用统计与审计必须覆盖 `timeline_preview`；清理只能删除命中的 generation 目录，不得扩大到媒体父目录、其他 generation、其他缓存根、原媒体、数据库或应用持久数据。
+- 所有登记、盘点、统计和清理继续受 Space 边界约束：请求 Space、资产 `space_id`、路径中的 Space 段及媒体归属必须一致，禁止跨 Space 枚举、统计、读取或删除预览资产。
+- 本扩展的实现、迁移、双向白名单测试、盘点/清理测试和 Space 隔离验收均由 FR2-029 负责；FR2-048 的 P2 已交付结论不因此追溯改写。

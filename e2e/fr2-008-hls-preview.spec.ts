@@ -161,7 +161,12 @@ test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失�
   } finally {
     if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
     if (existsSync(mediaDir))
-      rmSync(mediaDir, { recursive: true, force: true });
+      rmSync(mediaDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 250,
+      });
   }
 });
 

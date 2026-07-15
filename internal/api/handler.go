@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"mime"
@@ -29,20 +28,13 @@ import (
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
 	"github.com/wcpe/JianVideo/internal/storage"
+	"github.com/wcpe/JianVideo/internal/subtitle"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	thumbsvc "github.com/wcpe/JianVideo/internal/thumbnail"
 	"github.com/wcpe/JianVideo/internal/tools"
 	"github.com/wcpe/JianVideo/internal/transcoder"
 	"github.com/wcpe/JianVideo/internal/update"
 )
-
-// SubtitleTrack 表示一个外挂字幕轨道。
-type SubtitleTrack struct {
-	Index    int    `json:"index"`
-	FileName string `json:"file_name"`
-	Format   string `json:"format"`
-	URL      string `json:"url"`
-}
 
 // Handler API 请求处理器。
 type Handler struct {
@@ -97,6 +89,12 @@ type Handler struct {
 
 	// 分档缩略图任务服务（FR2-028）：按需/批量入队、Space 路径隔离与缓存登记。
 	thumbnail *thumbsvc.Service
+
+	// 时间轴预览服务（FR2-029）：状态、入队、重建与受控资源读取。
+	timelinePreview TimelinePreviewGateway
+
+	// 字幕与音轨服务（FR2-044）：稳定轨道 API、上传、内容与删除。
+	subtitle *subtitle.Service
 }
 
 // NewHandler 创建处理器。
@@ -198,6 +196,18 @@ func (h *Handler) WithCache(svc *storage.Service) *Handler {
 // WithThumbnail 注入分档缩略图任务服务。
 func (h *Handler) WithThumbnail(svc *thumbsvc.Service) *Handler {
 	h.thumbnail = svc
+	return h
+}
+
+// WithTimelinePreview 注入时间轴预览网关。
+func (h *Handler) WithTimelinePreview(gateway TimelinePreviewGateway) *Handler {
+	h.timelinePreview = gateway
+	return h
+}
+
+// WithSubtitle 注入字幕与音轨服务。
+func (h *Handler) WithSubtitle(service *subtitle.Service) *Handler {
+	h.subtitle = service
 	return h
 }
 
@@ -1373,98 +1383,4 @@ func (h *Handler) DeleteMediaExtension(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-// GetSubtitles 返回媒体文件的外挂字幕轨道列表。
-// GET /api/play/:id/subtitles
-func (h *Handler) GetSubtitles(c *gin.Context) {
-	spaceID, ok := h.resolveSpaceID(c)
-	if !ok {
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-		return
-	}
-
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
-		return
-	}
-
-	// SMB 路径暂不支持字幕查找
-	if strings.HasPrefix(mf.FilePath, "smb://") {
-		c.JSON(http.StatusOK, gin.H{"tracks": []SubtitleTrack{}})
-		return
-	}
-
-	files, err := transcoder.FindSubtitleFiles(mf.FilePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "字幕查找失败"})
-		return
-	}
-
-	tracks := make([]SubtitleTrack, len(files))
-	for i, f := range files {
-		tracks[i] = SubtitleTrack{
-			Index:    i,
-			FileName: filepath.Base(f.Path),
-			Format:   f.Format,
-			URL:      fmt.Sprintf("/api/play/%d/subtitles/%d", id, i),
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"tracks": tracks})
-}
-
-// GetSubtitleContent 返回指定字幕轨道的 WebVTT 内容。
-// GET /api/play/:id/subtitles/:index
-func (h *Handler) GetSubtitleContent(c *gin.Context) {
-	spaceID, ok := h.resolveSpaceID(c)
-	if !ok {
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
-		return
-	}
-
-	index, err := strconv.Atoi(c.Param("index"))
-	if err != nil || index < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INDEX", "message": "无效的字幕索引"})
-		return
-	}
-
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
-		return
-	}
-
-	files, err := transcoder.FindSubtitleFiles(mf.FilePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "字幕查找失败"})
-		return
-	}
-
-	if index >= len(files) {
-		c.JSON(http.StatusNotFound, gin.H{"code": "INDEX_OUT_OF_RANGE", "message": "字幕索引超出范围"})
-		return
-	}
-
-	vtt, err := transcoder.ConvertSubtitleFile(files[index].Path)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "CONVERT_FAILED", "message": "字幕转换失败"})
-		return
-	}
-
-	if vtt == "" {
-		c.Status(http.StatusNoContent)
-		return
-	}
-
-	c.Data(http.StatusOK, "text/vtt; charset=utf-8", []byte(vtt))
 }

@@ -286,8 +286,8 @@ async function realGetOnThisDay(limit = 12): Promise<MediaFile[]> {
 
 // 记录媒体查看：媒体在查看器/播放页被打开时调用，把 last_viewed_at 置为当前时间。
 // 失败由调用方静默处理（不阻塞打开），此处不吞异常。
-async function realSetMediaViewed(id: number): Promise<void> {
-  await client.put(`/api/library/media/${id}/viewed`);
+async function realSetMediaViewed(id: number, signal?: AbortSignal): Promise<void> {
+  await client.put(`/api/library/media/${id}/viewed`, undefined, { signal });
 }
 
 // 最近查看列表：返回 last_viewed_at 非空、未软删的媒体，按 last_viewed_at 倒序。
@@ -298,8 +298,8 @@ async function realGetRecentlyViewed(limit = 12): Promise<MediaFile[]> {
   return res.data.items;
 }
 
-async function realGetMediaFile(id: number): Promise<MediaFile> {
-  const res = await client.get(`/api/library/media/${id}`);
+async function realGetMediaFile(id: number, signal?: AbortSignal): Promise<MediaFile> {
+  const res = await client.get(`/api/library/media/${id}`, { signal });
   return res.data;
 }
 
@@ -328,9 +328,10 @@ async function realSelectMediaCover(id: number, candidateID: number): Promise<Me
   return res.data;
 }
 
-async function realGetMediaInference(id: number): Promise<MediaInference | null> {
+async function realGetMediaInference(id: number, signal?: AbortSignal): Promise<MediaInference | null> {
   const res = await client.get<{ inference: MediaInference | null }>(
     `/api/library/media/${id}/inference`,
+    { signal },
   );
   return res.data.inference;
 }
@@ -1220,8 +1221,8 @@ export function deleteLibraryPath(id: number) {
 export function getMediaFiles(params?: MediaListParams) {
   return useMock ? mockGetMediaFiles(params) : realGetMediaFiles(params);
 }
-export function getMediaFile(id: number) {
-  return useMock ? mockGetMediaFile(id) : realGetMediaFile(id);
+export function getMediaFile(id: number, signal?: AbortSignal) {
+  return useMock ? mockGetMediaFile(id) : realGetMediaFile(id, signal);
 }
 export function getMediaMetadata(id: number) {
   return useMock ? mockGetMediaMetadata() : realGetMediaMetadata(id);
@@ -1235,8 +1236,8 @@ export function generateMediaCovers(id: number, refresh: boolean) {
 export function selectMediaCover(id: number, candidateID: number) {
   return useMock ? mockSelectMediaCover() : realSelectMediaCover(id, candidateID);
 }
-export function getMediaInference(id: number) {
-  return useMock ? mockGetMediaInference(id) : realGetMediaInference(id);
+export function getMediaInference(id: number, signal?: AbortSignal) {
+  return useMock ? mockGetMediaInference(id) : realGetMediaInference(id, signal);
 }
 export function updateMediaInference(id: number, input: MediaInferenceInput) {
   return useMock ? mockUpdateMediaInference(id, input) : realUpdateMediaInference(id, input);
@@ -1359,8 +1360,8 @@ export function getOnThisDay(limit = 12) {
   return useMock ? mockGetOnThisDay(limit) : realGetOnThisDay(limit);
 }
 // 最近查看（FR-120）：记录媒体打开时间 + 拉取最近查看列表
-export function setMediaViewed(id: number) {
-  return useMock ? mockSetMediaViewed(id) : realSetMediaViewed(id);
+export function setMediaViewed(id: number, signal?: AbortSignal) {
+  return useMock ? mockSetMediaViewed(id) : realSetMediaViewed(id, signal);
 }
 export function getRecentlyViewed(limit = 12) {
   return useMock ? mockGetRecentlyViewed(limit) : realGetRecentlyViewed(limit);

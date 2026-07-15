@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/storage"
+	"github.com/wcpe/JianVideo/internal/subtitle"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
 	thumbsvc "github.com/wcpe/JianVideo/internal/thumbnail"
 	toolsvc "github.com/wcpe/JianVideo/internal/tools"
@@ -136,6 +138,13 @@ func transcodeConcurrencyFromSettings(service *settings.Service) int {
 	return value
 }
 
+func hlsPreviewCacheVariant(payload transcoder.HLSPreviewPayload, taskID int64) string {
+	if transcoder.IsAudioReloadProfileID(payload.ProfileID) {
+		return strconv.FormatInt(taskID, 10)
+	}
+	return ""
+}
+
 func registerABRAssets(ctx context.Context, cache *storage.Service, media *models.MediaFile, outputDir string, ladder []transcoder.QualityDefinition) error {
 	if _, err := cache.RegisterFile(ctx, storage.RegisterInput{
 		SpaceID: media.SpaceID, LibraryID: media.LibraryID, MediaID: media.ID,
@@ -182,6 +191,104 @@ func applyInstalledTool(result toolsvc.InstallResult) error {
 		library.SetMagickPath(result.Path)
 	}
 	return nil
+}
+
+func resolveHLSPreviewSource(ctx context.Context, libSvc *library.Service, subtitleSvc *subtitle.Service, payload transcoder.HLSPreviewPayload, policy transcoder.HardwarePolicy, ffmpegAvailable bool) (*models.MediaFile, error) {
+	media, err := libSvc.GetMediaFileByIDInSpace(payload.SpaceID, payload.MediaID)
+	if err != nil {
+		return nil, fmt.Errorf("HLS 预览反查媒体失败: mediaID=%d: %w", payload.MediaID, err)
+	}
+	if payload.AudioTrackID == "" && payload.AudioStreamIndex == nil {
+		return media, nil
+	}
+	if payload.AudioTrackID == "" || payload.AudioStreamIndex == nil || strings.TrimSpace(payload.SourceFingerprint) == "" {
+		return nil, fmt.Errorf("HLS 音轨任务源指纹不完整")
+	}
+	tracks, err := subtitleSvc.List(ctx, payload.SpaceID, payload.MediaID)
+	if err != nil {
+		return nil, fmt.Errorf("HLS 音轨任务读取轨道失败: %w", err)
+	}
+	if err := validateAudioReloadTrack(*media, payload, tracks.Tracks, policy, ffmpegAvailable); err != nil {
+		return nil, err
+	}
+	return media, nil
+}
+
+func validateAudioReloadTrack(media models.MediaFile, payload transcoder.HLSPreviewPayload, tracks []subtitle.Track, policy transcoder.HardwarePolicy, ffmpegAvailable bool) error {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(media.FilePath)), "smb://") {
+		return fmt.Errorf("HLS 音轨任务当前来源不是本地媒体")
+	}
+	if countCurrentAudioReloadTargets(tracks) <= 1 {
+		return fmt.Errorf("HLS 音轨任务当前有效内嵌音轨不足两个")
+	}
+	track := findCurrentAudioReloadTarget(tracks, payload.AudioTrackID)
+	if track == nil {
+		return fmt.Errorf("HLS 音轨任务目标轨道不存在或无效")
+	}
+	if *track.StreamIndex != *payload.AudioStreamIndex {
+		return fmt.Errorf("HLS 音轨任务流索引已变化")
+	}
+	if !ffmpegAvailable {
+		return fmt.Errorf("HLS 音轨任务当前不可重载：FFmpeg 不可用")
+	}
+	if _, _, _, err := transcoder.SelectCurrentEncoderForCodecWithPolicy(transcoder.DefaultTargetCodec, policy); err != nil {
+		return fmt.Errorf("HLS 音轨任务当前不可重载：%w", err)
+	}
+	fileInfo, err := os.Stat(media.FilePath)
+	if err != nil {
+		return fmt.Errorf("HLS 音轨任务读取真实源失败: %w", err)
+	}
+	media.FileSize = fileInfo.Size()
+	media.ModifiedAt = fileInfo.ModTime()
+	if audioReloadFingerprint(media, *track) != payload.SourceFingerprint {
+		return fmt.Errorf("HLS 音轨任务真实源已变化")
+	}
+	return nil
+}
+
+func countCurrentAudioReloadTargets(tracks []subtitle.Track) int {
+	count := 0
+	for _, track := range tracks {
+		if isCurrentAudioReloadTarget(track) {
+			count++
+		}
+	}
+	return count
+}
+
+func findCurrentAudioReloadTarget(tracks []subtitle.Track, trackID string) *subtitle.Track {
+	for index := range tracks {
+		if tracks[index].ID == trackID && isCurrentAudioReloadTarget(tracks[index]) {
+			return &tracks[index]
+		}
+	}
+	return nil
+}
+
+func isCurrentAudioReloadTarget(track subtitle.Track) bool {
+	return track.Kind == subtitle.KindAudio && track.Source == subtitle.SourceEmbedded && track.Available && track.StreamIndex != nil && *track.StreamIndex >= 0
+}
+
+func audioReloadFingerprint(media models.MediaFile, track subtitle.Track) string {
+	return transcoder.AudioReloadSourceFingerprint(transcoder.MediaIdentity{
+		SpaceID: media.SpaceID, MediaID: media.ID, Path: media.FilePath, Size: media.FileSize,
+		ModifiedAt: media.ModifiedAt, ContentHash: media.ContentHash, ContentHashStale: media.ContentHashStale,
+	}, transcoder.AudioTrackIdentity{
+		ID: track.ID, Index: *track.StreamIndex, Codec: track.Codec, Language: track.Language,
+		Title: track.Title, Channels: track.Channels, ChannelLayout: track.ChannelLayout,
+	})
+}
+
+func newSubtitleService(gormDB *gorm.DB, dataDir string, recorder audit.Recorder) *subtitle.Service {
+	return subtitle.NewService(gormDB, dataDir).WithAudit(recorder)
+}
+
+func newTimelinePreviewGateway(gormDB *gorm.DB, taskSvc *tasksvc.Service, taskWorkers *tasksvc.WorkerRegistry, cacheSvc *storage.Service, dataDir string, generator transcoder.TimelinePreviewGenerator) (api.TimelinePreviewGateway, error) {
+	service := transcoder.NewTimelinePreviewService(gormDB, taskSvc, taskWorkers, cacheSvc, dataDir, generator)
+	if err := service.RegisterWorker(); err != nil {
+		return nil, err
+	}
+	return api.NewTimelinePreviewGateway(service), nil
 }
 
 func startTaskWorkers(ctx context.Context, workers *tasksvc.WorkerRegistry) {
@@ -356,6 +463,7 @@ func run() int {
 	shareSvc := share.NewService(gormDB)
 	taskSvc := tasksvc.NewService(gormDB).WithAudit(auditSvc)
 	cacheSvc := storage.NewService(gormDB, dataDir).WithAudit(auditSvc).WithTasks(taskSvc)
+	subtitleSvc := newSubtitleService(gormDB, dataDir, auditSvc)
 	if err := taskSvc.RecoverRunning(context.Background()); err != nil {
 		log.Printf("[WARN] 通用任务队列重启恢复失败: %v", err)
 	}
@@ -381,9 +489,6 @@ func run() int {
 	if err := toolsManager.RegisterWorker(taskWorkers); err != nil {
 		log.Printf("[WARN] 工具下载 worker 注册失败: %v", err)
 	}
-	taskWorkerCtx, stopTaskWorkers := context.WithCancel(context.Background())
-	go startTaskWorkers(taskWorkerCtx, taskWorkers)
-	defer stopTaskWorkers()
 
 	// 扫描任务队列（FR-29）：单 worker 串行执行入队扫描，重启先恢复残留 running 再启动。
 	scanQueue := library.NewTaskQueue(gormDB, libSvc.ScanLibraryWithType).WithChangeExec(libSvc.ApplyScanChange).WithAudit(auditSvc).WithTasks(taskSvc)
@@ -422,22 +527,24 @@ func run() int {
 
 	// HLS preview 统一任务（FR2-008）：执行真源只使用通用 tasks，旧转码 API 作为兼容适配层。
 	presetStore := transcoder.NewPresetStore(gormDB)
-	hlsPreview := transcoder.NewHLSPreviewService(taskSvc, taskWorkers, hlsDir, func(ctx context.Context, _ int64, payload transcoder.HLSPreviewPayload) error {
-		mf, err := libSvc.GetMediaFileByIDInSpace(payload.SpaceID, payload.MediaID)
-		if err != nil {
-			return fmt.Errorf("HLS 预览反查媒体失败: mediaID=%d: %w", payload.MediaID, err)
-		}
-		outputDir, err := transcoder.HLSProfileDir(hlsDir, payload.SpaceID, payload.MediaID, payload.ProfileID)
+	hlsPreview := transcoder.NewHLSPreviewService(taskSvc, taskWorkers, hlsDir, func(ctx context.Context, taskID int64, payload transcoder.HLSPreviewPayload) error {
+		policy := hardwarePolicyFromSettings(settingsSvc)
+		mf, err := resolveHLSPreviewSource(ctx, libSvc, subtitleSvc, payload, policy, transcoder.IsFFmpegAvailable())
 		if err != nil {
 			return err
 		}
+		outputDir, err := transcoder.HLSPreviewOutputDir(hlsDir, taskID, payload)
+		if err != nil {
+			return err
+		}
+		cacheVariant := hlsPreviewCacheVariant(payload, taskID)
 		manifest := "index.m3u8"
 		if transcoder.SelectOutputPath(payload.Codec) == transcoder.OutputPathTS {
 			manifest = "master.m3u8"
 		}
 		if !payload.ForceRebuild {
 			if _, statErr := os.Stat(filepath.Join(outputDir, manifest)); statErr == nil {
-				_, err = cacheSvc.RegisterDirectory(ctx, storage.RegisterInput{SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, MediaID: mf.ID, Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Path: outputDir})
+				_, err = cacheSvc.RegisterDirectory(ctx, storage.RegisterInput{SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, MediaID: mf.ID, Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Variant: cacheVariant, Path: outputDir})
 				return err
 			}
 		}
@@ -445,13 +552,18 @@ func run() int {
 			return fmt.Errorf("安全清理旧 HLS profile 失败: %w", err)
 		}
 		previewWidth, previewHeight := transcoder.HLSPreviewResolution(payload, mf.Width, mf.Height)
-		result, err := transcoder.PreSliceWithCodecAndPolicyToDir(ctx, mf.ID, mf.FilePath, previewWidth, previewHeight, payload.Codec, hardwarePolicyFromSettings(settingsSvc), outputDir)
+		var result *transcoder.PreSliceResult
+		if payload.AudioStreamIndex != nil {
+			result, err = transcoder.PreSliceAudioTrackWithPolicyToDir(ctx, mf.ID, mf.FilePath, previewWidth, previewHeight, *payload.AudioStreamIndex, policy, outputDir)
+		} else {
+			result, err = transcoder.PreSliceWithCodecAndPolicyToDir(ctx, mf.ID, mf.FilePath, previewWidth, previewHeight, payload.Codec, policy, outputDir)
+		}
 		if err != nil {
 			return err
 		}
 		_, err = cacheSvc.RegisterDirectory(ctx, storage.RegisterInput{
 			SpaceID: mf.SpaceID, LibraryID: mf.LibraryID, MediaID: mf.ID,
-			Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Path: result.OutputDir,
+			Kind: storage.CacheKindHLS, ProfileID: payload.ProfileID, Variant: cacheVariant, Path: result.OutputDir,
 		})
 		return err
 	})
@@ -496,8 +608,19 @@ func run() int {
 		log.Printf("[ERROR] 注册 ABR 任务处理器失败: %v", err)
 		return 1
 	}
+	timelineGateway, err := newTimelinePreviewGateway(
+		gormDB, taskSvc, taskWorkers, cacheSvc, dataDir,
+		transcoder.NewFFmpegTimelinePreviewGenerator(""),
+	)
+	if err != nil {
+		log.Printf("[ERROR] 注册时间轴预览任务处理器失败: %v", err)
+		return 1
+	}
+	taskWorkerCtx, stopTaskWorkers := context.WithCancel(context.Background())
+	go startTaskWorkers(taskWorkerCtx, taskWorkers)
+	defer stopTaskWorkers()
 
-	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc)
+	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

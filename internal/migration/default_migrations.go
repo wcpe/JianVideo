@@ -176,6 +176,22 @@ func DefaultMigrations() []Migration {
 			Up:          migrateSmartCovers,
 			Validate:    validateSmartCovers,
 		},
+		{
+			ID:          "20260712_0019_fr2_029_timeline_previews",
+			Description: "建立时间线预览当前 generation 指针与查询约束",
+			SafeToRetry: true,
+			Estimate:    estimateTimelinePreviews,
+			Up:          migrateTimelinePreviews,
+			Validate:    validateTimelinePreviews,
+		},
+		{
+			ID:          "20260712_0020_fr2_044_subtitle_tracks",
+			Description: "建立字幕轨道来源唯一约束与持久化索引",
+			SafeToRetry: true,
+			Estimate:    estimateSubtitleTracks,
+			Up:          migrateSubtitleTracks,
+			Validate:    validateSubtitleTracks,
+		},
 	}
 }
 
@@ -249,6 +265,7 @@ func migrateBaselineSchema(_ context.Context, tx *gorm.DB) error {
 		&models.MediaHashGroup{},
 		&models.MediaInference{},
 		&models.MediaMetadata{},
+		&models.MediaSubtitleTrack{},
 	)
 }
 
@@ -1396,6 +1413,180 @@ func validateSmartCovers(_ context.Context, db *gorm.DB) (Validation, error) {
 		}
 	}
 	return Validation{Summary: "智能封面候选与人工选择语义已就绪"}, nil
+}
+
+func estimateTimelinePreviews(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "media_timeline_previews") {
+		return StepPlan{}, nil
+	}
+	var count int64
+	if err := db.Table("media_timeline_previews").Count(&count).Error; err != nil {
+		return StepPlan{}, err
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateTimelinePreviews(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.MediaTimelinePreview{}); err != nil {
+		return err
+	}
+	for _, statement := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_timeline_previews_space_media_profile ON media_timeline_previews(space_id, media_id, profile_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_timeline_previews_space_media ON media_timeline_previews(space_id, media_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_timeline_previews_asset_generation ON media_timeline_previews(asset_id, generation_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_timeline_previews_pending_task ON media_timeline_previews(pending_task_id);`,
+	} {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTimelinePreviews(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_timeline_previews") {
+		return Validation{}, fmt.Errorf("media_timeline_previews 表不存在")
+	}
+	for _, column := range []string{
+		"space_id", "media_id", "profile_id", "source_fingerprint",
+		"generation_id", "asset_id", "pending_source_fingerprint",
+		"pending_generation_id", "pending_task_id", "updated_at",
+	} {
+		if !columnExists(db, "media_timeline_previews", column) {
+			return Validation{}, fmt.Errorf("media_timeline_previews 缺少 %s", column)
+		}
+	}
+	for _, name := range []string{
+		"idx_media_timeline_previews_space_media_profile",
+		"idx_media_timeline_previews_space_media",
+		"idx_media_timeline_previews_asset_generation",
+		"idx_media_timeline_previews_pending_task",
+	} {
+		if !indexExists(db, name) {
+			return Validation{}, fmt.Errorf("时间线预览索引不存在: %s", name)
+		}
+	}
+	return Validation{Summary: "时间线预览当前 generation 指针与索引已就绪"}, nil
+}
+
+func estimateSubtitleTracks(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "media_subtitle_tracks") {
+		return StepPlan{}, nil
+	}
+	var count int64
+	err := db.Table("media_subtitle_tracks").Count(&count).Error
+	return StepPlan{EstimatedRows: count}, err
+}
+
+func migrateSubtitleTracks(_ context.Context, tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&models.MediaSubtitleTrack{}); err != nil {
+		return err
+	}
+	if err := normalizeSubtitleTrackRows(tx); err != nil {
+		return err
+	}
+	for _, statement := range subtitleTrackIndexStatements() {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeSubtitleTrackRows(tx *gorm.DB) error {
+	if err := deduplicateSubtitleTrackRows(tx); err != nil {
+		return err
+	}
+	statements := []string{
+		`UPDATE media_subtitle_tracks SET source = lower(trim(source)), format = lower(trim(format));`,
+		`UPDATE media_subtitle_tracks SET source_ref = lower(replace(trim(source_ref), char(92), '/')) WHERE source = 'sidecar';`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deduplicateSubtitleTrackRows(tx *gorm.DB) error {
+	statements := []string{
+		`DELETE FROM media_subtitle_tracks
+			WHERE lower(trim(source)) = 'sidecar' AND EXISTS (
+				SELECT 1 FROM media_subtitle_tracks AS keeper
+				WHERE lower(trim(keeper.source)) = 'sidecar'
+					AND keeper.space_id = media_subtitle_tracks.space_id
+					AND keeper.media_id = media_subtitle_tracks.media_id
+					AND lower(replace(trim(keeper.source_ref), char(92), '/')) = lower(replace(trim(media_subtitle_tracks.source_ref), char(92), '/'))
+					AND (coalesce(keeper.created_at, '') < coalesce(media_subtitle_tracks.created_at, '')
+						OR (coalesce(keeper.created_at, '') = coalesce(media_subtitle_tracks.created_at, '') AND keeper.id < media_subtitle_tracks.id))
+			);`,
+		`DELETE FROM media_subtitle_tracks
+			WHERE lower(trim(source)) = 'embedded' AND EXISTS (
+				SELECT 1 FROM media_subtitle_tracks AS keeper
+				WHERE lower(trim(keeper.source)) = 'embedded'
+					AND keeper.space_id = media_subtitle_tracks.space_id
+					AND keeper.media_id = media_subtitle_tracks.media_id
+					AND keeper.stream_index = media_subtitle_tracks.stream_index
+					AND (coalesce(keeper.created_at, '') < coalesce(media_subtitle_tracks.created_at, '')
+						OR (coalesce(keeper.created_at, '') = coalesce(media_subtitle_tracks.created_at, '') AND keeper.id < media_subtitle_tracks.id))
+			);`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func subtitleTrackIndexStatements() []string {
+	return []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_subtitle_tracks_embedded_unique
+			ON media_subtitle_tracks(space_id, media_id, stream_index)
+			WHERE source = 'embedded';`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_subtitle_tracks_sidecar_unique
+			ON media_subtitle_tracks(space_id, media_id, source_ref)
+			WHERE source = 'sidecar';`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_subtitle_tracks_uploaded_owner
+			ON media_subtitle_tracks(id, space_id)
+			WHERE source = 'uploaded';`,
+		`CREATE INDEX IF NOT EXISTS idx_media_subtitle_tracks_space_media_source
+			ON media_subtitle_tracks(space_id, media_id, source);`,
+	}
+}
+
+func validateSubtitleTracks(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "media_subtitle_tracks") {
+		return Validation{}, fmt.Errorf("media_subtitle_tracks 表不存在")
+	}
+	for _, column := range []string{
+		"id", "space_id", "media_id", "source", "source_ref", "storage_relative_path",
+		"stream_index", "format", "language", "title", "is_default", "is_forced", "created_at", "updated_at",
+	} {
+		if !columnExists(db, "media_subtitle_tracks", column) {
+			return Validation{}, fmt.Errorf("media_subtitle_tracks 缺少 %s", column)
+		}
+	}
+	return validateSubtitleTrackIndexes(db)
+}
+
+func validateSubtitleTrackIndexes(db *gorm.DB) (Validation, error) {
+	definitions := map[string]string{
+		"idx_media_subtitle_tracks_embedded_unique": "ON media_subtitle_tracks(space_id, media_id, stream_index) WHERE source = 'embedded'",
+		"idx_media_subtitle_tracks_sidecar_unique":  "ON media_subtitle_tracks(space_id, media_id, source_ref) WHERE source = 'sidecar'",
+		"idx_media_subtitle_tracks_uploaded_owner":  "ON media_subtitle_tracks(id, space_id) WHERE source = 'uploaded'",
+	}
+	for name, definition := range definitions {
+		if !indexDefinitionContains(db, name, definition) {
+			return Validation{}, fmt.Errorf("字幕轨道唯一索引定义不正确: %s", name)
+		}
+	}
+	const queryDefinition = "ON media_subtitle_tracks(space_id, media_id, source)"
+	if !indexDefinitionContains(db, "idx_media_subtitle_tracks_space_media_source", queryDefinition) {
+		return Validation{}, fmt.Errorf("字幕轨道查询索引定义不正确")
+	}
+	return Validation{Summary: "FR2-044 字幕轨道来源唯一约束已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

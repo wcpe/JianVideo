@@ -146,14 +146,33 @@ func PreSliceWithCodecAndPolicyToDir(
 	return &PreSliceResult{MediaID: mediaID, OutputDir: res.OutputDir, Qualities: []string{res.Codec}, MasterPath: res.ManifestPath}, nil
 }
 
+// PreSliceAudioTrackWithPolicyToDir 精确映射一条全局音频流并复用 H.264 单档预览管道。
+func PreSliceAudioTrackWithPolicyToDir(
+	ctx context.Context,
+	mediaID int64,
+	inputPath string,
+	srcWidth int,
+	srcHeight int,
+	audioStreamIndex int,
+	policy HardwarePolicy,
+	outputDir string,
+) (*PreSliceResult, error) {
+	if audioStreamIndex < 0 {
+		return nil, fmt.Errorf("音轨流索引不能为负数")
+	}
+	srcWidth, srcHeight = resolveSourceResolution(ctx, mediaID, inputPath, srcWidth, srcHeight)
+	qualityNames := previewQualityForResolution(srcWidth, srcHeight)
+	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, qualityNames, &audioStreamIndex)
+}
+
 func preSliceTSWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, srcWidth, srcHeight int, policy HardwarePolicy, outputDir string) (*PreSliceResult, error) {
 	srcWidth, srcHeight = resolveSourceResolution(ctx, mediaID, inputPath, srcWidth, srcHeight)
-	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, QualitiesForResolution(srcWidth, srcHeight))
+	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, QualitiesForResolution(srcWidth, srcHeight), nil)
 }
 
 func preSliceTSPreviewWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, srcWidth, srcHeight int, policy HardwarePolicy, outputDir string) (*PreSliceResult, error) {
 	srcWidth, srcHeight = resolveSourceResolution(ctx, mediaID, inputPath, srcWidth, srcHeight)
-	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, previewQualityForResolution(srcWidth, srcHeight))
+	return preSliceTSQualitiesWithPolicyToDir(ctx, mediaID, inputPath, policy, outputDir, previewQualityForResolution(srcWidth, srcHeight), nil)
 }
 
 func previewQualityForResolution(width, height int) []string {
@@ -164,7 +183,7 @@ func previewQualityForResolution(width, height int) []string {
 	return qualityNames
 }
 
-func preSliceTSQualitiesWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, policy HardwarePolicy, outputDir string, qualityNames []string) (*PreSliceResult, error) {
+func preSliceTSQualitiesWithPolicyToDir(ctx context.Context, mediaID int64, inputPath string, policy HardwarePolicy, outputDir string, qualityNames []string, audioStreamIndex *int) (*PreSliceResult, error) {
 	if !IsFFmpegAvailable() {
 		return nil, fmt.Errorf("ffmpeg 不可用，无法预切片")
 	}
@@ -177,7 +196,7 @@ func preSliceTSQualitiesWithPolicyToDir(ctx context.Context, mediaID int64, inpu
 	if err := resetHLSOutputDir(outputDir); err != nil {
 		return nil, err
 	}
-	if err := runHLSProfile(ctx, mediaID, inputPath, outputDir, qualityNames, policy); err != nil {
+	if err := runHLSProfile(ctx, mediaID, inputPath, outputDir, qualityNames, policy, audioStreamIndex); err != nil {
 		return nil, err
 	}
 	masterPath := filepath.Join(outputDir, "master.m3u8")
@@ -211,10 +230,10 @@ func resetHLSOutputDir(outputDir string) error {
 	return nil
 }
 
-func runHLSProfile(ctx context.Context, mediaID int64, inputPath, outputDir string, qualityNames []string, policy HardwarePolicy) error {
+func runHLSProfile(ctx context.Context, mediaID int64, inputPath, outputDir string, qualityNames []string, policy HardwarePolicy, audioStreamIndex *int) error {
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	if err := runMultiToDirWithPolicy(runCtx, inputPath, qualityNames, outputDir, policy); err != nil {
+	if err := runMultiToDirWithPolicy(runCtx, inputPath, qualityNames, outputDir, policy, audioStreamIndex); err != nil {
 		_ = os.RemoveAll(outputDir)
 		log.Printf("[ERROR] HLS 预切片失败（ffmpeg 切片）: mediaID=%d, outputDir=%s, qualities=%v, err=%v", mediaID, outputDir, qualityNames, err)
 		return fmt.Errorf("ffmpeg 切片失败: %w", err)
@@ -226,12 +245,12 @@ func runHLSProfile(ctx context.Context, mediaID int64, inputPath, outputDir stri
 	return nil
 }
 
-func runMultiToDirWithPolicy(ctx context.Context, inputPath string, qualityNames []string, outputDir string, policy HardwarePolicy) error {
+func runMultiToDirWithPolicy(ctx context.Context, inputPath string, qualityNames []string, outputDir string, policy HardwarePolicy, audioStreamIndex *int) error {
 	pipeline, err := NewPipelineForCodecWithPolicy(DefaultTargetCodec, policy)
 	if err != nil {
 		return err
 	}
-	err = NewMultiPipeline(pipeline).RunMultiToDir(ctx, inputPath, qualityNames, outputDir)
+	err = runMultiPipeline(ctx, pipeline, inputPath, qualityNames, outputDir, audioStreamIndex)
 	if err == nil || pipeline.deviceType == "" || !policy.Fallback {
 		return err
 	}
@@ -243,7 +262,15 @@ func runMultiToDirWithPolicy(ctx context.Context, inputPath string, qualityNames
 	if softwareErr != nil {
 		return err
 	}
-	return NewMultiPipeline(software).RunMultiToDir(ctx, inputPath, qualityNames, outputDir)
+	return runMultiPipeline(ctx, software, inputPath, qualityNames, outputDir, audioStreamIndex)
+}
+
+func runMultiPipeline(ctx context.Context, pipeline *Pipeline, inputPath string, qualityNames []string, outputDir string, audioStreamIndex *int) error {
+	multi := NewMultiPipeline(pipeline)
+	if audioStreamIndex == nil {
+		return multi.RunMultiToDir(ctx, inputPath, qualityNames, outputDir)
+	}
+	return multi.RunMultiToDirWithAudioStream(ctx, inputPath, qualityNames, outputDir, *audioStreamIndex)
 }
 
 // resPattern 匹配 ffmpeg -i 输出中的 "Video: h264 (...), yuv420p(...), 1920x1080" 之类。

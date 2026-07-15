@@ -22,8 +22,8 @@ export async function getTaskStats(
   return res.data;
 }
 
-export async function getTask(id: string): Promise<TaskItem> {
-  const res = await client.get<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`);
+export async function getTask(id: string, signal?: AbortSignal): Promise<TaskItem> {
+  const res = await client.get<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, { signal });
   return res.data;
 }
 

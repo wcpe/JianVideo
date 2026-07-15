@@ -21,6 +21,7 @@
   "dependencies": {
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
+    "@jianvideo/player-core": "file:../packages/player-core",
     "@mantine/core": "^7.17.0",
     "@mantine/dates": "^7.17.8",
     "@mantine/form": "^7.17.0",

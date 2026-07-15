@@ -189,8 +189,8 @@ func TestExtractSubtitlePath(t *testing.T) {
 		t.Fatalf("查找字幕失败: %v", err)
 	}
 
-	if len(subs) != 3 {
-		t.Fatalf("期望找到 3 个字幕文件, 实际 %d", len(subs))
+	if len(subs) != 2 {
+		t.Fatalf("期望找到 2 个文本字幕文件, 实际 %d", len(subs))
 	}
 
 	// 验证每个格式都被识别
@@ -205,7 +205,7 @@ func TestExtractSubtitlePath(t *testing.T) {
 	if _, ok := formatMap["ass"]; !ok {
 		t.Error("未找到 ASS 字幕")
 	}
-	if _, ok := formatMap["sup"]; !ok {
-		t.Error("未找到 SUP 字幕")
+	if _, ok := formatMap["sup"]; ok {
+		t.Error("图片字幕不应作为可转换外挂字幕返回")
 	}
 }

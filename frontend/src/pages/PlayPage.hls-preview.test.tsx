@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { http, HttpResponse } from 'msw';
@@ -27,6 +27,28 @@ function renderPage() {
 }
 
 describe('PlayPage ABR fallback', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('*/api/play/:id/timeline-preview', () =>
+        HttpResponse.json(
+          { duration: 0, profile_id: 'timeline-v1', status: 'pending', version: 1 },
+          { status: 202 },
+        ),
+      ),
+      http.get('*/api/play/:id/tracks', () =>
+        HttpResponse.json({
+          tracks: [],
+          selection: {
+            audio: { selected_track_id: null, effective_track_id: null },
+            subtitle: { selected_track_id: null, effective_track_id: null },
+          },
+          sources: {},
+          backend: {},
+        }),
+      ),
+    );
+  });
+
   it('先直连播放，失败后只查询已生成 ABR，不自动入队', async () => {
     let requestedProfile = '';
     let enqueueCount = 0;

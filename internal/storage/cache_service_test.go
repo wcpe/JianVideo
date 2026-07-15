@@ -35,6 +35,8 @@ func newCacheTestService(t *testing.T) (*Service, *gorm.DB, string) {
 		&models.LibraryPath{},
 		&models.MediaFile{},
 		&models.CacheAsset{},
+		&models.MediaTimelinePreview{},
+		&models.MediaSubtitleTrack{},
 		&models.AuditEvent{},
 		&models.Task{},
 	); err != nil {
@@ -139,6 +141,56 @@ func TestCacheRegisterHLSDirectoryAggregatesFiles(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("HLS segment 不应逐个登记，实际行数 %d", count)
+	}
+}
+
+func TestCacheAudioHLSUsesTaskIdentityForRegisterInventoryAndClean(t *testing.T) {
+	svc, db, dataDir := newCacheTestService(t)
+	profileID := "audio-h264-aac-0123456789abcdef01234567"
+	base := filepath.Join(dataDir, "hls", models.DefaultSpaceID, "42", profileID)
+	direct := filepath.Join(base, "master.m3u8")
+	mustWriteFile(t, direct, "legacy")
+	if _, err := svc.RegisterDirectory(context.Background(), RegisterInput{
+		SpaceID: models.DefaultSpaceID, MediaID: 42, Kind: CacheKindHLS, ProfileID: profileID, Path: base,
+	}); err == nil {
+		t.Fatal("音轨 HLS 旧 profile 直连目录不得登记")
+	}
+	for _, taskID := range []string{"101", "102"} {
+		dir := filepath.Join(base, "tasks", taskID)
+		mustWriteFile(t, filepath.Join(dir, "master.m3u8"), taskID)
+		if _, err := svc.RegisterDirectory(context.Background(), RegisterInput{
+			SpaceID: models.DefaultSpaceID, MediaID: 42, Kind: CacheKindHLS, ProfileID: profileID, Variant: "wrong", Path: dir,
+		}); err == nil {
+			t.Fatalf("音轨 HLS 登记的 Variant 必须等于 task_id: %s", taskID)
+		}
+	}
+
+	queued, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("音轨 HLS 盘点入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, queued.TaskID)
+	var assets []models.CacheAsset
+	if err := db.Where("kind = ? AND profile_id = ?", CacheKindHLS, profileID).Order("variant ASC").Find(&assets).Error; err != nil {
+		t.Fatalf("读取音轨 HLS 盘点资产失败: %v", err)
+	}
+	if len(assets) != 2 || assets[0].Variant != "101" || assets[1].Variant != "102" {
+		t.Fatalf("音轨 HLS 盘点必须按 task_id 分别登记: %+v", assets)
+	}
+	clean, err := svc.Clean(context.Background(), CleanInput{SpaceID: models.DefaultSpaceID, Kinds: []string{CacheKindHLS}})
+	if err != nil {
+		t.Fatalf("音轨 HLS 清理入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, clean.TaskID)
+	for _, taskID := range []string{"101", "102"} {
+		if _, err := os.Stat(filepath.Join(base, "tasks", taskID)); !os.IsNotExist(err) {
+			t.Fatalf("音轨 HLS 清理必须删除对应 task 目录: task=%s err=%v", taskID, err)
+		}
+	}
+	if data, err := os.ReadFile(direct); err != nil || string(data) != "legacy" {
+		t.Fatalf("未登记的旧直连目录不得被任务化清理误删: data=%q err=%v", data, err)
 	}
 }
 
@@ -254,6 +306,45 @@ func TestCacheInventoryMarksMissingAndDiscoversWhitelistFiles(t *testing.T) {
 	}
 	if asset.MissingAt == nil {
 		t.Fatalf("磁盘缺失资产应标记 missing_at: %+v", asset)
+	}
+}
+
+func TestCacheInventoryAndClean不触碰上传字幕(t *testing.T) {
+	svc, db, dataDir := newCacheTestService(t)
+	subtitlePath := filepath.Join(dataDir, "subtitles", models.DefaultSpaceID, "9", "upl-safe.vtt")
+	mustWriteFile(t, subtitlePath, "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n字幕\n")
+	row := models.MediaSubtitleTrack{ID: "upl-safe", SpaceID: models.DefaultSpaceID, MediaID: 9,
+		Source: models.MediaSubtitleSourceUploaded, SourceRef: "safe.vtt", StorageRelativePath: "subtitles/space-default/9/upl-safe.vtt",
+		StreamIndex: -1, Format: "vtt"}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("创建上传字幕记录失败: %v", err)
+	}
+	thumbnail := filepath.Join(dataDir, "thumbnails", models.DefaultSpaceID, "9", "320.jpg")
+	mustWriteFile(t, thumbnail, "thumbnail")
+	if _, err := svc.RegisterFile(context.Background(), RegisterInput{SpaceID: models.DefaultSpaceID, MediaID: 9, Kind: CacheKindThumbnail, Path: thumbnail}); err != nil {
+		t.Fatalf("登记清理对照缓存失败: %v", err)
+	}
+	inventory, err := svc.Inventory(context.Background(), InventoryInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("字幕隔离盘点入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, inventory.TaskID)
+	clean, err := svc.Clean(context.Background(), CleanInput{SpaceID: models.DefaultSpaceID})
+	if err != nil {
+		t.Fatalf("字幕隔离清理入队失败: %v", err)
+	}
+	runCacheWorkers(t, svc)
+	assertCacheTaskSucceeded(t, svc.tasks, clean.TaskID)
+	if _, err := os.Stat(subtitlePath); err != nil {
+		t.Fatalf("缓存盘点和清理不得触碰上传字幕: %v", err)
+	}
+	var count int64
+	if err := db.Model(&models.MediaSubtitleTrack{}).Where("id = ?", row.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("缓存盘点和清理不得删除字幕记录: count=%d err=%v", count, err)
+	}
+	if err := db.Model(&models.CacheAsset{}).Where("relative_path LIKE ?", "subtitles/%").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("字幕不得进入缓存资产: count=%d err=%v", count, err)
 	}
 }
 

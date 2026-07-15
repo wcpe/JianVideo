@@ -1,6 +1,7 @@
 package player
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,6 +115,55 @@ func TestGetSegment_RejectsSymlinkEscape(t *testing.T) {
 	mgr := NewHLSManager(baseDir)
 	if data, err := mgr.GetSegment(1, "1080p", "link.ts"); err == nil {
 		t.Fatalf("不得通过越界符号链接读取文件，读到 %q", data)
+	}
+}
+
+func TestOpenHLSFileRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	mediaDir := filepath.Join(root, "1")
+	if err := os.MkdirAll(mediaDir, 0o750); err != nil {
+		t.Fatalf("创建 HLS 目录失败: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.ts")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("创建越界文件失败: %v", err)
+	}
+	link := filepath.Join(mediaDir, "link.ts")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("当前环境无法创建符号链接: %v", err)
+	}
+	if file, _, err := OpenHLSFile(root, "1/link.ts"); err == nil {
+		_ = file.Close()
+		t.Fatal("受限打开不得跟随越界符号链接")
+	}
+}
+
+func TestOpenHLSFileKeepsOpenedHandleAfterPathReplacement(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "1", "segment.ts")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("创建 HLS 目录失败: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+		t.Fatalf("写入原始 HLS 文件失败: %v", err)
+	}
+	file, _, err := OpenHLSFile(root, "1/segment.ts")
+	if err != nil {
+		t.Fatalf("打开 HLS 文件失败: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Skipf("当前环境无法替换已打开文件: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("replacement"), 0o600); err != nil {
+		t.Fatalf("写入替换 HLS 文件失败: %v", err)
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("读取已打开 HLS 句柄失败: %v", err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("已打开句柄被路径替换影响: %q", data)
 	}
 }
 
