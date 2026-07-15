@@ -1,7 +1,9 @@
 import type { PlaybackCommandContext } from '@jianvideo/player-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createBinaryFrameMarkerResolver,
   WebFramePresentationFacet,
+  type WebBinaryFrameMarker,
   type WebFramePresentationSource,
 } from './WebFramePresentationFacet';
 
@@ -52,7 +54,78 @@ function createVideo(currentTime = 0): HTMLVideoElement {
   return video;
 }
 
+function markerPixels(
+  index: number,
+  marker: WebBinaryFrameMarker,
+  validSentinels = true,
+): ImageData {
+  const cells = marker.bits + 2;
+  const width = cells * marker.cellSize;
+  const data = new Uint8ClampedArray(width * marker.cellSize * 4);
+  for (let cell = 0; cell < cells; cell += 1) {
+    const sentinel = cell === 0 || cell === cells - 1;
+    const bit = sentinel ? validSentinels : ((index >> (cell - 1)) & 1) === 1;
+    const value = bit ? 255 : 0;
+    for (let y = 0; y < marker.cellSize; y += 1) {
+      for (let x = cell * marker.cellSize; x < (cell + 1) * marker.cellSize; x += 1) {
+        const offset = (y * width + x) * 4;
+        data[offset] = value;
+        data[offset + 1] = value;
+        data[offset + 2] = value;
+        data[offset + 3] = 255;
+      }
+    }
+  }
+  return { colorSpace: 'srgb', data, height: marker.cellSize, width } as ImageData;
+}
+
 describe('WebFramePresentationFacet', () => {
+  it('从实际视频像素 marker 读取稳定帧身份且不依赖 mediaTime/currentTime', () => {
+    const video = createVideo(99);
+    const marker: WebBinaryFrameMarker = { bits: 9, cellSize: 8, x: 16, y: 16 };
+    const context = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => markerPixels(173, marker)),
+    };
+    const canvas = {
+      getContext: vi.fn(() => context),
+      height: 0,
+      width: 0,
+    } as unknown as HTMLCanvasElement;
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(canvas);
+    const resolver = createBinaryFrameMarkerResolver(video, marker);
+
+    expect(resolver({ mediaTime: 0.1 } as VideoFrameCallbackMetadata)).toEqual({
+      sourceFrameIndex: 173,
+      stableFrameId: 'binary-marker:173',
+    });
+    expect(resolver({ mediaTime: 88 } as VideoFrameCallbackMetadata)).toEqual({
+      sourceFrameIndex: 173,
+      stableFrameId: 'binary-marker:173',
+    });
+    expect(context.drawImage).toHaveBeenCalledWith(video, 16, 16, 88, 8, 0, 0, 88, 8);
+    createElement.mockRestore();
+  });
+
+  it('二进制 marker 哨兵缺失时拒绝伪造稳定身份', () => {
+    const video = createVideo();
+    const marker: WebBinaryFrameMarker = { bits: 9, cellSize: 8, x: 0, y: 0 };
+    const context = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => markerPixels(5, marker, false)),
+    };
+    const canvas = {
+      getContext: vi.fn(() => context),
+      height: 0,
+      width: 0,
+    } as unknown as HTMLCanvasElement;
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(canvas);
+    const resolver = createBinaryFrameMarkerResolver(video, marker);
+
+    expect(resolver({ mediaTime: 5 / 30 } as VideoFrameCallbackMetadata)).toBeNull();
+    createElement.mockRestore();
+  });
+
   it('mediaTime 恰好命中稳定时间线也不反推身份且保持近似', () => {
     const video = createVideo();
     const harness = installVideoFrameCallback(video);
@@ -263,11 +336,7 @@ describe('WebFramePresentationFacet', () => {
     const newIdentityProvider = vi.fn(() => ({ stableFrameId: 'new-frame' }));
     const oldCommand = command('old', 5);
     facet.load(
-      source(
-        [{ mediaTime: 1, sourceFrameIndex: 1 }],
-        undefined,
-        oldIdentityProvider,
-      ),
+      source([{ mediaTime: 1, sourceFrameIndex: 1 }], undefined, oldIdentityProvider),
       oldCommand,
     );
     const oldCallbackId = Math.min(...harness.callbacks.keys());
@@ -276,11 +345,7 @@ describe('WebFramePresentationFacet', () => {
 
     const nextCommand = command('new', 6);
     facet.load(
-      source(
-        [{ mediaTime: 5, stableFrameId: 'new-frame' }],
-        undefined,
-        newIdentityProvider,
-      ),
+      source([{ mediaTime: 5, stableFrameId: 'new-frame' }], undefined, newIdentityProvider),
       nextCommand,
     );
     await expect(oldWaiter).rejects.toThrow('帧呈现等待已取消');
@@ -304,11 +369,7 @@ describe('WebFramePresentationFacet', () => {
     const facet = new WebFramePresentationFacet(video);
     const active = command('dispose', 7);
     facet.load(
-      source(
-        [{ mediaTime: 0, sourceFrameIndex: 0 }],
-        undefined,
-        () => ({ sourceFrameIndex: 0 }),
-      ),
+      source([{ mediaTime: 0, sourceFrameIndex: 0 }], undefined, () => ({ sourceFrameIndex: 0 })),
       active,
     );
     const waiter = facet.waitForPresentedFrame(active);

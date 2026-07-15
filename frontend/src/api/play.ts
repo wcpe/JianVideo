@@ -57,6 +57,21 @@ interface NegotiateResponse {
   url: string;
   mime?: string;
   fallback_url?: string;
+  frame_presentation?: {
+    marker: {
+      bits: number;
+      cell_size: number;
+      threshold?: number;
+      x: number;
+      y: number;
+    };
+    nominal_frame_rate: number;
+    timeline: Array<{
+      media_time: number;
+      source_frame_index?: number;
+      stable_frame_id?: string;
+    }>;
+  };
 }
 
 /**
@@ -158,10 +173,36 @@ export async function negotiate(
   );
   const data = res.data;
   const toAbsolute = (path: string) => new URL(path, window.location.href).toString();
+  const framePresentation = data.frame_presentation;
   return {
     codec: data.codec,
     path: data.path,
     url: toAbsolute(data.url),
     fallbackUrl: data.fallback_url ? toAbsolute(data.fallback_url) : undefined,
+    ...(framePresentation === undefined
+      ? {}
+      : {
+          framePresentation: {
+            marker: {
+              bits: framePresentation.marker.bits,
+              cellSize: framePresentation.marker.cell_size,
+              ...(framePresentation.marker.threshold === undefined
+                ? {}
+                : { threshold: framePresentation.marker.threshold }),
+              x: framePresentation.marker.x,
+              y: framePresentation.marker.y,
+            },
+            nominalFrameRate: framePresentation.nominal_frame_rate,
+            timeline: framePresentation.timeline.map((entry) => ({
+              mediaTime: entry.media_time,
+              ...(entry.source_frame_index === undefined
+                ? {}
+                : { sourceFrameIndex: entry.source_frame_index }),
+              ...(entry.stable_frame_id === undefined
+                ? {}
+                : { stableFrameId: entry.stable_frame_id }),
+            })),
+          },
+        }),
   };
 }

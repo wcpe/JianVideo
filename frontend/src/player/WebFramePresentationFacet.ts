@@ -16,6 +16,14 @@ export interface WebFrameTimelineEntry {
   readonly stableFrameId?: string;
 }
 
+export interface WebBinaryFrameMarker {
+  readonly bits: number;
+  readonly cellSize: number;
+  readonly threshold?: number;
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface WebPresentedFrameIdentity {
   readonly sourceFrameIndex?: number;
   readonly stableFrameId?: string;
@@ -28,6 +36,21 @@ export type ResolvePresentedFrameIdentity = (
 export type FramePresentationCapabilityListener = (
   capability: FramePresentationCapability,
 ) => void;
+
+export function createBinaryFrameMarkerResolver(
+  video: HTMLVideoElement,
+  marker: WebBinaryFrameMarker,
+): ResolvePresentedFrameIdentity {
+  const config = normalizeMarker(marker);
+  if (config === null) return () => null;
+  const canvas = document.createElement('canvas');
+  const width = (config.bits + 2) * config.cellSize;
+  canvas.width = width;
+  canvas.height = config.cellSize;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (context === null) return () => null;
+  return () => readBinaryFrameMarker(video, context, config, width);
+}
 
 export interface WebFramePresentationSource {
   readonly frameTimeline?: readonly WebFrameTimelineEntry[];
@@ -60,10 +83,7 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
   private readonly video: HTMLVideoElement;
   private readonly waiters = new Set<FrameWaiter>();
 
-  constructor(
-    video: HTMLVideoElement,
-    capabilityChanged?: FramePresentationCapabilityListener,
-  ) {
+  constructor(video: HTMLVideoElement, capabilityChanged?: FramePresentationCapabilityListener) {
     this.video = video;
     this.capabilityChanged = capabilityChanged;
   }
@@ -260,7 +280,9 @@ function invokeIdentityProvider(
   }
 }
 
-function validateIdentity(identity: WebPresentedFrameIdentity | null): WebPresentedFrameIdentity | null {
+function validateIdentity(
+  identity: WebPresentedFrameIdentity | null,
+): WebPresentedFrameIdentity | null {
   if (!identity || typeof identity !== 'object') return null;
   const sourceFrameIndex = identity.sourceFrameIndex;
   const stableFrameId = identity.stableFrameId;
@@ -281,7 +303,8 @@ function identityMatches(
 ): boolean {
   const indexed =
     identity.sourceFrameIndex === undefined || entry.sourceFrameIndex === identity.sourceFrameIndex;
-  const stable = identity.stableFrameId === undefined || entry.stableFrameId === identity.stableFrameId;
+  const stable =
+    identity.stableFrameId === undefined || entry.stableFrameId === identity.stableFrameId;
   return indexed && stable;
 }
 
@@ -314,6 +337,76 @@ function createAdjacentTarget(
     ...(target.sourceFrameIndex === undefined ? {} : { sourceFrameIndex: target.sourceFrameIndex }),
     ...(target.stableFrameId === undefined ? {} : { stableFrameId: target.stableFrameId }),
   };
+}
+
+function normalizeMarker(marker: WebBinaryFrameMarker): Required<WebBinaryFrameMarker> | null {
+  const validInteger = (value: number) => Number.isInteger(value) && value >= 0;
+  if (!validInteger(marker.x) || !validInteger(marker.y) || !validInteger(marker.cellSize))
+    return null;
+  if (!Number.isInteger(marker.bits) || marker.bits < 1 || marker.bits > 24 || marker.cellSize < 2)
+    return null;
+  const threshold = marker.threshold ?? 160;
+  if (!Number.isFinite(threshold) || threshold <= 0 || threshold >= 255) return null;
+  return { ...marker, threshold };
+}
+
+function readBinaryFrameMarker(
+  video: HTMLVideoElement,
+  context: CanvasRenderingContext2D,
+  marker: Required<WebBinaryFrameMarker>,
+  width: number,
+): WebPresentedFrameIdentity | null {
+  try {
+    context.drawImage(
+      video,
+      marker.x,
+      marker.y,
+      width,
+      marker.cellSize,
+      0,
+      0,
+      width,
+      marker.cellSize,
+    );
+    const pixels = context.getImageData(0, 0, width, marker.cellSize);
+    return decodeBinaryFrameMarker(pixels, marker);
+  } catch {
+    return null;
+  }
+}
+
+function decodeBinaryFrameMarker(
+  pixels: ImageData,
+  marker: Required<WebBinaryFrameMarker>,
+): WebPresentedFrameIdentity | null {
+  const cells = marker.bits + 2;
+  if (pixels.width < cells * marker.cellSize || pixels.height < marker.cellSize) return null;
+  const white = (cell: number) => cellLuma(pixels, cell, marker.cellSize) >= marker.threshold;
+  if (!white(0) || !white(cells - 1)) return null;
+  let sourceFrameIndex = 0;
+  for (let bit = 0; bit < marker.bits; bit += 1) {
+    if (white(bit + 1)) sourceFrameIndex += 2 ** bit;
+  }
+  return { sourceFrameIndex, stableFrameId: `binary-marker:${String(sourceFrameIndex)}` };
+}
+
+function cellLuma(pixels: ImageData, cell: number, cellSize: number): number {
+  const centerX = cell * cellSize + Math.floor(cellSize / 2);
+  const centerY = Math.floor(cellSize / 2);
+  let sum = 0;
+  let samples = 0;
+  for (let y = centerY - 1; y <= centerY + 1; y += 1) {
+    for (let x = centerX - 1; x <= centerX + 1; x += 1) {
+      const offset = (y * pixels.width + x) * 4;
+      sum +=
+        ((pixels.data[offset] ?? 0) +
+          (pixels.data[offset + 1] ?? 0) +
+          (pixels.data[offset + 2] ?? 0)) /
+        3;
+      samples += 1;
+    }
+  }
+  return sum / samples;
 }
 
 function finiteMediaTime(value: number): number {

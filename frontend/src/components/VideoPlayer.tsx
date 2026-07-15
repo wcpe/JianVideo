@@ -42,9 +42,11 @@ import { notifyError } from '@/utils/notify';
 import { useAuthStore } from '@/stores/auth';
 import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
 import { WebPlaybackBackend, type WebPlaybackSourcePayload } from '@/player/WebPlaybackBackend';
-import type {
-  ResolvePresentedFrameIdentity,
-  WebFrameTimelineEntry,
+import {
+  createBinaryFrameMarkerResolver,
+  type ResolvePresentedFrameIdentity,
+  type WebBinaryFrameMarker,
+  type WebFrameTimelineEntry,
 } from '@/player/WebFramePresentationFacet';
 
 interface VideoPlayerProps {
@@ -59,6 +61,8 @@ interface VideoPlayerProps {
   poster?: string;
   /** 后端准备的稳定帧时间线；仅用于取得相邻目标。 */
   frameTimeline?: readonly WebFrameTimelineEntry[];
+  /** 显式二进制画面 marker；仅从实际呈现像素读取稳定身份。 */
+  frameMarker?: WebBinaryFrameMarker;
   /** 独立的已呈现帧身份源；缺省时逐帧自动降级为近似。 */
   resolvePresentedFrameIdentity?: ResolvePresentedFrameIdentity;
   /** 名义帧率；缺省且无时间线时按 30fps 近似。 */
@@ -316,6 +320,7 @@ export default function VideoPlayer({
   descriptor,
   poster,
   frameTimeline,
+  frameMarker,
   nominalFrameRate,
   previewTrack,
   previewSpriteUrls,
@@ -599,6 +604,11 @@ export default function VideoPlayer({
   useEffect(() => {
     const core = coreRef.current;
     if (!core) return;
+    const markerResolver =
+      resolvePresentedFrameIdentity ??
+      (frameMarker && videoRef.current
+        ? createBinaryFrameMarkerResolver(videoRef.current, frameMarker)
+        : undefined);
     const source = createPlaybackSource(
       resolved.url,
       resolved.streamType,
@@ -608,7 +618,7 @@ export default function VideoPlayer({
       trackResponseRef.current,
       frameTimeline,
       nominalFrameRate,
-      resolvePresentedFrameIdentity,
+      markerResolver,
     );
     let current = true;
     restoreGenerationRef.current += 1;
@@ -633,6 +643,7 @@ export default function VideoPlayer({
   }, [
     autoPlay,
     attemptAutoPlay,
+    frameMarker,
     frameTimeline,
     isABR,
     mediaId,
@@ -1184,6 +1195,7 @@ export default function VideoPlayer({
     <Box
       ref={containerRef}
       data-testid="video-player-root"
+      data-frame-presentation={framePresentationCapability ?? 'pending'}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onMouseMove={showControlsTemporarily}

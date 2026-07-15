@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WebFramePresentationFacet } from '@/player/WebFramePresentationFacet';
 import { WebPlaybackBackend } from '@/player/WebPlaybackBackend';
 import VideoPlayer from './VideoPlayer';
 
@@ -211,6 +212,24 @@ describe('VideoPlayer 真实 PlaybackCore→WebPlaybackBackend 接入', () => {
     );
     const hls = await waitForHlsInstance();
     expect(hls.loadSource).toHaveBeenCalledWith('/master.m3u8');
+  });
+
+  it('二进制帧 marker 由播放器接成真实像素身份 resolver', async () => {
+    const load = vi.spyOn(WebFramePresentationFacet.prototype, 'load');
+    renderPlayer({
+      frameMarker: { bits: 9, cellSize: 8, x: 16, y: 16 },
+      frameTimeline: [
+        { mediaTime: 0, sourceFrameIndex: 0, stableFrameId: 'binary-marker:0' },
+        { mediaTime: 1 / 30, sourceFrameIndex: 1, stableFrameId: 'binary-marker:1' },
+      ],
+      nominalFrameRate: 30,
+    });
+
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    expect(load.mock.calls.at(-1)?.[0]).toMatchObject({
+      nominalFrameRate: 30,
+      resolvePresentedFrameIdentity: expect.any(Function),
+    });
   });
 
   it('mpegts autoplay 只在 core.load 等到 loadeddata 完成后发起', async () => {

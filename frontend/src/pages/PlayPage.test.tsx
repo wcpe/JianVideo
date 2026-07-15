@@ -22,6 +22,9 @@ vi.mock('@/components/VideoPlayer', () => ({
     trackResponse?: { tracks: unknown[] };
     onTrackManifestRefresh?: () => Promise<{ tracks: unknown[] }>;
     descriptor?: { codec: string; path: string; url: string };
+    frameMarker?: { bits: number; cellSize: number; x: number; y: number };
+    frameTimeline?: Array<{ mediaTime: number; sourceFrameIndex?: number; stableFrameId?: string }>;
+    nominalFrameRate?: number;
   }) => (
     <div
       data-testid="video-player"
@@ -36,6 +39,9 @@ vi.mock('@/components/VideoPlayer', () => ({
       data-desc-codec={props.descriptor?.codec ?? ''}
       data-desc-path={props.descriptor?.path ?? ''}
       data-desc-url={props.descriptor?.url ?? ''}
+      data-frame-marker={props.frameMarker ? JSON.stringify(props.frameMarker) : ''}
+      data-frame-timeline-size={props.frameTimeline?.length ?? ''}
+      data-nominal-frame-rate={props.nominalFrameRate ?? ''}
     />
   ),
 }));
@@ -539,6 +545,58 @@ describe('PlayPage', () => {
     // 上报了客户端能力
     await waitFor(() => expect(captured.caps).toBeTruthy());
     vi.unstubAllGlobals();
+  });
+
+  it('协商返回显式帧呈现描述符时接入直连真实画面身份源', async () => {
+    server.use(
+      http.get('*/api/library/media/8', () =>
+        HttpResponse.json({
+          id: 8,
+          library_id: 1,
+          file_path: 'D:/V/numbered.mp4',
+          file_name: 'numbered.mp4',
+          file_size: 0,
+          format: 'mp4',
+          video_codec: 'h264',
+          audio_codec: '',
+          duration: 130,
+          width: 320,
+          height: 180,
+          bitrate: 0,
+          subtitle_tracks: '',
+          added_at: '',
+          modified_at: '',
+        }),
+      ),
+      http.post('*/api/play/8/negotiate', () =>
+        HttpResponse.json({
+          codec: 'h264',
+          path: 'ts',
+          url: '/api/play/hls/8/master',
+          frame_presentation: {
+            marker: { bits: 9, cell_size: 8, x: 16, y: 16 },
+            nominal_frame_rate: 2,
+            timeline: [
+              { media_time: 0, source_frame_index: 0, stable_frame_id: 'binary-marker:0' },
+              { media_time: 0.5, source_frame_index: 1, stable_frame_id: 'binary-marker:1' },
+            ],
+          },
+        }),
+      ),
+    );
+
+    renderPlayPage('/play/8');
+
+    const player = await screen.findByTestId('video-player');
+    await waitFor(() => {
+      expect(player.getAttribute('data-desc-path')).toBe('mp4');
+      expect(player.getAttribute('data-desc-url')).toMatch(/\/api\/play\/8\/stream$/);
+      expect(player.getAttribute('data-frame-marker')).toBe(
+        JSON.stringify({ bits: 9, cellSize: 8, x: 16, y: 16 }),
+      );
+      expect(player.getAttribute('data-frame-timeline-size')).toBe('2');
+      expect(player.getAttribute('data-nominal-frame-rate')).toBe('2');
+    });
   });
 
   it('挂载时记录最近查看（PUT /viewed，FR-120）', async () => {

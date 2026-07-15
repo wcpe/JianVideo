@@ -266,10 +266,16 @@ export default function PlayPage() {
     void playApi
       .negotiate(mediaId, probeClientCapabilities(), signal)
       .then((nextDescriptor) => {
-        if (!isCurrentMediaRequest(request) || nextDescriptor.path !== 'fmp4') return;
-        setDescriptor(nextDescriptor);
-        setPlayerUrl(nextDescriptor.url);
-        setPlayerIsABR(true);
+        if (!isCurrentMediaRequest(request)) return;
+        if (nextDescriptor.path === 'fmp4') {
+          setDescriptor(nextDescriptor);
+          setPlayerUrl(nextDescriptor.url);
+          setPlayerIsABR(true);
+          return;
+        }
+        if (nextDescriptor.framePresentation) {
+          setDescriptor({ ...nextDescriptor, path: 'mp4', url: mediaStreamUrl(mediaId) });
+        }
       })
       .catch(() => undefined);
 
@@ -611,6 +617,9 @@ export default function PlayPage() {
           <VideoPlayer
             url={playerUrl}
             descriptor={descriptor ?? undefined}
+            frameMarker={descriptor?.framePresentation?.marker}
+            frameTimeline={descriptor?.framePresentation?.timeline}
+            nominalFrameRate={descriptor?.framePresentation?.nominalFrameRate}
             mediaId={media.id}
             trackResponse={trackManifest ?? undefined}
             onTrackManifestRefresh={refreshTrackManifest}

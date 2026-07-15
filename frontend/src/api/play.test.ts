@@ -193,6 +193,13 @@ describe('negotiate（FR-53 编码协商 API）', () => {
           url: '/api/play/hls/9/index.m3u8',
           mime: 'video/mp4; codecs="av01.0.05M.08"',
           fallback_url: '/api/play/9/stream',
+          frame_presentation: {
+            marker: { bits: 9, cell_size: 8, x: 16, y: 16 },
+            nominal_frame_rate: 30,
+            timeline: [
+              { media_time: 0, source_frame_index: 0, stable_frame_id: 'binary-marker:0' },
+            ],
+          },
         });
       }),
     );
@@ -204,6 +211,11 @@ describe('negotiate（FR-53 编码协商 API）', () => {
     expect(desc.path).toBe('fmp4');
     expect(desc.url).toMatch(/^https?:\/\/.+\/api\/play\/hls\/9\/index\.m3u8$/);
     expect(desc.fallbackUrl).toMatch(/^https?:\/\/.+\/api\/play\/9\/stream$/);
+    expect(desc.framePresentation).toEqual({
+      marker: { bits: 9, cellSize: 8, x: 16, y: 16 },
+      nominalFrameRate: 30,
+      timeline: [{ mediaTime: 0, sourceFrameIndex: 0, stableFrameId: 'binary-marker:0' }],
+    });
   });
 
   it('h264/TS 描述符无 fallbackUrl', async () => {

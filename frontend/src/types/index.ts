@@ -849,6 +849,26 @@ export interface SubtitleEntry {
  *
  * 端到端「按客户端能力选编码 + 触发后端产 fMP4」的协商属 FR-53。
  */
+export interface PlaybackFrameTimelineEntry {
+  mediaTime: number;
+  sourceFrameIndex?: number;
+  stableFrameId?: string;
+}
+
+export interface PlaybackFrameMarkerDescriptor {
+  bits: number;
+  cellSize: number;
+  threshold?: number;
+  x: number;
+  y: number;
+}
+
+export interface PlaybackFramePresentationDescriptor {
+  marker: PlaybackFrameMarkerDescriptor;
+  nominalFrameRate: number;
+  timeline: PlaybackFrameTimelineEntry[];
+}
+
 export interface PlaybackDescriptor {
   /** 目标视频编码（h264/h265/av1/vp9），用于 fmp4 路径前的客户端能力校验 */
   codec: string;
@@ -858,6 +878,8 @@ export interface PlaybackDescriptor {
   path: 'ts' | 'fmp4' | 'mp4';
   /** 客户端不支持目标编码时的 H.264/TS 回退源（缺省则展示不支持提示，由 FR-53 提供真实回退源） */
   fallbackUrl?: string;
+  /** 显式声明的真实画面帧身份来源；未声明时绝不根据时间推断精确身份。 */
+  framePresentation?: PlaybackFramePresentationDescriptor;
 }
 
 /** 项目自身协议信息（FR-57）：开源协议页顶部展示 */
