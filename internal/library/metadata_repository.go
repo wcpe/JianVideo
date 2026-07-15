@@ -10,7 +10,7 @@ import (
 )
 
 type metadataRepository interface {
-	Upsert(context.Context, *models.MediaMetadata, map[string]any) error
+	Upsert(context.Context, *models.MediaMetadata, []models.MediaChapter, map[string]any) error
 	List(context.Context, string, int64) ([]models.MediaMetadata, error)
 	MarkStale(context.Context, string, int64) error
 	CountMedia(context.Context, string, int64) (int64, error)
@@ -26,13 +26,16 @@ func newGormMetadataRepository(db *gorm.DB) metadataRepository {
 	return &gormMetadataRepository{db: db}
 }
 
-func (r *gormMetadataRepository) Upsert(ctx context.Context, row *models.MediaMetadata, mediaUpdates map[string]any) error {
+func (r *gormMetadataRepository) Upsert(ctx context.Context, row *models.MediaMetadata, chapters []models.MediaChapter, mediaUpdates map[string]any) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		conflict := clause.OnConflict{
 			Columns:   []clause.Column{{Name: "space_id"}, {Name: "media_id"}, {Name: "source"}},
 			DoUpdates: clause.AssignmentColumns([]string{"tool", "tool_version", "raw_json", "normalized_json", "parsed_at", "stale"}),
 		}
 		if err := tx.Clauses(conflict).Create(row).Error; err != nil {
+			return err
+		}
+		if err := replaceEmbeddedChapters(tx, row.SpaceID, row.MediaID, chapters); err != nil {
 			return err
 		}
 		if len(mediaUpdates) == 0 {
@@ -42,6 +45,20 @@ func (r *gormMetadataRepository) Upsert(ctx context.Context, row *models.MediaMe
 			Where("space_id = ? AND id = ?", row.SpaceID, row.MediaID).
 			Updates(mediaUpdates).Error
 	})
+}
+
+func replaceEmbeddedChapters(tx *gorm.DB, spaceID string, mediaID int64, chapters []models.MediaChapter) error {
+	if !tx.Migrator().HasTable(&models.MediaChapter{}) {
+		return nil
+	}
+	if err := tx.Where("space_id = ? AND media_id = ? AND source = ?", spaceID, mediaID, models.MediaChapterSourceEmbedded).
+		Delete(&models.MediaChapter{}).Error; err != nil {
+		return err
+	}
+	if len(chapters) == 0 {
+		return nil
+	}
+	return tx.Create(&chapters).Error
 }
 
 func (r *gormMetadataRepository) List(ctx context.Context, spaceID string, mediaID int64) ([]models.MediaMetadata, error) {

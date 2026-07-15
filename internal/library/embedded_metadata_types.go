@@ -30,6 +30,7 @@ type NormalizedEmbeddedMetadata struct {
 	VideoStreams    []VideoStreamMetadata    `json:"video_streams,omitempty"`
 	AudioStreams    []AudioStreamMetadata    `json:"audio_streams,omitempty"`
 	SubtitleStreams []SubtitleStreamMetadata `json:"subtitle_streams,omitempty"`
+	Chapters        []ChapterMetadata        `json:"chapters,omitempty"`
 	Image           *ImageEmbeddedMetadata   `json:"image,omitempty"`
 	Tags            map[string]string        `json:"tags,omitempty"`
 }
@@ -97,6 +98,15 @@ type SubtitleStreamMetadata struct {
 	Title         string `json:"title,omitempty"`
 	Default       bool   `json:"default,omitempty"`
 	Forced        bool   `json:"forced,omitempty"`
+}
+
+// ChapterMetadata 描述单个规范化内嵌章节。
+type ChapterMetadata struct {
+	SourceIndex int    `json:"source_index"`
+	StartMS     int64  `json:"start_ms"`
+	EndMS       int64  `json:"end_ms"`
+	Title       string `json:"title"`
+	Language    string `json:"language,omitempty"`
 }
 
 // ImageEmbeddedMetadata 描述图片可得的 EXIF、IPTC 与 XMP 信息。

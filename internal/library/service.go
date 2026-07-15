@@ -42,6 +42,8 @@ type Service struct {
 	db                           *gorm.DB
 	mediaRepo                    MediaQueryRepository
 	metadataRepo                 metadataRepository
+	chapterRepo                  chapterRepository
+	bookmarkRepo                 bookmarkRepository
 	metadataParser               embeddedMetadataParser
 	audit                        audit.Recorder
 	changeHook                   func(ScanChange)
@@ -113,6 +115,7 @@ var builtInMediaExtensions = map[string]string{
 func NewService(db *gorm.DB) *Service {
 	return &Service{
 		db: db, mediaRepo: newGormMediaRepository(db), metadataRepo: newGormMetadataRepository(db),
+		chapterRepo: newGormChapterRepository(db), bookmarkRepo: newGormBookmarkRepository(db),
 		metadataParser: defaultEmbeddedMetadataParser, now: time.Now,
 	}
 }

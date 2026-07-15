@@ -200,6 +200,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateWatchStates,
 			Validate:    validateWatchStates,
 		},
+		{
+			ID:          "20260712_0022_fr2_060_chapters_bookmarks",
+			Description: "建立内嵌章节派生表与用户书签真源表",
+			SafeToRetry: true,
+			Estimate:    estimateChaptersBookmarks,
+			Up:          migrateChaptersBookmarks,
+			Validate:    validateChaptersBookmarks,
+		},
 	}
 }
 
@@ -1595,6 +1603,80 @@ func validateSubtitleTrackIndexes(db *gorm.DB) (Validation, error) {
 		return Validation{}, fmt.Errorf("字幕轨道查询索引定义不正确")
 	}
 	return Validation{Summary: "FR2-044 字幕轨道来源唯一约束已就绪"}, nil
+}
+
+func estimateChaptersBookmarks(_ context.Context, _ *gorm.DB) (StepPlan, error) {
+	return StepPlan{EstimatedRows: 0}, nil
+}
+
+func migrateChaptersBookmarks(_ context.Context, tx *gorm.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS media_chapters (
+			id TEXT PRIMARY KEY,
+			space_id TEXT NOT NULL,
+			media_id INTEGER NOT NULL,
+			source TEXT NOT NULL CHECK(source = 'embedded'),
+			source_index INTEGER NOT NULL CHECK(source_index >= 0),
+			start_ms INTEGER NOT NULL CHECK(start_ms >= 0),
+			end_ms INTEGER NOT NULL CHECK(end_ms > start_ms),
+			title TEXT NOT NULL,
+			language TEXT,
+			source_fingerprint TEXT NOT NULL,
+			parsed_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
+		);`,
+		`CREATE TABLE IF NOT EXISTS media_bookmarks (
+			id TEXT PRIMARY KEY,
+			space_id TEXT NOT NULL,
+			media_id INTEGER NOT NULL,
+			position_ms INTEGER NOT NULL CHECK(position_ms >= 0),
+			title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 120),
+			note TEXT,
+			revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_chapters_space_media_source_index ON media_chapters(space_id, media_id, source, source_index);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_chapters_space_media_start ON media_chapters(space_id, media_id, start_ms, source_index);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_bookmarks_space_media_position_created ON media_bookmarks(space_id, media_id, position_ms, created_at);`,
+	}
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateChaptersBookmarks(_ context.Context, db *gorm.DB) (Validation, error) {
+	for table, columns := range map[string][]string{
+		"media_chapters":  {"id", "space_id", "media_id", "source", "source_index", "start_ms", "end_ms", "title", "source_fingerprint", "parsed_at"},
+		"media_bookmarks": {"id", "space_id", "media_id", "position_ms", "title", "note", "revision", "created_at", "updated_at"},
+	} {
+		if !tableExists(db, table) {
+			return Validation{}, fmt.Errorf("%s 表不存在", table)
+		}
+		for _, column := range columns {
+			if !columnExists(db, table, column) {
+				return Validation{}, fmt.Errorf("%s 缺少 %s", table, column)
+			}
+		}
+	}
+	for _, name := range []string{
+		"idx_media_chapters_space_media_source_index",
+		"idx_media_chapters_space_media_start",
+		"idx_media_bookmarks_space_media_position_created",
+	} {
+		if !indexExists(db, name) {
+			return Validation{}, fmt.Errorf("章节或书签索引不存在: %s", name)
+		}
+	}
+	return Validation{Summary: "FR2-060 章节与书签表、约束及索引已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

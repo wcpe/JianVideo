@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,8 +29,9 @@ var ffprobeVersionCache = struct {
 }{}
 
 type ffprobeEmbeddedOutput struct {
-	Format  ffprobeFormatMetadata   `json:"format"`
-	Streams []ffprobeStreamMetadata `json:"streams"`
+	Format   ffprobeFormatMetadata    `json:"format"`
+	Streams  []ffprobeStreamMetadata  `json:"streams"`
+	Chapters []ffprobeChapterMetadata `json:"chapters"`
 }
 
 type ffprobeFormatMetadata struct {
@@ -37,6 +41,16 @@ type ffprobeFormatMetadata struct {
 	Bitrate        string            `json:"bit_rate"`
 	Size           string            `json:"size"`
 	Tags           map[string]string `json:"tags"`
+}
+
+type ffprobeChapterMetadata struct {
+	ID        int64             `json:"id"`
+	TimeBase  string            `json:"time_base"`
+	Start     json.Number       `json:"start"`
+	StartTime string            `json:"start_time"`
+	End       json.Number       `json:"end"`
+	EndTime   string            `json:"end_time"`
+	Tags      map[string]string `json:"tags"`
 }
 
 type ffprobeStreamMetadata struct {
@@ -118,7 +132,7 @@ func probeEmbeddedVideoMetadata(ctx context.Context, path string) (ParsedEmbedde
 }
 
 func runFFprobeMetadata(ctx context.Context, path string) ([]byte, string, error) {
-	args := []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams", filepath.FromSlash(path)}
+	args := []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters", filepath.FromSlash(path)}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, getFFprobePath(), args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -158,10 +172,72 @@ func parseVideoEmbeddedMetadata(raw []byte) (NormalizedEmbeddedMetadata, error) 
 	}
 	result := NormalizedEmbeddedMetadata{MediaType: MediaTypeVideo, Tags: copyStringMap(probe.Format.Tags)}
 	result.Container = normalizeContainerMetadata(probe.Format)
+	result.Chapters = normalizeChapters(probe.Chapters, result.Container.Duration)
 	for _, stream := range probe.Streams {
 		normalizeVideoStream(&result, stream)
 	}
 	return result, nil
+}
+
+func normalizeChapters(chapters []ffprobeChapterMetadata, durationSeconds float64) []ChapterMetadata {
+	result := make([]ChapterMetadata, 0, len(chapters))
+	for sourceIndex, chapter := range chapters {
+		startSeconds, startOK := chapterTimeSeconds(chapter.StartTime, chapter.TimeBase, chapter.Start)
+		endSeconds, endOK := chapterTimeSeconds(chapter.EndTime, chapter.TimeBase, chapter.End)
+		if !startOK || !endOK || startSeconds < 0 || endSeconds <= startSeconds {
+			continue
+		}
+		if durationSeconds > 0 && startSeconds >= durationSeconds {
+			continue
+		}
+		if durationSeconds > 0 && endSeconds > durationSeconds {
+			endSeconds = durationSeconds
+		}
+		startMS, endMS := milliseconds(startSeconds), milliseconds(endSeconds)
+		if endMS <= startMS {
+			continue
+		}
+		result = append(result, ChapterMetadata{
+			SourceIndex: sourceIndex,
+			StartMS:     startMS,
+			EndMS:       endMS,
+			Title:       strings.TrimSpace(chapter.Tags["title"]),
+			Language:    strings.TrimSpace(chapter.Tags["language"]),
+		})
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].StartMS == result[j].StartMS {
+			return result[i].SourceIndex < result[j].SourceIndex
+		}
+		return result[i].StartMS < result[j].StartMS
+	})
+	for index := range result {
+		if result[index].Title == "" {
+			result[index].Title = fmt.Sprintf("章节 %d", index+1)
+		}
+	}
+	return result
+}
+
+func chapterTimeSeconds(decimal, timeBase string, ticks json.Number) (float64, bool) {
+	if strings.TrimSpace(decimal) != "" {
+		value, err := strconv.ParseFloat(strings.TrimSpace(decimal), 64)
+		return value, err == nil && !math.IsNaN(value) && !math.IsInf(value, 0)
+	}
+	integer, err := ticks.Int64()
+	if err != nil {
+		return 0, false
+	}
+	base, ok := new(big.Rat).SetString(strings.TrimSpace(timeBase))
+	if !ok || base.Sign() <= 0 {
+		return 0, false
+	}
+	seconds, _ := new(big.Rat).Mul(base, big.NewRat(integer, 1)).Float64()
+	return seconds, !math.IsNaN(seconds) && !math.IsInf(seconds, 0)
+}
+
+func milliseconds(seconds float64) int64 {
+	return int64(math.Round(seconds * 1000))
 }
 
 func normalizeContainerMetadata(format ffprobeFormatMetadata) ContainerMetadata {

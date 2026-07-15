@@ -172,3 +172,25 @@ func TestDefaultMigrations包含FR2044字幕轨道迁移(t *testing.T) {
 	}
 	t.Fatal("默认迁移缺少 FR2-044")
 }
+		if migration.Estimate == nil || migration.Up == nil || migration.Validate == nil || !migration.SafeToRetry {
+			t.Fatalf("FR2-044 迁移定义不完整: %+v", migration)
+		}
+		return
+=======
+	migrations := DefaultMigrations()
+	var target *Migration
+	for index := range migrations {
+		if migrations[index].ID == "20260712_0020_fr2_044_subtitle_tracks" {
+			target = &migrations[index]
+			break
+		}
+	}
+	if target == nil {
+		t.Fatal("FR2-044 字幕轨道迁移不存在")
+	}
+	if target.Estimate == nil || target.Up == nil || target.Validate == nil || !target.SafeToRetry {
+		t.Fatalf("FR2-044 迁移定义不完整: %+v", target)
+>>>>>>> b1a05ef (feat(library): 建立章节解析与书签真源)
+	}
+	t.Fatal("默认迁移缺少 FR2-044")
+}

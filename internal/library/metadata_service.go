@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,7 +52,8 @@ func (s *Service) parseAndStoreMetadataForFingerprint(ctx context.Context, space
 		return nil, nil
 	}
 	row := metadataRow(*current, parsed)
-	if err := s.metadataRepo.Upsert(ctx, row, metadataMediaUpdates(parsed.Normalized)); err != nil {
+	chapters := metadataChapterRows(*current, row.ParsedAt, parsed.Normalized.Chapters)
+	if err := s.metadataRepo.Upsert(ctx, row, chapters, metadataMediaUpdates(parsed.Normalized)); err != nil {
 		return nil, err
 	}
 	return row, nil
@@ -134,6 +136,29 @@ func metadataRow(media models.MediaFile, parsed ParsedEmbeddedMetadata) *models.
 		RawJSON: parsed.RawJSON, NormalizedJSON: parsed.NormalizedJSON,
 		ParsedAt: time.Now().UTC(), Stale: false,
 	}
+}
+
+func metadataChapterRows(media models.MediaFile, parsedAt time.Time, chapters []ChapterMetadata) []models.MediaChapter {
+	rows := make([]models.MediaChapter, 0, len(chapters))
+	for _, chapter := range chapters {
+		fingerprint := chapterFingerprint(media, chapter)
+		rows = append(rows, models.MediaChapter{
+			ID: fingerprint[:32], SpaceID: media.SpaceID, MediaID: media.ID,
+			Source: models.MediaChapterSourceEmbedded, SourceIndex: chapter.SourceIndex,
+			StartMS: chapter.StartMS, EndMS: chapter.EndMS, Title: chapter.Title,
+			Language: chapter.Language, SourceFingerprint: fingerprint, ParsedAt: parsedAt,
+		})
+	}
+	return rows
+}
+
+func chapterFingerprint(media models.MediaFile, chapter ChapterMetadata) string {
+	mediaFingerprint := fmt.Sprintf("%d:%d", media.FileSize, media.ModifiedAt.UnixNano())
+	if media.ContentHash != "" && !media.ContentHashStale {
+		mediaFingerprint = media.ContentHashAlgo + ":" + media.ContentHash
+	}
+	value := fmt.Sprintf("%s|%s|%d|%d|%d|%s|%s", media.SpaceID, mediaFingerprint, chapter.SourceIndex, chapter.StartMS, chapter.EndMS, chapter.Title, chapter.Language)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
 }
 
 func validateParsedEmbeddedMetadata(parsed ParsedEmbeddedMetadata) error {
