@@ -208,6 +208,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateChaptersBookmarks,
 			Validate:    validateChaptersBookmarks,
 		},
+		{
+			ID:          "20260712_0023_fr2_060_media_delete_cascade",
+			Description: "升级章节书签外键以兼容媒体物理删除",
+			SafeToRetry: true,
+			Estimate:    estimateChaptersBookmarksCascade,
+			Up:          migrateChaptersBookmarksCascade,
+			Validate:    validateChaptersBookmarksCascade,
+		},
 	}
 }
 
@@ -1626,7 +1634,7 @@ func migrateChaptersBookmarks(_ context.Context, tx *gorm.DB) error {
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
 		);`,
 		`CREATE TABLE IF NOT EXISTS media_bookmarks (
 			id TEXT PRIMARY KEY,
@@ -1639,7 +1647,7 @@ func migrateChaptersBookmarks(_ context.Context, tx *gorm.DB) error {
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_chapters_space_media_source_index ON media_chapters(space_id, media_id, source, source_index);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_chapters_space_media_start ON media_chapters(space_id, media_id, start_ms, source_index);`,
@@ -1677,6 +1685,113 @@ func validateChaptersBookmarks(_ context.Context, db *gorm.DB) (Validation, erro
 		}
 	}
 	return Validation{Summary: "FR2-060 章节与书签表、约束及索引已就绪"}, nil
+}
+
+func estimateChaptersBookmarksCascade(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var total int64
+	for _, table := range []string{"media_chapters", "media_bookmarks"} {
+		if !tableExists(db, table) {
+			continue
+		}
+		var count int64
+		if err := db.Table(table).Count(&count).Error; err != nil {
+			return StepPlan{}, err
+		}
+		total += count
+	}
+	return StepPlan{EstimatedRows: total}, nil
+}
+
+func migrateChaptersBookmarksCascade(ctx context.Context, tx *gorm.DB) error {
+	if !tableExists(tx, "media_chapters") || !tableExists(tx, "media_bookmarks") {
+		if err := migrateChaptersBookmarks(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if err := rebuildMediaChaptersCascade(tx); err != nil {
+		return err
+	}
+	return rebuildMediaBookmarksCascade(tx)
+}
+
+func rebuildMediaChaptersCascade(tx *gorm.DB) error {
+	return executeMigrationStatements(tx, []string{
+		`DROP TABLE IF EXISTS media_chapters_cascade`,
+		`CREATE TABLE media_chapters_cascade (
+			id TEXT PRIMARY KEY, space_id TEXT NOT NULL, media_id INTEGER NOT NULL,
+			source TEXT NOT NULL CHECK(source = 'embedded'), source_index INTEGER NOT NULL CHECK(source_index >= 0),
+			start_ms INTEGER NOT NULL CHECK(start_ms >= 0), end_ms INTEGER NOT NULL CHECK(end_ms > start_ms),
+			title TEXT NOT NULL, language TEXT, source_fingerprint TEXT NOT NULL,
+			parsed_at DATETIME NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+		)`,
+		`INSERT INTO media_chapters_cascade SELECT id, space_id, media_id, source, source_index, start_ms, end_ms, title, language, source_fingerprint, parsed_at, created_at, updated_at FROM media_chapters`,
+		`DROP TABLE media_chapters`,
+		`ALTER TABLE media_chapters_cascade RENAME TO media_chapters`,
+		`CREATE UNIQUE INDEX idx_media_chapters_space_media_source_index ON media_chapters(space_id, media_id, source, source_index)`,
+		`CREATE INDEX idx_media_chapters_space_media_start ON media_chapters(space_id, media_id, start_ms, source_index)`,
+	})
+}
+
+func rebuildMediaBookmarksCascade(tx *gorm.DB) error {
+	return executeMigrationStatements(tx, []string{
+		`DROP TABLE IF EXISTS media_bookmarks_cascade`,
+		`CREATE TABLE media_bookmarks_cascade (
+			id TEXT PRIMARY KEY, space_id TEXT NOT NULL, media_id INTEGER NOT NULL,
+			position_ms INTEGER NOT NULL CHECK(position_ms >= 0),
+			title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 120), note TEXT,
+			revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+		)`,
+		`INSERT INTO media_bookmarks_cascade SELECT id, space_id, media_id, position_ms, title, note, revision, created_at, updated_at FROM media_bookmarks`,
+		`DROP TABLE media_bookmarks`,
+		`ALTER TABLE media_bookmarks_cascade RENAME TO media_bookmarks`,
+		`CREATE INDEX idx_media_bookmarks_space_media_position_created ON media_bookmarks(space_id, media_id, position_ms, created_at)`,
+	})
+}
+
+func executeMigrationStatements(tx *gorm.DB, statements []string) error {
+	for _, statement := range statements {
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateChaptersBookmarksCascade(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, table := range []string{"media_chapters", "media_bookmarks"} {
+		cascade, err := hasCascadeMediaForeignKey(db, table)
+		if err != nil {
+			return Validation{}, err
+		}
+		if !cascade {
+			return Validation{}, fmt.Errorf("%s 的媒体外键未启用级联删除", table)
+		}
+	}
+	return Validation{Summary: "FR2-060 媒体物理删除级联语义已就绪"}, nil
+}
+
+type sqliteForeignKey struct {
+	From     string `gorm:"column:from"`
+	OnDelete string `gorm:"column:on_delete"`
+	Table    string `gorm:"column:table"`
+}
+
+func hasCascadeMediaForeignKey(db *gorm.DB, table string) (bool, error) {
+	var keys []sqliteForeignKey
+	if err := db.Raw("PRAGMA foreign_key_list(" + table + ")").Scan(&keys).Error; err != nil {
+		return false, err
+	}
+	for _, key := range keys {
+		if key.From == "media_id" && key.Table == "media_files" && strings.EqualFold(key.OnDelete, "CASCADE") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

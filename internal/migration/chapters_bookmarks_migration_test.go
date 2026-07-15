@@ -65,6 +65,12 @@ func TestChaptersBookmarksMigration媒体物理删除级联清理(t *testing.T) 
 		VALUES ('bookmark-1', 'space-a', 1, 500, '重点', NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).Error; err != nil {
 		t.Fatalf("创建书签失败: %v", err)
 	}
+	if err := migrateChaptersBookmarksCascade(context.Background(), db); err != nil {
+		t.Fatalf("升级级联外键失败: %v", err)
+	}
+	if _, err := validateChaptersBookmarksCascade(context.Background(), db); err != nil {
+		t.Fatalf("级联外键校验失败: %v", err)
+	}
 
 	if err := db.Exec(`DELETE FROM media_files WHERE id = 1`).Error; err != nil {
 		t.Fatalf("媒体物理删除不应被章节书签阻断: %v", err)
@@ -83,8 +89,8 @@ func TestChaptersBookmarksMigration媒体物理删除级联清理(t *testing.T) 
 func TestDefaultMigrations在0020后追加FR2060(t *testing.T) {
 	migrations := DefaultMigrations()
 	last := migrations[len(migrations)-1]
-	if last.ID != "20260712_0022_fr2_060_chapters_bookmarks" {
-		t.Fatalf("FR2-060 应追加为 0022，实际最后迁移为 %s", last.ID)
+	if last.ID != "20260712_0023_fr2_060_media_delete_cascade" {
+		t.Fatalf("FR2-060 级联修复应追加为 0023，实际最后迁移为 %s", last.ID)
 	}
 	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
 		t.Fatalf("FR2-060 迁移定义不完整: %+v", last)
