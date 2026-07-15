@@ -57,6 +57,18 @@
 - [`fr2-059-smart-cover-poster.md`](fr2-059-smart-cover-poster.md)：智能封面/海报。
 - [`fr2-061-file-hash-dedup.md`](fr2-061-file-hash-dedup.md)：文件级/哈希去重。
 
+## 当前 v2 P3 规格
+
+- [`fr2-029-timeline-preview.md`](fr2-029-timeline-preview.md)：视频进度条悬停预览。
+- [`fr2-034-frame-stepping.md`](fr2-034-frame-stepping.md)：逐帧前后步进。
+- [`fr2-035-tiered-seek.md`](fr2-035-tiered-seek.md)：阶梯快进快退。
+- [`fr2-036-player-core.md`](fr2-036-player-core.md)：可复用播放核心。
+- [`fr2-044-subtitle-audio-tracks.md`](fr2-044-subtitle-audio-tracks.md)：字幕与多音轨。
+- [`fr2-045-cross-device-watch-history.md`](fr2-045-cross-device-watch-history.md)：跨设备续播与观看历史。
+- [`fr2-057-quality-rate-ab-loop.md`](fr2-057-quality-rate-ab-loop.md)：手动清晰度、省流量、变速与 A-B 循环。
+- [`fr2-058-pip-background-mobile-gestures.md`](fr2-058-pip-background-mobile-gestures.md)：画中画、后台音频与移动手势。
+- [`fr2-060-chapters-bookmarks.md`](fr2-060-chapters-bookmarks.md)：章节与书签。
+
 ## 怎么用
 
 1. 复制 `_template.md` 到 `docs/specs/<feature>.md`。
