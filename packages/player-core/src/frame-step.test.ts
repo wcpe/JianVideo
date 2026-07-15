@@ -224,6 +224,19 @@ describe('PlaybackCore 逐帧控制', () => {
     expect(backend.calls.filter(({ method }) => method === 'seek')).toHaveLength(3);
   });
 
+  it('校正按实际落点相对目标选择方向且最多两次', async () => {
+    const facet = new ScriptedFrameFacet(frame(10), target(11), [frame(10), frame(12), frame(11)]);
+    const { backend, core } = await createFrameCore(facet);
+
+    await expect(core.stepFrame('next')).resolves.toMatchObject({ correctionCount: 2, status: 'completed' });
+
+    const targets = backend.calls.filter(({ method }) => method === 'seek').map(({ targetTime }) => targetTime);
+    expect(targets).toHaveLength(3);
+    expect(targets[0]).toBeCloseTo(11 * FRAME_DURATION);
+    expect(targets[1]).toBeCloseTo(12 * FRAME_DURATION);
+    expect(targets[2]).toBeCloseTo(10 * FRAME_DURATION);
+  });
+
   it('最终呈现帧身份缺失时降级为 approximate，不用 mediaTime 冒充精确', async () => {
     const actual = unidentifiedFrame(11);
     const facet = new ScriptedFrameFacet(frame(10), target(11), [actual]);

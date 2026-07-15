@@ -258,8 +258,9 @@ export class FrameStepController {
     targetTime: number,
   ): Promise<FrameStepResult> {
     let lastResult: ExactFrameResult | null = null;
+    let seekTargetTime = targetTime;
     for (let attempt = 0; attempt <= MAX_CORRECTIONS; attempt += 1) {
-      const result = await this.exactAttempt(context, plan, targetTime);
+      const result = await this.exactAttempt(context, plan, seekTargetTime);
       if (result.kind !== 'frame') {
         return this.finishExactAttempt(context, plan, result, attempt);
       }
@@ -267,6 +268,7 @@ export class FrameStepController {
       if (result.valid) {
         return this.publishExactSuccess(context, plan, result, attempt);
       }
+      seekTargetTime = this.correctionTarget(context, plan, result.frame);
     }
     return this.publishVerificationFailure(context, plan, lastResult);
   }
@@ -276,7 +278,7 @@ export class FrameStepController {
     plan: ExactFramePlan,
     targetTime: number,
   ): Promise<ExactAttemptResult> {
-    const seekOutcome = await this.seek(context.command, plan.targetMediaTime, targetTime);
+    const seekOutcome = await this.seek(context.command, targetTime, targetTime);
     if (seekOutcome.kind !== 'completed' || seekOutcome.value.status !== 'completed') {
       return { kind: 'seek', outcome: seekOutcome };
     }
@@ -310,6 +312,16 @@ export class FrameStepController {
       return { frame, kind: 'frame', precision: 'approximate', ...approximate };
     }
     return { frame, kind: 'frame', precision: 'exact-verified', timestampError: exact.timestampError, valid: exact.valid };
+  }
+
+  private correctionTarget(
+    context: FrameContext,
+    plan: ExactFramePlan,
+    frame: PresentedFrame,
+  ): number {
+    const correction = correctionDirection(plan.target, frame, context.direction);
+    const requestedTime = plan.targetMediaTime + correction * plan.target.frameDuration;
+    return clampToRanges(requestedTime, context.ranges);
   }
 
   private finishExactAttempt(
@@ -511,6 +523,20 @@ type ExactOperationResult =
       readonly kind: 'wait';
       readonly outcome: Exclude<FrameOperationOutcome<PresentedFrame>, { readonly kind: 'completed' }>;
     };
+
+function correctionDirection(
+  target: AdjacentFrameTarget,
+  actual: PresentedFrame,
+  stepDirection: FrameStepDirection,
+): 1 | -1 {
+  if (target.sourceFrameIndex !== undefined && actual.sourceFrameIndex !== undefined) {
+    if (actual.sourceFrameIndex < target.sourceFrameIndex) return 1;
+    if (actual.sourceFrameIndex > target.sourceFrameIndex) return -1;
+  }
+  if (actual.mediaTime < target.mediaTime) return 1;
+  if (actual.mediaTime > target.mediaTime) return -1;
+  return directionSign(stepDirection);
+}
 
 function verifyApproximateFrame(
   plan: ExactFramePlan,
