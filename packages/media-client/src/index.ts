@@ -82,6 +82,51 @@ export interface PageResult<T> {
   readonly total: number;
 }
 
+export type MediaIdentifier = number | string;
+
+export interface MediaChapter {
+  readonly endMs: number;
+  readonly id: string;
+  readonly language: string;
+  readonly source: 'embedded';
+  readonly sourceIndex: number;
+  readonly startMs: number;
+  readonly title: string;
+}
+
+export interface MediaChaptersResult {
+  readonly items: readonly MediaChapter[];
+  readonly parsedAt: string | null;
+  readonly stale: boolean;
+}
+
+export interface MediaBookmark {
+  readonly createdAt: string;
+  readonly id: string;
+  readonly note: string | null;
+  readonly positionMs: number;
+  readonly revision: number;
+  readonly title: string;
+  readonly updatedAt: string;
+}
+
+export interface MediaBookmarkInput {
+  readonly note?: string | null;
+  readonly positionMs: number;
+  readonly title: string;
+}
+
+export interface MediaBookmarkUpdate {
+  readonly note: string | null;
+  readonly positionMs: number;
+  readonly revision: number;
+  readonly title: string;
+}
+
+export interface BookmarkMutationOptions {
+  readonly reload: () => Promise<void>;
+}
+
 export type TaskType = string;
 
 export interface TaskItem {
@@ -139,6 +184,14 @@ export interface QueryKeyFactory {
     page: number | PageParams,
   ) => readonly ['media', 'list', string, number | PageParams];
   readonly mediaDetail: (space: SpaceContext, id: string) => readonly ['media', 'detail', string, string];
+  readonly mediaChapters: (
+    space: SpaceContext,
+    mediaId: MediaIdentifier,
+  ) => readonly ['media', 'chapters', string, string];
+  readonly mediaBookmarks: (
+    space: SpaceContext,
+    mediaId: MediaIdentifier,
+  ) => readonly ['media', 'bookmarks', string, string];
   readonly taskDetail: (space: SpaceContext, id: string) => readonly ['tasks', 'detail', string, string];
   readonly taskList: (space: SpaceContext) => readonly ['tasks', 'list', string];
 }
@@ -147,6 +200,8 @@ export function createQueryKeys(): QueryKeyFactory {
   return {
     mediaList: (space, page) => ['media', 'list', space.spaceId, page] as const,
     mediaDetail: (space, id) => ['media', 'detail', space.spaceId, id] as const,
+    mediaChapters: (space, mediaId) => ['media', 'chapters', space.spaceId, String(mediaId)] as const,
+    mediaBookmarks: (space, mediaId) => ['media', 'bookmarks', space.spaceId, String(mediaId)] as const,
     taskDetail: (space, id) => ['tasks', 'detail', space.spaceId, id] as const,
     taskList: (space) => ['tasks', 'list', space.spaceId] as const,
   };
@@ -184,6 +239,18 @@ export class WatchStateConflictError extends ApiError {
     super(409, 'WATCH_STATE_CONFLICT', message);
     this.name = 'WatchStateConflictError';
     this.current = current;
+  }
+}
+
+export class BookmarkConflictError extends ApiError {
+  readonly current: MediaBookmark | null;
+  readonly deleted: boolean;
+
+  constructor(message: string, current: MediaBookmark | null, deleted: boolean) {
+    super(409, 'BOOKMARK_CONFLICT', message);
+    this.name = 'BookmarkConflictError';
+    this.current = current;
+    this.deleted = deleted;
   }
 }
 
@@ -328,6 +395,67 @@ export async function listContinueWatching<TMedia = unknown>(
   return response.items.map(toWatchMediaEntry);
 }
 
+export async function getMediaChapters(
+  client: ApiClient,
+  mediaId: MediaIdentifier,
+): Promise<MediaChaptersResult> {
+  const response = await client.request<RawMediaChaptersResult>(`${mediaLibraryPath(mediaId)}/chapters`);
+  return {
+    items: response.items.map(toMediaChapter),
+    parsedAt: response.parsed_at,
+    stale: response.stale,
+  };
+}
+
+export async function listMediaBookmarks(
+  client: ApiClient,
+  mediaId: MediaIdentifier,
+): Promise<readonly MediaBookmark[]> {
+  const response = await client.request<RawMediaBookmarksResult>(`${mediaLibraryPath(mediaId)}/bookmarks`);
+  return response.items.map(toMediaBookmark);
+}
+
+export async function createMediaBookmark(
+  client: ApiClient,
+  mediaId: MediaIdentifier,
+  input: MediaBookmarkInput,
+  options: BookmarkMutationOptions,
+): Promise<MediaBookmark> {
+  return mutateBookmark(
+    () =>
+      client
+        .request<RawMediaBookmark>(`${mediaLibraryPath(mediaId)}/bookmarks`, jsonRequest('POST', bookmarkBody(input)))
+        .then(toMediaBookmark),
+    options,
+  );
+}
+
+export async function updateMediaBookmark(
+  client: ApiClient,
+  mediaId: MediaIdentifier,
+  bookmarkId: string,
+  input: MediaBookmarkUpdate,
+  options: BookmarkMutationOptions,
+): Promise<MediaBookmark> {
+  const path = `${mediaLibraryPath(mediaId)}/bookmarks/${encodeURIComponent(bookmarkId)}`;
+  return mutateBookmark(
+    () => client.request<RawMediaBookmark>(path, jsonRequest('PUT', bookmarkBody(input))).then(toMediaBookmark),
+    options,
+  );
+}
+
+export async function deleteMediaBookmark(
+  client: ApiClient,
+  mediaId: MediaIdentifier,
+  bookmarkId: string,
+  revision: number,
+  options: BookmarkMutationOptions,
+): Promise<void> {
+  const query = new URLSearchParams({ revision: String(revision) });
+  const path = `${mediaLibraryPath(mediaId)}/bookmarks/${encodeURIComponent(bookmarkId)}?${query.toString()}`;
+  return mutateBookmark(() => client.request<undefined>(path, { method: 'DELETE' }), options);
+}
+
 export async function listTasks(client: ApiClient, params: TaskListParams = {}): Promise<PageResult<TaskItem>> {
   const response = await client.request<RawTaskPage>(buildPath('/api/tasks', taskSearchParams(params)));
   return {
@@ -417,6 +545,36 @@ interface RawWatchStateConflictBody {
   readonly message: string;
 }
 
+interface RawMediaChapter {
+  readonly end_ms: number;
+  readonly id: string;
+  readonly language?: string;
+  readonly source: 'embedded';
+  readonly source_index: number;
+  readonly start_ms: number;
+  readonly title: string;
+}
+
+interface RawMediaChaptersResult {
+  readonly items: readonly RawMediaChapter[];
+  readonly parsed_at: string | null;
+  readonly stale: boolean;
+}
+
+interface RawMediaBookmark {
+  readonly created_at: string;
+  readonly id: string;
+  readonly note: string | null;
+  readonly position_ms: number;
+  readonly revision: number;
+  readonly title: string;
+  readonly updated_at: string;
+}
+
+interface RawMediaBookmarksResult {
+  readonly items: readonly RawMediaBookmark[];
+}
+
 interface RawTaskItem {
   readonly created_at: string;
   readonly error: string | null;
@@ -485,6 +643,30 @@ function toWatchMediaEntry<TMedia>(entry: RawWatchMediaEntry<TMedia>): WatchMedi
   return { media: entry.media, watchState: toWatchState(entry.watch_state) };
 }
 
+function toMediaChapter(item: RawMediaChapter): MediaChapter {
+  return {
+    endMs: item.end_ms,
+    id: item.id,
+    language: item.language ?? '',
+    source: item.source,
+    sourceIndex: item.source_index,
+    startMs: item.start_ms,
+    title: item.title,
+  };
+}
+
+function toMediaBookmark(item: RawMediaBookmark): MediaBookmark {
+  return {
+    createdAt: item.created_at,
+    id: item.id,
+    note: item.note,
+    positionMs: item.position_ms,
+    revision: item.revision,
+    title: item.title,
+    updatedAt: item.updated_at,
+  };
+}
+
 function toTaskItem(item: RawTaskItem): TaskItem {
   return {
     createdAt: item.created_at,
@@ -512,6 +694,45 @@ function watchListSearchParams(params: WatchHistoryParams): URLSearchParams {
     searchParams.set('limit', String(params.limit));
   }
   return searchParams;
+}
+
+function mediaLibraryPath(mediaId: MediaIdentifier): string {
+  return `/api/library/media/${encodeURIComponent(String(mediaId))}`;
+}
+
+function bookmarkBody(input: MediaBookmarkInput | MediaBookmarkUpdate): Record<string, number | string | null> {
+  const body: Record<string, number | string | null> = {
+    position_ms: input.positionMs,
+    title: input.title,
+  };
+  if (input.note !== undefined) {
+    body.note = input.note;
+  }
+  if ('revision' in input) {
+    body.revision = input.revision;
+  }
+  return body;
+}
+
+function jsonRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
+  return {
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    method,
+  };
+}
+
+async function mutateBookmark<T>(mutation: () => Promise<T>, options: BookmarkMutationOptions): Promise<T> {
+  try {
+    const result = await mutation();
+    await options.reload();
+    return result;
+  } catch (error) {
+    if (error instanceof BookmarkConflictError) {
+      await options.reload();
+    }
+    throw error;
+  }
 }
 
 function buildPath(path: string, params: URLSearchParams): string {
@@ -566,6 +787,9 @@ async function requestJson<T>(
   if (!response.ok) {
     throw await toApiError(response);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -584,6 +808,13 @@ async function toApiError(response: Response): Promise<ApiError> {
   if (response.status === 409 && isWatchStateConflictBody(body)) {
     return new WatchStateConflictError(body.message, toWatchState(body.current));
   }
+  if (response.status === 409 && isBookmarkConflictBody(body)) {
+    return new BookmarkConflictError(
+      body.message,
+      body.current === null ? null : toMediaBookmark(body.current),
+      body.deleted,
+    );
+  }
   if (isErrorBody(body)) {
     return new ApiError(response.status, body.code, body.message);
   }
@@ -592,6 +823,38 @@ async function toApiError(response: Response): Promise<ApiError> {
 
 function isWatchStateConflictBody(value: unknown): value is RawWatchStateConflictBody {
   return isErrorBody(value) && value.code === 'WATCH_STATE_CONFLICT' && 'current' in value;
+}
+
+function isBookmarkConflictBody(
+  value: unknown,
+): value is {
+  readonly code: 'BOOKMARK_CONFLICT';
+  readonly current: RawMediaBookmark | null;
+  readonly deleted: boolean;
+  readonly message: string;
+} {
+  return (
+    isErrorBody(value) &&
+    value.code === 'BOOKMARK_CONFLICT' &&
+    'current' in value &&
+    (value.current === null || isRawMediaBookmark(value.current)) &&
+    'deleted' in value &&
+    typeof value.deleted === 'boolean'
+  );
+}
+
+function isRawMediaBookmark(value: unknown): value is RawMediaBookmark {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'created_at' in value &&
+    'id' in value &&
+    'note' in value &&
+    'position_ms' in value &&
+    'revision' in value &&
+    'title' in value &&
+    'updated_at' in value
+  );
 }
 
 function isErrorBody(value: unknown): value is { readonly code: string; readonly message: string } {

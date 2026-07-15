@@ -1,21 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
-  createApiClient,
-  createQueryKeys,
+  BookmarkConflictError,
   cancelTask,
+  createApiClient,
+  createMediaBookmark,
+  createQueryKeys,
+  deleteMediaBookmark,
+  detectDeviceCapabilities,
   getMedia,
+  getMediaChapters,
   getTask,
   getTaskStats,
-  detectDeviceCapabilities,
   getWatchState,
   listContinueWatching,
-  listTasks,
   listMedia,
+  listMediaBookmarks,
+  listTasks,
   listWatchHistory,
   normalizeLegacyTaskState,
   retryTask,
   taskPollInterval,
+  updateMediaBookmark,
   updateWatchState,
   WatchStateConflictError,
   type FetchLike,
@@ -104,6 +110,217 @@ describe("media-client package", () => {
       "space-a",
       "task-1",
     ]);
+  });
+
+  it("为章节和书签生成 Space-scoped query key", () => {
+    const keys = createQueryKeys();
+
+    expect(keys.mediaChapters({ spaceId: "space-a" }, 42)).toEqual([
+      "media",
+      "chapters",
+      "space-a",
+      "42",
+    ]);
+    expect(keys.mediaBookmarks({ spaceId: "space-b" }, "42")).toEqual([
+      "media",
+      "bookmarks",
+      "space-b",
+      "42",
+    ]);
+  });
+
+  it("查询并规范化章节与书签 DTO", async () => {
+    const client = createApiClient({
+      baseUrl: "https://mock.local",
+      fetch: (input) => {
+        const path = new URL(new Request(input).url).pathname;
+        if (path.endsWith("/chapters")) {
+          return Promise.resolve(
+            Response.json({
+              items: [
+                {
+                  end_ms: 5000,
+                  id: "chapter-1",
+                  language: "zh",
+                  source: "embedded",
+                  source_index: 0,
+                  start_ms: 0,
+                  title: "开场",
+                },
+              ],
+              parsed_at: "2026-07-13T00:00:00Z",
+              stale: false,
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            items: [
+              {
+                created_at: "2026-07-13T00:00:00Z",
+                id: "bookmark-1",
+                note: "稍后复看",
+                position_ms: 12500,
+                revision: 1,
+                title: "关键论点",
+                updated_at: "2026-07-13T00:00:00Z",
+              },
+            ],
+          }),
+        );
+      },
+      space: { spaceId: "space-a" },
+    });
+
+    await expect(getMediaChapters(client, 42)).resolves.toEqual({
+      items: [
+        {
+          endMs: 5000,
+          id: "chapter-1",
+          language: "zh",
+          source: "embedded",
+          sourceIndex: 0,
+          startMs: 0,
+          title: "开场",
+        },
+      ],
+      parsedAt: "2026-07-13T00:00:00Z",
+      stale: false,
+    });
+    await expect(listMediaBookmarks(client, 42)).resolves.toEqual([
+      {
+        createdAt: "2026-07-13T00:00:00Z",
+        id: "bookmark-1",
+        note: "稍后复看",
+        positionMs: 12500,
+        revision: 1,
+        title: "关键论点",
+        updatedAt: "2026-07-13T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("书签 mutation 使用正确契约并在成功后显式 reload", async () => {
+    const requests: Request[] = [];
+    const reload = vi.fn().mockResolvedValue(undefined);
+    const client = createApiClient({
+      baseUrl: "https://mock.local",
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.method === "DELETE") {
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        return Promise.resolve(
+          Response.json({
+            created_at: "2026-07-13T00:00:00Z",
+            id: "bookmark-1",
+            note: null,
+            position_ms: request.method === "POST" ? 1000 : 1500,
+            revision: request.method === "POST" ? 1 : 2,
+            title: request.method === "POST" ? "初始标题" : "修正标题",
+            updated_at: "2026-07-13T00:01:00Z",
+          }),
+        );
+      },
+      space: { spaceId: "space-a" },
+    });
+
+    await createMediaBookmark(
+      client,
+      42,
+      { note: null, positionMs: 1000, title: "初始标题" },
+      { reload },
+    );
+    await updateMediaBookmark(
+      client,
+      42,
+      "bookmark-1",
+      { note: null, positionMs: 1500, revision: 1, title: "修正标题" },
+      { reload },
+    );
+    await deleteMediaBookmark(client, 42, "bookmark-1", 2, { reload });
+
+    expect(reload).toHaveBeenCalledTimes(3);
+    expect(
+      requests.map((request) => `${request.method} ${request.url}`),
+    ).toEqual([
+      "POST https://mock.local/api/library/media/42/bookmarks",
+      "PUT https://mock.local/api/library/media/42/bookmarks/bookmark-1",
+      "DELETE https://mock.local/api/library/media/42/bookmarks/bookmark-1?revision=2",
+    ]);
+    await expect(requests[0]?.json()).resolves.toEqual({
+      note: null,
+      position_ms: 1000,
+      title: "初始标题",
+    });
+    await expect(requests[1]?.json()).resolves.toEqual({
+      note: null,
+      position_ms: 1500,
+      revision: 1,
+      title: "修正标题",
+    });
+  });
+
+  it("映射 409 current/deleted 并在冲突后显式 reload", async () => {
+    const reload = vi.fn().mockResolvedValue(undefined);
+    const responses = [
+      Response.json(
+        {
+          code: "BOOKMARK_CONFLICT",
+          current: {
+            created_at: "2026-07-13T00:00:00Z",
+            id: "bookmark-1",
+            note: "服务端版本",
+            position_ms: 2000,
+            revision: 2,
+            title: "已更新",
+            updated_at: "2026-07-13T00:02:00Z",
+          },
+          deleted: false,
+          message: "书签已被其他客户端修改或删除",
+        },
+        { status: 409 },
+      ),
+      Response.json(
+        {
+          code: "BOOKMARK_CONFLICT",
+          current: null,
+          deleted: true,
+          message: "书签已被其他客户端修改或删除",
+        },
+        { status: 409 },
+      ),
+    ];
+    const client = createApiClient({
+      fetch: () => Promise.resolve(responses.shift() ?? Response.json({})),
+      space: { spaceId: "space-a" },
+    });
+
+    const updateError = await updateMediaBookmark(
+      client,
+      42,
+      "bookmark-1",
+      { note: null, positionMs: 1500, revision: 1, title: "旧端覆盖" },
+      { reload },
+    ).catch((error: unknown) => error);
+    const deleteError = await deleteMediaBookmark(client, 42, "bookmark-1", 1, {
+      reload,
+    }).catch((error: unknown) => error);
+
+    expect(updateError).toBeInstanceOf(BookmarkConflictError);
+    expect(updateError).toMatchObject({
+      current: {
+        id: "bookmark-1",
+        positionMs: 2000,
+        revision: 2,
+        title: "已更新",
+      },
+      deleted: false,
+    });
+    expect(deleteError).toBeInstanceOf(BookmarkConflictError);
+    expect(deleteError).toMatchObject({ current: null, deleted: true });
+    expect(reload).toHaveBeenCalledTimes(2);
   });
 
   it("对 mock fetch 跑通媒体分页、详情和任务轮询", async () => {
