@@ -7,7 +7,6 @@ import type {
   PlaybackSource,
   PlaybackTrack,
   PreparedPreviewTrack,
-  PreviewFacet,
   PreviewHit,
   SeekTier,
   TrackKind,
@@ -338,7 +337,6 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const coreRef = useRef<PlaybackCore | null>(null);
   const backendRef = useRef<WebPlaybackBackend | null>(null);
-  const previewFacetRef = useRef<PreviewFacet>(createPreviewFacet());
   const previewImageCacheRef = useRef(new Map<string, Promise<void>>());
   const previewRequestRef = useRef(0);
   const previewPointerRef = useRef<PreviewPointerSession>(createPointerSession());
@@ -475,15 +473,15 @@ export default function VideoPlayer({
 
   const syncPreviewFacet = useCallback((snapshot: PlaybackSnapshot) => {
     const command = commandFromSnapshot(snapshot);
-    if (!command) return;
-    const facet = previewFacetRef.current;
-    const state = facet.getState();
+    const core = coreRef.current;
+    if (!command || !core) return;
+    const state = core.getPreviewState();
     const track = previewTrackRef.current;
     const sourceChanged =
-      state.sourceEpoch !== command.sourceEpoch || state.sourceId !== command.sourceId;
-    const trackChanged = track?.generationId !== state.generationId;
-    if (sourceChanged) facet.setTrack(null, command);
-    if (sourceChanged || trackChanged) facet.setTrack(track ?? null, command);
+      state === null || state.sourceEpoch !== command.sourceEpoch || state.sourceId !== command.sourceId;
+    const trackChanged = track?.generationId !== state?.generationId;
+    if (sourceChanged) core.setPreviewTrack(null, command);
+    if (sourceChanged || trackChanged) core.setPreviewTrack(track ?? null, command);
   }, []);
 
   const syncCoreSnapshot = useCallback(
@@ -528,7 +526,11 @@ export default function VideoPlayer({
     });
     const core = new PlaybackCore({
       backend,
-      facets: { framePresentation: backend.framePresentation, tracks: backend.tracks },
+      facets: {
+        framePresentation: backend.framePresentation,
+        preview: createPreviewFacet(),
+        tracks: backend.tracks,
+      },
       initialSeekTier: DEFAULT_SEEK_TIER,
     });
     backendRef.current = backend;
@@ -778,7 +780,7 @@ export default function VideoPlayer({
     const command = commandFromSnapshot(snapshot);
     if (!command || snapshot.duration <= 0) return;
     const mediaTime = mediaTimeAtClientX(element, clientX, snapshot.duration);
-    const hit = previewFacetRef.current.hitTest(mediaTime, command);
+    const hit = core.hitTestPreview(mediaTime, command);
     const imageUrl = hit ? previewSpriteUrlsRef.current?.[hit.sprite.assetId] : undefined;
     const rawPercent = (mediaTime / snapshot.duration) * 100;
     const spriteWidth = hit?.sprite.width ?? 0;

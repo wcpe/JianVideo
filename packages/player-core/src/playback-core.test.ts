@@ -5,14 +5,30 @@ import {
   PlaybackBackendError,
   PlaybackCore,
   type PlaybackCapabilities,
+  createPreviewFacet,
+  type PlaybackCommandContext,
   type PlaybackEvent,
   type PlaybackSource,
+  type PreparedPreviewTrack,
   type SeekResult,
 } from './index';
 import { Deferred, EMPTY_CAPABILITIES, FakePlaybackBackend, createSnapshot } from './test-utils';
 
 const SOURCE_A: PlaybackSource = { id: 'source-a', mode: 'stream' };
 const SOURCE_B: PlaybackSource = { id: 'source-b', mode: 'adaptive' };
+const PREVIEW_TRACK: PreparedPreviewTrack = {
+  cues: [
+    {
+      endTime: 5,
+      sprite: { assetId: 'sheet-a', height: 90, width: 160, x: 0, y: 0 },
+      startTime: 0,
+    },
+  ],
+  generationId: 'generation-a',
+  mediaId: 'media-a',
+  profileId: 'profile-a',
+  sourceFingerprint: 'fingerprint-a',
+};
 
 class ControllableSnapshotBackend extends FakePlaybackBackend {
   snapshotError: Error | null = null;
@@ -83,6 +99,71 @@ describe('PlaybackCore', () => {
     expect(core.getSnapshot().state).toBe('paused');
     expect(states).toEqual(['loading', 'ready', 'playing', 'paused']);
     expect(backend.calls.map(({ requestId }) => requestId)).toEqual([1, 2, 3]);
+  });
+
+  it('持有 PreviewFacet 并通过核心绑定、命中当前源预览轨', async () => {
+    const backend = new FakePlaybackBackend();
+    const core = new PlaybackCore({ backend, facets: { preview: createPreviewFacet() } });
+    const load = await core.load(SOURCE_A);
+    const command: PlaybackCommandContext = { requestId: load.requestId, sourceEpoch: 1, sourceId: SOURCE_A.id };
+
+    expect(core.setPreviewTrack(PREVIEW_TRACK, command)).toMatchObject({
+      generationId: 'generation-a',
+      requestId: 1,
+      sourceEpoch: 1,
+      sourceId: SOURCE_A.id,
+      status: 'ready',
+    });
+    expect(core.getPreviewState()).toMatchObject({ generationId: 'generation-a', status: 'ready' });
+    expect(core.hitTestPreview(2, command)).toMatchObject({
+      generationId: 'generation-a',
+      sprite: { assetId: 'sheet-a' },
+    });
+  });
+
+  it('切源立即清空 PreviewFacet，旧 source epoch/requestId 不得回写', async () => {
+    const backend = new FakePlaybackBackend();
+    const core = new PlaybackCore({ backend, facets: { preview: createPreviewFacet() } });
+    const first = await core.load(SOURCE_A);
+    const staleCommand: PlaybackCommandContext = {
+      requestId: first.requestId,
+      sourceEpoch: 1,
+      sourceId: SOURCE_A.id,
+    };
+    core.setPreviewTrack(PREVIEW_TRACK, staleCommand);
+
+    const second = await core.load(SOURCE_B);
+    const currentCommand: PlaybackCommandContext = {
+      requestId: second.requestId,
+      sourceEpoch: 2,
+      sourceId: SOURCE_B.id,
+    };
+
+    expect(core.getPreviewState()).toMatchObject({
+      generationId: null,
+      requestId: second.requestId,
+      sourceEpoch: 2,
+      sourceId: SOURCE_B.id,
+      status: 'empty',
+    });
+    expect(core.setPreviewTrack(PREVIEW_TRACK, staleCommand)).toMatchObject({
+      generationId: null,
+      sourceEpoch: 2,
+      sourceId: SOURCE_B.id,
+    });
+    expect(core.hitTestPreview(2, staleCommand)).toBeNull();
+    expect(core.hitTestPreview(2, currentCommand)).toBeNull();
+  });
+
+  it('未绑定 PreviewFacet 时预览 API 返回 null', async () => {
+    const backend = new FakePlaybackBackend();
+    const core = new PlaybackCore({ backend });
+    const load = await core.load(SOURCE_A);
+    const command: PlaybackCommandContext = { requestId: load.requestId, sourceEpoch: 1, sourceId: SOURCE_A.id };
+
+    expect(core.setPreviewTrack(PREVIEW_TRACK, command)).toBeNull();
+    expect(core.getPreviewState()).toBeNull();
+    expect(core.hitTestPreview(2, command)).toBeNull();
   });
 
   it('将 seek 目标夹取到可 Seek 区间边界', async () => {

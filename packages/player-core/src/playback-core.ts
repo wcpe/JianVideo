@@ -17,6 +17,10 @@ import type {
   PlaybackSource,
   PlaybackState,
   PlaybackTrack,
+  PreparedPreviewTrack,
+  PreviewFacet,
+  PreviewHit,
+  PreviewTrackState,
   SeekReason,
   SeekRequest,
   SeekResult,
@@ -103,6 +107,7 @@ export class PlaybackCore {
   private readonly listeners = new Set<PlaybackListener>();
   private readonly completionSnapshots = new Map<number, PlaybackSnapshot>();
   private readonly pending = new Map<number, PendingCommand>();
+  private readonly previewFacet: PreviewFacet | undefined;
   private readonly tracksFacet: TrackFacet | undefined;
   private readonly trackSelectionRequestIds = new Map<TrackKind, VersionedTrackSelectionState>();
   private readonly trackSelections = new Map<TrackKind, VersionedTrackSelectionState>();
@@ -127,6 +132,7 @@ export class PlaybackCore {
 
   constructor(binding: PlaybackBackendBinding) {
     this.backend = binding.backend;
+    this.previewFacet = binding.facets?.preview;
     this.tracksFacet = binding.facets?.tracks;
     this.seekTier = isSeekTier(binding.initialSeekTier) ? canonicalSeekTier(binding.initialSeekTier) : null;
     this.frameStepController = new FrameStepController(this.backend, binding.facets?.framePresentation, {
@@ -160,6 +166,7 @@ export class PlaybackCore {
     const command = this.createLoadCommand(source, requestId);
     const startedTerminalRevision = this.terminalRevision;
     this.acceptCommand(requestId);
+    this.setPreviewTrack(null, command);
     this.latestEventId = -1;
     const operation = this.runOperation(requestId, () => this.backend.load(source, command));
     this.updateSnapshot(loadingSnapshot(this.snapshot, source, command));
@@ -221,6 +228,27 @@ export class PlaybackCore {
 
   getSnapshot(): PlaybackSnapshot {
     return this.snapshot;
+  }
+
+  setPreviewTrack(
+    track: PreparedPreviewTrack | null,
+    command: PlaybackCommandContext = this.currentPreviewCommand(),
+  ): PreviewTrackState | null {
+    if (this.previewFacet === undefined || command.sourceId.length === 0) {
+      return null;
+    }
+    return this.previewFacet.setTrack(track, command);
+  }
+
+  getPreviewState(): PreviewTrackState | null {
+    return this.previewFacet?.getState() ?? null;
+  }
+
+  hitTestPreview(
+    mediaTime: number,
+    command: PlaybackCommandContext = this.currentPreviewCommand(),
+  ): PreviewHit | null {
+    return this.previewFacet?.hitTest(mediaTime, command) ?? null;
   }
 
   getTracks(kind: TrackKind): readonly PlaybackTrack[] {
@@ -1167,6 +1195,14 @@ export class PlaybackCore {
       requestId,
       sourceEpoch: this.snapshot.sourceEpoch,
       sourceId: this.snapshot.sourceId,
+    };
+  }
+
+  private currentPreviewCommand(): PlaybackCommandContext {
+    return {
+      requestId: this.snapshot.requestId,
+      sourceEpoch: this.snapshot.sourceEpoch,
+      sourceId: this.snapshot.sourceId ?? '',
     };
   }
 

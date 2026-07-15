@@ -1,5 +1,5 @@
 import type { PreparedPreviewTrack } from '@jianvideo/player-core';
-import { PlaybackCore, PreparedPreviewFacet } from '@jianvideo/player-core';
+import { PlaybackCore } from '@jianvideo/player-core';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -146,12 +146,17 @@ afterEach(() => {
 });
 
 describe('VideoPlayer 时间轴预览（FR2-029）', () => {
-  it('hover 通过轨道命中并在图片加载后显示时间与精灵裁剪', async () => {
+  it('hover 通过 PlaybackCore 命中轨道并在图片加载后显示时间与精灵裁剪', async () => {
+    const hitTestPreview = vi.spyOn(PlaybackCore.prototype, 'hitTestPreview');
     const { progress, video } = renderPreviewPlayer();
     await waitFor(() => expect(video.getAttribute('src')).toBe('/preview.mp4'));
 
     fireEvent.mouseMove(progress, { clientX: 25 });
 
+    expect(hitTestPreview).toHaveBeenCalledWith(
+      2.5,
+      expect.objectContaining({ sourceEpoch: 1, sourceId: 'native:/preview.mp4' }),
+    );
     expect(screen.getByText('0:02')).toBeInTheDocument();
     expect(pendingImages).toHaveLength(1);
     act(() => pendingImages[0].load());
@@ -260,8 +265,8 @@ describe('VideoPlayer 时间轴预览（FR2-029）', () => {
     expect(screen.getByText('0:02')).toBeInTheDocument();
   });
 
-  it('切换播放源时先清空旧轨道再绑定当前轨道', async () => {
-    const setTrack = vi.spyOn(PreparedPreviewFacet.prototype, 'setTrack');
+  it('切换播放源时由 PlaybackCore 先清空旧轨道再绑定当前轨道', async () => {
+    const setTrack = vi.spyOn(PlaybackCore.prototype, 'setPreviewTrack');
     const view = renderPreviewPlayer();
     await waitFor(() => expect(view.video.getAttribute('src')).toBe('/preview.mp4'));
     setTrack.mockClear();
