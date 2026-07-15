@@ -37,11 +37,54 @@ func TestChaptersBookmarksMigration创建表约束与索引(t *testing.T) {
 	}
 }
 
+func TestChaptersBookmarksMigration媒体物理删除级联清理(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:chapters-cascade?mode=memory&cache=shared&_foreign_keys=on"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开外键测试库失败: %v", err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE spaces (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE media_files (id INTEGER PRIMARY KEY, space_id TEXT NOT NULL)`,
+		`INSERT INTO spaces(id) VALUES ('space-a')`,
+		`INSERT INTO media_files(id, space_id) VALUES (1, 'space-a')`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("准备父表失败: %v", err)
+		}
+	}
+	if err := migrateChaptersBookmarks(context.Background(), db); err != nil {
+		t.Fatalf("执行章节书签迁移失败: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO media_chapters
+		(id, space_id, media_id, source, source_index, start_ms, end_ms, title, language, source_fingerprint, parsed_at, created_at, updated_at)
+		VALUES ('chapter-1', 'space-a', 1, 'embedded', 0, 0, 1000, '开场', '', 'fingerprint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).Error; err != nil {
+		t.Fatalf("创建章节失败: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO media_bookmarks
+		(id, space_id, media_id, position_ms, title, note, revision, created_at, updated_at)
+		VALUES ('bookmark-1', 'space-a', 1, 500, '重点', NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).Error; err != nil {
+		t.Fatalf("创建书签失败: %v", err)
+	}
+
+	if err := db.Exec(`DELETE FROM media_files WHERE id = 1`).Error; err != nil {
+		t.Fatalf("媒体物理删除不应被章节书签阻断: %v", err)
+	}
+	for _, table := range []string{"media_chapters", "media_bookmarks"} {
+		var count int64
+		if err := db.Table(table).Count(&count).Error; err != nil {
+			t.Fatalf("统计 %s 失败: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("媒体删除后 %s 应级联清理，实际剩余 %d", table, count)
+		}
+	}
+}
+
 func TestDefaultMigrations在0020后追加FR2060(t *testing.T) {
 	migrations := DefaultMigrations()
 	last := migrations[len(migrations)-1]
 	if last.ID != "20260712_0022_fr2_060_chapters_bookmarks" {
-		t.Fatalf("FR2-060 应追加为 0021，实际最后迁移为 %s", last.ID)
+		t.Fatalf("FR2-060 应追加为 0022，实际最后迁移为 %s", last.ID)
 	}
 	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
 		t.Fatalf("FR2-060 迁移定义不完整: %+v", last)

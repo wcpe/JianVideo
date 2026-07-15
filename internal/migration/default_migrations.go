@@ -1626,7 +1626,7 @@ func migrateChaptersBookmarks(_ context.Context, tx *gorm.DB) error {
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS media_bookmarks (
 			id TEXT PRIMARY KEY,
@@ -1639,7 +1639,7 @@ func migrateChaptersBookmarks(_ context.Context, tx *gorm.DB) error {
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY(space_id) REFERENCES spaces(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE RESTRICT
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_chapters_space_media_source_index ON media_chapters(space_id, media_id, source, source_index);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_chapters_space_media_start ON media_chapters(space_id, media_id, start_ms, source_index);`,
