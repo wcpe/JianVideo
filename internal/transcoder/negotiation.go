@@ -19,6 +19,31 @@ type NegotiationDescriptor struct {
 	MIME string `json:"mime,omitempty"`
 	// FallbackURL 客户端不支持高级编码时的 H.264/TS 回退源；ts 路径为空。
 	FallbackURL string `json:"fallback_url,omitempty"`
+	// FramePresentation 仅在后端验证画面 marker 与有界帧索引一一对应后返回。
+	FramePresentation *FramePresentationDescriptor `json:"frame_presentation,omitempty"`
+}
+
+// FramePresentationDescriptor 描述可由实际呈现像素验证的逐帧身份契约。
+type FramePresentationDescriptor struct {
+	Marker           FrameMarkerDescriptor `json:"marker"`
+	NominalFrameRate float64               `json:"nominal_frame_rate"`
+	Timeline         []FrameTimelineEntry  `json:"timeline"`
+}
+
+// FrameMarkerDescriptor 描述二进制画面 marker 的像素布局。
+type FrameMarkerDescriptor struct {
+	Bits      int `json:"bits"`
+	CellSize  int `json:"cell_size"`
+	Threshold int `json:"threshold,omitempty"`
+	X         int `json:"x"`
+	Y         int `json:"y"`
+}
+
+// FrameTimelineEntry 描述 marker 身份对应的名义媒体时间。
+type FrameTimelineEntry struct {
+	MediaTime        float64 `json:"media_time"`
+	SourceFrameIndex int     `json:"source_frame_index"`
+	StableFrameID    string  `json:"stable_frame_id"`
 }
 
 // ChosenCodec 编码协商纯函数：返回首选优先级里第一个同时满足

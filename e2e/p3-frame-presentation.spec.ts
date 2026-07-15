@@ -3,7 +3,6 @@ import {
   test,
   type APIRequestContext,
   type Locator,
-  type Page,
 } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -16,7 +15,6 @@ test.use({ serviceWorkers: "block" });
 
 const VIDEO_DURATION = 130;
 const FRAME_RATE = 2;
-const FRAME_COUNT = VIDEO_DURATION * FRAME_RATE;
 const MARKER = { bits: 9, cellSize: 8, x: 16, y: 16 } as const;
 const hasFfmpeg = (() => {
   try {
@@ -27,7 +25,7 @@ const hasFfmpeg = (() => {
   }
 })();
 
-test("真实长视频从编号画面 marker 取得稳定身份", async ({ page }) => {
+test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
   test.setTimeout(90_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实编号帧长视频");
   const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-p3-frame-"));
@@ -39,26 +37,88 @@ test("真实长视频从编号画面 marker 取得稳定身份", async ({ page }
     await login(page);
     libraryID = await createLibrary(page.request, mediaDir);
     const mediaID = await scanAndLoadMedia(page.request, libraryID);
-    await installFramePresentationDescriptor(page, mediaID);
+    const position = await page.request.put(`/api/play/${mediaID}/position`, {
+      data: { position: 64 },
+    });
+    expect(position.ok()).toBeTruthy();
+    const negotiation = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/api/play/${mediaID}/negotiate`),
+    );
     await page.goto(`/play/${mediaID}`);
+
+    const descriptor = (await (await negotiation).json()) as {
+      frame_presentation?: {
+        marker: { bits: number; cell_size: number; x: number; y: number };
+        nominal_frame_rate: number;
+        timeline: Array<{
+          source_frame_index: number;
+          stable_frame_id: string;
+        }>;
+      };
+    };
+    expect(descriptor.frame_presentation).toMatchObject({
+      marker: {
+        bits: MARKER.bits,
+        cell_size: MARKER.cellSize,
+        x: MARKER.x,
+        y: MARKER.y,
+      },
+      nominal_frame_rate: FRAME_RATE,
+    });
+    expect(descriptor.frame_presentation?.timeline).toHaveLength(
+      VIDEO_DURATION * FRAME_RATE,
+    );
+    expect(descriptor.frame_presentation?.timeline.at(-1)).toMatchObject({
+      source_frame_index: VIDEO_DURATION * FRAME_RATE - 1,
+      stable_frame_id: `binary-marker:${VIDEO_DURATION * FRAME_RATE - 1}`,
+    });
 
     const player = page.getByTestId("video-player-root");
     const video = page.locator("video");
     await expect(player).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: "暂停" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await player
+      .getByRole("button", { name: "暂停" })
+      .evaluate((button: HTMLButtonElement) => button.click());
+    await expect(
+      player.getByRole("button", { name: "播放", exact: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() => video.evaluate((node) => node.currentTime), {
+        timeout: 15_000,
+      })
+      .toBeLessThan(70);
     await expect
       .poll(() => video.evaluate((node) => node.duration), { timeout: 15_000 })
       .toBeGreaterThan(125);
-    await presentFrameAt(video, 64);
     await expect(player).toHaveAttribute("data-frame-presentation", "exact", {
       timeout: 15_000,
     });
 
-    expect(await readMarker(video)).toBe(128);
-    await presentFrameAt(video, 96);
+    await expect
+      .poll(() => readMarker(video), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(0);
+    const startMarker = await readMarker(video);
+    expect(startMarker).toBeGreaterThanOrEqual(128);
+    expect(startMarker).toBeLessThan(VIDEO_DURATION * FRAME_RATE - 2);
+
+    await clickPlayerButton(player, "后一帧");
+    await expectMarker(video, startMarker + 1);
+    await clickPlayerButton(player, "后一帧");
+    await expectMarker(video, startMarker + 2);
+    await clickPlayerButton(player, "前一帧");
+    await expectMarker(video, startMarker + 1);
     await expect(player).toHaveAttribute("data-frame-presentation", "exact");
-    expect(await readMarker(video)).toBe(192);
   } finally {
-    if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
+    if (libraryID) {
+      await page.request
+        .delete(`/api/library/paths/${libraryID}`, { timeout: 5_000 })
+        .catch(() => undefined);
+    }
     if (existsSync(mediaDir))
       rmSync(mediaDir, { recursive: true, force: true });
   }
@@ -154,49 +214,16 @@ async function scanAndLoadMedia(
   return items.items[0]!.id;
 }
 
-async function installFramePresentationDescriptor(
-  page: Page,
-  mediaID: number,
-): Promise<void> {
-  await page.route(`**/api/play/${mediaID}/negotiate`, async (route) => {
-    await route.fulfill({
-      json: {
-        codec: "h264",
-        path: "mp4",
-        url: `/api/play/${mediaID}/stream`,
-        frame_presentation: {
-          marker: {
-            bits: MARKER.bits,
-            cell_size: MARKER.cellSize,
-            x: MARKER.x,
-            y: MARKER.y,
-          },
-          nominal_frame_rate: FRAME_RATE,
-          timeline: Array.from({ length: FRAME_COUNT }, (_, index) => ({
-            media_time: index / FRAME_RATE,
-            source_frame_index: index,
-            stable_frame_id: `binary-marker:${index}`,
-          })),
-        },
-      },
-    });
-  });
+async function clickPlayerButton(player: Locator, name: string): Promise<void> {
+  await player
+    .getByRole("button", { name })
+    .evaluate((button: HTMLButtonElement) => button.click());
 }
 
-async function presentFrameAt(
-  video: Locator,
-  mediaTime: number,
-): Promise<void> {
-  await video.evaluate(async (node, targetTime) => {
-    node.pause();
-    node.currentTime = targetTime;
-    await new Promise<void>((resolve) =>
-      node.addEventListener("seeked", () => resolve(), { once: true }),
-    );
-    await new Promise<void>((resolve) =>
-      node.requestVideoFrameCallback(() => resolve()),
-    );
-  }, mediaTime);
+async function expectMarker(video: Locator, expected: number): Promise<void> {
+  await expect
+    .poll(() => readMarker(video), { timeout: 15_000 })
+    .toBe(expected);
 }
 
 async function readMarker(video: Locator): Promise<number> {

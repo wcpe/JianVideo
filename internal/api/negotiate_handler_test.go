@@ -96,6 +96,9 @@ func TestNegotiate_H264_ReturnsTSAndRecordsSession(t *testing.T) {
 	if d.Codec != "h264" || d.Path != "ts" {
 		t.Errorf("期望 h264/ts，实得 %s/%s", d.Codec, d.Path)
 	}
+	if d.FramePresentation != nil {
+		t.Error("无法验证真实画面 marker 的普通媒体不得伪装 exact 契约")
+	}
 
 	// 会话记录实际编码与路径
 	sess := pbSvc.GetOrCreateSession(mf.ID, 0, 0)
@@ -174,5 +177,36 @@ func TestNegotiate_NoServices_FallbackH264(t *testing.T) {
 	}
 	if d.Codec != "h264" || d.Path != "ts" {
 		t.Errorf("无服务应回退 h264/ts，实得 %s/%s", d.Codec, d.Path)
+	}
+}
+
+// TestNegotiate_VerifiedMarkerReturnsBoundedFrameContract 真实像素验证成功时返回有界逐帧契约。
+func TestNegotiate_VerifiedMarkerReturnsBoundedFrameContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newNegotiateDB(t)
+	libSvc := library.NewService(db)
+	if _, err := libSvc.CreateMediaFile(1, "/tmp/verified-marker.mp4", 1); err != nil {
+		t.Fatalf("建媒体记录失败: %v", err)
+	}
+	original := detectFramePresentation
+	detectFramePresentation = func(context.Context, string) *transcoder.FramePresentationDescriptor {
+		return buildFramePresentation(2, 260)
+	}
+	t.Cleanup(func() { detectFramePresentation = original })
+
+	w, descriptor := doNegotiate(t, NewHandler(libSvc), "1", `{"client_caps":{}}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200，实得 %d，体=%s", w.Code, w.Body.String())
+	}
+	presentation := descriptor.FramePresentation
+	if presentation == nil {
+		t.Fatal("已验证 marker 的媒体必须返回 frame_presentation")
+	}
+	if presentation.NominalFrameRate != 2 || len(presentation.Timeline) != 260 {
+		t.Fatalf("逐帧契约不符: %+v", presentation)
+	}
+	if presentation.Timeline[259].StableFrameID != "binary-marker:259" {
+		t.Fatalf("稳定帧索引不符: %+v", presentation.Timeline[259])
 	}
 }

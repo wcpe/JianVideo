@@ -79,6 +79,7 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
   private generation = 0;
   private presentedFrame: PresentedFrame | null = null;
   private presentationSequence = 0;
+  private consumedPresentationSequence = 0;
   private readonly capabilityChanged?: FramePresentationCapabilityListener;
   private readonly video: HTMLVideoElement;
   private readonly waiters = new Set<FrameWaiter>();
@@ -108,7 +109,10 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
 
   getCurrentPresentedFrame(command: PlaybackCommandContext): PresentedFrame | null {
     if (!this.accepts(command) || this.capability === 'unavailable') return null;
-    if (this.presentedFrame) return this.presentedFrame;
+    if (this.presentedFrame) {
+      this.consumedPresentationSequence = this.presentedFrame.presentationSequence;
+      return this.presentedFrame;
+    }
     if (this.capability === 'exact') return null;
     return this.createBackendFrame(command);
   }
@@ -135,6 +139,13 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
     if (!this.accepts(command) || this.capability !== 'exact') {
       return Promise.reject(new Error(CANCELED_MESSAGE));
     }
+    if (
+      this.presentedFrame &&
+      this.presentedFrame.presentationSequence > this.consumedPresentationSequence
+    ) {
+      this.consumedPresentationSequence = this.presentedFrame.presentationSequence;
+      return Promise.resolve(this.presentedFrame);
+    }
     return new Promise((resolve, reject) => {
       this.waiters.add({ reject, resolve });
     });
@@ -154,6 +165,7 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
     this.rejectWaiters();
     this.presentedFrame = null;
     this.presentationSequence = 0;
+    this.consumedPresentationSequence = 0;
   }
 
   private cancelObservation(): void {
@@ -220,6 +232,8 @@ export class WebFramePresentationFacet implements FramePresentationFacet {
   }
 
   private resolveWaiters(frame: PresentedFrame): void {
+    if (this.waiters.size === 0) return;
+    this.consumedPresentationSequence = frame.presentationSequence;
     this.waiters.forEach((waiter) => waiter.resolve(frame));
     this.waiters.clear();
   }

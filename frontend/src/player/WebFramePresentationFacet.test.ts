@@ -264,6 +264,71 @@ describe('WebFramePresentationFacet', () => {
     ).toBeNull();
   });
 
+  it('seek 后画面先于 waiter 注册时立即消费新呈现帧', async () => {
+    const video = createVideo();
+    const harness = installVideoFrameCallback(video);
+    const facet = new WebFramePresentationFacet(video);
+    const active = command('seek-race', 8);
+    facet.load(
+      source(
+        [
+          { mediaTime: 1, sourceFrameIndex: 40 },
+          { mediaTime: 1.04, sourceFrameIndex: 41 },
+        ],
+        25,
+        (metadata) => ({ sourceFrameIndex: metadata.mediaTime < 1.02 ? 40 : 41 }),
+      ),
+      active,
+    );
+    harness.present(1);
+    expect(facet.getCurrentPresentedFrame(active)?.sourceFrameIndex).toBe(40);
+
+    harness.present(1.04);
+
+    await expect(facet.waitForPresentedFrame(active)).resolves.toMatchObject({
+      mediaTime: 1.04,
+      sourceFrameIndex: 41,
+    });
+  });
+
+  it('等待者消费已呈现帧后，下一次等待不会重复返回旧帧', async () => {
+    const video = createVideo();
+    const harness = installVideoFrameCallback(video);
+    let frameIndex = 40;
+    const facet = new WebFramePresentationFacet(video);
+    const active = command('sequential-wait', 4);
+    facet.load(
+      source(
+        [
+          { mediaTime: 1, sourceFrameIndex: 40 },
+          { mediaTime: 1.04, sourceFrameIndex: 41 },
+        ],
+        undefined,
+        () => ({ sourceFrameIndex: frameIndex }),
+      ),
+      active,
+    );
+
+    harness.present(1);
+    expect(facet.getCurrentPresentedFrame(active)?.sourceFrameIndex).toBe(40);
+
+    frameIndex = 41;
+    const first = facet.waitForPresentedFrame(active);
+    harness.present(1.04);
+    await expect(first).resolves.toMatchObject({ sourceFrameIndex: 41 });
+
+    const second = facet.waitForPresentedFrame(active);
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    harness.present(1.04);
+    await expect(second).resolves.toMatchObject({ sourceFrameIndex: 41 });
+  });
+
   it('支持 stableFrameId 时间线并返回双向相邻目标', () => {
     const video = createVideo();
     const harness = installVideoFrameCallback(video);

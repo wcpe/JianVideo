@@ -66,6 +66,7 @@ func (h *Handler) Negotiate(c *gin.Context) {
 	}
 
 	descriptor := transcoder.BuildNegotiationDescriptor(mf.ID, codec)
+	descriptor.FramePresentation = detectFramePresentation(c.Request.Context(), mf.FilePath)
 
 	// 记录会话实际编码与路径（FR-53）
 	if h.playback != nil {

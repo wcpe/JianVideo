@@ -194,10 +194,11 @@ describe('negotiate（FR-53 编码协商 API）', () => {
           mime: 'video/mp4; codecs="av01.0.05M.08"',
           fallback_url: '/api/play/9/stream',
           frame_presentation: {
-            marker: { bits: 9, cell_size: 8, x: 16, y: 16 },
+            marker: { bits: 9, cell_size: 8, threshold: 160, x: 16, y: 16 },
             nominal_frame_rate: 30,
             timeline: [
               { media_time: 0, source_frame_index: 0, stable_frame_id: 'binary-marker:0' },
+              { media_time: 1 / 30, source_frame_index: 1, stable_frame_id: 'binary-marker:1' },
             ],
           },
         });
@@ -212,9 +213,12 @@ describe('negotiate（FR-53 编码协商 API）', () => {
     expect(desc.url).toMatch(/^https?:\/\/.+\/api\/play\/hls\/9\/index\.m3u8$/);
     expect(desc.fallbackUrl).toMatch(/^https?:\/\/.+\/api\/play\/9\/stream$/);
     expect(desc.framePresentation).toEqual({
-      marker: { bits: 9, cellSize: 8, x: 16, y: 16 },
+      marker: { bits: 9, cellSize: 8, threshold: 160, x: 16, y: 16 },
       nominalFrameRate: 30,
-      timeline: [{ mediaTime: 0, sourceFrameIndex: 0, stableFrameId: 'binary-marker:0' }],
+      timeline: [
+        { mediaTime: 0, sourceFrameIndex: 0, stableFrameId: 'binary-marker:0' },
+        { mediaTime: 1 / 30, sourceFrameIndex: 1, stableFrameId: 'binary-marker:1' },
+      ],
     });
   });
 
