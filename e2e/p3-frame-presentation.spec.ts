@@ -13,8 +13,9 @@ import { login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const VIDEO_DURATION = 130;
-const FRAME_RATE = 2;
+const VIDEO_DURATION = 10;
+const FRAME_RATE = 30;
+const CONTINUOUS_STEPS = 60;
 const MARKER = { bits: 9, cellSize: 8, x: 16, y: 16 } as const;
 const hasFfmpeg = (() => {
   try {
@@ -26,7 +27,7 @@ const hasFfmpeg = (() => {
 })();
 
 test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(240_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实编号帧长视频");
   const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-p3-frame-"));
   const mediaPath = join(mediaDir, "p3-numbered-long-video.mp4");
@@ -37,10 +38,6 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
     await login(page);
     libraryID = await createLibrary(page.request, mediaDir);
     const mediaID = await scanAndLoadMedia(page.request, libraryID);
-    const position = await page.request.put(`/api/play/${mediaID}/position`, {
-      data: { position: 64 },
-    });
-    expect(position.ok()).toBeTruthy();
     const negotiation = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -49,6 +46,9 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
     await page.goto(`/play/${mediaID}`);
 
     const descriptor = (await (await negotiation).json()) as {
+      codec: string;
+      path: string;
+      url: string;
       frame_presentation?: {
         marker: { bits: number; cell_size: number; x: number; y: number };
         nominal_frame_rate: number;
@@ -58,6 +58,11 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
         }>;
       };
     };
+    expect(descriptor).toMatchObject({
+      codec: "h264",
+      path: "mp4",
+      url: `/api/play/${mediaID}/stream`,
+    });
     expect(descriptor.frame_presentation).toMatchObject({
       marker: {
         bits: MARKER.bits,
@@ -91,27 +96,46 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
       .poll(() => video.evaluate((node) => node.currentTime), {
         timeout: 15_000,
       })
-      .toBeLessThan(70);
+      .toBeLessThan(5.5);
     await expect
       .poll(() => video.evaluate((node) => node.duration), { timeout: 15_000 })
-      .toBeGreaterThan(125);
+      .toBeGreaterThan(9.5);
+    await expect
+      .poll(() => video.evaluate((node) => node.currentSrc), { timeout: 15_000 })
+      .toContain(`/api/play/${mediaID}/stream`);
     await expect(player).toHaveAttribute("data-frame-presentation", "exact", {
       timeout: 15_000,
     });
+    await seekWithProgress(player, 40);
+    await expect
+      .poll(
+        () => video.evaluate((node) => !node.seeking && node.paused),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
 
     await expect
       .poll(() => readMarker(video), { timeout: 15_000 })
-      .toBeGreaterThanOrEqual(0);
+      .toBeGreaterThanOrEqual(100);
     const startMarker = await readMarker(video);
-    expect(startMarker).toBeGreaterThanOrEqual(128);
-    expect(startMarker).toBeLessThan(VIDEO_DURATION * FRAME_RATE - 2);
+    expect(startMarker).toBeGreaterThanOrEqual(100);
+    expect(startMarker).toBeLessThan(
+      VIDEO_DURATION * FRAME_RATE - CONTINUOUS_STEPS,
+    );
 
-    await clickPlayerButton(player, "后一帧");
-    await expectMarker(video, startMarker + 1);
-    await clickPlayerButton(player, "后一帧");
-    await expectMarker(video, startMarker + 2);
-    await clickPlayerButton(player, "前一帧");
-    await expectMarker(video, startMarker + 1);
+    for (let step = 1; step <= CONTINUOUS_STEPS; step += 1) {
+      await clickPlayerButton(player, "后一帧");
+      await expectFrameStepResult(player, startMarker + step);
+      await expectMarker(video, startMarker + step);
+    }
+    for (let step = 1; step <= CONTINUOUS_STEPS; step += 1) {
+      await clickPlayerButton(player, "前一帧");
+      await expectFrameStepResult(
+        player,
+        startMarker + CONTINUOUS_STEPS - step,
+      );
+      await expectMarker(video, startMarker + CONTINUOUS_STEPS - step);
+    }
     await expect(player).toHaveAttribute("data-frame-presentation", "exact");
   } finally {
     if (libraryID) {
@@ -214,10 +238,30 @@ async function scanAndLoadMedia(
   return items.items[0]!.id;
 }
 
+async function seekWithProgress(player: Locator, percent: number): Promise<void> {
+  const progress = player.getByTestId("video-progress-preview");
+  const box = await progress.boundingBox();
+  if (box === null) throw new Error("无法定位播放进度控件");
+  await progress.click({
+    position: { x: (box.width * percent) / 100, y: box.height / 2 },
+  });
+}
+
 async function clickPlayerButton(player: Locator, name: string): Promise<void> {
   await player
     .getByRole("button", { name })
     .evaluate((button: HTMLButtonElement) => button.click());
+}
+
+async function expectFrameStepResult(
+  player: Locator,
+  expectedFrame: number,
+): Promise<void> {
+  await expect(player).toHaveAttribute(
+    "data-frame-step-result",
+    `completed:exact-verified:${expectedFrame}:ok`,
+    { timeout: 15_000 },
+  );
 }
 
 async function expectMarker(video: Locator, expected: number): Promise<void> {

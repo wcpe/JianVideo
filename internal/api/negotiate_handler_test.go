@@ -203,6 +203,9 @@ func TestNegotiate_VerifiedMarkerReturnsBoundedFrameContract(t *testing.T) {
 	if presentation == nil {
 		t.Fatal("已验证 marker 的媒体必须返回 frame_presentation")
 	}
+	if descriptor.Path != "mp4" || descriptor.URL != "/api/play/1/stream" {
+		t.Fatalf("逐帧契约必须描述实际验证的原文件直出路径: %+v", descriptor)
+	}
 	if presentation.NominalFrameRate != 2 || len(presentation.Timeline) != 260 {
 		t.Fatalf("逐帧契约不符: %+v", presentation)
 	}

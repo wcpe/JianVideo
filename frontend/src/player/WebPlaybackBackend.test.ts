@@ -872,6 +872,19 @@ describe('WebPlaybackBackend 命令与快照', () => {
     });
   });
 
+  it('原生媒体 seeked 后从 seeking 回落到实际暂停态', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1));
+    video.dispatchEvent(new Event('seeking'));
+    expect(backend.getSnapshot().state).toBe('seeking');
+
+    video.dispatchEvent(new Event('seeked'));
+    expect(backend.getSnapshot().state).toBe('paused');
+  });
+
   it('mpegts.js 播放与暂停命令转发给现有内核', async () => {
     const video = createVideo();
     const player = createMpegtsPlayer();

@@ -320,7 +320,7 @@ export class FrameStepController {
     frame: PresentedFrame,
   ): number {
     const correction = correctionDirection(plan.target, frame, context.direction);
-    const requestedTime = plan.targetMediaTime + correction * plan.target.frameDuration;
+    const requestedTime = plan.targetMediaTime + correction * plan.target.frameDuration * 0.5;
     return clampToRanges(requestedTime, context.ranges);
   }
 

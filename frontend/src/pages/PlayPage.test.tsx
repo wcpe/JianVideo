@@ -571,8 +571,8 @@ describe('PlayPage', () => {
       http.post('*/api/play/8/negotiate', () =>
         HttpResponse.json({
           codec: 'h264',
-          path: 'ts',
-          url: '/api/play/hls/8/master',
+          path: 'mp4',
+          url: '/api/play/8/stream',
           frame_presentation: {
             marker: { bits: 9, cell_size: 8, x: 16, y: 16 },
             nominal_frame_rate: 2,

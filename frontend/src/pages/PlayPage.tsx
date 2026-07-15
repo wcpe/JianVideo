@@ -273,8 +273,9 @@ export default function PlayPage() {
           setPlayerIsABR(true);
           return;
         }
-        if (nextDescriptor.framePresentation) {
-          setDescriptor({ ...nextDescriptor, path: 'mp4', url: mediaStreamUrl(mediaId) });
+        if (nextDescriptor.path === 'mp4' && nextDescriptor.framePresentation) {
+          setDescriptor(nextDescriptor);
+          setPlayerUrl(nextDescriptor.url);
         }
       })
       .catch(() => undefined);

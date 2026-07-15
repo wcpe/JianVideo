@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -66,7 +67,14 @@ func (h *Handler) Negotiate(c *gin.Context) {
 	}
 
 	descriptor := transcoder.BuildNegotiationDescriptor(mf.ID, codec)
-	descriptor.FramePresentation = detectFramePresentation(c.Request.Context(), mf.FilePath)
+	if !transcoder.IsAdvancedCodec(codec) {
+		presentation := detectFramePresentation(c.Request.Context(), mf.FilePath)
+		if presentation != nil {
+			descriptor.Path = "mp4"
+			descriptor.URL = fmt.Sprintf("/api/play/%d/stream", mf.ID)
+			descriptor.FramePresentation = presentation
+		}
+	}
 
 	// 记录会话实际编码与路径（FR-53）
 	if h.playback != nil {

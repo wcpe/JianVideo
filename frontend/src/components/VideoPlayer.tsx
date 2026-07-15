@@ -403,6 +403,7 @@ export default function VideoPlayer({
     PlaybackSnapshot['capabilities']['framePresentation'] | null
   >(null);
   const [approximateFrameStep, setApproximateFrameStep] = useState(false);
+  const [lastFrameStepResult, setLastFrameStepResult] = useState('pending');
   // FR-104：播放器内核与控件增强
   const containerRef = useRef<HTMLDivElement>(null);
   // 全屏态：由 fullscreenchange 同步
@@ -554,6 +555,14 @@ export default function VideoPlayer({
         const isCurrentSource =
           event.sourceEpoch === snapshot.sourceEpoch && event.sourceId === snapshot.sourceId;
         if (!isCurrentSource) return;
+        setLastFrameStepResult(
+          [
+            event.result.status,
+            event.result.precision,
+            event.result.confirmedSourceFrameIndex ?? event.result.confirmedStableFrameId ?? 'unknown',
+            event.result.error?.code ?? 'ok',
+          ].join(':'),
+        );
         if (event.result.precision === 'approximate') setApproximateFrameStep(true);
         if (event.result.precision === 'exact-verified' && event.result.status === 'completed') {
           setApproximateFrameStep(false);
@@ -629,6 +638,7 @@ export default function VideoPlayer({
     setAutoPlayBlocked(false);
     setFramePresentationCapability(null);
     setApproximateFrameStep(false);
+    setLastFrameStepResult('pending');
     previewRequestRef.current += 1;
     setTimelinePreview(null);
     void core.load(source).then(async (result) => {
@@ -1196,6 +1206,7 @@ export default function VideoPlayer({
       ref={containerRef}
       data-testid="video-player-root"
       data-frame-presentation={framePresentationCapability ?? 'pending'}
+      data-frame-step-result={lastFrameStepResult}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onMouseMove={showControlsTemporarily}

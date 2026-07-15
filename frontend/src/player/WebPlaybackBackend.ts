@@ -588,7 +588,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       this.rebasePlaybackControl({ playbackRate: positiveTime(this.video.playbackRate, 1) }),
     );
     this.listen('seeking', () => this.publishSnapshot(token, 'seeking'));
-    this.listen('seeked', publish);
+    this.listen('seeked', () => this.publishSnapshot(token, settledMediaState(this.video)));
     this.listen('playing', () => this.handlePlaying(token));
     this.listen('pause', () => this.publishSnapshot(token, 'paused'));
     this.listen('ended', () => this.handleEnded(token));
@@ -847,6 +847,11 @@ function createSourceSnapshot(
     sourceId: command.sourceId,
     state: 'loading',
   };
+}
+
+function settledMediaState(video: HTMLVideoElement): PlaybackState {
+  if (video.ended) return 'ended';
+  return video.paused ? 'paused' : 'playing';
 }
 
 function readMediaSnapshot(

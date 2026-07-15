@@ -11,9 +11,9 @@ import "fmt"
 type NegotiationDescriptor struct {
 	// Codec 协商出的实际目标编码（h264/h265/av1/vp9，已归一化）。
 	Codec string `json:"codec"`
-	// Path 播放路径：ts（H.264，mpegts.js）/ fmp4（高级编码，原生 MSE）。
+	// Path 播放路径：ts（H.264，mpegts.js）/ fmp4（高级编码，原生 MSE）/ mp4（已验证原文件直出）。
 	Path string `json:"path"`
-	// URL 清单 / 流地址：ts 为 master，fmp4 为 index.m3u8。
+	// URL 清单 / 流地址：ts 为 master，fmp4 为 index.m3u8，mp4 为原文件流。
 	URL string `json:"url"`
 	// MIME 高级编码在 fMP4 容器下的 MSE codec MIME 串；ts 路径为空。
 	MIME string `json:"mime,omitempty"`
