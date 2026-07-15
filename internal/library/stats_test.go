@@ -53,13 +53,13 @@ func TestMarkWatchedIncrementsViewCount(t *testing.T) {
 		t.Fatalf("看完一次后期望 view_count=1, 实际 %d", mf.ViewCount)
 	}
 
-	// 再看完一次 +1（累加）
+	// 完成态内重复上报不得重复计数。
 	if _, err := svc.MarkWatched(id); err != nil {
 		t.Fatalf("第二次标记已看失败: %v", err)
 	}
 	mf, _ = svc.GetMediaFileByID(id)
-	if mf.ViewCount != 2 {
-		t.Fatalf("看完两次后期望 view_count=2, 实际 %d", mf.ViewCount)
+	if mf.ViewCount != 1 {
+		t.Fatalf("重复完成后期望 view_count=1, 实际 %d", mf.ViewCount)
 	}
 }
 
@@ -137,7 +137,7 @@ func TestGetWatchStats_WatchedCounts(t *testing.T) {
 // TestGetWatchStats_PositionHeatmap 验证续播位置比例分桶（10 档）。
 func TestGetWatchStats_PositionHeatmap(t *testing.T) {
 	svc := newWatchTestService(t)
-	// duration=100：位置 5→第 0 档(0-10%)、55→第 5 档(50-60%)、95→第 9 档(90-100%)
+	// duration=100：位置 5→第 0 档、55→第 5 档、75→第 7 档；完成阈值内的位置会归零，不进入高位续播档。
 	id1 := seedStatsMedia(t, svc, "p1.mp4", 1, "mp4", 100)
 	id2 := seedStatsMedia(t, svc, "p2.mp4", 1, "mp4", 100)
 	id3 := seedStatsMedia(t, svc, "p3.mp4", 1, "mp4", 100)
@@ -150,7 +150,7 @@ func TestGetWatchStats_PositionHeatmap(t *testing.T) {
 	if _, err := svc.UpdateWatchPosition(id2, 55); err != nil {
 		t.Fatalf("上报 2 失败: %v", err)
 	}
-	if _, err := svc.UpdateWatchPosition(id3, 95); err != nil {
+	if _, err := svc.UpdateWatchPosition(id3, 75); err != nil {
 		t.Fatalf("上报 3 失败: %v", err)
 	}
 	if _, err := svc.UpdateWatchPosition(id4, 50); err != nil {
@@ -164,8 +164,8 @@ func TestGetWatchStats_PositionHeatmap(t *testing.T) {
 	if len(stats.PositionHeatmap) != 10 {
 		t.Fatalf("期望 10 档热力, 实际 %d", len(stats.PositionHeatmap))
 	}
-	if stats.PositionHeatmap[0] != 1 || stats.PositionHeatmap[5] != 1 || stats.PositionHeatmap[9] != 1 {
-		t.Fatalf("期望第 0/5/9 档各 1, 实际 %v", stats.PositionHeatmap)
+	if stats.PositionHeatmap[0] != 1 || stats.PositionHeatmap[5] != 1 || stats.PositionHeatmap[7] != 1 {
+		t.Fatalf("期望第 0/5/7 档各 1, 实际 %v", stats.PositionHeatmap)
 	}
 	// duration=0 的不应落入任何档（合计仅 3）
 	total := 0
@@ -249,8 +249,13 @@ func TestGetWatchStats_TopViewed(t *testing.T) {
 	idB := seedStatsMedia(t, svc, "b.mp4", 1, "mp4", 100)
 	seedStatsMedia(t, svc, "c.mp4", 1, "mp4", 100) // view_count=0，不应出现
 
-	// A 看完 3 次，B 看完 1 次
+	// A 完成后两次从头重播再完成，累计 3 次；B 完成 1 次。
 	for i := 0; i < 3; i++ {
+		if i > 0 {
+			if _, err := svc.UpdateWatchPosition(idA, 10); err != nil {
+				t.Fatalf("重播 A 失败: %v", err)
+			}
+		}
 		if _, err := svc.MarkWatched(idA); err != nil {
 			t.Fatalf("标记 A 失败: %v", err)
 		}

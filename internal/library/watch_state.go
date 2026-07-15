@@ -3,8 +3,6 @@ package library
 import (
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -18,21 +16,13 @@ func (s *Service) UpdateWatchPosition(id int64, position float64) (*models.Media
 	return s.UpdateWatchPositionInSpace(models.DefaultSpaceID, id, position)
 }
 
-// UpdateWatchPositionInSpace 持久化指定 Space 媒体的上次播放位置。
+// UpdateWatchPositionInSpace 通过统一观看状态服务持久化指定 Space 媒体的上次播放位置。
 func (s *Service) UpdateWatchPositionInSpace(spaceID string, id int64, position float64) (*models.MediaFile, error) {
 	if position < 0 {
 		position = 0
 	}
-	now := time.Now()
-	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), id).Updates(map[string]any{
-		"last_position":   position,
-		"last_watched_at": now,
-	})
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return nil, gorm.ErrRecordNotFound
+	if err := s.applyLegacyWatchEvent(spaceID, id, position, "legacy-position", WatchEventProgress); err != nil {
+		return nil, err
 	}
 	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
@@ -44,20 +34,10 @@ func (s *Service) MarkWatched(id int64) (*models.MediaFile, error) {
 	return s.MarkWatchedInSpace(models.DefaultSpaceID, id)
 }
 
-// MarkWatchedInSpace 标记指定 Space 媒体已看完。
+// MarkWatchedInSpace 通过统一观看状态服务标记指定 Space 媒体已看完。
 func (s *Service) MarkWatchedInSpace(spaceID string, id int64) (*models.MediaFile, error) {
-	now := time.Now()
-	result := s.db.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), id).Updates(map[string]any{
-		"watched":         true,
-		"last_position":   0,
-		"last_watched_at": now,
-		"view_count":      gorm.Expr("view_count + 1"),
-	})
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return nil, gorm.ErrRecordNotFound
+	if err := s.applyLegacyWatchEvent(spaceID, id, 0, "legacy-watched", WatchEventEnded); err != nil {
+		return nil, err
 	}
 	return s.GetMediaFileByIDInSpace(spaceID, id)
 }
@@ -101,21 +81,15 @@ func (s *Service) ListContinueWatching(limit int) ([]models.MediaFile, error) {
 	return s.ListContinueWatchingInSpace(models.DefaultSpaceID, limit)
 }
 
-// ListContinueWatchingInSpace 查询指定 Space 的继续观看列表。
+// ListContinueWatchingInSpace 从 watch_states 真源查询指定 Space 的继续观看列表。
 func (s *Service) ListContinueWatchingInSpace(spaceID string, limit int) ([]models.MediaFile, error) {
-	if limit < 1 {
-		limit = 12
-	}
-	if limit > continueWatchingMaxLimit {
-		limit = continueWatchingMaxLimit
-	}
-	var items []models.MediaFile
-	if err := s.db.
-		Where("space_id = ? AND last_position > 0 AND watched = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), false).
-		Order("last_watched_at DESC").
-		Limit(limit).
-		Find(&items).Error; err != nil {
+	items, err := s.ListContinueWatchingStatesInSpace(spaceID, limit)
+	if err != nil {
 		return nil, err
 	}
-	return items, nil
+	media := make([]models.MediaFile, 0, len(items))
+	for _, item := range items {
+		media = append(media, item.Media)
+	}
+	return media, nil
 }

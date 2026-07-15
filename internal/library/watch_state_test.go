@@ -17,7 +17,7 @@ func newWatchTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.WatchState{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	return NewService(gdb)

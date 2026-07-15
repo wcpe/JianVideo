@@ -161,12 +161,14 @@ func TestSubtitleTracksValidate拒绝缺失或错误索引(t *testing.T) {
 }
 
 func TestDefaultMigrations包含FR2044字幕轨道迁移(t *testing.T) {
-	migrations := DefaultMigrations()
-	last := migrations[len(migrations)-1]
-	if last.ID != "20260712_0020_fr2_044_subtitle_tracks" {
-		t.Fatalf("FR2-044 应追加为新迁移，实际最后迁移为 %s", last.ID)
+	for _, migration := range DefaultMigrations() {
+		if migration.ID != "20260712_0020_fr2_044_subtitle_tracks" {
+			continue
+		}
+		if migration.Estimate == nil || migration.Up == nil || migration.Validate == nil || !migration.SafeToRetry {
+			t.Fatalf("FR2-044 迁移定义不完整: %+v", migration)
+		}
+		return
 	}
-	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
-		t.Fatalf("FR2-044 迁移定义不完整: %+v", last)
-	}
+	t.Fatal("默认迁移缺少 FR2-044")
 }

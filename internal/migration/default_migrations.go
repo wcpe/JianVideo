@@ -192,6 +192,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateSubtitleTracks,
 			Validate:    validateSubtitleTracks,
 		},
+		{
+			ID:          "20260712_0021_fr2_045_watch_states",
+			Description: "建立观看状态唯一真源并回填旧续播投影",
+			SafeToRetry: true,
+			Estimate:    estimateWatchStates,
+			Up:          migrateWatchStates,
+			Validate:    validateWatchStates,
+		},
 	}
 }
 

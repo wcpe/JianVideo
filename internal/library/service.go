@@ -50,6 +50,7 @@ type Service struct {
 	inferenceCompensationWake    func()
 	beforeAutoInferenceSave      func()
 	inferenceBackfillBatchHook   func(int)
+	now                          func() time.Time
 	smbCreds                     *smb.CredentialStore
 	smbCredsMu                   sync.RWMutex
 }
@@ -112,7 +113,7 @@ var builtInMediaExtensions = map[string]string{
 func NewService(db *gorm.DB) *Service {
 	return &Service{
 		db: db, mediaRepo: newGormMediaRepository(db), metadataRepo: newGormMetadataRepository(db),
-		metadataParser: defaultEmbeddedMetadataParser,
+		metadataParser: defaultEmbeddedMetadataParser, now: time.Now,
 	}
 }
 
