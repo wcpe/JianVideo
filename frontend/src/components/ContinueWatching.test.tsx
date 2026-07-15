@@ -44,6 +44,25 @@ function buildMedia(id: number, name: string, lastPosition: number, duration: nu
   };
 }
 
+function buildWatchItem(media: MediaFile) {
+  return {
+    media,
+    watch_state: {
+      completed: false,
+      completed_at: null,
+      created_at: media.last_watched_at,
+      last_event_seq: 1,
+      last_session_id: 'test-session',
+      last_watched_at: media.last_watched_at,
+      media_id: media.id,
+      position_seconds: media.last_position,
+      revision: 1,
+      space_id: 'space-default',
+      updated_at: media.last_watched_at,
+    },
+  };
+}
+
 function renderComp() {
   return render(
     <MantineProvider>
@@ -62,7 +81,9 @@ describe('ContinueWatching', () => {
   it('展示继续观看列表并按点击进入续播', async () => {
     server.use(
       http.get('*/api/library/continue-watching', () =>
-        HttpResponse.json({ items: [buildMedia(42, '星际穿越.mp4', 600, 10000)] }),
+        HttpResponse.json({
+          items: [buildWatchItem(buildMedia(42, '星际穿越.mp4', 600, 10000))],
+        }),
       ),
     );
 

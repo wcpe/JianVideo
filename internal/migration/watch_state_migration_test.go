@@ -1,7 +1,9 @@
 package migration
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,55 @@ func TestWatchStatesMigration回填可重入且不覆盖新状态(t *testing.T) 
 	}
 	if current.PositionSeconds != 88 || current.Revision != 7 {
 		t.Fatalf("重入迁移覆盖了新状态: %+v", current)
+	}
+}
+
+func TestWatchStatesMigration旧表无UpdatedAt时缺失观看时间记录中文警告并跳过(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开迁移测试库失败: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE media_files (
+		id INTEGER PRIMARY KEY,
+		space_id TEXT NOT NULL,
+		last_position REAL NOT NULL DEFAULT 0,
+		watched INTEGER NOT NULL DEFAULT 0,
+		last_watched_at DATETIME
+	)`).Error; err != nil {
+		t.Fatalf("创建无 updated_at 的旧媒体表失败: %v", err)
+	}
+	if columnExists(db, "media_files", "updated_at") {
+		t.Fatal("测试旧媒体表不得存在 updated_at")
+	}
+	if err := db.Exec(`INSERT INTO media_files(id, space_id, last_position, watched, last_watched_at)
+		VALUES (1, 'space-a', 42, 0, NULL)`).Error; err != nil {
+		t.Fatalf("写入缺少观看时间的旧记录失败: %v", err)
+	}
+
+	var output bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&output)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	if err := migrateWatchStates(context.Background(), db); err != nil {
+		t.Fatalf("迁移无 updated_at 的旧表失败: %v", err)
+	}
+	if message := output.String(); !strings.Contains(message, "[WARN]") ||
+		!strings.Contains(message, "迁移跳过 1 条缺少 last_watched_at 的旧观看记录") ||
+		!strings.Contains(message, "不伪造观看时间") {
+		t.Fatalf("迁移应记录中文 WARN，实际日志: %q", message)
+	}
+	var count int64
+	if err := db.Table("watch_states").Count(&count).Error; err != nil {
+		t.Fatalf("统计观看状态失败: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("缺少 last_watched_at 的旧记录必须跳过，实际回填 %d 条", count)
 	}
 }
 

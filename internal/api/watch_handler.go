@@ -7,7 +7,114 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
+	"github.com/wcpe/JianVideo/internal/library"
 )
+
+type watchStateUpdateRequest struct {
+	PositionSeconds  *float64 `json:"position_seconds" binding:"required"`
+	DurationSeconds  *float64 `json:"duration_seconds"`
+	ExpectedRevision *int64   `json:"expected_revision" binding:"required"`
+	SessionID        string   `json:"session_id" binding:"required"`
+	EventSeq         *int64   `json:"event_seq" binding:"required"`
+	EventType        string   `json:"event_type" binding:"required"`
+	Reason           string   `json:"reason" binding:"required"`
+}
+
+// GetWatchState GET /api/play/:id/watch-state，返回当前 Space 的观看状态真源。
+func (h *Handler) GetWatchState(c *gin.Context) {
+	spaceID, mediaID, ok := h.watchStateTarget(c)
+	if !ok {
+		return
+	}
+	state, err := h.library.GetWatchStateInSpace(spaceID, mediaID)
+	if err != nil {
+		h.writeWatchStateError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, state)
+}
+
+// UpdateWatchState PUT /api/play/:id/watch-state，应用带 revision 的观看事件。
+func (h *Handler) UpdateWatchState(c *gin.Context) {
+	spaceID, mediaID, ok := h.watchStateTarget(c)
+	if !ok {
+		return
+	}
+	var request watchStateUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_WATCH_STATE", "message": "观看状态请求体无效"})
+		return
+	}
+	result, err := h.library.ApplyWatchEventInSpace(spaceID, mediaID, request.toInput())
+	if err != nil {
+		h.writeWatchStateError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"applied": result.Applied, "current": result.State})
+}
+
+// WatchHistory GET /api/library/watch-history，返回当前 Space 的稳定游标观看历史。
+func (h *Handler) WatchHistory(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	page, err := h.library.ListWatchHistoryInSpace(spaceID, c.Query("cursor"), parseWatchLimit(c, 20))
+	if err != nil {
+		var cursorError *library.WatchCursorError
+		if errors.As(err, &cursorError) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_CURSOR", "message": cursorError.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询观看历史失败"})
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}
+
+func (request watchStateUpdateRequest) toInput() library.WatchEventInput {
+	return library.WatchEventInput{
+		PositionSeconds: *request.PositionSeconds, DurationSeconds: request.DurationSeconds,
+		ExpectedRevision: *request.ExpectedRevision, SessionID: request.SessionID,
+		EventSeq: *request.EventSeq, EventType: request.EventType, Reason: request.Reason,
+	}
+}
+
+func (h *Handler) watchStateTarget(c *gin.Context) (string, int64, bool) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return "", 0, false
+	}
+	mediaID, ok := parseMediaID(c)
+	return spaceID, mediaID, ok
+}
+
+func (h *Handler) writeWatchStateError(c *gin.Context, err error) {
+	var conflict *library.WatchStateConflictError
+	var validation *library.WatchEventValidationError
+	switch {
+	case errors.As(err, &conflict):
+		c.JSON(http.StatusConflict, gin.H{
+			"code": "WATCH_STATE_CONFLICT", "message": "观看状态已被其他会话更新",
+			"applied": false, "current": conflict.Current,
+		})
+	case errors.As(err, &validation):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_WATCH_STATE", "message": validation.Error()})
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "UPDATE_FAILED", "message": "更新观看状态失败"})
+	}
+}
+
+func parseWatchLimit(c *gin.Context, fallback int) int {
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil || limit < 1 {
+		return fallback
+	}
+	return limit
+}
 
 // UpdateWatchPosition PUT /api/play/:id/position
 // 请求体：{"position": 12.5}，持久化媒体上次播放位置（秒），返回更新后的媒体对象。
@@ -71,11 +178,7 @@ func (h *Handler) ContinueWatching(c *gin.Context) {
 	if !ok {
 		return
 	}
-	limit := 12
-	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
-		limit = v
-	}
-	items, err := h.library.ListContinueWatchingInSpace(spaceID, limit)
+	items, err := h.library.ListContinueWatchingStatesInSpace(spaceID, parseWatchLimit(c, 12))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return

@@ -6,6 +6,10 @@
 
 ## 未发布
 
+### 新增
+
+- **FR2-045 跨端续播与观看历史协议**：新增 Space scoped 的 `GET/PUT /api/play/:id/watch-state`、`GET /api/library/watch-history` 与真源版继续观看响应；更新采用 `session_id + event_seq + expected_revision`，当前会话重复/倒序返回 `applied=false`，旧 revision 稳定返回 `409 WATCH_STATE_CONFLICT` 并携带 `current`。旧 `position` / `watched` 端点统一复用观看状态服务，继续同步 `media_files` 兼容投影；`packages/media-client` 与旧前端 API 补齐观看 DTO、历史游标、冲突对象和继续观看兼容映射。播放器与播放页共享 UI 接线、真实双上下文和安装态 PWA E2E 仍待后续验收。
+
 ### 修复
 - **FR2-044 字幕与多音轨契约和门禁收口**：统一以稳定 `track_id` 提供音轨/字幕列表、上传、删除和按请求 WebVTT 内容，同时保留旧 `/subtitles` 数组索引路径兼容；音轨 reload 改为按 `task_id` 隔离 HLS 目录、受鉴权 URL、状态查询与 `cache_assets.variant`，任务级文件路由还会验证真实 succeeded 任务身份，并以受限根打开的同一文件句柄响应，避免同 profile 历史任务串读与 symlink 竞态。worker 在清理和转码前复验本地源当前 size/mtime，数据库未刷新时的真实文件变化同样会失败。外挂字幕枚举跳过符号链接，并以媒体目录为受限根读取、打开后复验普通文件；上传字幕只读取数据库登记的受控应用数据相对路径；Web 音轨事务保留后发播放控制态，当前清单移除/禁用在途目标时会取消迟到结果，候选媒体错误与提交前 fatal 均回滚原源，提交后 fatal 统一报告 `HLS_FATAL` 且不伪降级到 mpegts.js。CI 的 Linux e2e job 显式安装并校验 ffmpeg/ffprobe，缺工具直接失败；Windows headed 继续作为开发者本机门，安装态 PWA 人工验收仍待完成。
 

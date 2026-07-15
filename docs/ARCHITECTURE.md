@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback`, `subtitle` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `subtitle` | 统一字幕/音轨聚合、稳定轨道 ID、上传持久化与删除、受限根读取、按请求 WebVTT 转换和来源能力表达（FR2-044） | → `db`, `audit`, `transcoder` |
@@ -206,9 +206,9 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 | content_hash_algo | TEXT | 内容哈希算法，首批固定 `sha256` |
 | content_hash_computed_at | DATETIME | 内容哈希计算时间 |
 | content_hash_stale | INTEGER, INDEX | 内容哈希过期标记，文件大小或 mtime 变化后置 1 |
-| last_position | REAL | 上次播放位置（秒，FR-44），用于续播 |
-| watched | INTEGER | 是否已看完（FR-44），0/1 |
-| last_watched_at | DATETIME | 最近一次观看时间（FR-44），用于「继续观看」排序 |
+| last_position | REAL | `watch_states.position_seconds` 的兼容投影，供旧查询过渡读取 |
+| watched | INTEGER | `watch_states.completed` 的兼容投影，0/1 |
+| last_watched_at | DATETIME | `watch_states.last_watched_at` 的兼容投影 |
 | last_viewed_at | DATETIME | 最近一次打开（查看/播放）时间（FR-120），用于时间轴「最近查看」排序；区别于 `last_watched_at`（仅视频播放进度），覆盖图片 + 视频 |
 | view_count | INTEGER | 观看次数（FR-75）：每「看完」一次 +1，位置上报不计数，供观看统计聚合 |
 | display_name | TEXT | 系统内显示名（FR-30），空则回退 `file_name` |
@@ -223,13 +223,28 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 >
 > FR2-007 媒体查询统一经 `MediaQueryRepository` 封装列表、详情、路径前缀与统计查询，SQLite/GORM 实现中集中维护 Space 条件、tuple cursor 分页与组合索引使用边界。活跃媒体分页使用 `idx_media_files_space_added_id`、`idx_media_files_space_library_added` 与 `idx_media_files_active_space_format_added_id` 避免临时排序；删除态使用 `idx_media_files_deleted_space_deleted_at` partial index，避免宽泛 `deleted_at` 索引干扰活跃列表规划。其他关键索引包括 `idx_media_files_space_media_time_id`、`idx_media_files_space_library_path_id`、`idx_media_files_space_size_content_hash`、`idx_media_files_space_content_hash_stale`、`idx_library_paths_space_path`、`idx_library_paths_space_path_id`、`idx_library_paths_space_enabled_id`。
 >
-> 观看状态（`last_position`/`watched`/`last_watched_at`，FR-44）记录的是「用户观看位置」，作用于 `media_files`、归属 `library` 模块，与 `playback` 模块维护的转码/缓冲会话进度是两套独立状态，互不复用、互不覆盖。
+> FR2-045 起，观看位置、完成态、最近观看时间与 revision 并发语义以 `watch_states` 为唯一真源，归属 `library` 模块；`media_files.last_position` / `watched` / `last_watched_at` 仅在同一事务内接收兼容投影。它与 `playback` 模块维护的转码/缓冲会话进度仍是两套独立状态，互不复用、互不覆盖。
 >
-> 观看热力与统计（FR-75）：`view_count` 列由 `MarkWatched` 在置 `watched`/清零续播位置的**同一次 UPDATE** 内用 `view_count + 1` 原子自增——「看完计一次」，位置上报（`UpdateWatchPosition`）不计数，避免约 10s 一次的位置上报重复累加。`library.GetWatchStats()` 纯查询/聚合现有列（全程 `deleted_at IS NULL`）产出已看/未看计数、最近观看时间线（`last_watched_at` 按本地时区 `strftime` 天分桶）、续播位置热力（`last_position/duration` 比例分 10 档，`duration>0`）、各库/各格式已看分布、观看次数 Top N，经 `GET /api/library/stats` 返回，供观看统计页（`/stats`）自建（无图表库）可视化。不新建观看明细表（YAGNI、守真源不变量），统计是 `media_files` 现有列的只读派生。
+> 观看热力与统计（FR-75）：非 `ab_loop` 事件造成 `completed=false -> true` 转换时，统一观看状态事务原子执行 `view_count + 1`；重复完成事件不重复计数。`library.GetWatchStats()` 在兼容期继续只读聚合 `media_files` 投影列（全程 `deleted_at IS NULL`），而续播详情、继续观看与观看历史必须读取 `watch_states` 真源。不新建逐秒观看事件明细表。
 >
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内筛出当前仍未软删的有效项，再置 `deleted_at` 并逐项写 `media.deleted` 审计事件；跳过不存在/已软删 id，返回受影响行数；供时间轴、目录浏览与重复项清理消费（进回收站、可还原）。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
+
+**观看状态（watch_states）（FR2-045）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| space_id + media_id | TEXT + INTEGER，联合主键 | P3 单用户阶段的唯一观看主体 |
+| position_seconds | REAL | 服务端接受后的续播位置，完成时清零 |
+| completed | INTEGER | 服务端按时长阈值或 ended 事件派生的完成态 |
+| last_watched_at | DATETIME | 最近一次已接受观看事件时间 |
+| completed_at | DATETIME | 最近一次进入完成态的时间，未完成为空 |
+| revision | INTEGER | 每次成功事件递增，用于比较交换 |
+| last_session_id / last_event_seq | TEXT / INTEGER | 仅对当前最近会话提供重复与倒序判断 |
+| created_at / updated_at | DATETIME | 创建与更新时间 |
+
+`library.ApplyWatchEventInSpace` 在短事务内校验 Space、软删和文件有效状态，先处理当前会话重复/倒序，再执行 revision CAS；成功后同时更新真源、`media_files` 兼容投影和完成转换计数。历史会话迟到包返回 `409 WATCH_STATE_CONFLICT + current`，不得落库。历史与继续观看通过 `watch_states JOIN media_files` 查询，显式排除其他 Space、软删和 missing 媒体；历史使用 `(last_watched_at, media_id)` 倒序游标，继续观看只取未完成且位置大于 1 秒的状态。
 
 **文件自带元数据（media_metadata）（FR2-030）**
 
@@ -581,11 +596,11 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、继续观看列表（FR-44）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118）、dHash 相似去重（FR-70）与内容哈希精确去重（FR2-061） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、观看历史游标页与继续观看真源列表（FR2-045）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118）、dHash 相似去重（FR-70）与内容哈希精确去重（FR2-061） |
 | 媒体类型 | `/api/media-types` | 媒体类型定义、全局/每库后缀规则、内置规则禁用与自定义规则增删改（FR2-025） |
 | 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
-| 播放 | `/api/play` | 视频流播放、Seek、HLS profile 文件服务与预览状态、直连失败回退、观看位置上报与已看标记（FR2-008 / FR-44） |
+| 播放 | `/api/play` | 视频流播放、Seek、HLS profile 文件服务与预览状态、直连失败回退、观看状态 GET/PUT revision 契约，以及旧 position/watched 统一服务适配（FR2-008 / FR2-045） |
 | 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD，以及兼容旧路径的统一 HLS preview 任务入队/列表（FR2-008） |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期设置读取、definitions 元数据与已登记 key 批量写入 |

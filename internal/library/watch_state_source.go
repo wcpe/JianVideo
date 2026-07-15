@@ -62,6 +62,22 @@ func (e *WatchStateConflictError) Error() string {
 	return "观看状态 revision 冲突"
 }
 
+// WatchEventValidationError 表示观看事件字段不符合协议。
+type WatchEventValidationError struct {
+	Message string
+}
+
+func (e *WatchEventValidationError) Error() string {
+	return e.Message
+}
+
+// WatchCursorError 表示观看历史游标无法解析。
+type WatchCursorError struct{}
+
+func (e *WatchCursorError) Error() string {
+	return "观看历史游标无效"
+}
+
 // WatchMediaItem 把媒体信息与同一真源中的观看状态绑定返回。
 type WatchMediaItem struct {
 	Media models.MediaFile  `json:"media"`
@@ -375,50 +391,54 @@ func encodeWatchCursor(watchedAt time.Time, mediaID int64) string {
 func decodeWatchCursor(cursor string) (time.Time, int64, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("观看历史游标无效")
+		return time.Time{}, 0, &WatchCursorError{}
 	}
 	parts := strings.Split(string(raw), "|")
 	if len(parts) != 2 {
-		return time.Time{}, 0, fmt.Errorf("观看历史游标无效")
+		return time.Time{}, 0, &WatchCursorError{}
 	}
 	watchedAt, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return time.Time{}, 0, fmt.Errorf("观看历史游标无效")
+		return time.Time{}, 0, &WatchCursorError{}
 	}
 	mediaID, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || mediaID <= 0 {
-		return time.Time{}, 0, fmt.Errorf("观看历史游标无效")
+		return time.Time{}, 0, &WatchCursorError{}
 	}
 	return watchedAt, mediaID, nil
 }
 
 func validateWatchEventInput(input WatchEventInput) error {
 	if input.PositionSeconds < 0 || math.IsNaN(input.PositionSeconds) || math.IsInf(input.PositionSeconds, 0) {
-		return fmt.Errorf("观看位置必须为有限非负数")
+		return invalidWatchEvent("观看位置必须为有限非负数")
 	}
 	if input.ExpectedRevision < 0 {
-		return fmt.Errorf("expected_revision 不能为负数")
+		return invalidWatchEvent("expected_revision 不能为负数")
 	}
 	if input.EventSeq < 0 {
-		return fmt.Errorf("event_seq 不能为负数")
+		return invalidWatchEvent("event_seq 不能为负数")
 	}
 	if !validWatchSessionID(input.SessionID) {
-		return fmt.Errorf("session_id 格式无效")
+		return invalidWatchEvent("session_id 格式无效")
 	}
 	switch input.EventType {
 	case WatchEventProgress, WatchEventPause, WatchEventSeek, WatchEventEnded:
 	default:
-		return fmt.Errorf("event_type 无效")
+		return invalidWatchEvent("event_type 无效")
 	}
 	switch input.Reason {
 	case WatchReasonUser, WatchReasonABLoop, WatchReasonRestore, WatchReasonSystem:
 	default:
-		return fmt.Errorf("reason 无效")
+		return invalidWatchEvent("reason 无效")
 	}
 	if input.DurationSeconds != nil && (*input.DurationSeconds <= 0 || math.IsNaN(*input.DurationSeconds) || math.IsInf(*input.DurationSeconds, 0)) {
-		return fmt.Errorf("duration_seconds 必须为有限正数")
+		return invalidWatchEvent("duration_seconds 必须为有限正数")
 	}
 	return nil
+}
+
+func invalidWatchEvent(message string) error {
+	return &WatchEventValidationError{Message: message}
 }
 
 func validWatchSessionID(value string) bool {

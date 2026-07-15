@@ -405,6 +405,7 @@ describe("media-client package", () => {
             Response.json({
               completed: false,
               completed_at: null,
+              created_at: "0001-01-01T00:00:00Z",
               last_event_seq: 0,
               last_session_id: "",
               last_watched_at: "0001-01-01T00:00:00Z",
@@ -412,6 +413,7 @@ describe("media-client package", () => {
               position_seconds: 0,
               revision: 0,
               space_id: "space-default",
+              updated_at: "0001-01-01T00:00:00Z",
             }),
           );
         }
@@ -421,6 +423,7 @@ describe("media-client package", () => {
             current: {
               completed: false,
               completed_at: null,
+              created_at: "2026-07-15T09:00:00Z",
               last_event_seq: 3,
               last_session_id: "session-a",
               last_watched_at: "2026-07-15T10:00:00Z",
@@ -428,6 +431,7 @@ describe("media-client package", () => {
               position_seconds: 42,
               revision: 1,
               space_id: "space-default",
+              updated_at: "2026-07-15T10:00:00Z",
             },
           }),
         );
@@ -446,10 +450,20 @@ describe("media-client package", () => {
       sessionId: "session-a",
     });
 
-    expect(initial).toMatchObject({ mediaId: "9", revision: 0 });
+    expect(initial).toMatchObject({
+      createdAt: "0001-01-01T00:00:00Z",
+      mediaId: "9",
+      revision: 0,
+      updatedAt: "0001-01-01T00:00:00Z",
+    });
     expect(updated).toMatchObject({
       applied: true,
-      current: { eventSeq: 3, positionSeconds: 42, revision: 1 },
+      current: {
+        eventSeq: 3,
+        positionSeconds: 42,
+        revision: 1,
+        updatedAt: "2026-07-15T10:00:00Z",
+      },
     });
     expect(
       requests.map((request) => `${request.method} ${request.url}`),
@@ -481,6 +495,7 @@ describe("media-client package", () => {
               current: {
                 completed: false,
                 completed_at: null,
+                created_at: "2026-07-15T09:00:00Z",
                 last_event_seq: 4,
                 last_session_id: "session-b",
                 last_watched_at: "2026-07-15T10:01:00Z",
@@ -488,6 +503,7 @@ describe("media-client package", () => {
                 position_seconds: 55,
                 revision: 2,
                 space_id: "space-default",
+                updated_at: "2026-07-15T10:01:00Z",
               },
               message: "观看状态已被其他会话更新",
             },
@@ -511,7 +527,11 @@ describe("media-client package", () => {
     expect(error).toBeInstanceOf(WatchStateConflictError);
     expect(error).toMatchObject({
       code: "WATCH_STATE_CONFLICT",
-      current: { positionSeconds: 55, revision: 2 },
+      current: {
+        positionSeconds: 55,
+        revision: 2,
+        updatedAt: "2026-07-15T10:01:00Z",
+      },
       status: 409,
     });
     expect(attempts).toBe(1);
@@ -532,6 +552,7 @@ describe("media-client package", () => {
               watch_state: {
                 completed: false,
                 completed_at: null,
+                created_at: "2026-07-15T09:00:00Z",
                 last_event_seq: 3,
                 last_session_id: "session-a",
                 last_watched_at: "2026-07-15T10:00:00Z",
@@ -539,6 +560,7 @@ describe("media-client package", () => {
                 position_seconds: 42,
                 revision: 1,
                 space_id: "space-default",
+                updated_at: "2026-07-15T10:00:00Z",
               },
             },
           ],

@@ -110,7 +110,24 @@ function useDefaultHandlers() {
     http.get('*/api/library/summary', () => HttpResponse.json(sampleSummary)),
     http.get('*/api/library/trends', () => HttpResponse.json(sampleTrends)),
     http.get('*/api/library/continue-watching', () =>
-      HttpResponse.json({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] }),
+      HttpResponse.json({
+        items: [1, 2, 3].map((id) => ({
+          media: { id },
+          watch_state: {
+            completed: false,
+            completed_at: null,
+            created_at: '2026-05-03T00:00:00Z',
+            last_event_seq: 1,
+            last_session_id: `session-${id}`,
+            last_watched_at: '2026-05-03T00:00:00Z',
+            media_id: id,
+            position_seconds: id * 10,
+            revision: 1,
+            space_id: 'space-default',
+            updated_at: '2026-05-03T00:00:00Z',
+          },
+        })),
+      }),
     ),
   );
 }

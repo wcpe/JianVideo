@@ -23,6 +23,46 @@ export interface LibraryPath {
 }
 
 /** 媒体文件 */
+export type WatchEventType = 'progress' | 'pause' | 'seek' | 'ended';
+export type WatchEventReason = 'user' | 'ab_loop' | 'restore' | 'system';
+
+/** Space 内媒体观看状态真源 DTO。 */
+export interface WatchState {
+  space_id: string;
+  media_id: number;
+  position_seconds: number;
+  completed: boolean;
+  last_watched_at: string;
+  completed_at?: string | null;
+  revision: number;
+  last_session_id: string;
+  last_event_seq: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 单次观看事件请求，session 内 event_seq 严格递增。 */
+export interface WatchStateEvent {
+  position_seconds: number;
+  duration_seconds?: number;
+  expected_revision: number;
+  session_id: string;
+  event_seq: number;
+  event_type: WatchEventType;
+  reason: WatchEventReason;
+}
+
+export interface WatchStateUpdateResult {
+  applied: boolean;
+  current: WatchState;
+}
+
+export interface WatchStateConflictResponse extends WatchStateUpdateResult {
+  applied: false;
+  code: 'WATCH_STATE_CONFLICT';
+  message: string;
+}
+
 export interface MediaFile {
   id: number;
   library_id: number;
@@ -76,6 +116,16 @@ export interface MediaFile {
   location?: string;
   /** 列表批量附带的本地影视信息推断（FR2-031），尚无结果时缺省 */
   inference?: MediaInference | null;
+}
+
+export interface WatchMediaItem {
+  media: MediaFile;
+  watch_state: WatchState;
+}
+
+export interface WatchHistoryPage {
+  items: WatchMediaItem[];
+  next_cursor?: string;
 }
 
 /** 当前媒体封面选择语义（FR2-059） */

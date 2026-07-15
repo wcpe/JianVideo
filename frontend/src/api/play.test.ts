@@ -6,9 +6,118 @@ import {
   createHLSABR,
   getHLSStatus,
   getTimelinePreviewStatus,
+  getWatchState,
   negotiate,
   rebuildTimelinePreview,
+  updateWatchState,
 } from './play';
+
+describe('观看状态 API', () => {
+  it('读取 revision 并按 session/event DTO 更新', async () => {
+    let body: unknown;
+    server.use(
+      http.get('*/api/play/9/watch-state', () =>
+        HttpResponse.json({
+          completed: false,
+          created_at: '0001-01-01T00:00:00Z',
+          last_event_seq: 0,
+          last_session_id: '',
+          last_watched_at: '0001-01-01T00:00:00Z',
+          media_id: 9,
+          position_seconds: 0,
+          revision: 0,
+          space_id: 'space-default',
+          updated_at: '0001-01-01T00:00:00Z',
+        }),
+      ),
+      http.put('*/api/play/9/watch-state', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({
+          applied: true,
+          current: {
+            completed: false,
+            created_at: '2026-07-15T09:00:00Z',
+            last_event_seq: 2,
+            last_session_id: 'session-a',
+            last_watched_at: '2026-07-15T10:00:00Z',
+            media_id: 9,
+            position_seconds: 33,
+            revision: 1,
+            space_id: 'space-default',
+            updated_at: '2026-07-15T10:00:00Z',
+          },
+        });
+      }),
+    );
+
+    const current = await getWatchState(9);
+    const result = await updateWatchState(9, {
+      position_seconds: 33,
+      expected_revision: current.revision,
+      session_id: 'session-a',
+      event_seq: 2,
+      event_type: 'progress',
+      reason: 'user',
+    });
+
+    expect(result).toMatchObject({ applied: true, current: { revision: 1, last_event_seq: 2 } });
+    expect(body).toEqual({
+      position_seconds: 33,
+      expected_revision: 0,
+      session_id: 'session-a',
+      event_seq: 2,
+      event_type: 'progress',
+      reason: 'user',
+    });
+  });
+
+  it('409 响应保留 applied=false 与 current', async () => {
+    server.use(
+      http.put('*/api/play/9/watch-state', () =>
+        HttpResponse.json(
+          {
+            applied: false,
+            code: 'WATCH_STATE_CONFLICT',
+            message: '观看状态已被其他会话更新',
+            current: {
+              completed: false,
+              created_at: '2026-07-15T09:00:00Z',
+              last_event_seq: 3,
+              last_session_id: 'session-b',
+              last_watched_at: '2026-07-15T10:01:00Z',
+              media_id: 9,
+              position_seconds: 45,
+              revision: 2,
+              space_id: 'space-default',
+              updated_at: '2026-07-15T10:01:00Z',
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const error = await updateWatchState(9, {
+      position_seconds: 80,
+      expected_revision: 1,
+      session_id: 'session-a',
+      event_seq: 3,
+      event_type: 'pause',
+      reason: 'system',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      response: {
+        data: {
+          applied: false,
+          code: 'WATCH_STATE_CONFLICT',
+          current: { position_seconds: 45, revision: 2 },
+        },
+        status: 409,
+      },
+    });
+  });
+});
 
 describe('时间轴预览 API', () => {
   it('将 202 作为正常状态并透传查询参数', async () => {

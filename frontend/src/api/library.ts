@@ -28,6 +28,9 @@ import type {
   MediaMetadata,
   MediaCover,
   MediaCoversResponse,
+  WatchHistoryPage,
+  WatchMediaItem,
+  WatchState,
 } from '@/types';
 
 // 使用构建时环境变量决定是否启用 mock 模式
@@ -267,11 +270,32 @@ async function realMarkWatched(id: number): Promise<MediaFile> {
   return res.data;
 }
 
-async function realGetContinueWatching(limit = 12): Promise<MediaFile[]> {
-  const res = await client.get<{ items: MediaFile[] }>('/api/library/continue-watching', {
+async function realGetContinueWatchingStates(limit = 12): Promise<WatchMediaItem[]> {
+  const res = await client.get<{ items: WatchMediaItem[] }>('/api/library/continue-watching', {
     params: { limit },
   });
   return res.data.items;
+}
+
+async function realGetContinueWatching(limit = 12): Promise<MediaFile[]> {
+  const items = await realGetContinueWatchingStates(limit);
+  return items.map(toLegacyWatchMedia);
+}
+
+async function realGetWatchHistory(
+  params: { cursor?: string; limit?: number } = {},
+): Promise<WatchHistoryPage> {
+  const res = await client.get<WatchHistoryPage>('/api/library/watch-history', { params });
+  return res.data;
+}
+
+function toLegacyWatchMedia(item: WatchMediaItem): MediaFile {
+  return {
+    ...item.media,
+    last_position: item.watch_state.position_seconds,
+    watched: item.watch_state.completed,
+    last_watched_at: item.watch_state.last_watched_at,
+  };
 }
 
 // 那年今日（FR-72）：拉取往年同一天拍摄的媒体回忆列表。
@@ -727,12 +751,45 @@ async function mockMarkWatched(id: number): Promise<MediaFile> {
   return f;
 }
 
-async function mockGetContinueWatching(limit = 12): Promise<MediaFile[]> {
+async function mockGetContinueWatchingStates(limit = 12): Promise<WatchMediaItem[]> {
   await mockDelay(100);
   return mockMediaFiles
-    .filter((m) => (m.last_position ?? 0) > 0 && !m.watched)
+    .filter((media) => (media.last_position ?? 0) > 1 && !media.watched)
     .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((media) => ({ media, watch_state: mockWatchState(media) }));
+}
+
+async function mockGetContinueWatching(limit = 12): Promise<MediaFile[]> {
+  return (await mockGetContinueWatchingStates(limit)).map(toLegacyWatchMedia);
+}
+
+async function mockGetWatchHistory(
+  params: { cursor?: string; limit?: number } = {},
+): Promise<WatchHistoryPage> {
+  await mockDelay(100);
+  const items = mockMediaFiles
+    .filter((media) => media.last_watched_at)
+    .sort((a, b) => (b.last_watched_at ?? '').localeCompare(a.last_watched_at ?? ''))
+    .slice(0, params.limit ?? 20)
+    .map((media) => ({ media, watch_state: mockWatchState(media) }));
+  return { items };
+}
+
+function mockWatchState(media: MediaFile): WatchState {
+  return {
+    space_id: 'space-default',
+    media_id: media.id,
+    position_seconds: media.last_position ?? 0,
+    completed: media.watched ?? false,
+    last_watched_at: media.last_watched_at ?? new Date(0).toISOString(),
+    completed_at: media.watched ? (media.last_watched_at ?? null) : null,
+    revision: 0,
+    last_session_id: '',
+    last_event_seq: 0,
+    created_at: media.last_watched_at ?? new Date(0).toISOString(),
+    updated_at: media.last_watched_at ?? new Date(0).toISOString(),
+  };
 }
 
 // 那年今日（FR-72）：挑出 media_time 命中「今天月-日」但年份不等于今年的媒体，按 media_time 倒序。
@@ -1352,8 +1409,14 @@ export function updateWatchPosition(id: number, position: number) {
 export function markWatched(id: number) {
   return useMock ? mockMarkWatched(id) : realMarkWatched(id);
 }
+export function getContinueWatchingStates(limit = 12) {
+  return useMock ? mockGetContinueWatchingStates(limit) : realGetContinueWatchingStates(limit);
+}
 export function getContinueWatching(limit = 12) {
   return useMock ? mockGetContinueWatching(limit) : realGetContinueWatching(limit);
+}
+export function getWatchHistory(params: { cursor?: string; limit?: number } = {}) {
+  return useMock ? mockGetWatchHistory(params) : realGetWatchHistory(params);
 }
 // 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
 export function getOnThisDay(limit = 12) {

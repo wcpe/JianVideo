@@ -150,11 +150,11 @@ P5 引入用户与 Space 成员后：
 
 ## 4. 任务拆分
 
-- [ ] 新增 `watch_states` migration、约束、索引与回填校验。
-- [ ] 建立 Space scoped 观看状态 repository 与事务更新服务。
-- [ ] 实现 revision 比较交换、仅当前最近会话的序号幂等和稳定冲突响应，不新增 receipts 表。
-- [ ] 将续播、继续观看和观看历史查询切换到真源。
-- [ ] 保留并事务同步 `media_files` 兼容投影与 `view_count` 转换计数，接入 `user | ab_loop | restore | system` reason。
+- [x] 新增 `watch_states` migration、约束、索引与回填校验。
+- [x] 建立 Space scoped 观看状态 repository 与事务更新服务。
+- [x] 实现 revision 比较交换、仅当前最近会话的序号幂等和稳定冲突响应，不新增 receipts 表。
+- [x] 将续播、继续观看和观看历史查询切换到真源。
+- [x] 保留并事务同步 `media_files` 兼容投影与 `view_count` 转换计数，接入 `user | ab_loop | restore | system` reason。
 - [ ] 在 `media-client` / `player-core` 接入读取、单请求合并、冲突采用与前后台补报。
 - [ ] 补迁移、并发、当前会话乱序/重复、历史会话迟到、`ab_loop` 不完成、跨 Space 隔离和 P5 回填预演测试。
 - [ ] 使用真实媒体完成独立浏览器上下文与安装态 PWA 上下文的跨端续播验收。

@@ -28,6 +28,53 @@ export interface MediaItem {
   readonly createdAt: string;
 }
 
+export type WatchEventType = 'progress' | 'pause' | 'seek' | 'ended';
+export type WatchEventReason = 'user' | 'ab_loop' | 'restore' | 'system';
+
+export interface WatchState {
+  readonly completed: boolean;
+  readonly completedAt: string | null;
+  readonly createdAt: string;
+  readonly eventSeq: number;
+  readonly lastWatchedAt: string;
+  readonly mediaId: string;
+  readonly positionSeconds: number;
+  readonly revision: number;
+  readonly sessionId: string;
+  readonly spaceId: string;
+  readonly updatedAt: string;
+}
+
+export interface WatchStateEvent {
+  readonly durationSeconds?: number;
+  readonly eventSeq: number;
+  readonly eventType: WatchEventType;
+  readonly expectedRevision: number;
+  readonly positionSeconds: number;
+  readonly reason: WatchEventReason;
+  readonly sessionId: string;
+}
+
+export interface WatchStateUpdateResult {
+  readonly applied: boolean;
+  readonly current: WatchState;
+}
+
+export interface WatchMediaEntry<TMedia = unknown> {
+  readonly media: TMedia;
+  readonly watchState: WatchState;
+}
+
+export interface WatchHistoryParams {
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+export interface WatchHistoryPage<TMedia = unknown> {
+  readonly items: readonly WatchMediaEntry<TMedia>[];
+  readonly nextCursor?: string;
+}
+
 export interface PageResult<T> {
   readonly items: readonly T[];
   readonly page: number;
@@ -130,6 +177,16 @@ export class ApiError extends Error {
   }
 }
 
+export class WatchStateConflictError extends ApiError {
+  readonly current: WatchState;
+
+  constructor(message: string, current: WatchState) {
+    super(409, 'WATCH_STATE_CONFLICT', message);
+    this.name = 'WatchStateConflictError';
+    this.current = current;
+  }
+}
+
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const fetchImpl = options.fetch ?? fetch;
@@ -229,6 +286,48 @@ export async function getMedia(client: ApiClient, id: string): Promise<MediaItem
   return toMediaItem(await client.request<RawMediaItem>(`/api/v2/media/${encodeURIComponent(id)}`));
 }
 
+export async function getWatchState(client: ApiClient, mediaId: string): Promise<WatchState> {
+  const response = await client.request<RawWatchState>(watchStatePath(mediaId));
+  return toWatchState(response);
+}
+
+export async function updateWatchState(
+  client: ApiClient,
+  mediaId: string,
+  event: WatchStateEvent,
+): Promise<WatchStateUpdateResult> {
+  const response = await client.request<RawWatchStateUpdateResult>(watchStatePath(mediaId), {
+    body: JSON.stringify(toRawWatchStateEvent(event)),
+    headers: { 'Content-Type': 'application/json' },
+    method: 'PUT',
+  });
+  return { applied: response.applied, current: toWatchState(response.current) };
+}
+
+export async function listWatchHistory<TMedia = unknown>(
+  client: ApiClient,
+  params: WatchHistoryParams = {},
+): Promise<WatchHistoryPage<TMedia>> {
+  const response = await client.request<RawWatchHistoryPage<TMedia>>(
+    buildPath('/api/library/watch-history', watchListSearchParams(params)),
+  );
+  return {
+    items: response.items.map(toWatchMediaEntry),
+    ...(response.next_cursor === undefined ? {} : { nextCursor: response.next_cursor }),
+  };
+}
+
+export async function listContinueWatching<TMedia = unknown>(
+  client: ApiClient,
+  limit?: number,
+): Promise<readonly WatchMediaEntry<TMedia>[]> {
+  const params: WatchHistoryParams = limit === undefined ? {} : { limit };
+  const response = await client.request<RawWatchList<TMedia>>(
+    buildPath('/api/library/continue-watching', watchListSearchParams(params)),
+  );
+  return response.items.map(toWatchMediaEntry);
+}
+
 export async function listTasks(client: ApiClient, params: TaskListParams = {}): Promise<PageResult<TaskItem>> {
   const response = await client.request<RawTaskPage>(buildPath('/api/tasks', taskSearchParams(params)));
   return {
@@ -280,6 +379,44 @@ interface RawMediaItem {
   readonly title: string;
 }
 
+interface RawWatchState {
+  readonly completed: boolean;
+  readonly completed_at?: string | null;
+  readonly created_at: string;
+  readonly last_event_seq: number;
+  readonly last_session_id: string;
+  readonly last_watched_at: string;
+  readonly media_id: number | string;
+  readonly position_seconds: number;
+  readonly revision: number;
+  readonly space_id: string;
+  readonly updated_at: string;
+}
+
+interface RawWatchStateUpdateResult {
+  readonly applied: boolean;
+  readonly current: RawWatchState;
+}
+
+interface RawWatchMediaEntry<TMedia> {
+  readonly media: TMedia;
+  readonly watch_state: RawWatchState;
+}
+
+interface RawWatchList<TMedia> {
+  readonly items: readonly RawWatchMediaEntry<TMedia>[];
+}
+
+interface RawWatchHistoryPage<TMedia> extends RawWatchList<TMedia> {
+  readonly next_cursor?: string;
+}
+
+interface RawWatchStateConflictBody {
+  readonly code: 'WATCH_STATE_CONFLICT';
+  readonly current: RawWatchState;
+  readonly message: string;
+}
+
 interface RawTaskItem {
   readonly created_at: string;
   readonly error: string | null;
@@ -316,6 +453,38 @@ function toMediaItem(item: RawMediaItem): MediaItem {
   };
 }
 
+function toWatchState(state: RawWatchState): WatchState {
+  return {
+    completed: state.completed,
+    completedAt: state.completed_at ?? null,
+    createdAt: state.created_at,
+    eventSeq: state.last_event_seq,
+    lastWatchedAt: state.last_watched_at,
+    mediaId: String(state.media_id),
+    positionSeconds: state.position_seconds,
+    revision: state.revision,
+    sessionId: state.last_session_id,
+    spaceId: state.space_id,
+    updatedAt: state.updated_at,
+  };
+}
+
+function toRawWatchStateEvent(event: WatchStateEvent): Record<string, unknown> {
+  return {
+    position_seconds: event.positionSeconds,
+    expected_revision: event.expectedRevision,
+    session_id: event.sessionId,
+    event_seq: event.eventSeq,
+    event_type: event.eventType,
+    reason: event.reason,
+    ...(event.durationSeconds === undefined ? {} : { duration_seconds: event.durationSeconds }),
+  };
+}
+
+function toWatchMediaEntry<TMedia>(entry: RawWatchMediaEntry<TMedia>): WatchMediaEntry<TMedia> {
+  return { media: entry.media, watchState: toWatchState(entry.watch_state) };
+}
+
 function toTaskItem(item: RawTaskItem): TaskItem {
   return {
     createdAt: item.created_at,
@@ -328,6 +497,21 @@ function toTaskItem(item: RawTaskItem): TaskItem {
     type: item.type,
     updatedAt: item.updated_at,
   };
+}
+
+function watchStatePath(mediaId: string): string {
+  return `/api/play/${encodeURIComponent(mediaId)}/watch-state`;
+}
+
+function watchListSearchParams(params: WatchHistoryParams): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params.cursor !== undefined) {
+    searchParams.set('cursor', params.cursor);
+  }
+  if (params.limit !== undefined) {
+    searchParams.set('limit', String(params.limit));
+  }
+  return searchParams;
 }
 
 function buildPath(path: string, params: URLSearchParams): string {
@@ -397,10 +581,17 @@ function buildHeaders(headers: HeadersInit | undefined, options: ApiClientOption
 
 async function toApiError(response: Response): Promise<ApiError> {
   const body = (await response.json().catch(() => undefined)) as unknown;
+  if (response.status === 409 && isWatchStateConflictBody(body)) {
+    return new WatchStateConflictError(body.message, toWatchState(body.current));
+  }
   if (isErrorBody(body)) {
     return new ApiError(response.status, body.code, body.message);
   }
   return new ApiError(response.status, `HTTP_${String(response.status)}`, '接口请求失败');
+}
+
+function isWatchStateConflictBody(value: unknown): value is RawWatchStateConflictBody {
+  return isErrorBody(value) && value.code === 'WATCH_STATE_CONFLICT' && 'current' in value;
 }
 
 function isErrorBody(value: unknown): value is { readonly code: string; readonly message: string } {

@@ -1,6 +1,11 @@
 import client from './client';
 import type { ClientCapabilities } from '@/utils/codec-capability';
-import type { PlaybackDescriptor } from '@/types';
+import type {
+  PlaybackDescriptor,
+  WatchState,
+  WatchStateEvent,
+  WatchStateUpdateResult,
+} from '@/types';
 
 /**
  * 端到端编码协商（FR-53）。
@@ -49,6 +54,24 @@ export interface HLSABRTaskResponse {
 export interface HLSABRTaskInput {
   priority?: number;
   force_rebuild?: boolean;
+}
+
+export async function getWatchState(mediaID: number, signal?: AbortSignal): Promise<WatchState> {
+  const response = await client.get<WatchState>(`/api/play/${mediaID}/watch-state`, { signal });
+  return response.data;
+}
+
+export async function updateWatchState(
+  mediaID: number,
+  event: WatchStateEvent,
+  signal?: AbortSignal,
+): Promise<WatchStateUpdateResult> {
+  const response = await client.put<WatchStateUpdateResult>(
+    `/api/play/${mediaID}/watch-state`,
+    event,
+    { signal },
+  );
+  return response.data;
 }
 
 interface NegotiateResponse {

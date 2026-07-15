@@ -420,20 +420,46 @@
 - **响应**（202）：`{"status":"pending","task_id":124}`
 - **说明**：幂等入队 `metadata.backfill`，按媒体 ID checkpoint 分批推进并更新任务进度；失败由通用任务队列自动重试，已完成媒体不会因重试重复追加元数据记录。
 
-### 继续观看列表（FR-44）
+### 读取观看状态（FR2-045）
+
+- **方法 / 路径**：`GET /api/play/:id/watch-state`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：返回当前 `WatchState`；尚无记录时返回该 Space 与媒体 ID、`revision=0`、`position_seconds=0`、`completed=false` 的初始状态。
+- **说明**：媒体必须属于当前 Space、未软删且源文件状态有效，否则返回 `404 NOT_FOUND`。
+
+### 更新观看状态（FR2-045）
+
+- **方法 / 路径**：`PUT /api/play/:id/watch-state`
+- **请求**：
+    ```json
+    {
+        "position_seconds": 1234.5,
+        "duration_seconds": 7200,
+        "expected_revision": 7,
+        "session_id": "web-01J2ABC",
+        "event_seq": 18,
+        "event_type": "progress",
+        "reason": "user"
+    }
+    ```
+- **枚举**：`event_type` 为 `progress | pause | seek | ended`；`reason` 为 `user | ab_loop | restore | system`。`duration_seconds` 可省略，仅在媒体元数据缺少时辅助完成判定。
+- **响应**（200）：`{"applied":true,"current":WatchState}`；当前会话重复或倒序事件返回 `applied=false`，`current` 保持不变。
+- **冲突**（409）：`{"code":"WATCH_STATE_CONFLICT","message":"观看状态已被其他会话更新","applied":false,"current":WatchState}`。客户端必须采用 `current` 重新基线化，不得按错误文本判断或无条件重试。
+- **说明**：更新以 `expected_revision` 比较交换；成功时在同一事务内更新 `watch_states`、`media_files` 兼容投影与完成转换的 `view_count`。
+
+### 观看历史（FR2-045）
+
+- **方法 / 路径**：`GET /api/library/watch-history`
+- **查询参数**：`cursor` 为上一页 `next_cursor`；`limit` 默认 `20`、上限 `50`
+- **响应**（200）：`{"items":[{"media":MediaFile,"watch_state":WatchState}],"next_cursor":"..."}`
+- **说明**：按 `last_watched_at DESC, media_id DESC` 稳定分页，包含已完成和未完成状态；只返回当前 Space 内未软删且有效的媒体。无效游标返回 `400 INVALID_CURSOR`。
+
+### 继续观看列表（FR2-045）
 
 - **方法 / 路径**：`GET /api/library/continue-watching`
-- **查询参数**：
-  - `limit`：返回条数上限，默认 `12`，超过 `50` 时收敛到 `50`
-- **响应**（200）：
-  ```json
-  {
-    "items": [
-      {"id": 1, "file_name": "电影名.mkv", "duration": 7200.0, "last_position": 1234.5, "watched": false, "last_watched_at": "2025-01-01T12:00:00Z"}
-    ]
-  }
-  ```
-- **说明**：返回「有进度（`last_position>0`）且未看完（`watched=false`）」的媒体，按 `last_watched_at` 倒序，排除已删除记录，供首页「继续观看」区块展示。
+- **查询参数**：`limit` 默认 `12`、上限 `50`
+- **响应**（200）：`{"items":[{"media":MediaFile,"watch_state":WatchState}]}`
+- **说明**：从 `watch_states` 真源返回 `completed=false AND position_seconds>1` 的媒体，按 `last_watched_at DESC, media_id DESC` 排序，并隔离其他 Space、软删和失效媒体。旧前端 API 适配层可把真源状态投影回 `last_position`、`watched`、`last_watched_at`，但不得反向以兼容字段覆盖真源。
 
 ### 那年今日列表（FR-72）
 

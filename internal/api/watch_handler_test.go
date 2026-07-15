@@ -21,7 +21,7 @@ func setupWatchRouter(t *testing.T) (*gin.Engine, *library.Service) {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.WatchState{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	svc := library.NewService(gdb)
@@ -43,6 +43,10 @@ func TestUpdateWatchPosition_API(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["last_position"].(float64) != 33.5 {
 		t.Fatalf("期望 last_position=33.5, 实际 %v", resp["last_position"])
+	}
+	state, err := svc.GetWatchStateInSpace(models.DefaultSpaceID, id)
+	if err != nil || state.PositionSeconds != 33.5 || state.Revision != 1 {
+		t.Fatalf("旧 position 端点必须写入统一真源: state=%+v err=%v", state, err)
 	}
 }
 
@@ -74,6 +78,10 @@ func TestMarkWatched_API(t *testing.T) {
 	if resp["last_position"].(float64) != 0 {
 		t.Fatalf("期望标记已看后 last_position=0, 实际 %v", resp["last_position"])
 	}
+	state, err := svc.GetWatchStateInSpace(models.DefaultSpaceID, id)
+	if err != nil || !state.Completed || state.PositionSeconds != 0 || state.Revision != 2 {
+		t.Fatalf("旧 watched 端点必须写入统一真源: state=%+v err=%v", state, err)
+	}
 }
 
 func TestContinueWatching_API(t *testing.T) {
@@ -102,7 +110,9 @@ func TestContinueWatching_API(t *testing.T) {
 		t.Fatalf("期望 1 条继续观看, 实际响应: %s", w.Body.String())
 	}
 	first, _ := items[0].(map[string]any)
-	if int64(first["id"].(float64)) != idA {
-		t.Fatalf("期望继续观看含 A(id=%d), 实际响应: %s", idA, w.Body.String())
+	media, _ := first["media"].(map[string]any)
+	state, _ := first["watch_state"].(map[string]any)
+	if int64(media["id"].(float64)) != idA || state["position_seconds"].(float64) != 10 {
+		t.Fatalf("期望继续观看含 A(id=%d) 及真源状态, 实际响应: %s", idA, w.Body.String())
 	}
 }
