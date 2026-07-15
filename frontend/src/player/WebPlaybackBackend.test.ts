@@ -22,10 +22,15 @@ interface FakeMpegtsPlayer {
 
 interface FakeHlsInstance {
   attachMedia: ReturnType<typeof vi.fn>;
+  autoLevelCapping: number;
+  currentLevel: number;
   destroy: ReturnType<typeof vi.fn>;
   handlers: Map<string, (...args: unknown[]) => void>;
-  levels: Array<{ height: number; width: number }>;
+  levels: Array<{ bitrate: number; height: number; width: number }>;
   loadSource: ReturnType<typeof vi.fn>;
+  loadingEnabled: boolean;
+  startLoad: ReturnType<typeof vi.fn>;
+  stopLoad: ReturnType<typeof vi.fn>;
 }
 
 const mpegtsMock = vi.hoisted(() => ({
@@ -33,7 +38,11 @@ const mpegtsMock = vi.hoisted(() => ({
 }));
 
 const hlsMock = vi.hoisted(() => ({
-  configs: [] as Array<{ xhrSetup?: (xhr: XMLHttpRequest) => void }>,
+  configs: [] as Array<{
+    autoStartLoad?: boolean;
+    startFragPrefetch?: boolean;
+    xhrSetup?: (xhr: XMLHttpRequest) => void;
+  }>,
   instances: [] as FakeHlsInstance[],
   supported: true,
 }));
@@ -65,15 +74,28 @@ vi.mock('hls.js', () => {
       media.playbackRate = media.defaultPlaybackRate;
       media.dispatchEvent(new Event('ratechange'));
     });
+    autoLevelCapping = -1;
+    currentLevel = -1;
     destroy = vi.fn();
     handlers = new Map<string, (...args: unknown[]) => void>();
     levels = [
-      { height: 720, width: 1280 },
-      { height: 480, width: 854 },
+      { bitrate: 2_500_000, height: 720, width: 1280 },
+      { bitrate: 1_000_000, height: 480, width: 854 },
     ];
     loadSource = vi.fn();
+    loadingEnabled = false;
+    startLoad = vi.fn(() => {
+      this.loadingEnabled = true;
+    });
+    stopLoad = vi.fn(() => {
+      this.loadingEnabled = false;
+    });
 
-    constructor(config: { xhrSetup?: (xhr: XMLHttpRequest) => void } = {}) {
+    constructor(config: {
+      autoStartLoad?: boolean;
+      startFragPrefetch?: boolean;
+      xhrSetup?: (xhr: XMLHttpRequest) => void;
+    } = {}) {
       hlsMock.configs.push(config);
       hlsMock.instances.push(this);
     }
@@ -366,6 +388,30 @@ describe('WebPlaybackBackend ready 时序', () => {
     video.dispatchEvent(new Event('canplay'));
     await transaction;
     expect(settled).toBe(true);
+  });
+
+  it('主 HLS 仅加载清单，播放后才启动分片，并暴露清晰度与加载分面', async () => {
+    const video = createVideo();
+    const backend = new WebPlaybackBackend(video);
+    const loading = backend.load(createSource('quality-hls', 'hls'), createCommand('quality-hls', 1));
+    const hls = await waitForHlsInstance();
+
+    expect(hlsMock.configs.at(-1)).toMatchObject({ autoStartLoad: false, startFragPrefetch: false });
+    expect(video.preload).toBe('none');
+    expect(hls.startLoad).not.toHaveBeenCalled();
+
+    hls.handlers.get('manifest')?.();
+    await loading;
+    expect(backend.getSnapshot().capabilities).toMatchObject({
+      loadControl: 'available',
+      quality: 'available',
+    });
+    expect(backend.quality.getState().qualities).toHaveLength(2);
+
+    await backend.play(createCommand('quality-hls', 1, 2));
+    expect(hls.startLoad).toHaveBeenCalledOnce();
+    await backend.loadControl.stopLoading(createCommand('quality-hls', 1, 3));
+    expect(hls.stopLoad).toHaveBeenCalledOnce();
   });
 
   it('HLS 不支持、导入失败、fatal 与超时均严格拒绝且不创建 mpegts', async () => {

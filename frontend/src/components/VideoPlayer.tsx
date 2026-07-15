@@ -1,8 +1,11 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPreviewFacet, PlaybackCore, SEEK_TIERS } from '@jianvideo/player-core';
 import type {
+  AbLoopState,
   FrameStepDirection,
   PlaybackCommandContext,
+  PlaybackQuality,
+  PlaybackQualityState,
   PlaybackSnapshot,
   PlaybackSource,
   PlaybackTrack,
@@ -11,7 +14,7 @@ import type {
   SeekTier,
   TrackKind,
 } from '@jianvideo/player-core';
-import { Text, Box, ActionIcon, Slider, Menu } from '@mantine/core';
+import { Text, Box, ActionIcon, Slider, Menu, Switch } from '@mantine/core';
 import {
   IconPlayerPlay,
   IconPlayerPause,
@@ -38,7 +41,7 @@ import {
   type SubtitlePreferences,
 } from '@/components/VideoTrackControls.helpers';
 import { isCodecSupported } from '@/utils/codec-capability';
-import { notifyError } from '@/utils/notify';
+import { notifyError, notifySuccess } from '@/utils/notify';
 import { useAuthStore } from '@/stores/auth';
 import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
 import { WebPlaybackBackend, type WebPlaybackSourcePayload } from '@/player/WebPlaybackBackend';
@@ -126,6 +129,16 @@ const VOLUME_STEP = 0.1;
 const CONTROLS_HIDE_DELAY = 3000;
 // 可选倍速档位（FR-104）
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+const INITIAL_QUALITY_STATE: PlaybackQualityState = {
+  actualQuality: null,
+  dataSaver: false,
+  dataSaverBlocked: false,
+  manualQuality: null,
+  playbackRate: 1,
+  qualities: [],
+  qualityMode: 'auto',
+};
+const INITIAL_AB_LOOP_STATE: AbLoopState = { a: null, b: null, enabled: false };
 // 字幕字号档位（FR-104）：映射到字幕文本 fontSize
 const SUBTITLE_SCALES = {
   small: 'var(--mantine-font-size-xs)',
@@ -394,8 +407,11 @@ export default function VideoPlayer({
   const [subtitlePreferences, setSubtitlePreferences] = useState<SubtitlePreferences>(() =>
     loadSubtitlePreferences(),
   );
-  // 当前由 hls.js 实际切换到的 ABR 档位，仅用于状态展示，不提供手动锁档。
   const [abrLevel, setAbrLevel] = useState<string | null>(null);
+  const [qualityState, setQualityState] = useState<PlaybackQualityState>(INITIAL_QUALITY_STATE);
+  const [abLoopState, setAbLoopState] = useState<AbLoopState>(INITIAL_AB_LOOP_STATE);
+  const abLoopStateRef = useRef(abLoopState);
+  abLoopStateRef.current = abLoopState;
   // 末端缓冲等待（FR-18）：mpegts.js ERROR 或 video stalled 时进入等待，1s 后自动重载
   const [isWaiting, setIsWaiting] = useState(false);
   const [seekTier, setSeekTier] = useState<SeekTier>(DEFAULT_SEEK_TIER);
@@ -534,7 +550,9 @@ export default function VideoPlayer({
       backend,
       facets: {
         framePresentation: backend.framePresentation,
+        loadControl: backend.loadControl,
         preview: createPreviewFacet(),
+        quality: backend.quality,
         tracks: backend.tracks,
       },
       initialSeekTier: DEFAULT_SEEK_TIER,
@@ -550,6 +568,11 @@ export default function VideoPlayer({
         syncTrackState(core);
       }
       if (event.type === 'seekTierChanged') setSeekTier(event.tier);
+      if (event.type === 'qualityStateChanged') {
+        setQualityState(event.state);
+        setRate(event.state.playbackRate);
+      }
+      if (event.type === 'abLoopChanged') setAbLoopState(event.state);
       if (event.type === 'frameStepCompleted') {
         const snapshot = core.getSnapshot();
         const isCurrentSource =
@@ -644,6 +667,9 @@ export default function VideoPlayer({
     void core.load(source).then(async (result) => {
       if (!current || result.status !== 'completed') return;
       syncTrackState(core);
+      setQualityState(core.getQualityState());
+      setAbLoopState(core.getAbLoopState());
+      setRate(core.getQualityState().playbackRate);
       await seekToInitialOnce();
       if (current && autoPlay && !resolved.unsupported) await attemptAutoPlay(core);
     });
@@ -694,7 +720,10 @@ export default function VideoPlayer({
         lastReportRef.current = video.currentTime;
         report(video.currentTime);
       }
+      const loop = abLoopStateRef.current;
+      const reachedLoopEnd = loop.enabled && loop.b !== null && video.currentTime >= loop.b;
       if (
+        !reachedLoopEnd &&
         isFinite(video.duration) &&
         video.duration > 0 &&
         video.duration - video.currentTime <= WATCHED_REMAINING_THRESHOLD
@@ -761,12 +790,6 @@ export default function VideoPlayer({
     }
   }, [autoPlay]);
 
-  // FR-104：倍速同步到 video.playbackRate（媒体重建后也复位为当前倍速）
-  useEffect(() => {
-    const v = videoRef.current;
-    if (v) v.playbackRate = rate;
-  }, [rate, resolved.url]);
-
   // FR-104：全屏态同步——监听 fullscreenchange，按当前全屏元素是否为本容器更新按钮态
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
@@ -776,7 +799,7 @@ export default function VideoPlayer({
 
   const togglePlay = () => {
     const core = coreRef.current;
-    if (!core) return;
+    if (!core || qualityState.dataSaverBlocked) return;
     if (isPlaying) {
       void core.pause();
       return;
@@ -1059,11 +1082,57 @@ export default function VideoPlayer({
     }
   };
 
-  // FR-104：调整倍速
-  const changeRate = (next: number) => {
-    const v = videoRef.current;
-    setRate(next);
-    if (v) v.playbackRate = next;
+  const changeRate = async (next: number) => {
+    const core = coreRef.current;
+    if (!core) return;
+    const result = await core.setPlaybackRate(next);
+    if (result.status === 'failed' || result.status === 'unsupported') {
+      notifyError(result.error?.message ?? '当前播放路径不支持该倍速', '切换倍速失败');
+    }
+  };
+
+  const changeQuality = async (quality: PlaybackQuality | null) => {
+    const core = coreRef.current;
+    if (!core) return;
+    const disabledSaver = qualityState.dataSaver && (quality?.height ?? 0) > 480;
+    const selection = quality === null
+      ? ({ mode: 'auto' } as const)
+      : {
+          mode: 'manual' as const,
+          quality: {
+            ...(quality.bandwidth === undefined ? {} : { bandwidth: quality.bandwidth }),
+            height: quality.height!,
+          },
+        };
+    const result = await core.selectQuality(selection);
+    if (result.status === 'failed' || result.status === 'unsupported') {
+      notifyError(result.error?.message ?? '目标清晰度当前不可用', '切换清晰度失败');
+      return;
+    }
+    if (disabledSaver) notifySuccess('已关闭省流量并切换到高画质');
+  };
+
+  const changeDataSaver = async (enabled: boolean) => {
+    const core = coreRef.current;
+    if (!core) return;
+    const result = await core.setDataSaver(enabled);
+    if (result.status === 'failed' || result.status === 'unsupported') {
+      notifyError(result.error?.message ?? '省流量切换失败');
+    }
+  };
+
+  const setAbPoint = async (point: 'a' | 'b') => {
+    const core = coreRef.current;
+    if (!core) return;
+    const result = point === 'a' ? await core.setAbLoopA() : await core.setAbLoopB();
+    if (result.status === 'failed' || result.status === 'unsupported') {
+      notifyError(result.error?.message ?? 'A-B 区间无效', '设置 A-B 失败');
+    }
+  };
+
+  const clearAbLoop = () => {
+    const core = coreRef.current;
+    if (core) void core.clearAbLoop();
   };
 
   // FR-104：键盘音量调节（夹取到 [0,1]，并解除静音）
@@ -1195,6 +1264,17 @@ export default function VideoPlayer({
   const displayedCurrentTime = seekPreviewTime ?? currentTime;
   const showPreciseCurrentTime = seekPreviewTime !== null || !isPlaying;
   const playPct = duration > 0 ? (displayedCurrentTime / duration) * 100 : 0;
+  const actualQualityLabel = qualityState.actualQuality?.label ?? abrLevel;
+  const qualityLabel =
+    qualityState.qualityMode === 'manual' && qualityState.manualQuality
+      ? `${qualityState.manualQuality.label}（手动）`
+      : actualQualityLabel
+        ? `自动（当前 ${actualQualityLabel}）`
+        : '自动';
+  const abLoopLabel =
+    abLoopState.a === null
+      ? 'A/B 未设置'
+      : `A ${fmt(abLoopState.a, true)} · ${abLoopState.b === null ? 'B 未设置' : `B ${fmt(abLoopState.b, true)}`}`;
 
   // FR-104：hover 进度条时的时间气泡定位（百分比）
   const hoverTime = hoverPct !== null && duration > 0 ? (hoverPct / 100) * duration : 0;
@@ -1257,7 +1337,25 @@ export default function VideoPlayer({
             </Text>
           </Box>
         )}
-        {autoPlayBlocked && !isPlaying && (
+        {qualityState.dataSaverBlocked && (
+          <Box
+            role="alert"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              padding: '0 1rem',
+            }}
+          >
+            <Text c="white" size="sm" ta="center">
+              当前视频无 480p 或更低档位，请关闭省流量后播放
+            </Text>
+          </Box>
+        )}
+        {autoPlayBlocked && !isPlaying && !qualityState.dataSaverBlocked && (
           <Box
             style={{
               position: 'absolute',
@@ -1378,6 +1476,7 @@ export default function VideoPlayer({
           variant="subtle"
           color="gray"
           onClick={togglePlay}
+          disabled={qualityState.dataSaverBlocked}
           aria-label={isPlaying ? '暂停' : '播放'}
         >
           {isPlaying ? <IconPlayerPause size={22} /> : <IconPlayerPlay size={22} />}
@@ -1578,6 +1677,71 @@ export default function VideoPlayer({
           </Text>
         </Box>
 
+        {isABR && (
+          <Menu position="top" withinPortal>
+            <Menu.Target>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="清晰度"
+                style={{ width: 'auto', paddingInline: 6 }}
+              >
+                <Text size="xs" fw={600}>
+                  {qualityLabel}
+                </Text>
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>清晰度</Menu.Label>
+              <Menu.Item onClick={() => void changeQuality(null)} fw={qualityState.qualityMode === 'auto' ? 700 : 400}>
+                自动
+              </Menu.Item>
+              {qualityState.qualities.map((quality) => (
+                <Menu.Item
+                  key={quality.id}
+                  onClick={() => void changeQuality(quality)}
+                  fw={qualityState.manualQuality?.id === quality.id ? 700 : 400}
+                >
+                  {quality.label}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        )}
+
+        {isABR && (
+          <Switch
+            size="xs"
+            label="省流量"
+            checked={qualityState.dataSaver}
+            onChange={(event) => void changeDataSaver(event.currentTarget.checked)}
+          />
+        )}
+
+        <Menu position="top" withinPortal>
+          <Menu.Target>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              aria-label="A-B 循环"
+              style={{ width: 'auto', paddingInline: 6 }}
+            >
+              <Text size="xs" fw={600}>
+                A-B
+              </Text>
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>A-B 循环</Menu.Label>
+            <Menu.Item onClick={() => void setAbPoint('a')}>设置 A 点</Menu.Item>
+            <Menu.Item onClick={() => void setAbPoint('b')}>设置 B 点</Menu.Item>
+            <Menu.Item onClick={clearAbLoop}>清除 A-B</Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+        <Text size="xs" c={abLoopState.enabled ? 'green' : 'dimmed'}>
+          {abLoopLabel}
+        </Text>
+
         {/* FR-104：倍速菜单 */}
         <Menu position="top" withinPortal>
           <Menu.Target>
@@ -1595,7 +1759,7 @@ export default function VideoPlayer({
           <Menu.Dropdown>
             <Menu.Label>播放速度</Menu.Label>
             {PLAYBACK_RATES.map((r) => (
-              <Menu.Item key={r} onClick={() => changeRate(r)} fw={r === rate ? 700 : 400}>
+              <Menu.Item key={r} onClick={() => void changeRate(r)} fw={r === rate ? 700 : 400}>
                 {r}×
               </Menu.Item>
             ))}
@@ -1694,11 +1858,6 @@ export default function VideoPlayer({
           </Text>
         )}
 
-        {isABR && (
-          <Text size="xs" c="green" fw={500}>
-            {abrLevel ? `ABR · ${abrLevel}` : 'ABR'}
-          </Text>
-        )}
       </Box>
     </Box>
   );

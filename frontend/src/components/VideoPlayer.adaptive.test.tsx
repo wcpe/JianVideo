@@ -33,6 +33,9 @@ vi.mock('hls.js', () => {
       return true;
     }
     static Events = { MANIFEST_PARSED: 'p', LEVEL_SWITCHED: 'l', ERROR: 'e' };
+    autoLevelCapping = -1;
+    currentLevel = -1;
+    loadingEnabled = false;
     loadSource(url: string) {
       hlsLoadSource(url);
     }
@@ -40,10 +43,16 @@ vi.mock('hls.js', () => {
     on(event: string, handler: (...args: unknown[]) => void) {
       hlsHandlers.set(event, handler);
     }
+    startLoad() {
+      this.loadingEnabled = true;
+    }
+    stopLoad() {
+      this.loadingEnabled = false;
+    }
     destroy() {}
     levels = [
-      { width: 1280, height: 720 },
-      { width: 854, height: 480 },
+      { bitrate: 2_500_000, width: 1280, height: 720 },
+      { bitrate: 1_000_000, width: 854, height: 480 },
     ];
   }
   return { default: FakeHls };
@@ -92,8 +101,11 @@ describe('自适应播放器按描述符分发（FR-52）', () => {
       </MantineProvider>,
     );
     await waitForHlsSource();
-    act(() => hlsHandlers.get('l')?.('l', { level: 1 }));
-    expect(screen.getByText('ABR · 480p')).toBeInTheDocument();
+    act(() => {
+      hlsHandlers.get('p')?.();
+      hlsHandlers.get('l')?.('l', { level: 1 });
+    });
+    expect(await screen.findByText('自动（当前 480p）')).toBeInTheDocument();
   });
 
   it('fmp4 描述符（编码受支持）走 hls.js 加载 index.m3u8', async () => {

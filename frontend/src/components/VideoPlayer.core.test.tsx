@@ -88,10 +88,19 @@ vi.mock('hls.js', () => {
       return true;
     }
     attachMedia = vi.fn();
+    autoLevelCapping = -1;
+    currentLevel = -1;
     destroy = vi.fn();
     handlers = new Map<string, (...args: unknown[]) => void>();
-    levels = [{ height: 720, width: 1280 }];
+    levels = [{ bitrate: 2_500_000, height: 720, width: 1280 }];
     loadSource = vi.fn();
+    loadingEnabled = false;
+    startLoad = vi.fn(() => {
+      this.loadingEnabled = true;
+    });
+    stopLoad = vi.fn(() => {
+      this.loadingEnabled = false;
+    });
 
     constructor() {
       hlsMock.instances.push(this);

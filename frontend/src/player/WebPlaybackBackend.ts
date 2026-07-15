@@ -16,6 +16,7 @@ import type {
 } from '@jianvideo/player-core';
 import type Hls from 'hls.js';
 import type { TrackResponse } from '@/api/subtitle';
+import { WebQualityFacet } from './WebQualityFacet';
 import { WebTrackFacet } from './WebTrackFacet';
 import {
   WebFramePresentationFacet,
@@ -126,11 +127,15 @@ export class WebPlaybackBackend implements PlaybackBackend {
   private readonly video: HTMLVideoElement;
   private readonly callbacks: WebPlaybackBackendCallbacks;
   readonly framePresentation: WebFramePresentationFacet;
+  readonly loadControl: WebQualityFacet;
+  readonly quality: WebQualityFacet;
   readonly tracks: WebTrackFacet;
 
   constructor(video: HTMLVideoElement, callbacks: WebPlaybackBackendCallbacks = {}) {
     this.video = video;
     this.callbacks = callbacks;
+    this.quality = new WebQualityFacet(video);
+    this.loadControl = this.quality;
     this.tracks = new WebTrackFacet(
       undefined,
       (command) => {
@@ -165,7 +170,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       await this.loadMpegts(payload.url, token);
       return;
     }
-    await this.loadHls(payload.url, token, payload.hlsSpaceId);
+    await this.loadHls(payload.url, token, payload.hlsSpaceId, 'manifest');
   }
 
   async transactAudioSource(
@@ -210,6 +215,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
     if (!this.acceptCommand(command)) return;
     this.rebasePlaybackControl({ intent: 'playing' });
     this.resumeOnMpegtsReady = false;
+    if (this.hls) await this.quality.startLoading(command);
     const result = this.mpegtsPlayer ? this.mpegtsPlayer.play() : this.video.play();
     await result;
     if (this.isCurrentCommand(command)) this.publishSnapshot(this.activeToken, 'playing');
@@ -344,6 +350,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       this.video.playbackRate = restore.playbackRate;
       this.video.currentTime = restore.currentTime;
       if (restore.intent === 'playing') {
+        if (this.hls) await this.quality.startLoading(this.active!.command);
         const result = this.mpegtsPlayer ? this.mpegtsPlayer.play() : this.video.play();
         await result;
       } else if (this.mpegtsPlayer) this.mpegtsPlayer.pause();
@@ -400,7 +407,11 @@ export class WebPlaybackBackend implements PlaybackBackend {
     this.active = { command, payload };
     this.playbackCurrentTime = 0;
     this.playbackIntent = 'paused';
-    this.playbackRate = positiveTime(this.video.playbackRate, 1);
+    this.playbackRate = 1;
+    this.video.defaultPlaybackRate = 1;
+    this.video.playbackRate = 1;
+    this.video.preload = payload.kind === 'hls' ? 'none' : 'metadata';
+    this.quality.load(command);
     this.playbackRevision += 1;
     this.resumeOnMpegtsReady = false;
     this.callbacks.onAbrLevelChange?.(null);
@@ -465,7 +476,12 @@ export class WebPlaybackBackend implements PlaybackBackend {
     player.load();
   }
 
-  private async loadHls(url: string, token: number, spaceId?: string): Promise<void> {
+  private async loadHls(
+    url: string,
+    token: number,
+    spaceId?: string,
+    readyMode: 'canplay' | 'manifest' = 'canplay',
+  ): Promise<void> {
     const ready = this.createReadyPromise(
       this.callbacks.hlsReadyTimeoutMs ?? HLS_READY_TIMEOUT_MS,
       'HLS 清单就绪超时',
@@ -477,7 +493,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       if (!HlsConstructor.isSupported()) {
         this.failReady(new Error('当前浏览器不支持 hls.js'));
       } else {
-        this.initializeHls(HlsConstructor, url, token, spaceId);
+        this.initializeHls(HlsConstructor, url, token, spaceId, readyMode);
       }
     } catch (error: unknown) {
       this.failReady(new Error(`hls.js 加载失败：${errorMessage(error)}`));
@@ -489,12 +505,15 @@ export class WebPlaybackBackend implements PlaybackBackend {
     HlsConstructor: typeof Hls,
     url: string,
     token: number,
-    spaceId?: string,
+    spaceId: string | undefined,
+    readyMode: 'canplay' | 'manifest',
   ): void {
     const headers = this.callbacks.getHlsRequestHeaders?.() ?? {};
     const hls = new HlsConstructor({
+      autoStartLoad: false,
       enableWorker: true,
       lowLatencyMode: true,
+      startFragPrefetch: false,
       xhrSetup: (xhr) => {
         xhr.withCredentials = true;
         if (spaceId) xhr.setRequestHeader('X-JianVideo-Space-Id', spaceId);
@@ -508,6 +527,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       if (isCurrentCandidate() && manifestParsed && mediaCanPlay) this.completeReady(token);
     };
     this.hls = hls;
+    if (this.active) this.quality.attach(hls, this.active.command);
     this.listen('canplay', () => {
       if (!isCurrentCandidate() || !manifestParsed) return;
       mediaCanPlay = true;
@@ -516,15 +536,25 @@ export class WebPlaybackBackend implements PlaybackBackend {
     hls.loadSource(url);
     hls.attachMedia(this.video);
     hls.on(HlsConstructor.Events.MANIFEST_PARSED, () => {
-      if (!isCurrentCandidate()) return;
+      if (!isCurrentCandidate() || !this.active) return;
       manifestParsed = true;
-      completeIfReady();
+      this.quality.refreshLevels(this.active.command);
+      this.publishCapabilities(token);
+      if (readyMode === 'manifest') this.completeReady(token);
+      else {
+        hls.startLoad();
+        completeIfReady();
+      }
     });
     hls.on(HlsConstructor.Events.LEVEL_SWITCHED, (_event, data) => {
+      if (this.active) this.quality.handleLevelSwitched(data.level, this.active.command);
       this.publishAbrLevel(hls, data.level, token);
     });
     hls.on(HlsConstructor.Events.ERROR, (_event, data) => {
-      if (!data.fatal || !this.isActiveToken(token) || this.hls !== hls) return;
+      if (!this.isActiveToken(token) || this.hls !== hls) return;
+      const level = 'level' in data && typeof data.level === 'number' ? data.level : null;
+      if (level !== null && this.active && this.quality.handleLevelError(level, this.active.command)) return;
+      if (!data.fatal) return;
       const error = new Error('HLS 播放发生致命错误');
       const transactionPending = this.hlsFailureGuard?.token === token;
       const readyPending = this.readyReject !== null;
@@ -698,13 +728,18 @@ export class WebPlaybackBackend implements PlaybackBackend {
     const tracks = this.active?.payload.trackResponse
       ? ('available' as const)
       : ('unavailable' as const);
+    const hlsCapabilities =
+      this.active?.payload.kind === 'hls'
+        ? { loadControl: 'available' as const, quality: 'available' as const }
+        : {};
     const capabilities = this.seekAvailable
       ? {
           ...BASE_CAPABILITIES,
+          ...hlsCapabilities,
           framePresentation: this.framePresentation.getCapability(),
           tracks,
         }
-      : { ...BASE_CAPABILITIES, seek: 'unavailable' as const, tracks };
+      : { ...BASE_CAPABILITIES, ...hlsCapabilities, seek: 'unavailable' as const, tracks };
     this.snapshot = { ...this.snapshot, capabilities };
     this.publishEvent(token, { capabilities, type: 'capabilitiesChanged' });
   }
@@ -789,6 +824,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
   }
 
   private releaseHls(): void {
+    if (this.active) this.quality.detach(this.active.command);
     this.hls?.destroy();
     this.hls = null;
   }

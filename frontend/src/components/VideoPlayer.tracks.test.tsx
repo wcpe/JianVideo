@@ -46,10 +46,19 @@ vi.mock('hls.js', () => {
     static isSupported() {
       return hlsHarness.supported;
     }
+    autoLevelCapping = -1;
+    currentLevel = -1;
     handlers = new Map<string, Set<Handler>>();
     levels = [];
+    loadingEnabled = false;
     loadSource = vi.fn();
     media: HTMLMediaElement | null = null;
+    startLoad = vi.fn(() => {
+      this.loadingEnabled = true;
+    });
+    stopLoad = vi.fn(() => {
+      this.loadingEnabled = false;
+    });
     attachMedia = vi.fn((media: HTMLMediaElement) => {
       this.media = media;
     });

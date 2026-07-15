@@ -14,7 +14,7 @@ export type PlaybackErrorCategory = 'network' | 'media' | 'decode' | 'unsupporte
 export type CapabilityAvailability = 'available' | 'unavailable';
 export type FramePresentationCapability = 'exact' | 'approximate' | 'unavailable';
 export type PlaybackSourceMode = 'direct' | 'stream' | 'adaptive' | 'live';
-export type SeekReason = 'user' | 'step' | 'tier' | 'restore';
+export type SeekReason = 'user' | 'step' | 'tier' | 'restore' | 'ab_loop';
 export type SeekBoundaryPolicy = 'clamp';
 export type SeekTier =
   | { readonly count: 1; readonly kind: 'frame' }
@@ -257,23 +257,58 @@ export interface TrackSelectionResult extends PlaybackCommandResult {
 }
 
 export interface PlaybackQuality {
-  readonly bitrate?: number;
+  readonly bandwidth?: number;
   readonly height?: number;
   readonly id: string;
   readonly label: string;
 }
 
-export type QualitySelection = { readonly mode: 'auto' } | { readonly id: string; readonly mode: 'fixed' };
+export interface QualityTarget {
+  readonly bandwidth?: number;
+  readonly height: number;
+}
+
+export type QualitySelection =
+  | { readonly mode: 'auto' }
+  | { readonly mode: 'manual'; readonly quality: QualityTarget };
+
+export interface QualityFacetState {
+  readonly actualQualityId: string | null;
+  readonly playbackRate: number;
+  readonly qualities: readonly PlaybackQuality[];
+  readonly selection: QualitySelection;
+}
+
+export type QualityFacetListener = (state: QualityFacetState, command: PlaybackCommandContext) => void;
 
 export interface QualityFacet {
-  getQualities(): readonly PlaybackQuality[];
+  getState(): QualityFacetState;
   selectQuality(selection: QualitySelection, command: PlaybackCommandContext): Promise<void>;
+  setAutoQualityCap(maxHeight: number | null, command: PlaybackCommandContext): Promise<void>;
   setPlaybackRate(rate: number, command: PlaybackCommandContext): Promise<void>;
+  subscribe(listener: QualityFacetListener): () => void;
 }
 
 export interface LoadControlFacet {
+  getLoadingState(): 'loading' | 'stopped';
   startLoading(command: PlaybackCommandContext): Promise<void>;
   stopLoading(command: PlaybackCommandContext): Promise<void>;
+}
+
+export interface PlaybackQualityState {
+  readonly actualQuality: PlaybackQuality | null;
+  readonly dataSaver: boolean;
+  readonly dataSaverBlocked: boolean;
+  readonly manualQuality: PlaybackQuality | null;
+  readonly playbackRate: number;
+  readonly qualityMode: 'auto' | 'manual';
+  readonly qualities: readonly PlaybackQuality[];
+}
+
+export interface AbLoopState {
+  readonly a: number | null;
+  readonly b: number | null;
+  readonly enabled: boolean;
 }
 
 export interface PlaybackBackendBinding {
@@ -337,6 +372,18 @@ export type PlaybackEvent = PlaybackEventContext &
         readonly sourceId: string | null;
         readonly tier: SeekTier;
         readonly type: 'seekTierChanged';
+      }
+    | {
+        readonly state: PlaybackQualityState;
+        readonly sourceEpoch: number;
+        readonly sourceId: string | null;
+        readonly type: 'qualityStateChanged';
+      }
+    | {
+        readonly state: AbLoopState;
+        readonly sourceEpoch: number;
+        readonly sourceId: string | null;
+        readonly type: 'abLoopChanged';
       }
     | {
         readonly error: PlaybackError;
