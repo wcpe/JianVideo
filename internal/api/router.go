@@ -105,7 +105,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/browse", h.BrowseDirectory)
 
-		// 继续观看（FR-44）：有进度且未看完的媒体列表
+		// 观看历史与继续观看（FR2-045）：统一读取 watch_states 真源
+		lib.GET("/watch-history", h.WatchHistory)
 		lib.GET("/continue-watching", h.ContinueWatching)
 
 		// 那年今日（FR-72）：往年同一天拍摄的媒体回忆列表
@@ -175,7 +176,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		sub.GET("/:id/subtitles/:track_id/content", h.GetSubtitleTrackContent)
 		sub.DELETE("/:id/subtitles/:track_id", h.DeleteSubtitleTrack)
 
-		// 续播与观看状态（FR-44）：用户观看位置，区别于 playback 的转码/缓冲进度
+		// 观看状态真源（FR2-045）与旧端点兼容适配
+		sub.GET("/:id/watch-state", h.GetWatchState)
+		sub.PUT("/:id/watch-state", h.UpdateWatchState)
 		sub.PUT("/:id/position", h.UpdateWatchPosition)
 		sub.PUT("/:id/watched", h.MarkWatched)
 

@@ -31,7 +31,7 @@ func setupSpaceTestRouter(t *testing.T) (*gin.Engine, *library.Service, *gorm.DB
 	t.Cleanup(func() {
 		_ = sqlDB.Close()
 	})
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.WatchState{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	if err := gdb.AutoMigrate(&models.Tag{}, &models.TagMapping{}, &models.ScanTask{}, &models.TranscodeTask{}); err != nil {
@@ -258,6 +258,18 @@ func TestSpaceScopesWatchRecentAndFavoriteEndpoints(t *testing.T) {
 		w := getJSON(t, router, path, "space-alt")
 		if w.Code != http.StatusOK {
 			t.Fatalf("%s 期望 200, 实际 %d, body: %s", path, w.Code, w.Body.String())
+		}
+		if path == "/api/library/continue-watching" {
+			var resp struct {
+				Items []library.WatchMediaItem `json:"items"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("解析 %s 响应失败: %v", path, err)
+			}
+			if len(resp.Items) != 1 || resp.Items[0].Media.ID != altMedia.ID {
+				t.Fatalf("%s 应只返回 space-alt 媒体, 实际: %+v", path, resp.Items)
+			}
+			continue
 		}
 		var resp struct {
 			Items []models.MediaFile `json:"items"`
