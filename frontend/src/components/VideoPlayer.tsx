@@ -1529,7 +1529,6 @@ export default function VideoPlayer({
   // 控件区透明度：播放中静止淡出，其余常显
   const controlsOpacity = controlsVisible ? 1 : 0;
   const platformCapabilities = detectWebPlayerCapabilities(videoRef.current);
-  const standaloneDisplay = window.matchMedia?.('(display-mode: standalone)').matches === true;
 
   return (
     <Box
@@ -1568,7 +1567,8 @@ export default function VideoPlayer({
           position: 'relative',
           width: '100%',
           backgroundColor: 'black',
-          touchAction: isFullscreen || standaloneDisplay ? 'none' : 'auto',
+          // 手势面只覆盖媒体画面；控件栏与播放器外区域仍保留页面滚动。
+          touchAction: 'none',
           // FR-103：填充模式去掉固定 16:9，改为 flex 填充剩余高度；缺省维持 16:9
           ...(fill ? { flex: 1, minHeight: 0 } : { aspectRatio: '16/9' }),
         }}

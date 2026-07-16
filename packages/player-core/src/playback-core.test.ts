@@ -353,16 +353,49 @@ describe('PlaybackCore', () => {
     expect(backend.calls.filter((call) => call.method === 'seek')).toHaveLength(0);
   });
 
-  it('seekBy 使用实时位置并复用核心 seek 的夹取与取消语义', async () => {
+  it('seekBy 使用后端实时位置并复用核心 seek 的夹取语义', async () => {
     const backend = new FakePlaybackBackend();
-    backend.setSnapshot(
-      createSnapshot({ currentTime: 55, duration: 60, seekable: [{ end: 60, start: 0 }] }),
-    );
     const core = new PlaybackCore({ backend });
     await core.load(SOURCE_A);
+    const current = core.getSnapshot();
+    backend.setSnapshot(
+      createSnapshot({
+        currentTime: 55,
+        duration: 60,
+        requestId: current.requestId,
+        seekable: [{ end: 60, start: 0 }],
+        sourceEpoch: current.sourceEpoch,
+        sourceId: current.sourceId,
+        state: 'playing',
+      }),
+    );
 
-    await expect(core.seekBy(10)).resolves.toMatchObject({ confirmedTime: 60, status: 'completed' });
+    await expect(core.seekBy(10)).resolves.toMatchObject({
+      confirmedTime: 60,
+      requestedTime: 65,
+      status: 'completed',
+    });
     expect(backend.calls.at(-1)).toMatchObject({ method: 'seek', targetTime: 60 });
+  });
+
+  it('seekBy 拒绝不属于当前源的后端实时快照', async () => {
+    const backend = new FakePlaybackBackend();
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+    const current = core.getSnapshot();
+    backend.setSnapshot(
+      createSnapshot({
+        currentTime: 30,
+        requestId: current.requestId,
+        sourceEpoch: current.sourceEpoch + 1,
+        sourceId: SOURCE_B.id,
+        state: 'playing',
+      }),
+    );
+    const seekCalls = backend.calls.filter((call) => call.method === 'seek').length;
+
+    await expect(core.seekBy(10)).resolves.toMatchObject({ status: 'superseded' });
+    expect(backend.calls.filter((call) => call.method === 'seek')).toHaveLength(seekCalls);
   });
 
   it('保留后端错误类别并把未分类异常归为 unknown', async () => {

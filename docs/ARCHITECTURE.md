@@ -788,10 +788,10 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 
 #### 5.5.4 Web 播放平台适配与移动手势（FR2-058）
 
-- **核心命令边界**：`packages/player-core` 继续只承载端无关控制语义，新增 `stop` 与相对定位 `seekBy`。`stop` 通过同一 request/source epoch 控制先暂停、再定位到首个可定位区间起点；已在停止位置时不重复触发后端，切源取代旧命令，卸载返回受控取消。PiP、Media Session、Pointer Events 和 DOM 类型不进入 `PlaybackBackend`。
+- **核心命令边界**：`packages/player-core` 继续只承载端无关控制语义，新增 `stop` 与相对定位 `seekBy`。`stop` 通过同一 request/source epoch 控制先暂停、再定位到首个可定位区间起点，并在省流量 HLS 下停止分片加载；已在停止位置且加载已停止时不重复触发后端，切源取代旧命令，卸载返回受控取消。`seekBy` 从后端实时快照读取当前位置，并校验快照仍属于当前 source epoch 后才提交定位。PiP、Media Session、Pointer Events 和 DOM 类型不进入 `PlaybackBackend`。
 - **平台适配层**：`frontend/src/player/WebPlatformAdapter.ts` 集中探测 Web 能力并管理原生 PiP 与 Media Session 生命周期。PiP 状态由 `enterpictureinpicture` / `leavepictureinpicture` 收敛，失败显示中文错误，切源与卸载清理；Media Session 元数据、播放状态和合法位置同步到系统控制面板，play/pause/seek/stop handler 统一映射 player-core 命令并在卸载时逐项注销。
 - **后台能力边界**：`backgroundAudio` 固定描述为 `best-effort`，页面隐藏或最小化时不主动暂停，也不创建静默音轨、Web Audio 保活或额外播放内核。Media Session 只提供元数据与系统控制入口，不承诺浏览器冻结、系统休眠或进程回收后的持续播放。
-- **手势与视觉层**：播放器画面区只接受 touch/pen Pointer Events；超过阈值后单向锁定为横向 seek、右侧纵向媒体音量或左侧纵向播放器视觉亮度。按钮、菜单、滑块和进度预览热区排除，多指、取消、失去捕获与卸载安全收口。视觉亮度仅给当前 `<video>` 应用 `brightness()`，范围 `0.5–1.5`，不覆盖字幕和控件、不写系统 API；取消恢复起始值，切源/卸载重置为 `1`，并提供键盘/触摸可达的重置入口与 `aria-live` 文本提示。能力模型始终保持 `systemBrightness=unsupported`。
+- **手势与视觉层**：播放器媒体画面使用 `touch-action: none` 可靠接管 touch/pen Pointer Events；该接管边界不包含控件栏和播放器外区域，普通页面仍可从这些区域滚动。超过阈值后单向锁定为横向 seek、右侧纵向媒体音量或左侧纵向播放器视觉亮度。按钮、菜单、滑块和进度预览热区排除，多指、取消、失去捕获与卸载安全收口。视觉亮度仅给当前 `<video>` 应用 `brightness()`，范围 `0.5–1.5`，不覆盖字幕和控件、不写系统 API；取消恢复起始值，切源/卸载重置为 `1`，并提供键盘/触摸可达的重置入口与 `aria-live` 文本提示。能力模型始终保持 `systemBrightness=unsupported`。
 
 ### 5.6 硬件加速管理
 

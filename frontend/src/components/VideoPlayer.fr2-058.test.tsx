@@ -292,7 +292,7 @@ describe('FR2-058 VideoPlayer 平台接线', () => {
     expect(screen.getByRole('button', { name: '画中画' })).toBeInTheDocument();
   });
 
-  it('横滑只在抬手时提交一次 seek，右纵滑实时调整媒体音量', async () => {
+  it('横滑只在抬手时提交一次 seek，取消不提交且右纵滑实时调整媒体音量', async () => {
     const seek = vi.spyOn(PlaybackCore.prototype, 'seek').mockResolvedValue({
       clamped: false,
       confirmedTime: 100,
@@ -323,6 +323,7 @@ describe('FR2-058 VideoPlayer 平台接线', () => {
       },
     });
     const surface = await screen.findByTestId('video-gesture-surface');
+    expect(surface).toHaveStyle({ touchAction: 'none' });
     vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({
       bottom: 100,
       height: 100,
@@ -349,6 +350,21 @@ describe('FR2-058 VideoPlayer 平台接线', () => {
     });
     expect(seek).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { clientX: 140, clientY: 54, pointerId: 1, pointerType: 'touch' });
+    expect(seek).toHaveBeenCalledOnce();
+
+    fireEvent.pointerDown(surface, {
+      clientX: 40,
+      clientY: 50,
+      pointerId: 4,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerMove(surface, {
+      clientX: 140,
+      clientY: 54,
+      pointerId: 4,
+      pointerType: 'touch',
+    });
+    fireEvent.pointerCancel(surface, { pointerId: 4, pointerType: 'touch' });
     expect(seek).toHaveBeenCalledOnce();
 
     act(() => {

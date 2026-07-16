@@ -232,6 +232,7 @@ test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
       )
       .toMatchObject({ paused: true, time: 0 });
 
+    await expect(surface).toHaveCSS("touch-action", "none");
     const box = await surface.boundingBox();
     if (box === null) throw new Error("无法定位播放器手势区域");
     await video.evaluate((node) => {

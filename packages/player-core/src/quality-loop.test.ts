@@ -283,6 +283,37 @@ describe('PlaybackCore 清晰度与省流量', () => {
     expect(core.getSnapshot().currentTime).toBe(12);
   });
 
+  it('省流量 stop 停止 HLS 加载且重复停止不重复触发', async () => {
+    const { core, loadControl } = await createLoadedCore({ state: 'playing' });
+    await core.setDataSaver(true);
+    loadControl.calls.length = 0;
+
+    await expect(core.stop()).resolves.toMatchObject({ status: 'completed' });
+    expect(loadControl.calls).toEqual([expect.objectContaining({ type: 'stop' })]);
+
+    await expect(core.stop()).resolves.toMatchObject({ status: 'completed' });
+    expect(loadControl.calls).toHaveLength(1);
+  });
+
+  it('省流量 stop 被同源 play 取代后不停止新播放的加载', async () => {
+    const { backend, core, loadControl } = await createLoadedCore({ state: 'playing' });
+    await core.setDataSaver(true);
+    const pauseGate = new Deferred<void>();
+    backend.pauseHandler = () => pauseGate.promise;
+    loadControl.calls.length = 0;
+
+    const stop = core.stop();
+    await Promise.resolve();
+    const play = core.play();
+
+    await expect(stop).resolves.toMatchObject({ status: 'superseded' });
+    await expect(play).resolves.toMatchObject({ status: 'completed' });
+    pauseGate.resolve();
+    await flushTasks();
+
+    expect(loadControl.calls.map((call) => call.type)).toEqual(['start']);
+  });
+
   it('省流量 play 等待启动加载时，后发 pause 取代旧播放意图', async () => {
     const { backend, core, loadControl } = await createLoadedCore();
     await core.setDataSaver(true);

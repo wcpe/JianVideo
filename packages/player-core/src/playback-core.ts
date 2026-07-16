@@ -243,7 +243,10 @@ export class PlaybackCore {
     const snapshot = this.snapshot;
     const targetTime = stopTarget(snapshot);
     this.acceptCommand(requestId);
-    if (isStoppedSnapshot(snapshot, targetTime)) return this.completeStop(command, targetTime);
+    if (isStoppedSnapshot(snapshot, targetTime)) {
+      if (this.qualityState.dataSaver) await this.stopLoadingForCommand(command);
+      return this.completeStop(command, targetTime);
+    }
     const startedTerminalRevision = this.terminalRevision;
     const operation = this.runOperation(requestId, () => this.executeStop(command, snapshot, targetTime));
     return this.finishStop(command, startedTerminalRevision, targetTime, await operation);
@@ -257,8 +260,26 @@ export class PlaybackCore {
     return result;
   }
 
-  seekBy(offset: number, reason: SeekReason = 'user'): Promise<SeekResult> {
-    return this.seek(this.snapshot.currentTime + offset, reason);
+  async seekBy(offset: number, reason: SeekReason = 'user'): Promise<SeekResult> {
+    const requestId = this.allocateRequestId();
+    const identity = this.identity(requestId);
+    this.interruptFrameCommands(requestId);
+    const fallbackRequestedTime = this.snapshot.currentTime + offset;
+    const rejected = this.rejectSeek(fallbackRequestedTime, identity);
+    if (rejected !== null) return rejected;
+    const snapshotOutcome = invokeSynchronously(() => this.backend.getSnapshot());
+    if (snapshotOutcome.kind === 'failed') {
+      return this.failSeekSnapshotRead(fallbackRequestedTime, identity, snapshotOutcome.error);
+    }
+    const backendSnapshot = snapshotOutcome.value;
+    const requestedTime = backendSnapshot.currentTime + offset;
+    if (!sameCommandSource(identity, backendSnapshot) || !sameCommandSource(identity, this.snapshot)) {
+      return this.publishSeekResult(this.basicSeekResult(requestedTime, requestId, 'superseded'), identity);
+    }
+    if (!Number.isFinite(requestedTime)) return this.unsupportedSeek(requestedTime, identity);
+    const result = await this.performSeekFromSnapshot(requestedTime, reason, identity, backendSnapshot);
+    if (reason !== 'ab_loop' && result.status === 'completed') await this.enforceAbLoop(result.confirmedTime);
+    return result;
   }
 
   stepFrame(direction: FrameStepDirection): Promise<FrameStepResult> {
@@ -763,7 +784,15 @@ export class PlaybackCore {
 
   private async stopLoadingForCurrentSource(): Promise<void> {
     const command = this.currentFeatureCommand();
-    if (command !== null) await this.invokeFeatureOperation(() => this.stopLoading(command));
+    if (command !== null) await this.stopLoadingForCommand(command);
+  }
+
+  private async stopLoadingForCommand(command: PlaybackCommandContext): Promise<void> {
+    const facet = this.loadControlFacet;
+    if (!this.isCurrentCommand(command) || facet === undefined) return;
+    const state = invokeSynchronously(() => facet.getLoadingState());
+    if (state.kind === 'completed' && state.value === 'stopped') return;
+    await this.invokeFeatureOperation(() => facet.stopLoading(command));
   }
 
   private currentFeatureCommand(): PlaybackCommandContext | null {
@@ -789,9 +818,13 @@ export class PlaybackCore {
     snapshot: PlaybackSnapshot,
     targetTime: number | null,
   ): Promise<SeekResult | null> {
-    await this.backend.pause(command);
-    if (!this.isCurrentCommand(command) || targetTime === null || snapshot.currentTime === targetTime) return null;
-    return this.backend.seek(createSeekRequest(command, 'user', targetTime, targetTime));
+    try {
+      await this.backend.pause(command);
+      if (!this.isCurrentCommand(command) || targetTime === null || snapshot.currentTime === targetTime) return null;
+      return await this.backend.seek(createSeekRequest(command, 'user', targetTime, targetTime));
+    } finally {
+      if (this.qualityState.dataSaver) await this.stopLoadingForCommand(command);
+    }
   }
 
   private finishStop(
@@ -1507,7 +1540,7 @@ export class PlaybackCore {
   private basicSeekResult(
     requestedTime: number,
     requestId: number,
-    status: 'canceled' | 'unsupported',
+    status: 'canceled' | 'superseded' | 'unsupported',
   ): SeekResult {
     const currentTime = finiteTime(this.snapshot.currentTime);
     return {
@@ -2052,6 +2085,10 @@ function sameTerminalSource(
   right: Pick<TerminalSignal, 'sourceEpoch' | 'sourceId'>,
 ): boolean {
   return left.sourceEpoch === right.sourceEpoch && left.sourceId === right.sourceId;
+}
+
+function sameCommandSource(identity: CommandIdentity, snapshot: PlaybackSnapshot): boolean {
+  return identity.sourceEpoch === snapshot.sourceEpoch && identity.sourceId === snapshot.sourceId;
 }
 
 function seekResumeState(state: PlaybackState): PlaybackState {
