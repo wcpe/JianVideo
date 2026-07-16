@@ -35,6 +35,12 @@ export function clampVolume(val: number): number {
   return Math.min(1, Math.max(0, val));
 }
 
+/** 把章节或书签毫秒位置格式化为播放器时间。 */
+export function formatMarkerTime(positionMs: number): string {
+  const seconds = Math.floor(Math.max(0, positionMs) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 /** 写入音量 / 静音偏好（纯函数，FR-104）。失败静默忽略（如隐私模式禁写）。 */
 export function saveVolumePref(pref: VolumePref): void {
   try {

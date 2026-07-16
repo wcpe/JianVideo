@@ -14,6 +14,12 @@ import type {
   SeekTier,
   TrackKind,
 } from '@jianvideo/player-core';
+import type {
+  MediaBookmark,
+  MediaBookmarkInput,
+  MediaBookmarkUpdate,
+  MediaChapter,
+} from '../../../packages/media-client/src/index';
 import { Text, Box, ActionIcon, Slider, Menu, Switch } from '@mantine/core';
 import {
   IconPlayerPlay,
@@ -36,6 +42,7 @@ import VideoTrackControls, {
   SubtitleOverlay,
   type TrackSelections,
 } from '@/components/VideoTrackControls';
+import VideoMarkersPanel from '@/components/VideoMarkersPanel';
 import {
   loadSubtitlePreferences,
   type SubtitlePreferences,
@@ -43,7 +50,12 @@ import {
 import { isCodecSupported } from '@/utils/codec-capability';
 import { notifyError, notifySuccess } from '@/utils/notify';
 import { useAuthStore } from '@/stores/auth';
-import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
+import {
+  loadVolumePref,
+  clampVolume,
+  formatMarkerTime,
+  saveVolumePref,
+} from '@/components/VideoPlayer.helpers';
 import { WebPlaybackBackend, type WebPlaybackSourcePayload } from '@/player/WebPlaybackBackend';
 import {
   DEFAULT_PLAYER_VISUAL_BRIGHTNESS,
@@ -134,6 +146,19 @@ interface VideoPlayerProps {
    * 播放接近结束时回调一次（FR-44），用于标记「已看」。
    */
   onEnded?: () => void;
+  /** 只读内嵌章节，由端壳通过 media-client 获取。 */
+  chapters?: readonly MediaChapter[];
+  /** 用户书签，由端壳通过 media-client 获取。 */
+  bookmarks?: readonly MediaBookmark[];
+  /** Space 与媒体组合键，变化时清理面板草稿。 */
+  markerContextKey?: string;
+  markersLoading?: boolean;
+  markersError?: string | null;
+  chaptersStale?: boolean;
+  onMarkersReload?: () => void;
+  onCreateBookmark?: (input: MediaBookmarkInput) => Promise<void>;
+  onUpdateBookmark?: (bookmarkId: string, input: MediaBookmarkUpdate) => Promise<void>;
+  onDeleteBookmark?: (bookmarkId: string, revision: number) => Promise<void>;
 }
 
 // 播放位置上报节流间隔（秒，FR-44）
@@ -344,6 +369,20 @@ function bufferedPercent(snapshot: PlaybackSnapshot): number {
   return Math.min(100, (bufferedEnd / snapshot.duration) * 100);
 }
 
+function currentChapterAt(chapters: readonly MediaChapter[], currentTime: number): MediaChapter | null {
+  const positionMs = Math.max(0, currentTime) * 1000;
+  return (
+    chapters.find((chapter) => positionMs >= chapter.startMs && positionMs < chapter.endMs) ??
+    chapters.findLast((chapter) => positionMs >= chapter.startMs) ??
+    null
+  );
+}
+
+function markerPercent(positionMs: number, duration: number): number | null {
+  if (!Number.isFinite(positionMs) || duration <= 0) return null;
+  return Math.min(100, Math.max(0, (positionMs / 1000 / duration) * 100));
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '请稍后重试';
 }
@@ -387,6 +426,16 @@ export default function VideoPlayer({
   onPositionReport,
   onEnded,
   onPlaybackError,
+  chapters = [],
+  bookmarks = [],
+  markerContextKey,
+  markersLoading = false,
+  markersError,
+  chaptersStale = false,
+  onMarkersReload,
+  onCreateBookmark,
+  onUpdateBookmark,
+  onDeleteBookmark,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const coreRef = useRef<PlaybackCore | null>(null);
@@ -1411,6 +1460,11 @@ export default function VideoPlayer({
     if (core && duration > 0) void core.seek((pct / 100) * duration, 'user');
   };
 
+  const seekToMarker = (positionMs: number) => {
+    const core = coreRef.current;
+    if (core) void core.seek(Math.max(0, positionMs) / 1000, 'user');
+  };
+
   // FR-104：控件自动隐藏——鼠标移动时显示并重置定时器，播放中静止超时淡出
   const showControlsTemporarily = useCallback(() => {
     setControlsVisible(true);
@@ -1529,6 +1583,8 @@ export default function VideoPlayer({
   // 控件区透明度：播放中静止淡出，其余常显
   const controlsOpacity = controlsVisible ? 1 : 0;
   const platformCapabilities = detectWebPlayerCapabilities(videoRef.current);
+  const currentChapter = currentChapterAt(chapters, currentTime);
+  const effectiveMarkerContext = markerContextKey ?? `${mediaId ?? ''}:${resolved.url}`;
 
   return (
     <Box
@@ -1896,6 +1952,55 @@ export default function VideoPlayer({
               thumbSize={12}
               style={{ position: 'absolute', width: '100%' }}
             />
+            {chapters.map((chapter) => {
+              const left = markerPercent(chapter.startMs, duration);
+              if (left === null) return null;
+              return (
+                <Box
+                  component="span"
+                  role="img"
+                  key={chapter.id}
+                  data-testid="video-chapter-marker"
+                  aria-label={`章节 ${chapter.title}，${formatMarkerTime(chapter.startMs)}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}%`,
+                    width: 2,
+                    height: 8,
+                    bottom: 4,
+                    transform: 'translateX(-1px)',
+                    backgroundColor: 'var(--mantine-color-gray-5)',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+              );
+            })}
+            {bookmarks.map((item) => {
+              const left = markerPercent(item.positionMs, duration);
+              if (left === null) return null;
+              return (
+                <Box
+                  component="span"
+                  role="img"
+                  key={item.id}
+                  data-testid="video-bookmark-marker"
+                  aria-label={`书签 ${item.title}，${formatMarkerTime(item.positionMs)}`}
+                  style={{
+                    position: 'absolute',
+                    left: `${left}%`,
+                    width: 7,
+                    height: 7,
+                    top: 0,
+                    transform: 'translateX(-50%) rotate(45deg)',
+                    backgroundColor: 'var(--mantine-color-yellow-5)',
+                    border: '1px solid var(--mantine-color-dark-7)',
+                    pointerEvents: 'none',
+                    zIndex: 3,
+                  }}
+                />
+              );
+            })}
             {timelinePreview && (
               <Box
                 data-testid="timeline-preview-overlay"
@@ -1965,6 +2070,22 @@ export default function VideoPlayer({
             {fmt(duration)}
           </Text>
         </Box>
+
+        <VideoMarkersPanel
+          bookmarks={bookmarks}
+          chapters={chapters}
+          contextKey={effectiveMarkerContext}
+          currentChapter={currentChapter}
+          currentTime={currentTime}
+          error={markersError}
+          loading={markersLoading}
+          stale={chaptersStale}
+          onCreateBookmark={onCreateBookmark}
+          onDeleteBookmark={onDeleteBookmark}
+          onReload={onMarkersReload}
+          onSeek={seekToMarker}
+          onUpdateBookmark={onUpdateBookmark}
+        />
 
         {isABR && (
           <Menu position="top" withinPortal>

@@ -1064,6 +1064,24 @@ export const handlers = [
     });
   }),
 
+  http.get('*/api/library/media/:id/chapters', () =>
+    HttpResponse.json({ items: [], parsed_at: null, stale: false }),
+  ),
+
+  http.get('*/api/library/media/:id/bookmarks', () => HttpResponse.json({ items: [] })),
+
+  http.get('*/api/play/:id/tracks', () =>
+    HttpResponse.json({
+      backend: {},
+      selection: {
+        audio: { effective_track_id: null, selected_track_id: null },
+        subtitle: { effective_track_id: null, selected_track_id: null },
+      },
+      sources: {},
+      tracks: [],
+    }),
+  ),
+
   http.get('*/api/library/media/:id', async ({ params }) => {
     await delay(200);
     const id = Number(params.id);

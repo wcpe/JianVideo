@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { PreparedPreviewTrack } from '@jianvideo/player-core';
+import {
+  BookmarkConflictError,
+  createApiClient,
+  createMediaBookmark,
+  deleteMediaBookmark,
+  getMediaChapters,
+  listMediaBookmarks,
+  updateMediaBookmark,
+  type MediaBookmark,
+  type MediaBookmarkInput,
+  type MediaBookmarkUpdate,
+  type MediaChapter,
+} from '../../../packages/media-client/src/index';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Button,
@@ -63,11 +76,30 @@ type MediaRequest = {
   mediaId: number;
 };
 
+type MarkerRequest = {
+  generation: number;
+  mediaId: number;
+};
+
+const DEFAULT_SPACE_ID = 'space-default';
+const MEDIA_CLIENT_FETCH = globalThis.fetch.bind(globalThis);
 const TIMELINE_TASK_POLL_INTERVAL = 1000;
 const TIMELINE_TASK_POLL_MAX_INTERVAL = 8000;
 
 function abortError(): DOMException {
   return new DOMException('请求已取消', 'AbortError');
+}
+
+function chaptersBookmarksClient() {
+  return createApiClient({
+    baseUrl: window.location.origin,
+    fetch: MEDIA_CLIENT_FETCH,
+    space: { spaceId: DEFAULT_SPACE_ID },
+  });
+}
+
+function requestErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '请稍后重试';
 }
 
 function waitForTimelinePoll(signal: AbortSignal, interval: number): Promise<void> {
@@ -157,6 +189,13 @@ export default function PlayPage() {
   const previewGenerationRef = useRef(0);
   const mediaGenerationRef = useRef(0);
   const mediaRequestRef = useRef<MediaRequest | null>(null);
+  const markerGenerationRef = useRef(0);
+  const markerRequestRef = useRef<MarkerRequest | null>(null);
+  const [chapters, setChapters] = useState<readonly MediaChapter[]>([]);
+  const [bookmarks, setBookmarks] = useState<readonly MediaBookmark[]>([]);
+  const [markersLoading, setMarkersLoading] = useState(false);
+  const [markersError, setMarkersError] = useState<string | null>(null);
+  const [chaptersStale, setChaptersStale] = useState(false);
 
   // 双模式改名（FR-30）：null 表示弹窗关闭
   const [nameEditKind, setNameEditKind] = useState<NameEditKind | null>(null);
@@ -199,6 +238,39 @@ export default function PlayPage() {
       current.mediaId === request.mediaId
     );
   }, []);
+
+  const isCurrentMarkerRequest = useCallback((request: MarkerRequest): boolean => {
+    const current = markerRequestRef.current;
+    return current?.generation === request.generation && current.mediaId === request.mediaId;
+  }, []);
+
+  const loadMarkers = useCallback(
+    async (request: MarkerRequest, showLoading: boolean): Promise<void> => {
+      if (showLoading && isCurrentMarkerRequest(request)) setMarkersLoading(true);
+      try {
+        const client = chaptersBookmarksClient();
+        const [chapterResult, bookmarkItems] = await Promise.all([
+          getMediaChapters(client, request.mediaId),
+          listMediaBookmarks(client, request.mediaId),
+        ]);
+        if (!isCurrentMarkerRequest(request)) return;
+        setChapters(chapterResult.items);
+        setChaptersStale(chapterResult.stale);
+        setBookmarks(bookmarkItems);
+        setMarkersError(null);
+      } catch {
+        if (isCurrentMarkerRequest(request)) setMarkersError('章节与书签加载失败');
+      } finally {
+        if (showLoading && isCurrentMarkerRequest(request)) setMarkersLoading(false);
+      }
+    },
+    [isCurrentMarkerRequest],
+  );
+
+  const reloadMarkers = useCallback(async (): Promise<void> => {
+    const request = markerRequestRef.current;
+    if (request) await loadMarkers(request, false);
+  }, [loadMarkers]);
 
   useEffect(() => {
     if (!id) return;
@@ -287,6 +359,30 @@ export default function PlayPage() {
   }, [id, isCurrentMediaRequest]);
 
   useEffect(() => {
+    const mediaId = Number(id);
+    const request = { generation: ++markerGenerationRef.current, mediaId };
+    markerRequestRef.current = request;
+    setChapters([]);
+    setBookmarks([]);
+    setChaptersStale(false);
+    setMarkersError(null);
+    if (!Number.isInteger(mediaId) || mediaId <= 0) {
+      setMarkersLoading(false);
+      return () => {
+        if (markerRequestRef.current === request) markerRequestRef.current = null;
+      };
+    }
+
+    void loadMarkers(request, true);
+    const reloadOnFocus = () => void loadMarkers(request, false);
+    window.addEventListener('focus', reloadOnFocus);
+    return () => {
+      window.removeEventListener('focus', reloadOnFocus);
+      if (markerRequestRef.current === request) markerRequestRef.current = null;
+    };
+  }, [id, loadMarkers]);
+
+  useEffect(() => {
     const generation = ++previewGenerationRef.current;
     const mediaID = Number(id);
     setPreviewTrack(undefined);
@@ -327,6 +423,73 @@ export default function PlayPage() {
     setTrackManifest(response);
     return response;
   }, [isCurrentMediaRequest, media]);
+
+  const showBookmarkConflict = useCallback((request: MarkerRequest) => {
+    if (!isCurrentMarkerRequest(request)) return;
+    notifications.show({
+      title: '书签已在其他设备更新',
+      message: '已重新加载服务端最新书签，未覆盖其他设备的修改',
+      color: 'yellow',
+      autoClose: 4500,
+    });
+  }, [isCurrentMarkerRequest]);
+
+  const handleCreateBookmark = useCallback(async (input: MediaBookmarkInput): Promise<void> => {
+    const request = markerRequestRef.current;
+    if (!media || !request || request.mediaId !== media.id) throw abortError();
+    try {
+      await createMediaBookmark(chaptersBookmarksClient(), media.id, input, { reload: reloadMarkers });
+    } catch (error) {
+      if (error instanceof BookmarkConflictError) {
+        showBookmarkConflict(request);
+        return;
+      }
+      if (isCurrentMarkerRequest(request)) {
+        notifications.show({ title: '创建书签失败', message: requestErrorMessage(error), color: 'red' });
+      }
+      throw error;
+    }
+  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
+
+  const handleUpdateBookmark = useCallback(async (
+    bookmarkId: string,
+    input: MediaBookmarkUpdate,
+  ): Promise<void> => {
+    const request = markerRequestRef.current;
+    if (!media || !request || request.mediaId !== media.id) throw abortError();
+    try {
+      await updateMediaBookmark(chaptersBookmarksClient(), media.id, bookmarkId, input, { reload: reloadMarkers });
+    } catch (error) {
+      if (error instanceof BookmarkConflictError) {
+        showBookmarkConflict(request);
+        return;
+      }
+      if (isCurrentMarkerRequest(request)) {
+        notifications.show({ title: '更新书签失败', message: requestErrorMessage(error), color: 'red' });
+      }
+      throw error;
+    }
+  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
+
+  const handleDeleteBookmark = useCallback(async (
+    bookmarkId: string,
+    revision: number,
+  ): Promise<void> => {
+    const request = markerRequestRef.current;
+    if (!media || !request || request.mediaId !== media.id) throw abortError();
+    try {
+      await deleteMediaBookmark(chaptersBookmarksClient(), media.id, bookmarkId, revision, { reload: reloadMarkers });
+    } catch (error) {
+      if (error instanceof BookmarkConflictError) {
+        showBookmarkConflict(request);
+        return;
+      }
+      if (isCurrentMarkerRequest(request)) {
+        notifications.show({ title: '删除书签失败', message: requestErrorMessage(error), color: 'red' });
+      }
+      throw error;
+    }
+  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
 
   // 续播与观看状态（FR-44）：上报播放位置、看完标记。失败仅静默忽略，不打断播放。
   const handlePositionReport = useCallback(
@@ -630,6 +793,16 @@ export default function PlayPage() {
             fill
             previewTrack={previewTrack}
             previewSpriteUrls={previewSpriteUrls}
+            chapters={chapters}
+            bookmarks={bookmarks}
+            markerContextKey={`${DEFAULT_SPACE_ID}:${media.id}`}
+            markersLoading={markersLoading}
+            markersError={markersError}
+            chaptersStale={chaptersStale}
+            onMarkersReload={() => void reloadMarkers()}
+            onCreateBookmark={handleCreateBookmark}
+            onUpdateBookmark={handleUpdateBookmark}
+            onDeleteBookmark={handleDeleteBookmark}
             isABR={playerIsABR}
             streamType={playerIsABR ? 'mpegts' : 'mp4'}
             initialPosition={media.last_position}
