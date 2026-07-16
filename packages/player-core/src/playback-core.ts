@@ -420,10 +420,11 @@ export class PlaybackCore {
 
   async setPlaybackRate(rate: number): Promise<PlaybackCommandResult> {
     const command = this.beginFeatureCommand();
-    if (command === null || this.qualityFacet === undefined || !isPlaybackRate(rate)) {
+    const qualityFacet = this.qualityFacet;
+    if (command === null || qualityFacet === undefined || !isPlaybackRate(rate)) {
       return this.unsupportedFeatureCommand(command, '当前播放路径不支持该倍速');
     }
-    const outcome = await this.runFeatureOperation(command, () => this.qualityFacet!.setPlaybackRate(rate, command));
+    const outcome = await this.runFeatureOperation(command, () => qualityFacet.setPlaybackRate(rate, command));
     if (outcome.status !== 'completed') {
       this.applyQualityState({ ...this.qualityState, playbackRate: 1 }, command.requestId);
       return outcome;
@@ -436,34 +437,34 @@ export class PlaybackCore {
     return this.abLoopState;
   }
 
-  async setAbLoopA(): Promise<PlaybackCommandResult> {
+  setAbLoopA(): Promise<PlaybackCommandResult> {
     const command = this.beginFeatureCommand();
-    if (command === null) return this.unsupportedFeatureCommand(command);
+    if (command === null) return Promise.resolve(this.unsupportedFeatureCommand(command));
     const snapshot = this.readBackendSnapshot();
     if (snapshot === null || !validLoopPoint(snapshot.currentTime, snapshot.duration)) {
-      return this.unsupportedFeatureCommand(command, '当前位置或媒体时长无效');
+      return Promise.resolve(this.unsupportedFeatureCommand(command, '当前位置或媒体时长无效'));
     }
     this.applyAbLoopState({ a: snapshot.currentTime, b: null, enabled: false }, command.requestId);
-    return this.publishCommandResult(this.result(command.requestId, 'completed'), command);
+    return Promise.resolve(this.publishCommandResult(this.result(command.requestId, 'completed'), command));
   }
 
-  async setAbLoopB(): Promise<PlaybackCommandResult> {
+  setAbLoopB(): Promise<PlaybackCommandResult> {
     const command = this.beginFeatureCommand();
-    if (command === null) return this.unsupportedFeatureCommand(command);
+    if (command === null) return Promise.resolve(this.unsupportedFeatureCommand(command));
     const snapshot = this.readBackendSnapshot();
     const a = this.abLoopState.a;
     if (snapshot === null || a === null || !validLoopRange(a, snapshot.currentTime, snapshot.duration)) {
-      return this.unsupportedFeatureCommand(command, 'B 点必须晚于 A 点至少 0.5 秒且位于媒体时长内');
+      return Promise.resolve(this.unsupportedFeatureCommand(command, 'B 点必须晚于 A 点至少 0.5 秒且位于媒体时长内'));
     }
     this.applyAbLoopState({ a, b: snapshot.currentTime, enabled: true }, command.requestId);
-    return this.publishCommandResult(this.result(command.requestId, 'completed'), command);
+    return Promise.resolve(this.publishCommandResult(this.result(command.requestId, 'completed'), command));
   }
 
-  async clearAbLoop(): Promise<PlaybackCommandResult> {
+  clearAbLoop(): Promise<PlaybackCommandResult> {
     const command = this.beginFeatureCommand();
-    if (command === null) return this.unsupportedFeatureCommand(command);
+    if (command === null) return Promise.resolve(this.unsupportedFeatureCommand(command));
     this.applyAbLoopState(createAbLoopState(), command.requestId);
-    return this.publishCommandResult(this.result(command.requestId, 'completed'), command);
+    return Promise.resolve(this.publishCommandResult(this.result(command.requestId, 'completed'), command));
   }
 
   subscribe(listener: PlaybackListener): () => void {
@@ -513,10 +514,11 @@ export class PlaybackCore {
   }
 
   private async restoreQualityAfterLoad(command: PlaybackCommandContext, playbackRate: number): Promise<void> {
-    if (this.qualityFacet === undefined || !this.isCurrentSource(command)) return;
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined || !this.isCurrentSource(command)) return;
     const state = this.readQualityFacetState();
     if (state !== null) this.acceptQualityFacetState(state, command);
-    const rateError = await this.invokeFeatureOperation(() => this.qualityFacet!.setPlaybackRate(playbackRate, command));
+    const rateError = await this.invokeFeatureOperation(() => qualityFacet.setPlaybackRate(playbackRate, command));
     if (!this.isCurrentSource(command)) return;
     this.applyQualityState(
       { ...this.qualityState, playbackRate: rateError === null ? playbackRate : 1 },
@@ -543,10 +545,12 @@ export class PlaybackCore {
   }
 
   private async selectAutoQuality(command: PlaybackCommandContext): Promise<PlaybackCommandResult> {
-    const error = await this.invokeFeatureOperation(() => this.qualityFacet!.selectQuality({ mode: 'auto' }, command));
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined) return this.unsupportedFeatureCommand(command);
+    const error = await this.invokeFeatureOperation(() => qualityFacet.selectQuality({ mode: 'auto' }, command));
     if (error !== null) return this.featureFailure(command, error);
     const cap = this.qualityState.dataSaver ? DATA_SAVER_MAX_HEIGHT : null;
-    const capError = await this.invokeFeatureOperation(() => this.qualityFacet!.setAutoQualityCap(cap, command));
+    const capError = await this.invokeFeatureOperation(() => qualityFacet.setAutoQualityCap(cap, command));
     if (capError !== null) return this.featureFailure(command, capError);
     this.applyQualityState({ ...this.qualityState, manualQuality: null, qualityMode: 'auto' }, command.requestId);
     return this.publishCommandResult(this.result(command.requestId, 'completed'), command);
@@ -556,15 +560,17 @@ export class PlaybackCore {
     target: PlaybackQuality,
     command: PlaybackCommandContext,
   ): Promise<PlaybackCommandResult> {
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined) return this.unsupportedFeatureCommand(command);
     const targetSemantic = qualityTarget(target);
     if (targetSemantic === null) return this.unsupportedFeatureCommand(command, '目标清晰度缺少有效高度');
     const disablesSaver = this.qualityState.dataSaver && targetSemantic.height > DATA_SAVER_MAX_HEIGHT;
     if (disablesSaver) {
-      const capError = await this.invokeFeatureOperation(() => this.qualityFacet!.setAutoQualityCap(null, command));
+      const capError = await this.invokeFeatureOperation(() => qualityFacet.setAutoQualityCap(null, command));
       if (capError !== null) return this.featureFailure(command, capError);
     }
     const error = await this.invokeFeatureOperation(() =>
-      this.qualityFacet!.selectQuality({ mode: 'manual', quality: targetSemantic }, command),
+      qualityFacet.selectQuality({ mode: 'manual', quality: targetSemantic }, command),
     );
     if (error !== null) return this.featureFailure(command, error);
     this.applyQualityState(
@@ -581,18 +587,19 @@ export class PlaybackCore {
   }
 
   private async enableDataSaver(command: PlaybackCommandContext): Promise<PlaybackCommandResult> {
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined) return this.unsupportedFeatureCommand(command);
     const compatible = highestDataSaverQuality(this.qualityState.qualities);
     if (compatible === null) return this.blockDataSaver(command);
     if (this.qualityState.qualityMode === 'manual' && (this.qualityState.manualQuality?.height ?? 0) > DATA_SAVER_MAX_HEIGHT) {
-      const target = qualityTarget(compatible)!;
+      const target = qualityTarget(compatible);
+      if (target === null) return this.unsupportedFeatureCommand(command, '目标清晰度缺少有效高度');
       const selectError = await this.invokeFeatureOperation(() =>
-        this.qualityFacet!.selectQuality({ mode: 'manual', quality: target }, command),
+        qualityFacet.selectQuality({ mode: 'manual', quality: target }, command),
       );
       if (selectError !== null) return this.featureFailure(command, selectError);
     }
-    const capError = await this.invokeFeatureOperation(() =>
-      this.qualityFacet!.setAutoQualityCap(DATA_SAVER_MAX_HEIGHT, command),
-    );
+    const capError = await this.invokeFeatureOperation(() => qualityFacet.setAutoQualityCap(DATA_SAVER_MAX_HEIGHT, command));
     if (capError !== null) return this.featureFailure(command, capError);
     const manualQuality =
       this.qualityState.qualityMode === 'manual' && (this.qualityState.manualQuality?.height ?? 0) > DATA_SAVER_MAX_HEIGHT
@@ -607,8 +614,10 @@ export class PlaybackCore {
   }
 
   private async disableDataSaver(command: PlaybackCommandContext): Promise<PlaybackCommandResult> {
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined) return this.unsupportedFeatureCommand(command);
     const wasBlocked = this.qualityState.dataSaverBlocked;
-    const capError = await this.invokeFeatureOperation(() => this.qualityFacet!.setAutoQualityCap(null, command));
+    const capError = await this.invokeFeatureOperation(() => qualityFacet.setAutoQualityCap(null, command));
     if (capError !== null) return this.featureFailure(command, capError);
     this.applyQualityState(
       { ...this.qualityState, dataSaver: false, dataSaverBlocked: false },
@@ -676,8 +685,9 @@ export class PlaybackCore {
   }
 
   private readQualityFacetState(): QualityFacetState | null {
-    if (this.qualityFacet === undefined) return null;
-    const state = invokeSynchronously(() => this.qualityFacet!.getState());
+    const qualityFacet = this.qualityFacet;
+    if (qualityFacet === undefined) return null;
+    const state = invokeSynchronously(() => qualityFacet.getState());
     return state.kind === 'completed' ? state.value : null;
   }
 
@@ -701,7 +711,8 @@ export class PlaybackCore {
   }
 
   private async reconcileQualityState(command: PlaybackCommandContext): Promise<void> {
-    if (this.qualityReconcilePending || this.qualityFacet === undefined || !this.isCurrentSource(command)) return;
+    const qualityFacet = this.qualityFacet;
+    if (this.qualityReconcilePending || qualityFacet === undefined || !this.isCurrentSource(command)) return;
     this.qualityReconcilePending = true;
     try {
       const maxHeight = this.qualityState.dataSaver ? DATA_SAVER_MAX_HEIGHT : null;
@@ -712,15 +723,16 @@ export class PlaybackCore {
       if (this.qualityState.qualityMode === 'manual' && this.qualityState.manualQuality !== null) {
         const target = qualityTarget(this.qualityState.manualQuality);
         const matched = target === null ? null : resolveQuality(this.qualityState.qualities, target, maxHeight);
-        if (matched !== null) {
+        const matchedTarget = matched === null ? null : qualityTarget(matched);
+        if (matched !== null && matchedTarget !== null) {
           const error = await this.invokeFeatureOperation(() =>
-            this.qualityFacet!.selectQuality({ mode: 'manual', quality: qualityTarget(matched)! }, command),
+            qualityFacet.selectQuality({ mode: 'manual', quality: matchedTarget }, command),
           );
           if (error !== null) return;
           this.applyQualityState({ ...this.qualityState, manualQuality: matched }, command.requestId);
         }
       }
-      await this.invokeFeatureOperation(() => this.qualityFacet!.setAutoQualityCap(maxHeight, command));
+      await this.invokeFeatureOperation(() => qualityFacet.setAutoQualityCap(maxHeight, command));
     } finally {
       this.qualityReconcilePending = false;
     }

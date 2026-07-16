@@ -46,7 +46,7 @@ export function resolveQuality(
   if (candidates.length === 0) return null;
   const sameHeight = candidates.filter((quality) => quality.height === target.height);
   if (sameHeight.length > 0) return selectBandwidth(sameHeight, target.bandwidth);
-  const lower = candidates.filter((quality) => quality.height! < target.height);
+  const lower = candidates.filter((quality) => quality.height !== undefined && quality.height < target.height);
   if (lower.length > 0) return highestQuality(lower);
   return lowestQuality(candidates);
 }
@@ -84,11 +84,15 @@ function selectBandwidth(qualities: readonly PlaybackQuality[], bandwidth: numbe
 }
 
 function highestQuality(qualities: readonly PlaybackQuality[]): PlaybackQuality {
-  return [...qualities].sort(compareQuality).at(-1)!;
+  const quality = [...qualities].sort(compareQuality).at(-1);
+  if (quality === undefined) throw new Error('清晰度列表不能为空');
+  return quality;
 }
 
 function lowestQuality(qualities: readonly PlaybackQuality[]): PlaybackQuality {
-  return [...qualities].sort(compareQuality)[0]!;
+  const quality = [...qualities].sort(compareQuality)[0];
+  if (quality === undefined) throw new Error('清晰度列表不能为空');
+  return quality;
 }
 
 function compareQuality(left: PlaybackQuality, right: PlaybackQuality): number {

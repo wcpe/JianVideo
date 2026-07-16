@@ -29,9 +29,9 @@ class FakeQualityFacet implements QualityFacet {
     | { readonly command: PlaybackCommandContext; readonly rate: number; readonly type: 'rate' }
     | { readonly command: PlaybackCommandContext; readonly selection: QualitySelection; readonly type: 'select' }
   > = [];
-  capFailure: unknown;
-  rateFailure: unknown;
-  selectFailure: unknown;
+  capFailure: Error | undefined;
+  rateFailure: Error | undefined;
+  selectFailure: Error | undefined;
   private readonly listeners = new Set<QualityFacetListener>();
   private state: QualityFacetState = {
     actualQualityId: QUALITY_720.id,
@@ -68,7 +68,9 @@ class FakeQualityFacet implements QualityFacet {
 
   subscribe(listener: QualityFacetListener): () => void {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   replaceState(state: Partial<QualityFacetState>, command: PlaybackCommandContext): void {
@@ -77,7 +79,9 @@ class FakeQualityFacet implements QualityFacet {
   }
 
   private emit(command: PlaybackCommandContext): void {
-    this.listeners.forEach((listener) => listener(this.state, command));
+    this.listeners.forEach((listener) => {
+      listener(this.state, command);
+    });
   }
 }
 
@@ -108,7 +112,7 @@ class TrackingBackend extends FakePlaybackBackend {
 
   constructor() {
     super();
-    this.seekHandler = async (request) => {
+    this.seekHandler = (request) => {
       this.seekRequests.push(request);
       this.setSnapshot(
         createSnapshot({
@@ -123,14 +127,14 @@ class TrackingBackend extends FakePlaybackBackend {
           state: this.getSnapshot().state,
         }),
       );
-      return {
+      return Promise.resolve({
         clamped: request.requestedTime !== request.targetTime,
         confirmedTime: request.targetTime,
         requestId: request.requestId,
         requestedTime: request.requestedTime,
-        status: 'completed',
+        status: 'completed' as const,
         targetTime: request.targetTime,
-      };
+      });
     };
   }
 }
@@ -169,18 +173,24 @@ function currentCommand(core: PlaybackCore): PlaybackCommandContext {
   return {
     requestId: snapshot.requestId,
     sourceEpoch: snapshot.sourceEpoch,
-    sourceId: snapshot.sourceId!,
+    sourceId: requireSourceId(snapshot.sourceId),
   };
 }
 
 function manualQuality(quality: PlaybackQuality): QualitySelection {
+  if (quality.height === undefined) throw new Error('测试清晰度缺少高度');
   return {
     mode: 'manual',
     quality: {
       ...(quality.bandwidth === undefined ? {} : { bandwidth: quality.bandwidth }),
-      height: quality.height!,
+      height: quality.height,
     },
   };
+}
+
+function requireSourceId(sourceId: string | null): string {
+  if (sourceId === null) throw new Error('测试播放源缺少标识');
+  return sourceId;
 }
 
 async function flushTasks(): Promise<void> {
@@ -277,7 +287,7 @@ describe('PlaybackCore 清晰度与省流量', () => {
       requestId: resumed.requestId,
       snapshot: resumed,
       sourceEpoch: resumed.sourceEpoch,
-      sourceId: resumed.sourceId!,
+      sourceId: requireSourceId(resumed.sourceId),
       type: 'snapshotChanged',
     });
     expect(core.getSnapshot().currentTime).toBe(12);
@@ -394,8 +404,9 @@ describe('PlaybackCore 倍速', () => {
   it('同 sourceId 重新加载后恢复原倍速而不是保留后端重置的 1x', async () => {
     const { backend, core, quality } = await createLoadedCore();
     await core.setPlaybackRate(1.5);
-    backend.loadHandler = async (_source, command) => {
+    backend.loadHandler = (_source, command) => {
       quality.replaceState({ playbackRate: 1 }, command);
+      return Promise.resolve();
     };
 
     await core.load(SOURCE_A);
@@ -489,14 +500,14 @@ describe('PlaybackCore A-B 循环', () => {
       requestId: backendRequestId,
       snapshot: ended,
       sourceEpoch: ended.sourceEpoch,
-      sourceId: ended.sourceId!,
+      sourceId: requireSourceId(ended.sourceId),
       type: 'snapshotChanged',
     });
     backend.emit({
       eventId: 111,
       requestId: backendRequestId,
       sourceEpoch: ended.sourceEpoch,
-      sourceId: ended.sourceId!,
+      sourceId: requireSourceId(ended.sourceId),
       type: 'ended',
     });
     await flushTasks();
