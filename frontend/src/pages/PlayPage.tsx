@@ -11,6 +11,7 @@ import {
   type MediaBookmark,
   type MediaBookmarkInput,
   type MediaBookmarkUpdate,
+  type BookmarkMutationOptions,
   type MediaChapter,
 } from '../../../packages/media-client/src/index';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -79,9 +80,9 @@ type MediaRequest = {
 type MarkerRequest = {
   generation: number;
   mediaId: number;
+  spaceId: string;
 };
 
-const DEFAULT_SPACE_ID = 'space-default';
 const MEDIA_CLIENT_FETCH = globalThis.fetch.bind(globalThis);
 const TIMELINE_TASK_POLL_INTERVAL = 1000;
 const TIMELINE_TASK_POLL_MAX_INTERVAL = 8000;
@@ -90,12 +91,18 @@ function abortError(): DOMException {
   return new DOMException('请求已取消', 'AbortError');
 }
 
-function chaptersBookmarksClient() {
+function chaptersBookmarksClient(spaceId: string) {
   return createApiClient({
     baseUrl: window.location.origin,
     fetch: MEDIA_CLIENT_FETCH,
-    space: { spaceId: DEFAULT_SPACE_ID },
+    space: { spaceId },
   });
+}
+
+function upsertBookmark(items: readonly MediaBookmark[], next: MediaBookmark): readonly MediaBookmark[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index < 0) return [...items, next];
+  return items.map((item, itemIndex) => (itemIndex === index ? next : item));
 }
 
 function requestErrorMessage(error: unknown): string {
@@ -190,6 +197,7 @@ export default function PlayPage() {
   const mediaGenerationRef = useRef(0);
   const mediaRequestRef = useRef<MediaRequest | null>(null);
   const markerGenerationRef = useRef(0);
+  const markerLoadSequenceRef = useRef(0);
   const markerRequestRef = useRef<MarkerRequest | null>(null);
   const [chapters, setChapters] = useState<readonly MediaChapter[]>([]);
   const [bookmarks, setBookmarks] = useState<readonly MediaBookmark[]>([]);
@@ -241,36 +249,41 @@ export default function PlayPage() {
 
   const isCurrentMarkerRequest = useCallback((request: MarkerRequest): boolean => {
     const current = markerRequestRef.current;
-    return current?.generation === request.generation && current.mediaId === request.mediaId;
+    return (
+      current?.generation === request.generation &&
+      current.mediaId === request.mediaId &&
+      current.spaceId === request.spaceId
+    );
   }, []);
 
   const loadMarkers = useCallback(
-    async (request: MarkerRequest, showLoading: boolean): Promise<void> => {
-      if (showLoading && isCurrentMarkerRequest(request)) setMarkersLoading(true);
+    async (request: MarkerRequest, showLoading: boolean): Promise<boolean> => {
+      const loadSequence = ++markerLoadSequenceRef.current;
+      const isLatestMarkerLoad = () =>
+        loadSequence === markerLoadSequenceRef.current && isCurrentMarkerRequest(request);
+      if (showLoading && isLatestMarkerLoad()) setMarkersLoading(true);
       try {
-        const client = chaptersBookmarksClient();
+        const client = chaptersBookmarksClient(request.spaceId);
         const [chapterResult, bookmarkItems] = await Promise.all([
           getMediaChapters(client, request.mediaId),
           listMediaBookmarks(client, request.mediaId),
         ]);
-        if (!isCurrentMarkerRequest(request)) return;
+        if (!isLatestMarkerLoad()) return true;
         setChapters(chapterResult.items);
         setChaptersStale(chapterResult.stale);
         setBookmarks(bookmarkItems);
         setMarkersError(null);
+        return true;
       } catch {
-        if (isCurrentMarkerRequest(request)) setMarkersError('章节与书签加载失败');
+        if (!isLatestMarkerLoad()) return true;
+        setMarkersError('章节与书签加载失败');
+        return false;
       } finally {
-        if (showLoading && isCurrentMarkerRequest(request)) setMarkersLoading(false);
+        if (isLatestMarkerLoad()) setMarkersLoading(false);
       }
     },
     [isCurrentMarkerRequest],
   );
-
-  const reloadMarkers = useCallback(async (): Promise<void> => {
-    const request = markerRequestRef.current;
-    if (request) await loadMarkers(request, false);
-  }, [loadMarkers]);
 
   useEffect(() => {
     if (!id) return;
@@ -360,18 +373,19 @@ export default function PlayPage() {
 
   useEffect(() => {
     const mediaId = Number(id);
-    const request = { generation: ++markerGenerationRef.current, mediaId };
+    const spaceId = media?.space_id;
+    if (!Number.isInteger(mediaId) || mediaId <= 0 || media?.id !== mediaId || !spaceId) {
+      markerLoadSequenceRef.current += 1;
+      markerRequestRef.current = null;
+      setMarkersLoading(false);
+      return;
+    }
+    const request = { generation: ++markerGenerationRef.current, mediaId, spaceId };
     markerRequestRef.current = request;
     setChapters([]);
     setBookmarks([]);
     setChaptersStale(false);
     setMarkersError(null);
-    if (!Number.isInteger(mediaId) || mediaId <= 0) {
-      setMarkersLoading(false);
-      return () => {
-        if (markerRequestRef.current === request) markerRequestRef.current = null;
-      };
-    }
 
     void loadMarkers(request, true);
     const reloadOnFocus = () => void loadMarkers(request, false);
@@ -380,7 +394,7 @@ export default function PlayPage() {
       window.removeEventListener('focus', reloadOnFocus);
       if (markerRequestRef.current === request) markerRequestRef.current = null;
     };
-  }, [id, loadMarkers]);
+  }, [id, loadMarkers, media]);
 
   useEffect(() => {
     const generation = ++previewGenerationRef.current;
@@ -434,11 +448,38 @@ export default function PlayPage() {
     });
   }, [isCurrentMarkerRequest]);
 
+  const reloadMarkersAfterSuccess = useCallback((request: MarkerRequest) => {
+    void loadMarkers(request, false).then((loaded) => {
+      if (!loaded && isCurrentMarkerRequest(request)) {
+        notifications.show({
+          title: '书签已保存，刷新失败',
+          message: '已保留本次修改，可稍后重新加载服务端数据',
+          color: 'yellow',
+        });
+      }
+    });
+  }, [isCurrentMarkerRequest, loadMarkers]);
+
+  const bookmarkMutationOptions = useCallback((request: MarkerRequest): BookmarkMutationOptions => ({
+    reload: async () => {
+      await loadMarkers(request, false);
+    },
+    reloadAfterSuccess: false,
+  }), [loadMarkers]);
+
   const handleCreateBookmark = useCallback(async (input: MediaBookmarkInput): Promise<void> => {
     const request = markerRequestRef.current;
     if (!media || !request || request.mediaId !== media.id) throw abortError();
     try {
-      await createMediaBookmark(chaptersBookmarksClient(), media.id, input, { reload: reloadMarkers });
+      const saved = await createMediaBookmark(
+        chaptersBookmarksClient(request.spaceId),
+        media.id,
+        input,
+        bookmarkMutationOptions(request),
+      );
+      if (!isCurrentMarkerRequest(request)) return;
+      setBookmarks((items) => upsertBookmark(items, saved));
+      reloadMarkersAfterSuccess(request);
     } catch (error) {
       if (error instanceof BookmarkConflictError) {
         showBookmarkConflict(request);
@@ -449,7 +490,7 @@ export default function PlayPage() {
       }
       throw error;
     }
-  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
+  }, [bookmarkMutationOptions, isCurrentMarkerRequest, media, reloadMarkersAfterSuccess, showBookmarkConflict]);
 
   const handleUpdateBookmark = useCallback(async (
     bookmarkId: string,
@@ -458,7 +499,16 @@ export default function PlayPage() {
     const request = markerRequestRef.current;
     if (!media || !request || request.mediaId !== media.id) throw abortError();
     try {
-      await updateMediaBookmark(chaptersBookmarksClient(), media.id, bookmarkId, input, { reload: reloadMarkers });
+      const saved = await updateMediaBookmark(
+        chaptersBookmarksClient(request.spaceId),
+        media.id,
+        bookmarkId,
+        input,
+        bookmarkMutationOptions(request),
+      );
+      if (!isCurrentMarkerRequest(request)) return;
+      setBookmarks((items) => upsertBookmark(items, saved));
+      reloadMarkersAfterSuccess(request);
     } catch (error) {
       if (error instanceof BookmarkConflictError) {
         showBookmarkConflict(request);
@@ -469,7 +519,7 @@ export default function PlayPage() {
       }
       throw error;
     }
-  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
+  }, [bookmarkMutationOptions, isCurrentMarkerRequest, media, reloadMarkersAfterSuccess, showBookmarkConflict]);
 
   const handleDeleteBookmark = useCallback(async (
     bookmarkId: string,
@@ -478,7 +528,16 @@ export default function PlayPage() {
     const request = markerRequestRef.current;
     if (!media || !request || request.mediaId !== media.id) throw abortError();
     try {
-      await deleteMediaBookmark(chaptersBookmarksClient(), media.id, bookmarkId, revision, { reload: reloadMarkers });
+      await deleteMediaBookmark(
+        chaptersBookmarksClient(request.spaceId),
+        media.id,
+        bookmarkId,
+        revision,
+        bookmarkMutationOptions(request),
+      );
+      if (!isCurrentMarkerRequest(request)) return;
+      setBookmarks((items) => items.filter((item) => item.id !== bookmarkId));
+      reloadMarkersAfterSuccess(request);
     } catch (error) {
       if (error instanceof BookmarkConflictError) {
         showBookmarkConflict(request);
@@ -489,7 +548,7 @@ export default function PlayPage() {
       }
       throw error;
     }
-  }, [isCurrentMarkerRequest, media, reloadMarkers, showBookmarkConflict]);
+  }, [bookmarkMutationOptions, isCurrentMarkerRequest, media, reloadMarkersAfterSuccess, showBookmarkConflict]);
 
   // 续播与观看状态（FR-44）：上报播放位置、看完标记。失败仅静默忽略，不打断播放。
   const handlePositionReport = useCallback(
@@ -795,11 +854,14 @@ export default function PlayPage() {
             previewSpriteUrls={previewSpriteUrls}
             chapters={chapters}
             bookmarks={bookmarks}
-            markerContextKey={`${DEFAULT_SPACE_ID}:${media.id}`}
+            markerContextKey={`${media.space_id ?? ''}:${media.id}`}
             markersLoading={markersLoading}
             markersError={markersError}
             chaptersStale={chaptersStale}
-            onMarkersReload={() => void reloadMarkers()}
+            onMarkersReload={() => {
+              const request = markerRequestRef.current;
+              if (request) void loadMarkers(request, false);
+            }}
             onCreateBookmark={handleCreateBookmark}
             onUpdateBookmark={handleUpdateBookmark}
             onDeleteBookmark={handleDeleteBookmark}

@@ -74,6 +74,23 @@ describe("media-client package", () => {
     expect(requests[0]?.headers.get("X-JianVideo-Space-Id")).toBe("space-a");
   });
 
+  it("多个客户端始终使用各自 Space 请求头", async () => {
+    const requests: Request[] = [];
+    const fetchMock: typeof fetch = (input, init) => {
+      requests.push(new Request(input, init));
+      return Promise.resolve(Response.json({ items: [] }));
+    };
+    const clientA = createApiClient({ fetch: fetchMock, space: { spaceId: "space-a" } });
+    const clientB = createApiClient({ fetch: fetchMock, space: { spaceId: "space-b" } });
+
+    await Promise.all([listMediaBookmarks(clientA, 1), listMediaBookmarks(clientB, 1)]);
+
+    expect(requests.map((request) => request.headers.get("X-JianVideo-Space-Id"))).toEqual([
+      "space-a",
+      "space-b",
+    ]);
+  });
+
   it("规范化接口错误", async () => {
     const client = createApiClient({
       fetch: () =>
@@ -260,6 +277,69 @@ describe("media-client package", () => {
       revision: 1,
       title: "修正标题",
     });
+  });
+
+  it("POST 成功后 reload 失败仍返回已写入书签且不会重复写入", async () => {
+    let postCount = 0;
+    const client = createApiClient({
+      fetch: () => {
+        postCount += 1;
+        return Promise.resolve(
+          Response.json({
+            created_at: "2026-07-13T00:00:00Z",
+            id: "bookmark-1",
+            note: null,
+            position_ms: 1000,
+            revision: 1,
+            title: "已保存",
+            updated_at: "2026-07-13T00:01:00Z",
+          }),
+        );
+      },
+      space: { spaceId: "space-a" },
+    });
+    const reloadError = new Error("GET 刷新失败");
+    const onReloadError = vi.fn();
+
+    await expect(
+      createMediaBookmark(
+        client,
+        42,
+        { note: null, positionMs: 1000, title: "已保存" },
+        { onReloadError, reload: vi.fn().mockRejectedValue(reloadError) },
+      ),
+    ).resolves.toMatchObject({ id: "bookmark-1", revision: 1, title: "已保存" });
+    expect(postCount).toBe(1);
+    expect(onReloadError).toHaveBeenCalledWith(reloadError);
+  });
+
+  it("可跳过成功后的 reload 以先提交服务端写入结果", async () => {
+    const reload = vi.fn();
+    const client = createApiClient({
+      fetch: () =>
+        Promise.resolve(
+          Response.json({
+            created_at: "2026-07-13T00:00:00Z",
+            id: "bookmark-1",
+            note: null,
+            position_ms: 1000,
+            revision: 1,
+            title: "已保存",
+            updated_at: "2026-07-13T00:01:00Z",
+          }),
+        ),
+      space: { spaceId: "space-a" },
+    });
+
+    await expect(
+      createMediaBookmark(
+        client,
+        42,
+        { note: null, positionMs: 1000, title: "已保存" },
+        { reload, reloadAfterSuccess: false },
+      ),
+    ).resolves.toMatchObject({ id: "bookmark-1", revision: 1, title: "已保存" });
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("映射 409 current/deleted 并在冲突后显式 reload", async () => {

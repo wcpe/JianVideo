@@ -125,6 +125,8 @@ export interface MediaBookmarkUpdate {
 
 export interface BookmarkMutationOptions {
   readonly reload: () => Promise<void>;
+  readonly onReloadError?: (error: unknown) => Promise<void> | void;
+  readonly reloadAfterSuccess?: boolean;
 }
 
 export type TaskType = string;
@@ -722,17 +724,28 @@ function jsonRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
   };
 }
 
-async function mutateBookmark<T>(mutation: () => Promise<T>, options: BookmarkMutationOptions): Promise<T> {
+async function reloadAfterBookmarkMutation(options: BookmarkMutationOptions): Promise<void> {
   try {
-    const result = await mutation();
     await options.reload();
-    return result;
   } catch (error) {
-    if (error instanceof BookmarkConflictError) {
-      await options.reload();
+    try {
+      await options.onReloadError?.(error);
+    } catch {
+      // 刷新错误回调不得把已经成功的服务端写入改判为失败。
     }
+  }
+}
+
+async function mutateBookmark<T>(mutation: () => Promise<T>, options: BookmarkMutationOptions): Promise<T> {
+  let result: T;
+  try {
+    result = await mutation();
+  } catch (error) {
+    if (error instanceof BookmarkConflictError) await reloadAfterBookmarkMutation(options);
     throw error;
   }
+  if (options.reloadAfterSuccess !== false) await reloadAfterBookmarkMutation(options);
+  return result;
 }
 
 function buildPath(path: string, params: URLSearchParams): string {

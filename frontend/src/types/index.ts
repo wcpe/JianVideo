@@ -65,6 +65,8 @@ export interface WatchStateConflictResponse extends WatchStateUpdateResult {
 
 export interface MediaFile {
   id: number;
+  /** 媒体所属 Space；旧缓存数据可能缺省。 */
+  space_id?: string;
   library_id: number;
   file_path: string;
   file_name: string;

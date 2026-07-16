@@ -44,9 +44,10 @@ vi.mock('@/components/VideoPlayer', () => ({
   },
 }));
 
-function media(id: number) {
+function media(id: number, spaceId = `space-${id}`) {
   return {
     id,
+    space_id: spaceId,
     library_id: 1,
     file_path: `D:/video/${id}.mp4`,
     file_name: `${id}.mp4`,
@@ -152,13 +153,16 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
     await waitFor(() => {
       expect(player).toHaveAttribute('data-chapters', '开场');
       expect(player).toHaveAttribute('data-bookmarks', '重点:1');
-      expect(player).toHaveAttribute('data-marker-context', 'space-default:1');
+      expect(player).toHaveAttribute('data-marker-context', 'space-1:1');
     });
     expect(mediaClient.getMediaChapters).toHaveBeenCalledWith(
-      expect.objectContaining({ space: { spaceId: 'space-default' } }),
+      expect.objectContaining({ space: { spaceId: 'space-1' } }),
       1,
     );
-    expect(mediaClient.listMediaBookmarks).toHaveBeenCalledWith(expect.any(Object), 1);
+    expect(mediaClient.listMediaBookmarks).toHaveBeenCalledWith(
+      expect.objectContaining({ space: { spaceId: 'space-1' } }),
+      1,
+    );
   });
 
   it('revision CAS 冲突后重新加载服务端真源并显示明确提示', async () => {
@@ -210,6 +214,41 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
     );
   });
 
+  it('写入成功后刷新失败仍保留服务端返回且不重复写入', async () => {
+    mediaClient.createMediaBookmark.mockResolvedValue(bookmark('服务端写入结果', 1));
+    mediaClient.listMediaBookmarks
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('GET 刷新失败'));
+    const notify = vi.spyOn(notifications, 'show');
+    renderPage();
+    const player = await screen.findByTestId('video-player');
+    await waitFor(() => expect(player).toHaveAttribute('data-marker-context', 'space-1:1'));
+
+    const create = playerState.props.onCreateBookmark as (input: {
+      note: string | null;
+      positionMs: number;
+      title: string;
+    }) => Promise<void>;
+    await act(async () => {
+      await create({ note: null, positionMs: 5_000, title: '本地输入' });
+    });
+
+    expect(mediaClient.createMediaBookmark).toHaveBeenCalledWith(
+      expect.objectContaining({ space: { spaceId: 'space-1' } }),
+      1,
+      expect.any(Object),
+      expect.objectContaining({ reloadAfterSuccess: false }),
+    );
+    await waitFor(() => {
+      expect(player).toHaveAttribute('data-bookmarks', '服务端写入结果:1');
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '书签已保存，刷新失败' }),
+      );
+    });
+    expect(mediaClient.createMediaBookmark).toHaveBeenCalledTimes(1);
+    expect(mediaClient.listMediaBookmarks).toHaveBeenCalledTimes(2);
+  });
+
   it('快速切换媒体时丢弃旧章节和书签的迟到响应', async () => {
     let releaseOld!: () => void;
     const oldGate = new Promise<void>((resolve) => {
@@ -237,12 +276,99 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
     await waitFor(() => {
       expect(player).toHaveAttribute('data-chapters', '新章节');
       expect(player).toHaveAttribute('data-bookmarks', '新书签:1');
-      expect(player).toHaveAttribute('data-marker-context', 'space-default:2');
+      expect(player).toHaveAttribute('data-marker-context', 'space-2:2');
     });
 
     releaseOld();
     await act(async () => Promise.resolve());
     expect(player).toHaveAttribute('data-chapters', '新章节');
     expect(player).toHaveAttribute('data-bookmarks', '新书签:1');
+  });
+
+  it('同一媒体切换 Space 时按新 Space 重载并丢弃旧响应', async () => {
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let currentSpace = 'space-a';
+    server.use(
+      http.get('*/api/library/media/:id', ({ params }) =>
+        HttpResponse.json(media(Number(params.id), currentSpace)),
+      ),
+    );
+    mediaClient.getMediaChapters.mockImplementation(async (client: { space: { spaceId: string } }) => {
+      if (client.space.spaceId === 'space-a') await oldGate;
+      return {
+        items: [chapter(client.space.spaceId === 'space-a' ? '旧空间章节' : '新空间章节')],
+        parsedAt: null,
+        stale: false,
+      };
+    });
+    mediaClient.listMediaBookmarks.mockImplementation(
+      async (client: { space: { spaceId: string } }) => {
+        if (client.space.spaceId === 'space-a') await oldGate;
+        return [bookmark(client.space.spaceId === 'space-a' ? '旧空间书签' : '新空间书签', 1)];
+      },
+    );
+
+    const { router } = renderPage('/play/1');
+    await screen.findByTestId('video-player');
+    currentSpace = 'space-b';
+    await act(async () => {
+      await router.navigate('/other');
+    });
+    await screen.findByText('其它页面');
+    await act(async () => {
+      await router.navigate('/play/1');
+    });
+    const player = await screen.findByTestId('video-player');
+    await waitFor(() => {
+      expect(player).toHaveAttribute('data-marker-context', 'space-b:1');
+      expect(player).toHaveAttribute('data-chapters', '新空间章节');
+      expect(player).toHaveAttribute('data-bookmarks', '新空间书签:1');
+    });
+
+    releaseOld();
+    await act(async () => Promise.resolve());
+    expect(player).toHaveAttribute('data-chapters', '新空间章节');
+    expect(player).toHaveAttribute('data-bookmarks', '新空间书签:1');
+  });
+
+  it('同一 media 和 Space 的多次加载乱序时仅接受最新响应', async () => {
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let loadCount = 0;
+    mediaClient.getMediaChapters.mockImplementation(async () => {
+      loadCount += 1;
+      const currentLoad = loadCount;
+      if (currentLoad === 1) await oldGate;
+      return {
+        items: [chapter(currentLoad === 1 ? '旧章节' : '新章节')],
+        parsedAt: null,
+        stale: false,
+      };
+    });
+    mediaClient.listMediaBookmarks.mockImplementation(async () => {
+      const currentLoad = loadCount;
+      if (currentLoad === 1) await oldGate;
+      return [bookmark(currentLoad === 1 ? '旧书签' : '新书签', currentLoad)];
+    });
+
+    renderPage();
+    await screen.findByTestId('video-player');
+    const reload = playerState.props.onMarkersReload as () => void;
+    await act(async () => reload());
+    const player = await screen.findByTestId('video-player');
+    await waitFor(() => {
+      expect(player).toHaveAttribute('data-chapters', '新章节');
+      expect(player).toHaveAttribute('data-bookmarks', '新书签:2');
+    });
+
+    releaseOld();
+    await act(async () => Promise.resolve());
+    expect(player).toHaveAttribute('data-chapters', '新章节');
+    expect(player).toHaveAttribute('data-bookmarks', '新书签:2');
   });
 });
