@@ -46,6 +46,21 @@ import { useAuthStore } from '@/stores/auth';
 import { loadVolumePref, clampVolume, saveVolumePref } from '@/components/VideoPlayer.helpers';
 import { WebPlaybackBackend, type WebPlaybackSourcePayload } from '@/player/WebPlaybackBackend';
 import {
+  DEFAULT_PLAYER_VISUAL_BRIGHTNESS,
+  MAX_PLAYER_VISUAL_BRIGHTNESS,
+  MIN_PLAYER_VISUAL_BRIGHTNESS,
+  WebMediaSessionAdapter,
+  WebPictureInPictureAdapter,
+  classifyPlayerGesture,
+  detectWebPlayerCapabilities,
+  isGestureInteractiveTarget,
+  mapSeekGesture,
+  mapVerticalGesture,
+  type MediaSessionPort,
+  type PictureInPictureState,
+  type PlayerGestureKind,
+} from '@/player/WebPlatformAdapter';
+import {
   createBinaryFrameMarkerResolver,
   type ResolvePresentedFrameIdentity,
   type WebBinaryFrameMarker,
@@ -60,8 +75,12 @@ interface VideoPlayerProps {
    * 缺省时保持现有 url/isABR/streamType 行为不变（现有调用方零改动）。
    */
   descriptor?: PlaybackDescriptor;
-  /** 可选视频海报；只传给原生 video，不参与播放状态机。 */
+  /** 可选视频海报；同时作为 Media Session 封面，不参与播放状态机。 */
   poster?: string;
+  /** Media Session 展示的当前媒体标题。 */
+  mediaTitle?: string;
+  /** Media Session 展示的应用名。 */
+  applicationName?: string;
   /** 后端准备的稳定帧时间线；仅用于取得相邻目标。 */
   frameTimeline?: readonly WebFrameTimelineEntry[];
   /** 显式二进制画面 marker；仅从实际呈现像素读取稳定身份。 */
@@ -165,6 +184,21 @@ type PreviewPointerSession = {
   pointerId: number;
   startY: number;
   timer: ReturnType<typeof setTimeout> | null;
+};
+
+type PlayerGestureSession = {
+  brightness: number;
+  height: number;
+  kind: PlayerGestureKind | null;
+  originalMuted: boolean;
+  originalVolume: number;
+  pointerId: number;
+  seekTarget: number | null;
+  startTime: number;
+  startVolume: number;
+  startX: number;
+  startY: number;
+  width: number;
 };
 
 function createPointerSession(): PreviewPointerSession {
@@ -332,6 +366,8 @@ export default function VideoPlayer({
   url,
   descriptor,
   poster,
+  mediaTitle = 'JianVideo 媒体',
+  applicationName = 'JianVideo',
   frameTimeline,
   frameMarker,
   nominalFrameRate,
@@ -355,6 +391,11 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const coreRef = useRef<PlaybackCore | null>(null);
   const backendRef = useRef<WebPlaybackBackend | null>(null);
+  const mediaSessionRef = useRef<WebMediaSessionAdapter | null>(null);
+  const pipAdapterRef = useRef<WebPictureInPictureAdapter | null>(null);
+  const gestureSessionRef = useRef<PlayerGestureSession | null>(null);
+  const gestureStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressDoubleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewImageCacheRef = useRef(new Map<string, Promise<void>>());
   const previewRequestRef = useRef(0);
   const previewPointerRef = useRef<PreviewPointerSession>(createPointerSession());
@@ -424,6 +465,9 @@ export default function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   // 全屏态：由 fullscreenchange 同步
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [pipState, setPipState] = useState<PictureInPictureState>('unsupported');
+  const [visualBrightness, setVisualBrightness] = useState(DEFAULT_PLAYER_VISUAL_BRIGHTNESS);
+  const [gestureStatus, setGestureStatus] = useState<string | null>(null);
   // 倍速：映射到 video.playbackRate
   const [rate, setRate] = useState(1);
   // 进度条 hover 时间预览：null 表示未 hover
@@ -433,8 +477,6 @@ export default function VideoPlayer({
   const [controlsVisible, setControlsVisible] = useState(true);
   // 字幕字号档（FR-104）
   const [subtitleScale, setSubtitleScale] = useState<SubtitleScale>('medium');
-  // 画中画能力探测（FR-104）：浏览器不支持时隐藏 PiP 按钮
-  const pipSupported = typeof document !== 'undefined' && Boolean(document.pictureInPictureEnabled);
   // 控件自动隐藏定时器句柄
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -517,6 +559,7 @@ export default function VideoPlayer({
       setDuration(snapshot.duration);
       setBufferedProgress(bufferedPercent(snapshot));
       setFramePresentationCapability(snapshot.capabilities.framePresentation);
+      mediaSessionRef.current?.sync(snapshot);
       if (becameSeekable) {
         restoreRetryPendingRef.current = true;
         void seekToInitialOnce();
@@ -602,6 +645,46 @@ export default function VideoPlayer({
   }, [syncCoreSnapshot, syncTrackState]);
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const pip = new WebPictureInPictureAdapter(video, document, setPipState, (message) => {
+      notifyError(message, '画中画操作失败');
+    });
+    pipAdapterRef.current = pip;
+
+    const session = navigator.mediaSession as unknown as MediaSessionPort | undefined;
+    const mediaSession = session
+      ? new WebMediaSessionAdapter(session, {
+          pause: () => coreRef.current?.pause(),
+          play: () => coreRef.current?.play(),
+          seekBy: (offset) => coreRef.current?.seekBy(offset),
+          seekTo: (time) => coreRef.current?.seek(time, 'user'),
+          stop: () => coreRef.current?.stop(),
+        })
+      : null;
+    mediaSessionRef.current = mediaSession;
+    const snapshot = coreRef.current?.getSnapshot();
+    if (snapshot) mediaSession?.sync(snapshot);
+
+    const syncVisibleState = () => {
+      const current = coreRef.current?.getSnapshot();
+      if (current) mediaSessionRef.current?.sync(current);
+    };
+    document.addEventListener('visibilitychange', syncVisibleState);
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibleState);
+      mediaSession?.dispose();
+      mediaSessionRef.current = null;
+      pip.dispose();
+      pipAdapterRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    mediaSessionRef.current?.setMetadata({ applicationName, artwork: poster, title: mediaTitle });
+  }, [applicationName, mediaTitle, poster, resolved.url]);
+
+  useEffect(() => {
     const core = coreRef.current;
     if (core) syncPreviewFacet(core.getSnapshot());
     previewRequestRef.current += 1;
@@ -653,6 +736,22 @@ export default function VideoPlayer({
       markerResolver,
     );
     let current = true;
+    const pendingGesture = gestureSessionRef.current;
+    if (pendingGesture?.kind === 'volume' && videoRef.current) {
+      videoRef.current.volume = pendingGesture.originalVolume;
+      videoRef.current.muted = pendingGesture.originalMuted;
+      setVolume(pendingGesture.originalVolume);
+      setIsMuted(pendingGesture.originalMuted);
+    }
+    gestureSessionRef.current = null;
+    if (gestureStatusTimerRef.current) {
+      clearTimeout(gestureStatusTimerRef.current);
+      gestureStatusTimerRef.current = null;
+    }
+    setGestureStatus(null);
+    setSeekPreviewTime(null);
+    setVisualBrightness(DEFAULT_PLAYER_VISUAL_BRIGHTNESS);
+    void pipAdapterRef.current?.resetForSourceChange();
     restoreGenerationRef.current += 1;
     restoreInFlightRef.current = null;
     restoreRetryPendingRef.current = false;
@@ -937,6 +1036,151 @@ export default function VideoPlayer({
     // FR-104：用户主动调音量 → 记忆其偏好
     saveVolumePref({ volume: next, muted: next === 0 });
   };
+  const resetVisualBrightness = () => {
+    if (gestureStatusTimerRef.current) clearTimeout(gestureStatusTimerRef.current);
+    setVisualBrightness(DEFAULT_PLAYER_VISUAL_BRIGHTNESS);
+    setGestureStatus('播放器画面亮度 100%，仅影响当前播放器画面');
+    gestureStatusTimerRef.current = setTimeout(() => {
+      gestureStatusTimerRef.current = null;
+      setGestureStatus(null);
+    }, 1200);
+  };
+
+  const cancelPlayerGesture = () => {
+    const session = gestureSessionRef.current;
+    if (!session) return;
+    if (session.kind === 'volume' && videoRef.current) {
+      videoRef.current.volume = session.originalVolume;
+      videoRef.current.muted = session.originalMuted;
+      setVolume(session.originalVolume);
+      setIsMuted(session.originalMuted);
+    }
+    if (session.kind === 'brightness') setVisualBrightness(session.brightness);
+    gestureSessionRef.current = null;
+    setSeekPreviewTime(null);
+    setGestureStatus(null);
+  };
+
+  const suppressGestureDoubleClick = () => {
+    if (suppressDoubleClickTimerRef.current) clearTimeout(suppressDoubleClickTimerRef.current);
+    suppressDoubleClickTimerRef.current = setTimeout(() => {
+      suppressDoubleClickTimerRef.current = null;
+    }, 500);
+  };
+
+  const handlePlayerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+    if (isGestureInteractiveTarget(event.target, event.currentTarget)) return;
+    if (gestureSessionRef.current !== null) {
+      cancelPlayerGesture();
+      return;
+    }
+    const video = videoRef.current;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!video || rect.width <= 0 || rect.height <= 0) return;
+    if (gestureStatusTimerRef.current) {
+      clearTimeout(gestureStatusTimerRef.current);
+      gestureStatusTimerRef.current = null;
+    }
+    gestureSessionRef.current = {
+      brightness: visualBrightness,
+      height: rect.height,
+      kind: null,
+      originalMuted: video.muted,
+      originalVolume: video.volume,
+      pointerId: event.pointerId,
+      seekTarget: null,
+      startTime: Number.isFinite(video.currentTime) ? video.currentTime : currentTime,
+      startVolume: video.muted ? 0 : video.volume,
+      startX: event.clientX - rect.left,
+      startY: event.clientY,
+      width: rect.width,
+    };
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // 捕获失败时仍依赖 pointercancel 和卸载清理收口。
+    }
+  };
+
+  const updateSeekGesture = (session: PlayerGestureSession, deltaX: number) => {
+    const target = mapSeekGesture({
+      deltaX,
+      duration,
+      startTime: session.startTime,
+      width: session.width,
+    });
+    session.seekTarget = target;
+    setSeekPreviewTime(target);
+    const offset = Math.round(target - session.startTime);
+    const sign = offset > 0 ? '+' : '';
+    setGestureStatus(`定位 ${sign}${offset} 秒，目标 ${fmt(target)} / ${fmt(duration)}`);
+  };
+
+  const updateVolumeGesture = (session: PlayerGestureSession, deltaY: number) => {
+    const next = mapVerticalGesture({
+      deltaY,
+      height: session.height,
+      max: 1,
+      min: 0,
+      startValue: session.startVolume,
+    });
+    handleVolume(next);
+    setGestureStatus(`媒体音量 ${Math.round(next * 100)}%`);
+  };
+
+  const updateBrightnessGesture = (session: PlayerGestureSession, deltaY: number) => {
+    const next = mapVerticalGesture({
+      deltaY,
+      height: session.height,
+      max: MAX_PLAYER_VISUAL_BRIGHTNESS,
+      min: MIN_PLAYER_VISUAL_BRIGHTNESS,
+      startValue: session.brightness,
+    });
+    setVisualBrightness(next);
+    setGestureStatus(`播放器画面亮度 ${Math.round(next * 100)}%，仅影响当前播放器画面`);
+  };
+
+  const handlePlayerPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = gestureSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const deltaX = event.clientX - rect.left - session.startX;
+    const deltaY = event.clientY - session.startY;
+    session.kind ??= classifyPlayerGesture({ deltaX, deltaY, startX: session.startX, width: session.width });
+    if (session.kind === null) return;
+    event.preventDefault();
+    suppressGestureDoubleClick();
+    if (session.kind === 'seek') updateSeekGesture(session, deltaX);
+    if (session.kind === 'volume') updateVolumeGesture(session, deltaY);
+    if (session.kind === 'brightness') updateBrightnessGesture(session, deltaY);
+  };
+
+  const handlePlayerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const session = gestureSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    gestureSessionRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // 浏览器已释放捕获时无需额外处理。
+    }
+    setSeekPreviewTime(null);
+    setGestureStatus(null);
+    if (session.kind === 'seek' && session.seekTarget !== null) {
+      void coreRef.current?.seek(session.seekTarget, 'user');
+    }
+  };
+
+  const handlePlayerDoubleClick = () => {
+    if (suppressDoubleClickTimerRef.current) {
+      clearTimeout(suppressDoubleClickTimerRef.current);
+      suppressDoubleClickTimerRef.current = null;
+      return;
+    }
+    toggleFullscreen();
+  };
+
   const toggleMute = () => {
     const v = videoRef.current;
     if (!v) return;
@@ -1156,17 +1400,9 @@ export default function VideoPlayer({
     }
   };
 
-  // FR-104：画中画切换（仅在浏览器支持时可达）
+  // 画中画状态由浏览器原生事件收敛，不以 Promise 完成冒充已进入。
   const togglePip = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (document.pictureInPictureElement === v) {
-      void document.exitPictureInPicture?.();
-    } else {
-      void v.requestPictureInPicture?.()?.catch?.(() => {
-        /* 静默：部分流不支持 PiP */
-      });
-    }
+    void pipAdapterRef.current?.toggle();
   };
 
   // FR-104：按百分比跳转（数字键 0-9）也统一进入 core。
@@ -1188,8 +1424,16 @@ export default function VideoPlayer({
   useEffect(
     () => () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (gestureStatusTimerRef.current) clearTimeout(gestureStatusTimerRef.current);
+      if (suppressDoubleClickTimerRef.current) clearTimeout(suppressDoubleClickTimerRef.current);
       const timer = previewPointerRef.current.timer;
       if (timer) clearTimeout(timer);
+      const gesture = gestureSessionRef.current;
+      if (gesture?.kind === 'volume' && videoRef.current) {
+        videoRef.current.volume = gesture.originalVolume;
+        videoRef.current.muted = gesture.originalMuted;
+      }
+      gestureSessionRef.current = null;
     },
     [],
   );
@@ -1284,13 +1528,19 @@ export default function VideoPlayer({
   const hoverTime = hoverPct !== null && duration > 0 ? (hoverPct / 100) * duration : 0;
   // 控件区透明度：播放中静止淡出，其余常显
   const controlsOpacity = controlsVisible ? 1 : 0;
+  const platformCapabilities = detectWebPlayerCapabilities(videoRef.current);
+  const standaloneDisplay = window.matchMedia?.('(display-mode: standalone)').matches === true;
 
   return (
     <Box
       ref={containerRef}
       data-testid="video-player-root"
+      data-background-audio={platformCapabilities.backgroundAudio}
       data-frame-presentation={framePresentationCapability ?? 'pending'}
       data-frame-step-result={lastFrameStepResult}
+      data-media-session={platformCapabilities.mediaSession}
+      data-player-visual-brightness={platformCapabilities.playerVisualBrightness}
+      data-system-brightness={platformCapabilities.systemBrightness}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onMouseMove={showControlsTemporarily}
@@ -1307,11 +1557,18 @@ export default function VideoPlayer({
       }}
     >
       <Box
-        onDoubleClick={toggleFullscreen}
+        data-testid="video-gesture-surface"
+        onDoubleClick={handlePlayerDoubleClick}
+        onPointerDown={handlePlayerPointerDown}
+        onPointerMove={handlePlayerPointerMove}
+        onPointerUp={handlePlayerPointerUp}
+        onPointerCancel={cancelPlayerGesture}
+        onLostPointerCapture={cancelPlayerGesture}
         style={{
           position: 'relative',
           width: '100%',
           backgroundColor: 'black',
+          touchAction: isFullscreen || standaloneDisplay ? 'none' : 'auto',
           // FR-103：填充模式去掉固定 16:9，改为 flex 填充剩余高度；缺省维持 16:9
           ...(fill ? { flex: 1, minHeight: 0 } : { aspectRatio: '16/9' }),
         }}
@@ -1319,7 +1576,13 @@ export default function VideoPlayer({
         <video
           ref={videoRef}
           poster={poster}
-          style={{ width: '100%', height: '100%', backgroundColor: 'black', objectFit: 'contain' }}
+          style={{
+            width: '100%',
+            height: '100%',
+            backgroundColor: 'black',
+            filter: `brightness(${visualBrightness})`,
+            objectFit: 'contain',
+          }}
           playsInline
         />
         {/* FR-52：目标编码不受支持且无回退源时的提示（不抛 Network Error） */}
@@ -1361,6 +1624,7 @@ export default function VideoPlayer({
         )}
         {autoPlayBlocked && !isPlaying && !qualityState.dataSaverBlocked && (
           <Box
+            data-player-gesture-ignore="true"
             style={{
               position: 'absolute',
               inset: 0,
@@ -1422,6 +1686,27 @@ export default function VideoPlayer({
           >
             <Text c="white" size="sm">
               等待新数据…
+            </Text>
+          </Box>
+        )}
+        {gestureStatus && (
+          <Box
+            aria-live="polite"
+            role="status"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              padding: '8px 12px',
+              borderRadius: 'var(--mantine-radius-md)',
+              backgroundColor: 'rgba(0,0,0,0.75)',
+              color: 'white',
+              pointerEvents: 'none',
+            }}
+          >
+            <Text c="white" size="sm" ta="center">
+              {gestureStatus}
             </Text>
           </Box>
         )}
@@ -1839,9 +2124,27 @@ export default function VideoPlayer({
           />
         </Box>
 
-        {/* FR-104：画中画（浏览器不支持则隐藏） */}
-        {pipSupported && (
-          <ActionIcon variant="subtle" color="gray" onClick={togglePip} aria-label="画中画">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          onClick={resetVisualBrightness}
+          aria-label="重置播放器画面亮度"
+          title="仅调整播放器画面，浏览器不支持调节系统亮度"
+          style={{ width: 'auto', paddingInline: 6 }}
+        >
+          <Text size="xs" fw={600}>
+            亮度 {Math.round(visualBrightness * 100)}%
+          </Text>
+        </ActionIcon>
+
+        {pipState !== 'unsupported' && (
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            onClick={togglePip}
+            disabled={pipState === 'requesting' || pipState === 'exiting'}
+            aria-label={pipState === 'active' ? '退出画中画' : '画中画'}
+          >
             <IconPictureInPicture size={18} />
           </ActionIcon>
         )}

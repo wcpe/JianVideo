@@ -233,12 +233,32 @@ export class PlaybackCore {
     return result;
   }
 
+  async stop(): Promise<PlaybackCommandResult> {
+    const requestId = this.allocateRequestId();
+    const identity = this.identity(requestId);
+    this.interruptFrameCommands(requestId);
+    const rejected = this.rejectStateCommand(identity);
+    if (rejected !== null) return rejected;
+    const command = this.requireCommand(identity);
+    const snapshot = this.snapshot;
+    const targetTime = stopTarget(snapshot);
+    this.acceptCommand(requestId);
+    if (isStoppedSnapshot(snapshot, targetTime)) return this.completeStop(command, targetTime);
+    const startedTerminalRevision = this.terminalRevision;
+    const operation = this.runOperation(requestId, () => this.executeStop(command, snapshot, targetTime));
+    return this.finishStop(command, startedTerminalRevision, targetTime, await operation);
+  }
+
   async seek(requestedTime: number, reason: SeekReason = 'user'): Promise<SeekResult> {
     const requestId = this.allocateRequestId();
     this.interruptFrameCommands(requestId);
     const result = await this.performSeek(requestedTime, reason, this.identity(requestId));
     if (reason !== 'ab_loop' && result.status === 'completed') await this.enforceAbLoop(result.confirmedTime);
     return result;
+  }
+
+  seekBy(offset: number, reason: SeekReason = 'user'): Promise<SeekResult> {
+    return this.seek(this.snapshot.currentTime + offset, reason);
   }
 
   stepFrame(direction: FrameStepDirection): Promise<FrameStepResult> {
@@ -762,6 +782,49 @@ export class PlaybackCore {
 
   private stopLoading(command: PlaybackCommandContext): Promise<void> {
     return this.loadControlFacet?.stopLoading(command) ?? Promise.resolve();
+  }
+
+  private async executeStop(
+    command: PlaybackCommandContext,
+    snapshot: PlaybackSnapshot,
+    targetTime: number | null,
+  ): Promise<SeekResult | null> {
+    await this.backend.pause(command);
+    if (!this.isCurrentCommand(command) || targetTime === null || snapshot.currentTime === targetTime) return null;
+    return this.backend.seek(createSeekRequest(command, 'user', targetTime, targetTime));
+  }
+
+  private finishStop(
+    command: PlaybackCommandContext,
+    startedTerminalRevision: number,
+    targetTime: number | null,
+    outcome: OperationOutcome<SeekResult | null>,
+  ): PlaybackCommandResult {
+    if (outcome.kind === 'controlled') {
+      return this.publishCommandResult(this.result(command.requestId, outcome.status), command);
+    }
+    const controlled = this.controlledCommandResult(command, outcome);
+    if (controlled !== null) return controlled;
+    const terminal = this.terminalCommandResult(command, startedTerminalRevision);
+    if (terminal !== null) return terminal;
+    if (outcome.kind === 'failed') return this.finishStateFailure(command, outcome.error);
+    if (outcome.value !== null && outcome.value.status !== 'completed') {
+      return this.finishStopSeekResult(command, outcome.value);
+    }
+    return this.completeStop(command, outcome.value?.confirmedTime ?? targetTime);
+  }
+
+  private finishStopSeekResult(command: PlaybackCommandContext, result: SeekResult): PlaybackCommandResult {
+    const error = result.error ?? (result.status === 'failed' ? { category: 'unknown' as const, message: '停止播放失败' } : undefined);
+    const state = result.status === 'failed' ? 'error' : 'paused';
+    this.updateSnapshot({ ...this.snapshot, error: error ?? null, requestId: command.requestId, state });
+    return this.publishCommandResult(this.result(command.requestId, result.status, error), command);
+  }
+
+  private completeStop(command: PlaybackCommandContext, targetTime: number | null): PlaybackCommandResult {
+    const currentTime = targetTime ?? this.snapshot.currentTime;
+    this.updateSnapshot({ ...this.snapshot, currentTime, error: null, requestId: command.requestId, state: 'ready' });
+    return this.publishCommandResult(this.result(command.requestId, 'completed'), command);
   }
 
   private async performSeek(
@@ -2000,6 +2063,16 @@ function seekResumeState(state: PlaybackState): PlaybackState {
 
 function isCommandState(state: PlaybackState): boolean {
   return state !== 'idle' && state !== 'loading' && state !== 'error' && state !== 'disposed';
+}
+
+function stopTarget(snapshot: PlaybackSnapshot): number | null {
+  if (snapshot.capabilities.seek === 'unavailable') return null;
+  return normalizeRanges(snapshot.seekable)[0]?.start ?? null;
+}
+
+function isStoppedSnapshot(snapshot: PlaybackSnapshot, targetTime: number | null): boolean {
+  const stoppedState = snapshot.state !== 'playing' && snapshot.state !== 'seeking';
+  return stoppedState && (targetTime === null || snapshot.currentTime === targetTime);
 }
 
 function finiteTime(value: number): number {

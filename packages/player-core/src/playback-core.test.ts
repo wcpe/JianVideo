@@ -259,14 +259,72 @@ describe('PlaybackCore', () => {
     expect(core.getSnapshot()).toMatchObject({ currentTime: 0, sourceId: SOURCE_B.id, state: 'ready' });
   });
 
-  it('dispose 幂等并让待处理命令受控取消', async () => {
+  it('stop 暂停并回到可定位起点，重复调用不重复触发后端', async () => {
+    const backend = new FakePlaybackBackend();
+    backend.setSnapshot(
+      createSnapshot({ currentTime: 20, sourceId: SOURCE_A.id, state: 'playing' }),
+    );
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+
+    await expect(core.stop()).resolves.toMatchObject({ requestId: 2, status: 'completed' });
+    expect(core.getSnapshot()).toMatchObject({ currentTime: 0, requestId: 2, state: 'ready' });
+    expect(backend.calls.slice(1)).toEqual([
+      expect.objectContaining({ method: 'pause', requestId: 2, sourceId: SOURCE_A.id }),
+      expect.objectContaining({ method: 'seek', requestId: 2, sourceId: SOURCE_A.id, targetTime: 0 }),
+    ]);
+
+    await expect(core.stop()).resolves.toMatchObject({ requestId: 3, status: 'completed' });
+    expect(core.getSnapshot()).toMatchObject({ currentTime: 0, requestId: 3, state: 'ready' });
+    expect(backend.calls).toHaveLength(3);
+  });
+
+  it('stop 取代待处理播放且不把受控取消归类为错误', async () => {
     const backend = new FakePlaybackBackend();
     const pendingPlay = new Deferred<void>();
     backend.playHandler = () => pendingPlay.promise;
     const core = new PlaybackCore({ backend });
     await core.load(SOURCE_A);
 
-    const result = core.play();
+    const play = core.play();
+    await Promise.resolve();
+    const stop = core.stop();
+
+    await expect(play).resolves.toMatchObject({ status: 'superseded' });
+    await expect(stop).resolves.toMatchObject({ status: 'completed' });
+    expect(core.getSnapshot()).toMatchObject({ error: null, state: 'ready' });
+    pendingPlay.resolve();
+  });
+
+  it('切源会受控取代进行中的 stop，旧源不得继续 seek', async () => {
+    const backend = new FakePlaybackBackend();
+    const pendingPause = new Deferred<void>();
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+    await core.play();
+    backend.pauseHandler = () => pendingPause.promise;
+
+    const stop = core.stop();
+    await Promise.resolve();
+    const load = core.load(SOURCE_B);
+
+    await expect(stop).resolves.toMatchObject({ status: 'superseded' });
+    await expect(load).resolves.toMatchObject({ status: 'completed' });
+    expect(core.getSnapshot()).toMatchObject({ sourceId: SOURCE_B.id, state: 'ready' });
+    expect(backend.calls.filter((call) => call.method === 'seek')).toHaveLength(0);
+    pendingPause.resolve();
+  });
+
+  it('dispose 幂等并让待处理 stop 受控取消', async () => {
+    const backend = new FakePlaybackBackend();
+    const pendingPause = new Deferred<void>();
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+    await core.play();
+    backend.pauseHandler = () => pendingPause.promise;
+
+    const result = core.stop();
+    await Promise.resolve();
     core.dispose();
     core.dispose();
 
@@ -274,7 +332,37 @@ describe('PlaybackCore', () => {
     expect(core.getSnapshot().state).toBe('disposed');
     expect(core.getSnapshot().error).toBeNull();
     expect(backend.disposeCount).toBe(1);
-    pendingPlay.resolve();
+    pendingPause.resolve();
+  });
+
+  it('stop 在不可定位媒体上只暂停并保留当前位置', async () => {
+    const backend = new FakePlaybackBackend();
+    backend.setSnapshot(
+      createSnapshot({
+        capabilities: { ...EMPTY_CAPABILITIES, seek: 'unavailable' },
+        currentTime: 20,
+        sourceId: SOURCE_A.id,
+        state: 'playing',
+      }),
+    );
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+
+    await expect(core.stop()).resolves.toMatchObject({ status: 'completed' });
+    expect(core.getSnapshot()).toMatchObject({ currentTime: 20, state: 'ready' });
+    expect(backend.calls.filter((call) => call.method === 'seek')).toHaveLength(0);
+  });
+
+  it('seekBy 使用实时位置并复用核心 seek 的夹取与取消语义', async () => {
+    const backend = new FakePlaybackBackend();
+    backend.setSnapshot(
+      createSnapshot({ currentTime: 55, duration: 60, seekable: [{ end: 60, start: 0 }] }),
+    );
+    const core = new PlaybackCore({ backend });
+    await core.load(SOURCE_A);
+
+    await expect(core.seekBy(10)).resolves.toMatchObject({ confirmedTime: 60, status: 'completed' });
+    expect(backend.calls.at(-1)).toMatchObject({ method: 'seek', targetTime: 60 });
   });
 
   it('保留后端错误类别并把未分类异常归为 unknown', async () => {

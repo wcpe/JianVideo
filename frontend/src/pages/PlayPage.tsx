@@ -622,6 +622,8 @@ export default function PlayPage() {
             frameTimeline={descriptor?.framePresentation?.timeline}
             nominalFrameRate={descriptor?.framePresentation?.nominalFrameRate}
             mediaId={media.id}
+            mediaTitle={mediaDisplayName(media)}
+            poster={`/api/library/thumbnail/${media.id}`}
             trackResponse={trackManifest ?? undefined}
             onTrackManifestRefresh={refreshTrackManifest}
             autoPlay

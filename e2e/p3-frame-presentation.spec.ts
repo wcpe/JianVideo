@@ -3,6 +3,7 @@ import {
   test,
   type APIRequestContext,
   type Locator,
+  type Page,
 } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -101,17 +102,18 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
       .poll(() => video.evaluate((node) => node.duration), { timeout: 15_000 })
       .toBeGreaterThan(9.5);
     await expect
-      .poll(() => video.evaluate((node) => node.currentSrc), { timeout: 15_000 })
+      .poll(() => video.evaluate((node) => node.currentSrc), {
+        timeout: 15_000,
+      })
       .toContain(`/api/play/${mediaID}/stream`);
     await expect(player).toHaveAttribute("data-frame-presentation", "exact", {
       timeout: 15_000,
     });
     await seekWithProgress(player, 40);
     await expect
-      .poll(
-        () => video.evaluate((node) => !node.seeking && node.paused),
-        { timeout: 15_000 },
-      )
+      .poll(() => video.evaluate((node) => !node.seeking && node.paused), {
+        timeout: 15_000,
+      })
       .toBe(true);
 
     await expect
@@ -147,6 +149,246 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
       rmSync(mediaDir, { recursive: true, force: true });
   }
 });
+
+test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
+  test.setTimeout(240_000);
+  test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实手势测试视频");
+  await installPlatformStubs(page);
+  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-p3-platform-"));
+  const mediaPath = join(mediaDir, "fr2-058-platform-video.mp4");
+  let libraryID = 0;
+
+  try {
+    writeNumberedVideo(mediaPath);
+    await login(page);
+    libraryID = await createLibrary(page.request, mediaDir);
+    const mediaID = await scanAndLoadMedia(page.request, libraryID);
+    await page.goto(`/play/${mediaID}`);
+
+    const player = page.getByTestId("video-player-root");
+    const surface = page.getByTestId("video-gesture-surface");
+    const video = page.locator("video");
+    await expect(player).toBeVisible({ timeout: 15_000 });
+    await expect(player).toHaveAttribute(
+      "data-background-audio",
+      "best-effort",
+    );
+    await expect(player).toHaveAttribute(
+      "data-system-brightness",
+      "unsupported",
+    );
+    await expect(player).toHaveAttribute(
+      "data-player-visual-brightness",
+      "available",
+    );
+    await expect(page.getByRole("button", { name: "暂停" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole("button", { name: "画中画" })).toBeVisible();
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => video.evaluate((node) => node.paused)).toBe(false);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            Object.keys(
+              (
+                window as Window & {
+                  __jianvideoMediaHandlers: Record<string, unknown>;
+                }
+              ).__jianvideoMediaHandlers,
+            ),
+          ),
+        { timeout: 15_000 },
+      )
+      .toContain("stop");
+
+    await page.getByRole("button", { name: "画中画" }).click();
+    await expect(
+      page.getByRole("button", { name: "退出画中画" }),
+    ).toBeVisible();
+
+    await video.evaluate((node) => {
+      node.currentTime = 3;
+      node.dispatchEvent(new Event("timeupdate"));
+    });
+    await page.evaluate(() => {
+      const handlers = (
+        window as Window & {
+          __jianvideoMediaHandlers: Record<
+            string,
+            ((details?: object) => void) | null
+          >;
+        }
+      ).__jianvideoMediaHandlers;
+      handlers.stop?.();
+    });
+    await expect
+      .poll(() =>
+        video.evaluate((node) => ({
+          paused: node.paused,
+          time: node.currentTime,
+        })),
+      )
+      .toMatchObject({ paused: true, time: 0 });
+
+    const box = await surface.boundingBox();
+    if (box === null) throw new Error("无法定位播放器手势区域");
+    await video.evaluate((node) => {
+      node.currentTime = 2;
+      node.dispatchEvent(new Event("timeupdate"));
+    });
+    await dispatchTouchGesture(
+      surface,
+      1,
+      box.width * 0.2,
+      box.height * 0.5,
+      box.width * 0.7,
+      box.height * 0.52,
+    );
+    await expect
+      .poll(() => video.evaluate((node) => node.currentTime))
+      .toBeGreaterThan(2);
+
+    await video.evaluate((node) => {
+      node.muted = false;
+      node.volume = 0.8;
+      node.dispatchEvent(new Event("volumechange"));
+    });
+    await dispatchTouchGesture(
+      surface,
+      2,
+      box.width * 0.8,
+      box.height * 0.2,
+      box.width * 0.79,
+      box.height * 0.7,
+    );
+    await expect
+      .poll(() => video.evaluate((node) => node.volume))
+      .toBeCloseTo(0.3, 1);
+
+    await dispatchTouchGesture(
+      surface,
+      3,
+      box.width * 0.2,
+      box.height * 0.7,
+      box.width * 0.21,
+      box.height * 0.2,
+    );
+    await expect(video).toHaveCSS("filter", "brightness(1.5)");
+    await page
+      .getByRole("button", { name: "重置播放器画面亮度" })
+      .click();
+    await expect(video).toHaveCSS("filter", "brightness(1)");
+
+    await dispatchTouchGesture(
+      surface,
+      4,
+      box.width * 0.2,
+      box.height * 0.7,
+      box.width * 0.21,
+      box.height * 0.2,
+      "pointercancel",
+    );
+    await expect(video).toHaveCSS("filter", "brightness(1)");
+  } finally {
+    if (libraryID) {
+      await page.request
+        .delete(`/api/library/paths/${libraryID}`, { timeout: 5_000 })
+        .catch(() => undefined);
+    }
+    if (existsSync(mediaDir))
+      rmSync(mediaDir, { recursive: true, force: true });
+  }
+});
+
+async function installPlatformStubs(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type Handler =
+      ((details?: { seekOffset?: number; seekTime?: number }) => void) | null;
+    const handlers: Record<string, Handler> = {};
+    Object.defineProperty(window, "__jianvideoMediaHandlers", {
+      value: handlers,
+    });
+    Object.defineProperty(window, "MediaMetadata", {
+      value: class {
+        constructor(init: MediaMetadataInit) {
+          Object.assign(this, init);
+        }
+      },
+    });
+    Object.defineProperty(navigator, "mediaSession", {
+      configurable: true,
+      value: {
+        metadata: null,
+        playbackState: "none",
+        setActionHandler(action: MediaSessionAction, handler: Handler) {
+          handlers[action] = handler;
+        },
+        setPositionState() {},
+      },
+    });
+
+    let pipElement: Element | null = null;
+    Object.defineProperties(Document.prototype, {
+      pictureInPictureElement: { configurable: true, get: () => pipElement },
+      pictureInPictureEnabled: { configurable: true, get: () => true },
+    });
+    Object.defineProperty(
+      HTMLVideoElement.prototype,
+      "requestPictureInPicture",
+      {
+        configurable: true,
+        value(this: HTMLVideoElement) {
+          pipElement = this;
+          this.dispatchEvent(new Event("enterpictureinpicture"));
+          return Promise.resolve({ height: 180, width: 320 });
+        },
+      },
+    );
+    Object.defineProperty(Document.prototype, "exitPictureInPicture", {
+      configurable: true,
+      value() {
+        const video = pipElement;
+        pipElement = null;
+        video?.dispatchEvent(new Event("leavepictureinpicture"));
+        return Promise.resolve();
+      },
+    });
+  });
+}
+
+async function dispatchTouchGesture(
+  surface: Locator,
+  pointerId: number,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  endType: "pointerup" | "pointercancel" = "pointerup",
+): Promise<void> {
+  await surface.evaluate(
+    (element, input) => {
+      const rect = element.getBoundingClientRect();
+      const dispatch = (type: string, x: number, y: number) => {
+        element.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+            pointerId: input.pointerId,
+            pointerType: "touch",
+          }),
+        );
+      };
+      dispatch("pointerdown", input.startX, input.startY);
+      dispatch("pointermove", input.endX, input.endY);
+      dispatch(input.endType, input.endX, input.endY);
+    },
+    { endType, endX, endY, pointerId, startX, startY },
+  );
+}
 
 function writeNumberedVideo(path: string): void {
   const markerWidth = (MARKER.bits + 2) * MARKER.cellSize;
@@ -238,7 +480,10 @@ async function scanAndLoadMedia(
   return items.items[0]!.id;
 }
 
-async function seekWithProgress(player: Locator, percent: number): Promise<void> {
+async function seekWithProgress(
+  player: Locator,
+  percent: number,
+): Promise<void> {
   const progress = player.getByTestId("video-progress-preview");
   const box = await progress.boundingBox();
   if (box === null) throw new Error("无法定位播放进度控件");

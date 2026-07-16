@@ -786,6 +786,13 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 - **列表兼容**：`GET /api/transcode/tasks` 从通用任务反投影旧响应，补回 `profile_id/priority/progress`，并只在该边界把 `succeeded/failed` 映射为 `completed/error`。任务详情、取消、重试与队列监控统一使用 `/api/tasks`。
 - **执行装配**：`main.go` 注册 `transcode.hls.preview` worker，按 Space 反查媒体路径、选择硬件策略、可选安全清理目标 profile、调用 `PreSliceWithCodecAndPolicyToDir`，成功后目录级登记缓存。历史 `PregenQueue` 仅保留未注入 HLS preview 服务时的测试/兼容降级路径。
 
+#### 5.5.4 Web 播放平台适配与移动手势（FR2-058）
+
+- **核心命令边界**：`packages/player-core` 继续只承载端无关控制语义，新增 `stop` 与相对定位 `seekBy`。`stop` 通过同一 request/source epoch 控制先暂停、再定位到首个可定位区间起点；已在停止位置时不重复触发后端，切源取代旧命令，卸载返回受控取消。PiP、Media Session、Pointer Events 和 DOM 类型不进入 `PlaybackBackend`。
+- **平台适配层**：`frontend/src/player/WebPlatformAdapter.ts` 集中探测 Web 能力并管理原生 PiP 与 Media Session 生命周期。PiP 状态由 `enterpictureinpicture` / `leavepictureinpicture` 收敛，失败显示中文错误，切源与卸载清理；Media Session 元数据、播放状态和合法位置同步到系统控制面板，play/pause/seek/stop handler 统一映射 player-core 命令并在卸载时逐项注销。
+- **后台能力边界**：`backgroundAudio` 固定描述为 `best-effort`，页面隐藏或最小化时不主动暂停，也不创建静默音轨、Web Audio 保活或额外播放内核。Media Session 只提供元数据与系统控制入口，不承诺浏览器冻结、系统休眠或进程回收后的持续播放。
+- **手势与视觉层**：播放器画面区只接受 touch/pen Pointer Events；超过阈值后单向锁定为横向 seek、右侧纵向媒体音量或左侧纵向播放器视觉亮度。按钮、菜单、滑块和进度预览热区排除，多指、取消、失去捕获与卸载安全收口。视觉亮度仅给当前 `<video>` 应用 `brightness()`，范围 `0.5–1.5`，不覆盖字幕和控件、不写系统 API；取消恢复起始值，切源/卸载重置为 `1`，并提供键盘/触摸可达的重置入口与 `aria-live` 文本提示。能力模型始终保持 `systemBrightness=unsupported`。
+
 ### 5.6 硬件加速管理
 
 - 硬件加速能力以**编码器实测**为单一真源（见 [ADR-0033](adr/0033-hwaccel-probe-source-cache.md)，取代 ADR-0015）：对各家族 × 各编码（H.264/H.265/AV1/VP9）候选用外部 ffmpeg 跑一小段试编码（`-f lavfi … -f null`，VAAPI/Vulkan 另带设备初始化），判定「编入 / 试编码成功」。

@@ -8,6 +8,7 @@
 
 ### 新增
 
+- **FR2-058 画中画、Media Session 与移动手势**：播放器复用现有 video 与 player-core 接入原生 PiP 状态机、系统媒体元数据及 play/pause/seek/stop 控制，页面后台不主动暂停且明确后台音频仅为浏览器 `best-effort` 能力。player-core 新增幂等 stop 与相对 seek 命令，支持受控取消、切源取代和卸载收口。触摸/笔输入在播放器面横滑定位、右侧纵滑媒体音量、左侧纵滑仅调整 video 视觉亮度；按钮和进度预览热区、多指与取消路径均避让，视觉亮度不写系统 API，切源/卸载重置并提供可访问提示与重置入口。
 - **FR2-045 跨端续播与观看历史协议**：新增 Space scoped 的 `GET/PUT /api/play/:id/watch-state`、`GET /api/library/watch-history` 与真源版继续观看响应；更新采用 `session_id + event_seq + expected_revision`，当前会话重复/倒序返回 `applied=false`，旧 revision 稳定返回 `409 WATCH_STATE_CONFLICT` 并携带 `current`。旧 `position` / `watched` 端点统一复用观看状态服务，继续同步 `media_files` 兼容投影；`packages/media-client` 与旧前端 API 补齐观看 DTO、历史游标、冲突对象和继续观看兼容映射。播放器与播放页共享 UI 接线、真实双上下文和安装态 PWA E2E 仍待后续验收。
 
 ### 修复
