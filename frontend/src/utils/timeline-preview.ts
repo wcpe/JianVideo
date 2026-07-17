@@ -8,11 +8,15 @@ export interface TimelinePreviewVttIdentity {
   readonly spriteUrls: Readonly<Record<string, string>>;
 }
 
-const TIMING_PATTERN = /^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{3}) --> (\d{2}):([0-5]\d):([0-5]\d)\.(\d{3})$/u;
+const TIMING_PATTERN =
+  /^(\d{2}):([0-5]\d):([0-5]\d)\.(\d{3}) --> (\d{2}):([0-5]\d):([0-5]\d)\.(\d{3})$/u;
 const SHORT_TIMING_PATTERN = /^([0-5]\d):([0-5]\d)\.(\d{3}) --> ([0-5]\d):([0-5]\d)\.(\d{3})$/u;
 const SPRITE_PATTERN = /^(sprite-\d{3}\.jpg)#xywh=(\d+),(\d+),(\d+),(\d+)$/u;
 
-export function parseTimelinePreviewVtt(vtt: string, identity: TimelinePreviewVttIdentity): PreparedPreviewTrack {
+export function parseTimelinePreviewVtt(
+  vtt: string,
+  identity: TimelinePreviewVttIdentity,
+): PreparedPreviewTrack {
   validateIdentity(identity);
   const blocks = normalizeBlocks(vtt);
   const cues: PreparedPreviewCue[] = [];
@@ -66,10 +70,15 @@ function parseTiming(value: string): readonly [number, number] {
 
 function toSeconds(parts: readonly string[]): number {
   const [hours = '0', minutes = '0', seconds = '0', milliseconds = '0'] = parts;
-  return Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds) + Number(milliseconds) / 1000;
+  return (
+    Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds) + Number(milliseconds) / 1000
+  );
 }
 
-function parseSprite(value: string, spriteUrls: Readonly<Record<string, string>>): PreparedPreviewCue['sprite'] {
+function parseSprite(
+  value: string,
+  spriteUrls: Readonly<Record<string, string>>,
+): PreparedPreviewCue['sprite'] {
   const match = SPRITE_PATTERN.exec(value);
   if (match === null) {
     throw new Error('预览 sprite 描述无效');
@@ -77,8 +86,13 @@ function parseSprite(value: string, spriteUrls: Readonly<Record<string, string>>
   const [assetName = '', x = '', y = '', width = '', height = ''] = match.slice(1);
   const dimensions = [x, y, width, height].map(Number);
   const [spriteX = -1, spriteY = -1, spriteWidth = 0, spriteHeight = 0] = dimensions;
-  const invalidPosition = !Number.isInteger(spriteX) || spriteX < 0 || !Number.isInteger(spriteY) || spriteY < 0;
-  const invalidSize = !Number.isInteger(spriteWidth) || spriteWidth <= 0 || !Number.isInteger(spriteHeight) || spriteHeight <= 0;
+  const invalidPosition =
+    !Number.isInteger(spriteX) || spriteX < 0 || !Number.isInteger(spriteY) || spriteY < 0;
+  const invalidSize =
+    !Number.isInteger(spriteWidth) ||
+    spriteWidth <= 0 ||
+    !Number.isInteger(spriteHeight) ||
+    spriteHeight <= 0;
   if (spriteUrls[assetName] === undefined || invalidPosition || invalidSize) {
     throw new Error('预览 sprite 身份或坐标无效');
   }
@@ -86,7 +100,12 @@ function parseSprite(value: string, spriteUrls: Readonly<Record<string, string>>
 }
 
 function validateIdentity(identity: TimelinePreviewVttIdentity): void {
-  const values = [identity.generationId, identity.mediaId, identity.profileId, identity.sourceFingerprint];
+  const values = [
+    identity.generationId,
+    identity.mediaId,
+    identity.profileId,
+    identity.sourceFingerprint,
+  ];
   if (values.some((value) => value.trim().length === 0)) {
     throw new Error('预览轨道身份不能为空');
   }

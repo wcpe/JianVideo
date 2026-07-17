@@ -1,6 +1,6 @@
 # 功能规格：阶梯快进快退
 
-> 状态：开发中　·　关联 PRD：FR2-035　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-035-tiered-seek`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-035　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-035-tiered-seek`
 
 ## 1. 背景与目标
 
@@ -111,16 +111,16 @@ type SeekTier =
 
 ## 4. 任务拆分
 
-- [ ] 测试先行：为六档合法集合、非法档位拒绝、切换不位移编写失败测试。
-- [ ] 测试先行：为前后对称、播放速率无关、VOD/滑动窗口夹取和浮点容差编写失败测试。
-- [ ] 测试先行：为连续 Seek、最后意图优先、旧结果隔离、Range 中止不报 `Network Error` 编写失败测试。
-- [ ] 接入 FR2-034 的“1 帧”档，不复制逐帧算法；补 `next`/`previous` 方向、编号恰好相邻及时间戳容差测试。
-- [ ] 实现 player-core 档位状态、目标计算、边界夹取、命令合并和播放意图恢复。
-- [ ] 将 Windows 桌面 Web 按钮/键盘与 Windows 安装态 PWA 入口映射到同一阶梯命令。
-- [ ] 用真实编号帧 fixture 和长视频时间码 fixture 覆盖六档及双向边界。
-- [ ] 补原文件直出、mpegts.js/MSE、hls.js/MSE 回归测试。
-- [ ] 执行 Windows 桌面 Web 与 Windows 安装态 PWA 的 headed 阻断验收，记录每个内核路径、档位、方向和错误结果；P7 原生 Desktop、Android、iOS 后端与移动真机另行验收。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 测试先行：为六档合法集合、非法档位拒绝、切换不位移编写失败测试。
+- [x] 测试先行：为前后对称、播放速率无关、VOD/滑动窗口夹取和浮点容差编写失败测试。
+- [x] 测试先行：为连续 Seek、最后意图优先、旧结果隔离、Range 中止不报 `Network Error` 编写失败测试。
+- [x] 接入 FR2-034 的“1 帧”档，不复制逐帧算法；补 `next`/`previous` 方向、编号恰好相邻及时间戳容差测试。
+- [x] 实现 player-core 档位状态、目标计算、边界夹取、命令合并和播放意图恢复。
+- [x] 将 Windows 桌面 Web 按钮/键盘与 Windows 安装态 PWA 入口映射到同一阶梯命令。
+- [x] 用真实编号帧 fixture 和长视频时间码 fixture 覆盖六档及双向边界。
+- [x] 补原文件直出、mpegts.js/MSE、hls.js/MSE 回归测试。
+- [x] 执行 Windows 桌面 Web 与 Windows 安装态 PWA 的 headed 阻断验收，记录每个内核路径、档位、方向和错误结果；P7 原生 Desktop、Android、iOS 后端与移动真机另行验收。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

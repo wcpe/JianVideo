@@ -170,6 +170,7 @@ describe('VideoPlayer 章节与书签共享 UI（FR2-060）', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '章节与书签，当前章节 开场' }));
     await userEvent.click(screen.getByRole('button', { name: '在当前时间新增书签' }));
+    expect(screen.getByLabelText('书签时间（秒）')).toHaveValue('12.345');
     await userEvent.type(screen.getByLabelText('书签标题'), '新书签');
     await userEvent.type(screen.getByLabelText('书签备注'), '复核此处');
     await userEvent.click(screen.getByRole('button', { name: '保存书签' }));
@@ -186,8 +187,11 @@ describe('VideoPlayer 章节与书签共享 UI（FR2-060）', () => {
     expect(seek).toHaveBeenCalledWith(5, 'user');
 
     await userEvent.click(screen.getByRole('button', { name: '编辑书签 重点' }));
+    const position = screen.getByLabelText('书签时间（秒）');
     const title = screen.getByLabelText('书签标题');
     const note = screen.getByLabelText('书签备注');
+    await userEvent.clear(position);
+    await userEvent.type(position, '8.25');
     await userEvent.clear(title);
     await userEvent.type(title, '修正重点');
     await userEvent.clear(note);
@@ -197,7 +201,7 @@ describe('VideoPlayer 章节与书签共享 UI（FR2-060）', () => {
     await waitFor(() =>
       expect(updateBookmark).toHaveBeenCalledWith('bookmark-1', {
         note: '服务端真源',
-        positionMs: 5_000,
+        positionMs: 8_250,
         revision: 3,
         title: '修正重点',
       }),
@@ -207,6 +211,111 @@ describe('VideoPlayer 章节与书签共享 UI（FR2-060）', () => {
     expect(screen.getByText('确认删除「重点」0:05？')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '确认删除书签 重点' }));
     await waitFor(() => expect(deleteBookmark).toHaveBeenCalledWith('bookmark-1', 3));
+  });
+
+  it('书签保存失败时接受服务端列表真源并保留本地编辑草稿', async () => {
+    let rejectUpdate!: (reason: Error) => void;
+    const updateBookmark = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectUpdate = reject;
+        }),
+    );
+    const view = renderPlayer({ onUpdateBookmark: updateBookmark });
+    await waitFor(() => expect(view.video.getAttribute('src')).toBe('/chapter.mp4'));
+
+    await userEvent.click(screen.getByRole('button', { name: '章节与书签，当前章节 开场' }));
+    await userEvent.click(screen.getByRole('button', { name: '编辑书签 重点' }));
+    const title = screen.getByLabelText('书签标题');
+    const note = screen.getByLabelText('书签备注');
+    await userEvent.clear(title);
+    await userEvent.type(title, '本地草稿标题');
+    await userEvent.clear(note);
+    await userEvent.type(note, '本地草稿备注');
+    await userEvent.click(screen.getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(updateBookmark).toHaveBeenCalledTimes(1));
+
+    view.rerender(
+      <MantineProvider>
+        <VideoPlayer
+          autoPlay={false}
+          bookmarks={[{ ...bookmark, note: '服务端新备注', revision: 4, title: '服务端真源' }]}
+          chapters={chapters}
+          markerContextKey="space-a:1"
+          mediaId={1}
+          onUpdateBookmark={updateBookmark}
+          streamType="mp4"
+          url="/chapter.mp4"
+        />
+      </MantineProvider>,
+    );
+    await act(async () => rejectUpdate(new Error('书签冲突')));
+
+    expect(screen.getByText('服务端真源')).toBeInTheDocument();
+    expect(screen.getByText('服务端新备注')).toBeInTheDocument();
+    expect(screen.getByLabelText('书签标题')).toHaveValue('本地草稿标题');
+    expect(screen.getByLabelText('书签备注')).toHaveValue('本地草稿备注');
+    expect(screen.getByRole('button', { name: '保存修改' })).toBeEnabled();
+  });
+
+  it('按 Unicode code point 校验标题与备注长度且不使用原生 maxLength 截断 emoji', async () => {
+    const createBookmark = vi.fn().mockResolvedValue(undefined);
+    const { video } = renderPlayer({ onCreateBookmark: createBookmark });
+    await waitFor(() => expect(video.getAttribute('src')).toBe('/chapter.mp4'));
+    await userEvent.click(screen.getByRole('button', { name: '章节与书签，当前章节 开场' }));
+    await userEvent.click(screen.getByRole('button', { name: '在当前时间新增书签' }));
+
+    const allowedTitle = '😀'.repeat(120);
+    const title = screen.getByLabelText('书签标题');
+    expect(title).not.toHaveAttribute('maxlength');
+    fireEvent.change(title, { target: { value: allowedTitle } });
+    expect(title).toHaveValue(allowedTitle);
+    expect(allowedTitle).toHaveLength(240);
+    await userEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    await waitFor(() =>
+      expect(createBookmark).toHaveBeenCalledWith({
+        note: null,
+        positionMs: 0,
+        title: allowedTitle,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText('书签标题')).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: '在当前时间新增书签' }));
+    const oversizedTitle = '😀'.repeat(121);
+    const nextTitle = screen.getByLabelText('书签标题');
+    fireEvent.change(nextTitle, { target: { value: oversizedTitle } });
+    expect(nextTitle).toHaveValue(oversizedTitle);
+    await userEvent.click(screen.getByRole('button', { name: '保存书签' }));
+
+    expect(await screen.findByText('书签标题不能超过 120 个字符')).toBeInTheDocument();
+    expect(createBookmark).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('书签标题')).toHaveValue(oversizedTitle);
+
+    fireEvent.change(screen.getByLabelText('书签标题'), { target: { value: '备注边界' } });
+    const allowedNote = '😀'.repeat(2000);
+    const note = screen.getByLabelText('书签备注');
+    expect(note).not.toHaveAttribute('maxlength');
+    fireEvent.change(note, { target: { value: allowedNote } });
+    expect(note).toHaveValue(allowedNote);
+    await userEvent.click(screen.getByRole('button', { name: '保存书签' }));
+    await waitFor(() =>
+      expect(createBookmark).toHaveBeenLastCalledWith({
+        note: allowedNote,
+        positionMs: 0,
+        title: '备注边界',
+      }),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '在当前时间新增书签' }));
+    fireEvent.change(screen.getByLabelText('书签标题'), { target: { value: '备注超限' } });
+    const oversizedNote = '😀'.repeat(2001);
+    fireEvent.change(screen.getByLabelText('书签备注'), { target: { value: oversizedNote } });
+    await userEvent.click(screen.getByRole('button', { name: '保存书签' }));
+
+    expect(await screen.findByText('书签备注不能超过 2000 个字符')).toBeInTheDocument();
+    expect(createBookmark).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('书签备注')).toHaveValue(oversizedNote);
   });
 
   it('Space 或媒体上下文切换时关闭旧面板并清理草稿数据', async () => {

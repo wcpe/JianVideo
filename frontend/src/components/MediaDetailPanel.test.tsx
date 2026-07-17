@@ -9,8 +9,12 @@ import type { MediaFile } from '@/types';
 
 const mockNavigate = vi.fn();
 const mockGetMediaMetadata = vi.hoisted(() => vi.fn().mockResolvedValue([]));
-const mockGetMediaCovers = vi.hoisted(() => vi.fn().mockResolvedValue({ cover: null, candidates: [] }));
-const mockGenerateMediaCovers = vi.hoisted(() => vi.fn().mockResolvedValue({ status: 'pending', task_id: 1 }));
+const mockGetMediaCovers = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ cover: null, candidates: [] }),
+);
+const mockGenerateMediaCovers = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ status: 'pending', task_id: 1 }),
+);
 const mockSelectMediaCover = vi.hoisted(() => vi.fn());
 const mockGetTask = vi.hoisted(() => vi.fn());
 vi.mock('@/api/library', async (importOriginal) => {
@@ -233,7 +237,13 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
         normalized_json: JSON.stringify({
           container: { format_name: 'matroska,webm', bitrate: 2048000 },
           video_streams: [
-            { codec_name: 'h264', width: 1920, height: 1080, frame_rate: '30000/1001', color: { space: 'bt709' } },
+            {
+              codec_name: 'h264',
+              width: 1920,
+              height: 1080,
+              frame_rate: '30000/1001',
+              color: { space: 'bt709' },
+            },
           ],
           audio_streams: [{ codec_name: 'aac', language: 'zh', title: '国语' }],
           subtitle_streams: [{ codec_name: 'subrip', language: 'zh', title: '中文字幕' }],

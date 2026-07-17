@@ -129,9 +129,7 @@ describe('MediaThumbnail', () => {
     fireEvent.load(before);
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent('jianvideo:cover-changed', { detail: { mediaID: 9 } }),
-      );
+      window.dispatchEvent(new CustomEvent('jianvideo:cover-changed', { detail: { mediaID: 9 } }));
     });
 
     expect(screen.getByAltText('pic.png')).not.toBe(before);

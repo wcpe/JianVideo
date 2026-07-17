@@ -66,6 +66,13 @@ interface HlsFailureGuard {
   readonly token: number;
 }
 
+interface ControlledSeekPauseToken {
+  readonly requestId: number;
+  readonly sourceEpoch: number;
+  readonly sourceId: string;
+  readonly sourceToken: number;
+}
+
 type PlaybackBackendEventPayload = PlaybackBackendEvent extends infer Event
   ? Event extends PlaybackBackendEvent
     ? Omit<Event, 'eventId' | 'requestId' | 'sourceEpoch' | 'sourceId'>
@@ -106,6 +113,8 @@ export class WebPlaybackBackend implements PlaybackBackend {
   private audioCommandRevision = 0;
   private audioTransactionBase: AudioTransactionBase | null = null;
   private audioTransactionGeneration = 0;
+  private controlledSeekPauseCandidates: ControlledSeekPauseToken[] = [];
+  private controlledSeekPauseTombstones: ControlledSeekPauseToken[] = [];
   private disposed = false;
   private eventId = 0;
   private hls: Hls | null = null;
@@ -213,12 +222,22 @@ export class WebPlaybackBackend implements PlaybackBackend {
 
   async play(command: PlaybackCommandContext): Promise<void> {
     if (!this.acceptCommand(command)) return;
+    const previousIntent = this.playbackIntent;
     this.rebasePlaybackControl({ intent: 'playing' });
     this.resumeOnMpegtsReady = false;
-    if (this.hls) await this.quality.startLoading(command);
-    const result = this.mpegtsPlayer ? this.mpegtsPlayer.play() : this.video.play();
-    await result;
-    if (this.isCurrentCommand(command)) this.publishSnapshot(this.activeToken, 'playing');
+    try {
+      if (this.hls) await this.quality.startLoading(command);
+      const result = this.mpegtsPlayer ? this.mpegtsPlayer.play() : this.video.play();
+      await result;
+    } catch (error: unknown) {
+      if (this.isCurrentCommand(command)) this.rebasePlaybackControl({ intent: previousIntent });
+      throw error;
+    }
+    if (!this.isCurrentCommand(command)) {
+      this.enforcePlaybackIntent();
+      return;
+    }
+    this.publishSnapshot(this.activeToken, 'playing');
   }
 
   async pause(command: PlaybackCommandContext): Promise<void> {
@@ -235,13 +254,26 @@ export class WebPlaybackBackend implements PlaybackBackend {
     if (!this.acceptCommand(request)) {
       return { ...base, confirmedTime: finiteTime(this.video.currentTime), status: 'superseded' };
     }
+    const pauseToken = this.issueControlledSeekPause(request);
     try {
       this.video.currentTime = request.targetTime;
+      this.establishControlledSeekPause(pauseToken);
       const confirmedTime = finiteTime(this.video.currentTime);
       this.rebasePlaybackControl({ currentTime: confirmedTime });
-      this.publishSnapshot(this.activeToken);
+      if (this.playbackIntent === 'paused' && this.mpegtsPlayer) {
+        this.resumeOnMpegtsReady = false;
+        this.mpegtsPlayer.pause();
+      }
+      if (!(await this.restorePlayingIntentAfterSeek(request))) {
+        return { ...base, confirmedTime, status: 'superseded' };
+      }
+      this.publishSnapshot(
+        this.activeToken,
+        this.playbackIntent === 'playing' ? 'playing' : undefined,
+      );
       return { ...base, confirmedTime, status: 'completed' };
     } catch {
+      this.revokeControlledSeekPauseToken(pauseToken);
       return {
         ...base,
         confirmedTime: finiteTime(this.video.currentTime),
@@ -255,6 +287,30 @@ export class WebPlaybackBackend implements PlaybackBackend {
     return this.snapshot;
   }
 
+  consumeControlledSeekPause(): boolean {
+    while (this.controlledSeekPauseTombstones.length > 0) {
+      const tombstone = this.controlledSeekPauseTombstones.shift();
+      if (tombstone && this.isCurrentControlledSeekPause(tombstone)) return true;
+    }
+    while (this.controlledSeekPauseCandidates.length > 0) {
+      const candidate = this.controlledSeekPauseCandidates[0];
+      if (!candidate) return false;
+      if (!this.isCurrentControlledSeekPause(candidate)) {
+        this.controlledSeekPauseCandidates.shift();
+        continue;
+      }
+      if (!this.video.paused) return false;
+      this.controlledSeekPauseCandidates.shift();
+      return true;
+    }
+    return false;
+  }
+
+  revokeControlledSeekPause(): void {
+    this.controlledSeekPauseCandidates = [];
+    this.controlledSeekPauseTombstones = [];
+  }
+
   subscribe(listener: PlaybackBackendListener): () => void {
     if (this.disposed) return () => undefined;
     this.listeners.add(listener);
@@ -264,6 +320,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.revokeControlledSeekPause();
     this.audioTransactionGeneration += 1;
     this.audioTransactionBase = null;
     this.activeToken += 1;
@@ -273,6 +330,71 @@ export class WebPlaybackBackend implements PlaybackBackend {
     this.active = null;
     this.snapshot = { ...this.snapshot, error: null, state: 'disposed' };
     this.listeners.clear();
+  }
+
+  private issueControlledSeekPause(
+    command: PlaybackCommandContext,
+  ): ControlledSeekPauseToken | null {
+    if (this.video.paused) return null;
+    const token = {
+      requestId: command.requestId,
+      sourceEpoch: command.sourceEpoch,
+      sourceId: command.sourceId,
+      sourceToken: this.activeToken,
+    };
+    this.controlledSeekPauseCandidates.push(token);
+    return token;
+  }
+
+  private establishControlledSeekPause(token: ControlledSeekPauseToken | null): void {
+    if (!token || !this.removeControlledSeekPause(this.controlledSeekPauseCandidates, token))
+      return;
+    if (this.video.paused && this.isCurrentControlledSeekPause(token)) {
+      this.controlledSeekPauseTombstones.push(token);
+    }
+  }
+
+  private revokeControlledSeekPauseToken(token: ControlledSeekPauseToken | null): void {
+    if (!token) return;
+    this.removeControlledSeekPause(this.controlledSeekPauseCandidates, token);
+    this.removeControlledSeekPause(this.controlledSeekPauseTombstones, token);
+  }
+
+  private removeControlledSeekPause(
+    tokens: ControlledSeekPauseToken[],
+    token: ControlledSeekPauseToken,
+  ): boolean {
+    const index = tokens.indexOf(token);
+    if (index < 0) return false;
+    tokens.splice(index, 1);
+    return true;
+  }
+
+  private isCurrentControlledSeekPause(token: ControlledSeekPauseToken): boolean {
+    const command = this.active?.command;
+    return Boolean(
+      command &&
+      token.sourceToken === this.activeToken &&
+      token.sourceEpoch === command.sourceEpoch &&
+      token.sourceId === command.sourceId,
+    );
+  }
+
+  private async restorePlayingIntentAfterSeek(command: PlaybackCommandContext): Promise<boolean> {
+    if (this.playbackIntent !== 'playing' || !this.video.paused) return true;
+    const result = this.mpegtsPlayer ? this.mpegtsPlayer.play() : this.video.play();
+    await result;
+    if (this.isCurrentCommand(command)) return true;
+    this.enforcePlaybackIntent();
+    return false;
+  }
+
+  private enforcePlaybackIntent(): void {
+    if (this.playbackIntent !== 'paused') return;
+    this.resumeOnMpegtsReady = false;
+    if (this.mpegtsPlayer) this.mpegtsPlayer.pause();
+    else this.video.pause();
+    this.publishSnapshot(this.activeToken, 'paused');
   }
 
   private rebasePlaybackControl(update: Partial<PlaybackRestorePoint>): void {
@@ -304,6 +426,8 @@ export class WebPlaybackBackend implements PlaybackBackend {
     payload: WebPlaybackSourcePayload,
     signal?: AbortSignal,
   ): Promise<void> {
+    // 媒体实例即将替换，旧代 seek 产生的 pause 令牌不得跨代消费。
+    this.revokeControlledSeekPause();
     this.activeToken += 1;
     const token = this.activeToken;
     this.video.defaultPlaybackRate = this.playbackRate;
@@ -402,6 +526,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
   ): number {
     this.audioTransactionGeneration += 1;
     this.audioTransactionBase = null;
+    this.revokeControlledSeekPause();
     this.activeToken += 1;
     this.releaseResources();
     this.active = { command, payload };
@@ -557,7 +682,8 @@ export class WebPlaybackBackend implements PlaybackBackend {
       if (recovery === 'blocked') return;
       if (recovery === 'fallback') {
         this.quality.restartLoading();
-        if (data.fatal && data.type === HlsConstructor.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        if (data.fatal && data.type === HlsConstructor.ErrorTypes.MEDIA_ERROR)
+          hls.recoverMediaError();
         return;
       }
       if (!data.fatal) return;
@@ -573,12 +699,20 @@ export class WebPlaybackBackend implements PlaybackBackend {
 
   private installMpegtsListeners(player: mpegts.Player, token: number): void {
     player.on('loadeddata', () => this.handleMpegtsLoaded(player, token));
-    player.on('playing', () => {
-      this.setWaiting(false, token);
-      this.publishSnapshot(token, 'playing');
-    });
+    player.on('playing', () => this.handleMpegtsPlaying(player, token));
     player.on('pause', () => this.publishSnapshot(token, 'paused'));
     player.on('error', () => this.handleMpegtsError(player, token));
+  }
+
+  private handleMpegtsPlaying(player: mpegts.Player, token: number): void {
+    if (!this.isActiveToken(token) || this.mpegtsPlayer !== player) return;
+    if (this.playbackIntent === 'paused') {
+      this.resumeOnMpegtsReady = false;
+      player.pause();
+      return;
+    }
+    this.setWaiting(false, token);
+    this.publishSnapshot(token, 'playing');
   }
 
   private handleMpegtsLoaded(player: mpegts.Player, token: number): void {
@@ -624,7 +758,7 @@ export class WebPlaybackBackend implements PlaybackBackend {
       this.rebasePlaybackControl({ playbackRate: positiveTime(this.video.playbackRate, 1) }),
     );
     this.listen('seeking', () => this.publishSnapshot(token, 'seeking'));
-    this.listen('seeked', () => this.publishSnapshot(token, settledMediaState(this.video)));
+    this.listen('seeked', () => this.handleSeeked(token));
     this.listen('playing', () => this.handlePlaying(token));
     this.listen('pause', () => this.publishSnapshot(token, 'paused'));
     this.listen('ended', () => this.handleEnded(token));
@@ -639,7 +773,27 @@ export class WebPlaybackBackend implements PlaybackBackend {
     this.mediaCleanups.push(() => this.video.removeEventListener(event, listener));
   }
 
+  private handleSeeked(token: number): void {
+    if (!this.isActiveToken(token)) return;
+    if (this.playbackIntent === 'paused' && this.mpegtsPlayer) {
+      this.resumeOnMpegtsReady = false;
+      this.mpegtsPlayer.pause();
+      this.publishSnapshot(token, 'paused');
+      return;
+    }
+    this.publishSnapshot(token, settledMediaState(this.video));
+  }
+
   private handlePlaying(token: number): void {
+    if (!this.isActiveToken(token)) return;
+    if (this.playbackIntent === 'paused' && this.mpegtsPlayer) {
+      this.resumeOnMpegtsReady = false;
+      this.mpegtsPlayer.pause();
+      return;
+    }
+    // pause 与 playing 来自同一媒体事件任务序列；playing 已到达时，旧 pause 不可能再反序出现。
+    // 原生事件不携带 requestId，因此这里只按真实事件顺序安全清理，不伪造命令关联。
+    this.revokeControlledSeekPause();
     this.setWaiting(false, token);
     this.publishSnapshot(token, 'playing');
   }

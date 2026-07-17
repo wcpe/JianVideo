@@ -204,13 +204,15 @@ export class WebQualityFacet implements QualityFacet, LoadControlFacet {
 
   private requireHls(command: PlaybackCommandContext): Hls {
     this.requireCommand(command);
-    if (this.hls === null) throw new PlaybackBackendError('unsupported', '当前播放路径不支持清晰度切换');
+    if (this.hls === null)
+      throw new PlaybackBackendError('unsupported', '当前播放路径不支持清晰度切换');
     return this.hls;
   }
 
   private requireCommand(command: PlaybackCommandContext): void {
     if (!this.isCurrentSource(command)) throw new DOMException('清晰度命令已过期', 'AbortError');
-    if (this.command !== null && command.requestId >= this.command.requestId) this.command = command;
+    if (this.command !== null && command.requestId >= this.command.requestId)
+      this.command = command;
   }
 
   private isCurrentSource(command: PlaybackCommandContext): boolean {
@@ -235,7 +237,8 @@ function createIndexedQualities(hls: Hls): readonly IndexedQuality[] {
   return hls.levels.map((level, index) => {
     const bandwidth = level.bitrate;
     const bitrateLabel = `${Math.round(bandwidth / 1000)} kbps`;
-    const label = heights.get(level.height)! > 1 ? `${level.height}p · ${bitrateLabel}` : `${level.height}p`;
+    const label =
+      heights.get(level.height)! > 1 ? `${level.height}p · ${bitrateLabel}` : `${level.height}p`;
     return {
       index,
       quality: {
@@ -254,7 +257,9 @@ function matchQuality(
   maxHeight: number | null,
 ): IndexedQuality | null {
   const candidates = indexed.filter(
-    (entry) => entry.quality.height !== undefined && (maxHeight === null || entry.quality.height <= maxHeight),
+    (entry) =>
+      entry.quality.height !== undefined &&
+      (maxHeight === null || entry.quality.height <= maxHeight),
   );
   const sameHeight = candidates.filter((entry) => entry.quality.height === target.height);
   if (sameHeight.length > 0) return selectBandwidth(sameHeight, target.bandwidth);
@@ -272,22 +277,30 @@ function lowerQuality(
     if (maxHeight !== null && entry.quality.height > maxHeight) return false;
     return (
       entry.quality.height < failed.height ||
-      (entry.quality.height === failed.height && (entry.quality.bandwidth ?? 0) < (failed.bandwidth ?? 0))
+      (entry.quality.height === failed.height &&
+        (entry.quality.bandwidth ?? 0) < (failed.bandwidth ?? 0))
     );
   });
   return highestQuality(candidates, null);
 }
 
-function selectBandwidth(indexed: readonly IndexedQuality[], bandwidth: number | undefined): IndexedQuality {
+function selectBandwidth(
+  indexed: readonly IndexedQuality[],
+  bandwidth: number | undefined,
+): IndexedQuality {
   if (bandwidth === undefined) return highestQuality(indexed, null)!;
   const notHigher = indexed.filter((entry) => (entry.quality.bandwidth ?? 0) <= bandwidth);
   return notHigher.length > 0 ? highestQuality(notHigher, null)! : lowestQuality(indexed)!;
 }
 
-function highestQuality(indexed: readonly IndexedQuality[], maxHeight: number | null): IndexedQuality | null {
-  const candidates = maxHeight === null
-    ? indexed
-    : indexed.filter((entry) => (entry.quality.height ?? Number.POSITIVE_INFINITY) <= maxHeight);
+function highestQuality(
+  indexed: readonly IndexedQuality[],
+  maxHeight: number | null,
+): IndexedQuality | null {
+  const candidates =
+    maxHeight === null
+      ? indexed
+      : indexed.filter((entry) => (entry.quality.height ?? Number.POSITIVE_INFINITY) <= maxHeight);
   return [...candidates].sort(compareQuality).at(-1) ?? null;
 }
 

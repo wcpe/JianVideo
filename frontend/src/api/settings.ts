@@ -36,8 +36,7 @@ export const SETTING_KEY_NETWORK_PROXY = 'network_proxy';
 export const SETTING_KEY_DEBUG_LOG = 'debug_log';
 // 本地离线影视信息推断设置（FR2-031）
 export const SETTING_KEY_MEDIA_INFERENCE_ENABLED = 'media_inference_enabled';
-export const SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES =
-  'media_inference_disabled_libraries';
+export const SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES = 'media_inference_disabled_libraries';
 
 /** 按后端设置注册表口径解析合法布尔值，非法值使用默认值。 */
 export function parseBooleanSetting(raw: string | undefined, defaultValue: boolean): boolean {

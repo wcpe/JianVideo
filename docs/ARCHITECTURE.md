@@ -47,7 +47,7 @@
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
 | `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback`, `subtitle` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、内嵌章节解析与书签 revision CAS（FR2-060）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `subtitle` | 统一字幕/音轨聚合、稳定轨道 ID、上传持久化与删除、受限根读取、按请求 WebVTT 转换和来源能力表达（FR2-044） | → `db`, `audit`, `transcoder` |
@@ -246,6 +246,32 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 
 `library.ApplyWatchEventInSpace` 在短事务内校验 Space、软删和文件有效状态，先处理当前会话重复/倒序，再执行 revision CAS；成功后同时更新真源、`media_files` 兼容投影和完成转换计数。历史会话迟到包返回 `409 WATCH_STATE_CONFLICT + current`，不得落库。历史与继续观看通过 `watch_states JOIN media_files` 查询，显式排除其他 Space、软删和 missing 媒体；历史使用 `(last_watched_at, media_id)` 倒序游标，继续观看只取未完成且位置大于 1 秒的状态。
 
+**媒体章节（media_chapters）（FR2-060）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | 由媒体、来源与来源序号派生的稳定章节 ID |
+| space_id / media_id | TEXT / INTEGER, INDEX | Space 与媒体归属，媒体删除时级联清理 |
+| source / source_index | TEXT / INTEGER | 当前为 `embedded` 与 ffprobe 章节序号 |
+| start_ms / end_ms | INTEGER | 半开时间区间，要求 `start_ms >= 0` 且 `end_ms > start_ms` |
+| title / language | TEXT | 章节标题与可选语言 |
+| source_fingerprint / parsed_at | TEXT / DATETIME | 解析时源文件指纹与时间，用于 stale 判断 |
+
+`library` 在扫描入库或章节读取链路中通过 ffprobe 规范化内嵌章节，同一 `(space_id, media_id, source, source_index)` 原子替换当前结果。章节只读，查询按 `start_ms, source_index` 排序；文件大小或 mtime 与解析指纹不一致时只返回 `stale=true`，不会把旧章节误当成最新结果。
+
+**媒体书签（media_bookmarks）（FR2-060）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | TEXT PK | 服务端生成的稳定书签 ID |
+| space_id / media_id | TEXT / INTEGER, INDEX | Space 与媒体归属，媒体删除时级联清理 |
+| position_ms | INTEGER | 非负播放位置 |
+| title / note | TEXT | 必填标题与可选备注 |
+| revision | INTEGER | 从 1 开始，每次成功更新递增 |
+| created_at / updated_at | DATETIME | 创建与更新时间 |
+
+书签创建、更新和删除均在短事务内校验 Space、媒体有效状态与记录归属。更新和删除使用 revision CAS；并发冲突返回 `409 BOOKMARK_CONFLICT` 与当前记录，记录已删除时返回 `deleted=true`，客户端不得覆盖式重试。列表按 `position_ms, created_at, id` 稳定排序。
+
 **文件自带元数据（media_metadata）（FR2-030）**
 
 | 字段 | 类型 | 说明 |
@@ -409,7 +435,7 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | id | INTEGER PK | 自增主键 |
 | space_id | TEXT | Space 归属，缺省兼容 `space-default` |
 | library_id / media_id | INTEGER | 关联媒体库与媒体；盘点发现的孤立缓存可为空 |
-| kind | TEXT | `thumbnail` / `hls` / `image_proxy` / `cover` / `metadata_temp` |
+| kind | TEXT | `thumbnail` / `hls` / `image_proxy` / `cover` / `metadata_temp` / `timeline_preview` |
 | asset_level | TEXT | `file` 或 `directory`；HLS 只按目录登记 |
 | profile_id / variant / cache_key | TEXT | 产物档位、变体或调用方缓存键 |
 | relative_path | TEXT UNIQUE | 相对数据目录的缓存路径 |
@@ -417,7 +443,20 @@ FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：�
 | rebuildable | BOOLEAN | 是否可按需重建；首批缓存均为可重建 |
 | created_at / accessed_at / missing_at / updated_at | DATETIME | 创建、访问、磁盘缺失和更新时间 |
 
-FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；普通 FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记，FR2-044 音轨重载按 `hls/{space_id}/{media_id}/{profile_id}/tasks/{task_id}/` 登记并把 `variant` 固定为字符串 `task_id`，两者均聚合 `size_bytes` 与 `file_count`。segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过缓存安全边界只删除目标 Space/media/profile 或精确任务目录与资产行，不影响同媒体其他 profile、同 profile 其他任务或原媒体。
+FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` 只接受数据目录下的白名单子目录：`thumbnails/`、`hls/`、`image_cache/`、`covers/`、`metadata_temp/`、`timeline_previews/`；清理前会重新解析相对路径并拒绝数据库、WAL/SHM、审计和备份类路径。缩略图、图片代理与封面按文件登记；普通 FR2-008 HLS 产物按 `hls/{space_id}/{media_id}/{profile_id}/` 目录级登记，FR2-044 音轨重载按 `hls/{space_id}/{media_id}/{profile_id}/tasks/{task_id}/` 登记并把 `variant` 固定为字符串 `task_id`，FR2-029 时间轴预览按 `timeline_previews/{space_id}/{media_id}/{profile_id}/{source_fingerprint}/{generation_id}/` 目录级登记并以完整 source/generation 身份盘点。segment 请求不同步写 `accessed_at`，避免高频 SQLite 写入。强制重建通过缓存安全边界只删除目标 Space/media/profile、精确任务目录或精确时间轴 generation 的资产行，不影响同媒体其他 profile、同 profile 其他任务或原媒体。
+
+**时间轴预览当前指针（media_timeline_previews）（FR2-029）**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| space_id + media_id + profile_id | TEXT + INTEGER + TEXT，唯一键 | 当前 Space/media/profile 的唯一指针 |
+| source_fingerprint / generation_id | TEXT | 当前已发布源指纹与 generation |
+| asset_id | INTEGER, INDEX | 当前 generation 对应的目录级缓存资产 |
+| pending_source_fingerprint / pending_generation_id | TEXT | 正在生成但尚未发布的候选身份 |
+| pending_task_id | INTEGER, INDEX | 当前候选通用任务 ID，0 表示无在途任务 |
+| updated_at | DATETIME | 最近指针变化时间 |
+
+`TimelinePreviewService` 以 source fingerprint + profile 固化生成身份，缺失查询只幂等入队 `timeline_preview.generate`，显式重建创建新 generation。worker 先在临时目录生成并校验完整 WebVTT 与分页 sprite，再登记 `cache_assets(kind=timeline_preview)` 并原子切换当前指针；失败或取消不覆盖旧 generation。资源路由按 Space/media/profile/fingerprint/generation 全身份受限读取，不按“最新”猜测，也不跨 generation 回退。
 
 **媒体当前封面（media_covers）** — FR2-059
 
@@ -596,11 +635,11 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | 分组 | 前缀 | 说明 |
 |---|---|---|
 | 认证 | `/api/auth` | 登录、登出、会话校验 |
-| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、观看历史游标页与继续观看真源列表（FR2-045）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118）、dHash 相似去重（FR-70）与内容哈希精确去重（FR2-061） |
+| 媒体库 | `/api/library` | 目录增删、媒体文件列表、搜索、异步扫描与进度 SSE、扫描任务队列与列表（FR-29）、媒体健康巡检与问题清单（FR-73）、目录浏览（含聚合虚拟根 FR-66）、图片 raw 预览、缩略图、原文件下载（FR-42）、旧后缀配置兼容端点（FR-64）、观看历史游标页与继续观看真源列表（FR2-045）、只读内嵌章节与 revision 书签 CRUD（FR2-060）、那年今日回忆列表（FR-72）、最近查看记录与列表（FR-120）、软删除/回收站与还原（FR-25）、批量软删（FR-69）、回收站清理（FR-26）、媒体库概览汇总（聚合总量/视频图片拆分/总大小时长/各库明细 FR-117）、媒体增长趋势（按天新增 count/size/duration，供统计页趋势 FR-118）、dHash 相似去重（FR-70）与内容哈希精确去重（FR2-061） |
 | 媒体类型 | `/api/media-types` | 媒体类型定义、全局/每库后缀规则、内置规则禁用与自定义规则增删改（FR2-025） |
 | 任务 | `/api/tasks` | 通用任务列表、详情、统计、取消与重试（FR2-037），按 Space / 类型 / 状态 / 关联资源过滤 |
 | 相册 | `/api/albums` | 相册增删、跨目录成员增删与成员浏览（FR-40） |
-| 播放 | `/api/play` | 视频流播放、Seek、HLS profile 文件服务与预览状态、直连失败回退、观看状态 GET/PUT revision 契约，以及旧 position/watched 统一服务适配（FR2-008 / FR2-045） |
+| 播放 | `/api/play` | 视频流播放、Seek、HLS profile 文件服务与预览状态、时间轴预览状态/重建/资源读取（FR2-029）、直连失败回退、观看状态 GET/PUT revision 契约，以及旧 position/watched 统一服务适配（FR2-008 / FR2-045） |
 | 转码 | `/api/transcode` | 硬件加速能力查询、转码预设 CRUD，以及兼容旧路径的统一 HLS preview 任务入队/列表（FR2-008） |
 | 配置 | `/api/config` | 系统配置读取 |
 | 设置 | `/api/settings` | 运行期设置读取、definitions 元数据与已登记 key 批量写入 |
@@ -792,6 +831,14 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 - **平台适配层**：`frontend/src/player/WebPlatformAdapter.ts` 集中探测 Web 能力并管理原生 PiP 与 Media Session 生命周期。PiP 状态由 `enterpictureinpicture` / `leavepictureinpicture` 收敛，失败显示中文错误，切源与卸载清理；Media Session 元数据、播放状态和合法位置同步到系统控制面板，play/pause/seek/stop handler 统一映射 player-core 命令并在卸载时逐项注销。
 - **后台能力边界**：`backgroundAudio` 固定描述为 `best-effort`，页面隐藏或最小化时不主动暂停，也不创建静默音轨、Web Audio 保活或额外播放内核。Media Session 只提供元数据与系统控制入口，不承诺浏览器冻结、系统休眠或进程回收后的持续播放。
 - **手势与视觉层**：播放器媒体画面使用 `touch-action: none` 可靠接管 touch/pen Pointer Events；该接管边界不包含控件栏和播放器外区域，普通页面仍可从这些区域滚动。超过阈值后单向锁定为横向 seek、右侧纵向媒体音量或左侧纵向播放器视觉亮度。按钮、菜单、滑块和进度预览热区排除，多指、取消、失去捕获与卸载安全收口。视觉亮度仅给当前 `<video>` 应用 `brightness()`，范围 `0.5–1.5`，不覆盖字幕和控件、不写系统 API；取消恢复起始值，切源/卸载重置为 `1`，并提供键盘/触摸可达的重置入口与 `aria-live` 文本提示。能力模型始终保持 `systemBrightness=unsupported`。
+
+#### 5.5.5 P3 可复用播放核心与标记层（FR2-029/034/035/036/057/060）
+
+- **核心边界**：`packages/player-core` 只依赖端无关的 `PlaybackBackend` 与 facet 接口，承载播放/暂停、绝对与相对定位、停止、逐帧、阶梯步进、预览帧、轨道、质量、倍速与 A-B 循环语义。DOM、hls.js、mpegts.js、Pointer Events、PiP 与 Media Session 留在 Web 适配层，P7 其他端复用同一核心而不复制控制状态机。
+- **并发模型**：命令使用 request generation 与 source epoch 隔离。后发切源、Seek、逐帧或音轨事务取代旧请求；后端快照在提交前必须仍属于当前 source epoch，卸载统一返回受控取消。画面逐帧通过 `FramePresentationFacet` 提供可证明的前后帧身份，无法证明时受控拒绝，不以微小时间偏移冒充帧准确。
+- **时间轴预览**：`PreviewFacet` 消费 FR2-029 的 VTT/sprite 描述符，桌面悬停和移动端长按只根据当前媒体 duration 与轨道 cue 定位；过期加载结果受 source epoch 丢弃。后端 generation 发布、缓存身份与资源读取规则见 `media_timeline_previews`。
+- **质量与循环**：质量锁定、省流量、倍速和 A-B 循环在共享控制状态中维护；切源、关闭循环与卸载会清理区间和临时状态，循环回跳使用受控 seek，不把 `ab_loop` 计入观看完成次数。
+- **章节与书签标记层**：`VideoMarkersPanel` 消费 FR2-060 章节和书签 API，将毫秒位置映射为播放器跳转命令。章节只读；书签写入使用 revision CAS，冲突时刷新服务端当前值。媒体 ID 与 Space 变化会清空旧请求和本地标记，迟到响应不能污染新媒体。
 
 ### 5.6 硬件加速管理
 

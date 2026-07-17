@@ -366,6 +366,7 @@ async function dispatchPointer(
 async function resetSeekState(video: Locator, time: number): Promise<void> {
   await video.evaluate((node, target) => {
     const media = node as HTMLVideoElement & { __seekCount?: number };
+    media.pause();
     media.currentTime = target;
     media.__seekCount = 0;
   }, time);

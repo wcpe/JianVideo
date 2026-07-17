@@ -420,6 +420,30 @@
 - **响应**（202）：`{"status":"pending","task_id":124}`
 - **说明**：幂等入队 `metadata.backfill`，按媒体 ID checkpoint 分批推进并更新任务进度；失败由通用任务队列自动重试，已完成媒体不会因重试重复追加元数据记录。
 
+### 查询媒体章节（FR2-060）
+
+- **方法 / 路径**：`GET /api/library/media/:id/chapters`
+- **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
+- **响应**（200）：`{"items":[MediaChapter...],"stale":false,"parsed_at":"2026-07-17T00:00:00Z"}`
+- **说明**：章节只读，来自媒体内嵌章节元数据，按 `start_ms, source_index` 稳定排序。媒体文件大小或 mtime 与最近解析指纹不一致时返回 `stale=true`；跨 Space、软删或 missing 媒体返回 `404 MEDIA_NOT_FOUND`。
+
+### 查询与创建媒体书签（FR2-060）
+
+- **列表**：`GET /api/library/media/:id/bookmarks`，响应 `{"items":[MediaBookmark...]}`，按位置和创建时间稳定排序。
+- **创建**：`POST /api/library/media/:id/bookmarks`
+- **请求**：`{"position_ms":123000,"title":"关键论点","note":"稍后复看"}`
+- **响应**（201）：创建后的 `MediaBookmark`，初始 `revision=1`。
+- **说明**：`position_ms` 必须非负，标题必填且不超过 120 字符，备注不超过服务端限制；所有操作同时校验当前 Space 与媒体有效状态。
+
+### 更新与删除媒体书签（FR2-060）
+
+- **更新**：`PUT /api/library/media/:id/bookmarks/:bookmark_id`
+- **请求**：`{"position_ms":125000,"title":"关键论点","note":null,"revision":1}`
+- **删除**：`DELETE /api/library/media/:id/bookmarks/:bookmark_id?revision=2`
+- **响应**：更新成功返回新的 `MediaBookmark`；删除成功返回 `204`。
+- **冲突**（409）：`{"code":"BOOKMARK_CONFLICT","message":"...","current":MediaBookmark,"deleted":false}`；记录已删除时 `deleted=true`。客户端必须以服务端当前值重新基线化。
+- **错误**：非法位置、标题或备注返回结构化 `400 BOOKMARK_*`；媒体或书签不存在、归属不匹配返回 `404 MEDIA_NOT_FOUND`。
+
 ### 读取观看状态（FR2-045）
 
 - **方法 / 路径**：`GET /api/play/:id/watch-state`
@@ -1274,6 +1298,27 @@
   ```
 - **说明**：普通 preview 的 `task` 仍是当前 Space/media/profile 最近一条统一任务；默认 H.264/TS profile 返回兼容 URL `master.m3u8`，`abr-h264` 返回 `/api/play/hls/:id/profiles/abr-h264/master.m3u8`。音轨重载不按 profile 猜“最新任务”，而是按 `task_id` 精确交叉校验 Space、media、profile、任务类型和 payload；其 `available`、`url` 与 `effective_track_id` 只对应这一任务。只有任务成功且任务目录内清单存在时才返回 `available=true` 和目标 `effective_track_id`。
 - **错误**：`400 INVALID_ID`（媒体 ID 不是整数）、`400 INVALID_HLS_TASK_ID`（任务 ID 非正整数，或 ABR 错带 `task_id`）、`400 HLS_TASK_ID_REQUIRED`（音轨 profile 缺少 `task_id`）、`404 HLS_TASK_NOT_FOUND`、`404 NOT_FOUND`（媒体不存在）、`500 HLS_STATUS_FAILED`（任务信封、payload、媒体/profile/task 身份不一致，profile 未使用创建响应中的 canonical 值，或状态读取失败；响应不泄露内部细节）、`503 HLS_PREVIEW_UNAVAILABLE`、`503 HLS_ABR_UNAVAILABLE`。
+
+### 查询或生成时间轴预览（FR2-029）
+
+- **方法 / 路径**：`GET /api/play/:id/timeline-preview`
+- **查询参数**：`profile` 可选；缺省使用服务端当前默认 profile。
+- **响应**：已有可用 generation 时返回 `200` 与 `status=available`、`profile_id`、`source_fingerprint`、`generation_id`、`duration`、`version`、`vtt_url`、`sprite_urls`；缺失或过期时幂等入队并返回 `202`、`status=pending` 与 `task_id`。
+- **说明**：查询不会同步执行 ffmpeg；同一 Space/media/profile/source generation 的未完成任务复用同一幂等身份。媒体不存在或不属于当前 Space 返回 `404 NOT_FOUND`。
+
+### 重建时间轴预览（FR2-029）
+
+- **方法 / 路径**：`POST /api/play/:id/timeline-preview/rebuild`
+- **请求**：`{"profile_id":"timeline-v1-..."}`
+- **响应**（202）：返回新的 pending generation 与 `task_id`。
+- **说明**：显式重建创建新 generation，旧 generation 在新产物原子发布前仍可读取；发布成功后当前指针切换，新旧缓存由安全清理与补偿机制收口。
+
+### 获取时间轴预览资源（FR2-029）
+
+- **方法 / 路径**：`GET /api/play/:id/timeline-preview/resources/:profile/:fingerprint/:generation/:resource`
+- **资源**：`:resource` 仅允许 `index.vtt` 或服务端返回的 `.jpg/.webp/.png` sprite 文件名。
+- **响应**：VTT 返回 `text/vtt`，sprite 返回对应 `image/*`；按完整 Space/media/profile/source fingerprint/generation 身份受限读取，不回退到其他 generation。
+- **错误**：非法 profile 或资源身份返回 `400 INVALID_PROFILE/INVALID_RESOURCE/INVALID_PREVIEW`，资源不存在返回 `404 NOT_FOUND`，服务未启用返回 `503 TIMELINE_PREVIEW_UNAVAILABLE`。
 
 ### 显式创建多码率 HLS 任务（FR2-026）
 

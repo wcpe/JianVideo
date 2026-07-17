@@ -387,9 +387,7 @@ describe('VideoPlayer 统一轨道接入', () => {
       ),
     );
     await userEvent.click(screen.getByRole('button', { name: '字幕轨道' }));
-    expect(
-      screen.getByRole('menuitem', { name: /关闭字幕.*当前播放/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /关闭字幕.*当前播放/ })).toBeInTheDocument();
   });
 
   it('删除 uploaded 轨道前先关闭且删除后刷新', async () => {
@@ -419,9 +417,7 @@ describe('VideoPlayer 统一轨道接入', () => {
       expect.objectContaining({ title: '删除字幕失败', message: '删除被拒绝', color: 'red' }),
     );
     await userEvent.click(screen.getByRole('button', { name: '字幕轨道' }));
-    expect(
-      screen.getByRole('menuitem', { name: /字幕 A.*当前播放/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /字幕 A.*当前播放/ })).toBeInTheDocument();
   });
 
   it('删除非当前 uploaded 轨道时不关闭当前字幕', async () => {
@@ -440,7 +436,10 @@ describe('VideoPlayer 统一轨道接入', () => {
         manifest.tracks[1],
       ],
     };
-    renderPlayer(vi.fn(async () => twoTracks), twoTracks);
+    renderPlayer(
+      vi.fn(async () => twoTracks),
+      twoTracks,
+    );
     await userEvent.click(await screen.findByRole('button', { name: '字幕轨道' }));
     await userEvent.click(screen.getByRole('menuitem', { name: '字幕 A' }));
     await waitFor(() => expect(api.getTrackContent).toHaveBeenCalledTimes(1));
@@ -450,9 +449,7 @@ describe('VideoPlayer 统一轨道接入', () => {
 
     expect(api.getTrackContent).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole('button', { name: '字幕轨道' }));
-    expect(
-      screen.getByRole('menuitem', { name: /字幕 A.*当前播放/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /字幕 A.*当前播放/ })).toBeInTheDocument();
   });
 
   it('音轨 HLS 清单与 canplay 均就绪后才收敛 effective，并按创建时 task 查询', async () => {
@@ -480,12 +477,7 @@ describe('VideoPlayer 统一轨道接入', () => {
       expect(screen.getByRole('menuitem', { name: /音轨 B.*当前播放/ })).toBeInTheDocument(),
     );
     expect(playApi.createAudioReload).toHaveBeenCalledWith(9, 'audio-b', expect.any(AbortSignal));
-    expect(playApi.getHLSStatus).toHaveBeenCalledWith(
-      9,
-      'audio-b',
-      '81',
-      expect.any(AbortSignal),
-    );
+    expect(playApi.getHLSStatus).toHaveBeenCalledWith(9, 'audio-b', '81', expect.any(AbortSignal));
     expect(api.getTrackContent).not.toHaveBeenCalled();
   });
 
@@ -504,7 +496,11 @@ describe('VideoPlayer 统一轨道接入', () => {
 
     await waitFor(() =>
       expect(notification).toHaveBeenCalledWith(
-        expect.objectContaining({ title: '切换音轨失败', message: '音轨版本生成失败', color: 'red' }),
+        expect.objectContaining({
+          title: '切换音轨失败',
+          message: '音轨版本生成失败',
+          color: 'red',
+        }),
       ),
     );
     await userEvent.click(screen.getByRole('button', { name: '音轨' }));

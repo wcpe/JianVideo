@@ -4,6 +4,7 @@ import {
   PlaybackCore,
   type LoadControlFacet,
   type PlaybackCommandContext,
+  type PlaybackEvent,
   type PlaybackQuality,
   type PlaybackSource,
   type QualityFacet,
@@ -293,6 +294,34 @@ describe('PlaybackCore 清晰度与省流量', () => {
     expect(core.getSnapshot().currentTime).toBe(12);
   });
 
+  it('省流量切换新源时空清单不阻断，后续兼容档位解除已确认阻断', async () => {
+    const { backend, core, quality } = await createLoadedCore();
+    await core.setDataSaver(true);
+    backend.loadHandler = (_source, command) => {
+      quality.replaceState({ actualQualityId: null, qualities: [] }, command);
+      return Promise.resolve();
+    };
+
+    await core.load(SOURCE_B);
+    expect(core.getQualityState()).toMatchObject({ dataSaver: true, dataSaverBlocked: false, qualities: [] });
+
+    quality.replaceState({ qualities: [QUALITY_1080, QUALITY_720] }, currentCommand(core));
+    await flushTasks();
+    expect(core.getQualityState()).toMatchObject({ dataSaver: true, dataSaverBlocked: true });
+
+    quality.replaceState(
+      { actualQualityId: QUALITY_480_LOW.id, qualities: [QUALITY_1080, QUALITY_480_LOW] },
+      currentCommand(core),
+    );
+    await flushTasks();
+    expect(core.getQualityState()).toMatchObject({
+      actualQuality: QUALITY_480_LOW,
+      dataSaver: true,
+      dataSaverBlocked: false,
+    });
+    expect(quality.calls.filter((call) => call.type === 'cap').at(-1)).toMatchObject({ maxHeight: 480 });
+  });
+
   it('省流量 stop 停止 HLS 加载且重复停止不重复触发', async () => {
     const { core, loadControl } = await createLoadedCore({ state: 'playing' });
     await core.setDataSaver(true);
@@ -458,6 +487,10 @@ describe('PlaybackCore A-B 循环', () => {
     backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 8, state: 'playing' });
     await core.setAbLoopB();
     backend.seekRequests.length = 0;
+    const completions: Array<Extract<PlaybackEvent, { readonly type: 'seekCompleted' }>> = [];
+    core.subscribe((event) => {
+      if (event.type === 'seekCompleted') completions.push(event);
+    });
 
     backend.setSnapshot({ ...backend.getSnapshot(), currentTime: 7.999, requestId: backendRequestId });
     backend.emit({
@@ -482,6 +515,11 @@ describe('PlaybackCore A-B 循环', () => {
     });
     await flushTasks();
     expect(backend.seekRequests.at(-1)).toMatchObject({ reason: 'ab_loop', targetTime: 5 });
+    expect(completions).toHaveLength(1);
+    expect(completions[0]).toMatchObject({
+      reason: 'ab_loop',
+      result: { status: 'completed', targetTime: 5 },
+    });
     expect(core.getSnapshot().state).toBe('playing');
   });
 

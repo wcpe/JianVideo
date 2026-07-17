@@ -14,7 +14,11 @@ function exactGroupItems(groups: ExactDuplicateGroup[]): MediaFile[][] {
   return groups.map((group) => group.items);
 }
 
-function visibleItems(mode: DuplicateMode, exact: ExactDuplicateGroup[], similar: DuplicateGroup[]) {
+function visibleItems(
+  mode: DuplicateMode,
+  exact: ExactDuplicateGroup[],
+  similar: DuplicateGroup[],
+) {
   return mode === 'exact' ? exactGroupItems(exact) : similar;
 }
 
@@ -43,7 +47,8 @@ export default function DuplicatesPage() {
       }
       setSelected((prev) => {
         const alive = new Set<number>();
-        for (const group of nextGroups) for (const media of group) if (prev.has(media.id)) alive.add(media.id);
+        for (const group of nextGroups)
+          for (const media of group) if (prev.has(media.id)) alive.add(media.id);
         return alive;
       });
     } catch (err) {

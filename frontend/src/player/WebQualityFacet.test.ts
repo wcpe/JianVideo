@@ -106,7 +106,10 @@ describe('WebQualityFacet HLS 层级适配', () => {
     facet.load(command());
     facet.attach(hls, command());
     facet.refreshLevels(command());
-    await facet.selectQuality({ mode: 'manual', quality: { bandwidth: 800_000, height: 480 } }, command(2));
+    await facet.selectQuality(
+      { mode: 'manual', quality: { bandwidth: 800_000, height: 480 } },
+      command(2),
+    );
 
     facet.handleLevelSwitched(4);
 

@@ -78,7 +78,9 @@ function SubtitleMenu(
         <Menu.Label>字幕</Menu.Label>
         <Menu.Item
           leftSection={
-            props.selections.subtitle.effectiveTrackId === null ? <IconCheck size={14} /> : undefined
+            props.selections.subtitle.effectiveTrackId === null ? (
+              <IconCheck size={14} />
+            ) : undefined
           }
           onClick={() => props.onSelect('subtitle', null)}
         >

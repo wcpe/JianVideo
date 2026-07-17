@@ -15,7 +15,43 @@ export type CapabilityAvailability = 'available' | 'unavailable';
 export type FramePresentationCapability = 'exact' | 'approximate' | 'unavailable';
 export type PlaybackSourceMode = 'direct' | 'stream' | 'adaptive' | 'live';
 export type SeekReason = 'user' | 'step' | 'tier' | 'restore' | 'ab_loop';
+export type WatchStateEventType = 'progress' | 'pause' | 'seek' | 'ended';
+export type WatchStateEventReason = 'user' | 'ab_loop' | 'restore' | 'system';
 export type SeekBoundaryPolicy = 'clamp';
+
+export interface WatchStateSnapshot {
+  readonly completed: boolean;
+  readonly positionSeconds: number;
+  readonly revision: number;
+}
+
+export interface WatchStatePlaybackContext {
+  readonly durationSeconds?: number;
+  readonly foreground: boolean;
+  readonly playing: boolean;
+  readonly positionSeconds: number;
+}
+
+export interface WatchStateReportInput {
+  readonly durationSeconds?: number;
+  readonly eventType: WatchStateEventType;
+  readonly positionSeconds: number;
+  readonly reason: WatchStateEventReason;
+}
+
+export interface WatchStateReport extends WatchStateReportInput {
+  readonly eventSeq: number;
+  readonly expectedRevision: number;
+  readonly sessionId: string;
+}
+
+export type WatchStateSendResult =
+  | { readonly applied: boolean; readonly current: WatchStateSnapshot; readonly kind: 'applied' }
+  | { readonly current: WatchStateSnapshot; readonly kind: 'conflict' };
+
+export interface WatchStateTransport {
+  send(event: WatchStateReport, options?: { readonly keepalive?: boolean }): Promise<WatchStateSendResult>;
+}
 export type SeekTier =
   | { readonly count: 1; readonly kind: 'frame' }
   | { readonly kind: 'seconds'; readonly value: 0.5 | 1 | 5 | 30 | 60 };
@@ -350,6 +386,14 @@ export type PlaybackEvent = PlaybackEventContext &
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
         readonly type: 'frameStepCompleted';
+      }
+    | {
+        readonly reason: SeekReason;
+        readonly result: SeekResult;
+        readonly snapshot?: PlaybackSnapshot;
+        readonly sourceEpoch: number;
+        readonly sourceId: string | null;
+        readonly type: 'seekCompleted';
       }
     | {
         readonly effectiveTrackId: string | null;

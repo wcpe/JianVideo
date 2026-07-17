@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -152,8 +152,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const pathInput = await screen.findByLabelText('回收站路径 1');
-    await user.clear(pathInput);
-    await user.type(pathInput, 'D:/trash');
+    fireEvent.change(pathInput, { target: { value: 'D:/trash' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -203,7 +202,7 @@ describe('SettingsPage', () => {
     await screen.findByLabelText('盘符 1', {}, { timeout: 10000 });
     // 加一行并填与第一行相同的盘符 D
     await user.click(screen.getByRole('button', { name: '添加盘符' }));
-    await user.type(screen.getByLabelText('盘符 2'), 'D');
+    fireEvent.change(screen.getByLabelText('盘符 2'), { target: { value: 'D' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -219,8 +218,7 @@ describe('SettingsPage', () => {
     const input = await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 10000 });
     await waitFor(() => expect(input).toHaveValue('3600'));
 
-    await user.clear(input);
-    await user.type(input, '7200');
+    fireEvent.change(input, { target: { value: '7200' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -335,7 +333,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('FFmpeg 路径');
-    await user.type(input, 'D:/tools/ffmpeg.exe');
+    fireEvent.change(input, { target: { value: 'D:/tools/ffmpeg.exe' } });
     await user.click(screen.getByRole('button', { name: '检测' }));
 
     await waitFor(() => {
@@ -348,7 +346,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('FFmpeg 路径');
-    await user.type(input, 'D:/tools/notexist.bin');
+    fireEvent.change(input, { target: { value: 'D:/tools/notexist.bin' } });
     await user.click(screen.getByRole('button', { name: '检测' }));
 
     await waitFor(() => {
@@ -361,7 +359,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('网络代理');
-    await user.type(input, 'http://127.0.0.1:7890');
+    fireEvent.change(input, { target: { value: 'http://127.0.0.1:7890' } });
     await user.click(screen.getByRole('button', { name: '测试' }));
 
     await waitFor(() => {
@@ -374,7 +372,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('网络代理');
-    await user.type(input, 'http://bad-proxy:9999');
+    fireEvent.change(input, { target: { value: 'http://bad-proxy:9999' } });
     await user.click(screen.getByRole('button', { name: '测试' }));
 
     await waitFor(() => {
@@ -477,7 +475,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('Magick 路径');
-    await user.type(input, 'D:/tools/magick.exe');
+    fireEvent.change(input, { target: { value: 'D:/tools/magick.exe' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -501,7 +499,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('网络代理');
-    await user.type(input, 'socks5://127.0.0.1:1080');
+    fireEvent.change(input, { target: { value: 'socks5://127.0.0.1:1080' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -525,7 +523,7 @@ describe('SettingsPage', () => {
     renderPage();
 
     const input = await screen.findByLabelText('FFmpeg 路径');
-    await user.type(input, 'D:/tools/ffmpeg.exe');
+    fireEvent.change(input, { target: { value: 'D:/tools/ffmpeg.exe' } });
     await user.click(screen.getByRole('button', { name: '保存设置' }));
 
     await waitFor(() => {
@@ -697,9 +695,9 @@ describe('SettingsPage', () => {
     renderPage();
     await screen.findByLabelText('当前密码');
 
-    await user.type(screen.getByLabelText('当前密码'), 'admin');
-    await user.type(screen.getByLabelText('新密码'), 'secret123');
-    await user.type(screen.getByLabelText('确认新密码'), 'mismatch1');
+    fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText('确认新密码'), { target: { value: 'mismatch1' } });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
 
     expect(await screen.findByText('两次输入的新密码不一致')).toBeVisible();
@@ -711,9 +709,9 @@ describe('SettingsPage', () => {
     renderPage();
     await screen.findByLabelText('当前密码');
 
-    await user.type(screen.getByLabelText('当前密码'), 'wrong-pass');
-    await user.type(screen.getByLabelText('新密码'), 'secret123');
-    await user.type(screen.getByLabelText('确认新密码'), 'secret123');
+    fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'wrong-pass' } });
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText('确认新密码'), { target: { value: 'secret123' } });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
 
     await waitFor(() => {
@@ -726,9 +724,9 @@ describe('SettingsPage', () => {
     renderPage();
     await screen.findByLabelText('当前密码');
 
-    await user.type(screen.getByLabelText('当前密码'), 'admin');
-    await user.type(screen.getByLabelText('新密码'), 'secret123');
-    await user.type(screen.getByLabelText('确认新密码'), 'secret123');
+    fireEvent.change(screen.getByLabelText('当前密码'), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'secret123' } });
+    fireEvent.change(screen.getByLabelText('确认新密码'), { target: { value: 'secret123' } });
     await user.click(screen.getByRole('button', { name: '修改密码' }));
 
     await waitFor(() => {

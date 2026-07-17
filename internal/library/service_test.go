@@ -27,10 +27,41 @@ func newTestService(t *testing.T) (*Service, *gorm.DB) {
 		t.Fatalf("获取底层连接失败: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.MediaHashGroup{}); err != nil {
+	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{}, &models.MediaHashGroup{}, &models.WatchState{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 	return NewService(gdb), gdb
+}
+
+func prepareMediaDeleteIntegrityTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		t.Fatalf("启用外键失败: %v", err)
+	}
+	if err := db.AutoMigrate(&models.MediaMetadata{}); err != nil {
+		t.Fatalf("迁移媒体元数据表失败: %v", err)
+	}
+	statements := []string{
+		`CREATE TABLE media_chapters (
+			id TEXT PRIMARY KEY, space_id TEXT NOT NULL, media_id INTEGER NOT NULL,
+			source TEXT NOT NULL, source_index INTEGER NOT NULL, start_ms INTEGER NOT NULL,
+			end_ms INTEGER NOT NULL, title TEXT NOT NULL, language TEXT,
+			source_fingerprint TEXT NOT NULL, parsed_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+		)`,
+		`CREATE TABLE media_bookmarks (
+			id TEXT PRIMARY KEY, space_id TEXT NOT NULL, media_id INTEGER NOT NULL,
+			position_ms INTEGER NOT NULL, title TEXT NOT NULL, note TEXT,
+			revision INTEGER NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+			FOREIGN KEY(media_id) REFERENCES media_files(id) ON UPDATE CASCADE ON DELETE CASCADE
+		)`,
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("创建媒体删除完整性测试表失败: %v", err)
+		}
+	}
 }
 
 func TestCreateLibraryPath(t *testing.T) {
@@ -166,6 +197,76 @@ func TestDeleteLibraryPath(t *testing.T) {
 	db.Model(&models.MediaExtension{}).Where("library_id = ?", lp.ID).Count(&count)
 	if count != 0 {
 		t.Fatalf("关联自定义后缀应已删除, 仍有 %d 条", count)
+	}
+}
+
+func TestDeleteLibraryPath_CleansMediaRelationsAndKeepsOtherSpace(t *testing.T) {
+	svc, db := newTestService(t)
+	prepareMediaDeleteIntegrityTables(t, db)
+	deletedLibrary, err := svc.CreateLibraryPathInSpace(models.DefaultSpaceID, t.TempDir(), "local", "待删除")
+	if err != nil {
+		t.Fatalf("创建待删除媒体库失败: %v", err)
+	}
+	keptLibrary, err := svc.CreateLibraryPathInSpace("space-other", t.TempDir(), "local", "其他 Space 保留")
+	if err != nil {
+		t.Fatalf("创建保留媒体库失败: %v", err)
+	}
+	deletedMedia, err := svc.CreateMediaFileInSpace(models.DefaultSpaceID, deletedLibrary.ID, "/tmp/deleted.mp4", 1024)
+	if err != nil {
+		t.Fatalf("创建待删除媒体失败: %v", err)
+	}
+	keptMedia, err := svc.CreateMediaFileInSpace("space-other", keptLibrary.ID, "/tmp/kept.mp4", 1024)
+	if err != nil {
+		t.Fatalf("创建保留媒体失败: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&[]models.WatchState{
+		{SpaceID: deletedMedia.SpaceID, MediaID: deletedMedia.ID, PositionSeconds: 10, LastWatchedAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{SpaceID: keptMedia.SpaceID, MediaID: keptMedia.ID, PositionSeconds: 20, LastWatchedAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("创建观看状态失败: %v", err)
+	}
+	if err := db.Create(&[]models.MediaMetadata{
+		{SpaceID: deletedMedia.SpaceID, MediaID: deletedMedia.ID, Source: "ffprobe", Tool: "ffprobe", ToolVersion: "7.1", RawJSON: "{}", NormalizedJSON: "{}", ParsedAt: now},
+		{SpaceID: keptMedia.SpaceID, MediaID: keptMedia.ID, Source: "ffprobe", Tool: "ffprobe", ToolVersion: "7.1", RawJSON: "{}", NormalizedJSON: "{}", ParsedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("创建媒体元数据失败: %v", err)
+	}
+	if err := db.Create(&[]models.MediaChapter{
+		{ID: "chapter-delete", SpaceID: deletedMedia.SpaceID, MediaID: deletedMedia.ID, Source: models.MediaChapterSourceEmbedded, SourceIndex: 0, StartMS: 0, EndMS: 1000, Title: "待删除章节", SourceFingerprint: "delete", ParsedAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "chapter-keep", SpaceID: keptMedia.SpaceID, MediaID: keptMedia.ID, Source: models.MediaChapterSourceEmbedded, SourceIndex: 0, StartMS: 0, EndMS: 1000, Title: "保留章节", SourceFingerprint: "keep", ParsedAt: now, CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("创建媒体章节失败: %v", err)
+	}
+	if err := db.Create(&[]models.MediaBookmark{
+		{ID: "bookmark-delete", SpaceID: deletedMedia.SpaceID, MediaID: deletedMedia.ID, PositionMS: 500, Title: "待删除书签", Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "bookmark-keep", SpaceID: keptMedia.SpaceID, MediaID: keptMedia.ID, PositionMS: 500, Title: "保留书签", Revision: 1, CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("创建媒体书签失败: %v", err)
+	}
+
+	if err := svc.DeleteLibraryPathInSpace(models.DefaultSpaceID, deletedLibrary.ID); err != nil {
+		t.Fatalf("删除媒体库失败: %v", err)
+	}
+
+	for _, table := range []string{"watch_states", "media_metadata", "media_chapters", "media_bookmarks"} {
+		var deletedCount int64
+		if err := db.Table(table).Where("space_id = ? AND media_id = ?", deletedMedia.SpaceID, deletedMedia.ID).Count(&deletedCount).Error; err != nil {
+			t.Fatalf("统计 %s 待删除记录失败: %v", table, err)
+		}
+		if deletedCount != 0 {
+			t.Fatalf("媒体物理删除后 %s 不应遗留记录, 实际 %d 条", table, deletedCount)
+		}
+		var keptCount int64
+		if err := db.Table(table).Where("space_id = ? AND media_id = ?", keptMedia.SpaceID, keptMedia.ID).Count(&keptCount).Error; err != nil {
+			t.Fatalf("统计 %s 保留记录失败: %v", table, err)
+		}
+		if keptCount != 1 {
+			t.Fatalf("其他 Space 的 %s 不应被删除, 实际 %d 条", table, keptCount)
+		}
+	}
+	if _, err := svc.GetMediaFileByIDInSpace(keptMedia.SpaceID, keptMedia.ID); err != nil {
+		t.Fatalf("其他 Space 媒体不应被删除: %v", err)
 	}
 }
 
@@ -349,8 +450,37 @@ func TestRestoreMediaFile_NotFound(t *testing.T) {
 	svc, _ := newTestService(t)
 
 	err := svc.RestoreMediaFile(99999)
-	if err == nil {
-		t.Fatal("还原不存在的媒体应返回错误")
+	if !errors.Is(err, ErrRecycleMediaNotFound) {
+		t.Fatalf("还原不存在的媒体应返回 ErrRecycleMediaNotFound, 实际 %v", err)
+	}
+}
+
+func TestRestoreMediaFile_PropagatesDatabaseFailure(t *testing.T) {
+	svc, db := newTestService(t)
+	mf, err := svc.CreateMediaFile(1, "/tmp/restore-db-failure.mp4", 1024)
+	if err != nil {
+		t.Fatalf("创建媒体失败: %v", err)
+	}
+	if err := svc.DeleteMediaFile(mf.ID); err != nil {
+		t.Fatalf("软删除失败: %v", err)
+	}
+
+	injectedErr := errors.New("注入回收站查询失败")
+	const callbackName = "test:restore_media_query_failure"
+	failed := false
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if failed || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "media_files" {
+			return
+		}
+		failed = true
+		injectGORMCallbackError(t, tx, injectedErr)
+	}); err != nil {
+		t.Fatalf("注册回收站查询失败注入失败: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	if err := svc.RestoreMediaFile(mf.ID); !errors.Is(err, injectedErr) {
+		t.Fatalf("数据库失败必须保留底层错误供上层诊断, 实际 %v", err)
 	}
 }
 
@@ -667,14 +797,24 @@ func TestScanLibrary_AllowsSamePathInDifferentLibraries(t *testing.T) {
 }
 
 func TestDeleteMediaFileByLibraryAndPath_OnlyDeletesCurrentLibrary(t *testing.T) {
-	svc, _ := newTestService(t)
+	svc, db := newTestService(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "shared.mp4")
-	if _, err := svc.CreateMediaFile(1, path, 1024); err != nil {
+	deletedMedia, err := svc.CreateMediaFile(1, path, 1024)
+	if err != nil {
 		t.Fatalf("创建媒体文件失败: %v", err)
 	}
-	if _, err := svc.CreateMediaFile(2, path, 1024); err != nil {
+	keptMedia, err := svc.CreateMediaFile(2, path, 1024)
+	if err != nil {
 		t.Fatalf("创建第二个媒体库媒体文件失败: %v", err)
+	}
+	now := time.Now().UTC()
+	states := []models.WatchState{
+		{SpaceID: deletedMedia.SpaceID, MediaID: deletedMedia.ID, PositionSeconds: 10, LastWatchedAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{SpaceID: keptMedia.SpaceID, MediaID: keptMedia.ID, PositionSeconds: 20, LastWatchedAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&states).Error; err != nil {
+		t.Fatalf("创建观看状态失败: %v", err)
 	}
 
 	if err := svc.DeleteMediaFileByLibraryAndPath(1, path); err != nil {
@@ -685,6 +825,20 @@ func TestDeleteMediaFileByLibraryAndPath_OnlyDeletesCurrentLibrary(t *testing.T)
 	}
 	if _, err := svc.GetMediaFileByLibraryAndPath(2, path); err != nil {
 		t.Fatalf("其他媒体库同路径记录不应被删除: %v", err)
+	}
+	var deletedStateCount int64
+	if err := db.Model(&models.WatchState{}).Where("media_id = ?", deletedMedia.ID).Count(&deletedStateCount).Error; err != nil {
+		t.Fatalf("统计已删媒体观看状态失败: %v", err)
+	}
+	if deletedStateCount != 0 {
+		t.Fatalf("物理删除媒体后不应遗留观看状态, 实际 %d 条", deletedStateCount)
+	}
+	var keptStateCount int64
+	if err := db.Model(&models.WatchState{}).Where("media_id = ?", keptMedia.ID).Count(&keptStateCount).Error; err != nil {
+		t.Fatalf("统计保留媒体观看状态失败: %v", err)
+	}
+	if keptStateCount != 1 {
+		t.Fatalf("其他媒体库观看状态不应被删除, 实际 %d 条", keptStateCount)
 	}
 }
 

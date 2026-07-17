@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -563,7 +564,12 @@ func (h *Handler) RestoreMediaFile(c *gin.Context) {
 	}
 
 	if err := h.library.RestoreMediaFileInSpace(spaceID, id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "回收站中不存在该媒体文件"})
+		if errors.Is(err, library.ErrRecycleMediaNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "回收站中不存在该媒体文件"})
+			return
+		}
+		log.Printf("[ERROR] 回收站还原失败: spaceID=%s, mediaID=%d, err=%v", spaceID, id, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "RESTORE_UNAVAILABLE", "message": "回收站还原暂时不可用"})
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -603,10 +609,98 @@ func (h *Handler) RecycleCleanup(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "RECYCLE_PATH_UNSET", "message": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "CLEANUP_FAILED", "message": "清理回收站失败"})
+		var recovery *library.RecycleRecoveryError
+		if errors.As(err, &recovery) {
+			writeRecycleRecoveryError(c, result, recovery)
+			return
+		}
+		writeRecycleCleanupError(c, spaceID, result, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"moved": result.Moved, "failed": result.Failed})
+}
+
+func writeRecycleCleanupError(c *gin.Context, spaceID string, result library.CleanupResult, err error) {
+	log.Printf("[ERROR] 回收站清理失败: spaceID=%s, moved=%d, failed=%d, err=%v", spaceID, result.Moved, result.Failed, err)
+	status := http.StatusInternalServerError
+	code := "CLEANUP_FAILED"
+	message := "清理回收站失败"
+	if isSQLiteBusyOrLocked(err) {
+		status = http.StatusServiceUnavailable
+		code = "CLEANUP_UNAVAILABLE"
+		message = "回收站清理暂时不可用"
+	}
+	c.JSON(status, gin.H{"code": code, "message": message})
+}
+
+const (
+	sqliteBusyErrorCode   = 5
+	sqliteLockedErrorCode = 6
+	sqliteErrorPackage    = "github.com/mattn/go-sqlite3"
+)
+
+func isSQLiteBusyOrLocked(err error) bool {
+	if code, ok := sqliteErrorCode(err); ok {
+		return code == sqliteBusyErrorCode || code == sqliteLockedErrorCode
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, inner := range joined.Unwrap() {
+			if isSQLiteBusyOrLocked(inner) {
+				return true
+			}
+		}
+		return false
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return isSQLiteBusyOrLocked(wrapped.Unwrap())
+	}
+	return false
+}
+
+func sqliteErrorCode(err error) (int64, bool) {
+	value := reflect.ValueOf(err)
+	for value.IsValid() && value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return 0, false
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return 0, false
+	}
+	typeInfo := value.Type()
+	if typeInfo.PkgPath() != sqliteErrorPackage || typeInfo.Name() != "Error" {
+		return 0, false
+	}
+	code := value.FieldByName("Code")
+	if !code.IsValid() || !code.CanInt() {
+		return 0, false
+	}
+	return code.Int(), true
+}
+
+func writeRecycleRecoveryError(c *gin.Context, result library.CleanupResult, recovery *library.RecycleRecoveryError) {
+	log.Printf(
+		"[ERROR] 回收站恢复异常: mediaID=%d, state=%s, source=%s, target=%s, action=%s, databaseErr=%v, recoveryErr=%v",
+		recovery.MediaID, recovery.State, recovery.Source, recovery.Target, recovery.Action,
+		recovery.DatabaseError, recovery.RecoveryError,
+	)
+	if isSQLiteBusyOrLocked(recovery.DatabaseError) || isSQLiteBusyOrLocked(recovery.RecoveryError) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code": "CLEANUP_UNAVAILABLE", "message": "回收站清理暂时不可用",
+			"moved": result.Moved, "failed": result.Failed,
+		})
+		return
+	}
+	status, code := http.StatusInternalServerError, "RECYCLE_RECOVERY_FAILED"
+	if recovery.State == library.RecycleRecoveryStateSourceOccupied {
+		status, code = http.StatusConflict, "RECYCLE_RECOVERY_CONFLICT"
+	}
+	c.JSON(status, gin.H{
+		"code": code, "message": recovery.Error(), "moved": result.Moved, "failed": result.Failed,
+		"media_id": recovery.MediaID, "source_name": filepath.Base(recovery.Source), "target_name": filepath.Base(recovery.Target),
+		"state": recovery.State, "action": recovery.Action,
+	})
 }
 
 // RenameMediaFile PUT /api/library/media/:id/rename

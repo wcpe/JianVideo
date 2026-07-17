@@ -337,7 +337,10 @@ async function realGetMediaCovers(id: number): Promise<MediaCoversResponse> {
   return res.data;
 }
 
-async function realGenerateMediaCovers(id: number, refresh: boolean): Promise<{ status: string; task_id: number }> {
+async function realGenerateMediaCovers(
+  id: number,
+  refresh: boolean,
+): Promise<{ status: string; task_id: number }> {
   const res = await client.post<{ status: string; task_id: number }>(
     `/api/library/media/${id}/covers/generate`,
     { refresh },
@@ -352,7 +355,10 @@ async function realSelectMediaCover(id: number, candidateID: number): Promise<Me
   return res.data;
 }
 
-async function realGetMediaInference(id: number, signal?: AbortSignal): Promise<MediaInference | null> {
+async function realGetMediaInference(
+  id: number,
+  signal?: AbortSignal,
+): Promise<MediaInference | null> {
   const res = await client.get<{ inference: MediaInference | null }>(
     `/api/library/media/${id}/inference`,
     { signal },

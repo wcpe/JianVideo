@@ -312,6 +312,20 @@ interface DeviceDetectionInput {
   };
 }
 
+function mergeAbortSignals(primary: AbortSignal, secondary?: AbortSignal | null): AbortSignal {
+  if (!secondary) return primary;
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort();
+  };
+  if (primary.aborted || secondary.aborted) abort();
+  else {
+    primary.addEventListener('abort', abort, { once: true });
+    secondary.addEventListener('abort', abort, { once: true });
+  }
+  return controller.signal;
+}
+
 async function requestAttempt<T>(
   fetchImpl: FetchLike,
   url: URL,
@@ -325,7 +339,8 @@ async function requestAttempt<T>(
       controller.abort();
     }, timeoutMs);
     try {
-      return { ok: true, value: await requestJson<T>(fetchImpl, url, options, init, controller.signal) };
+      const signal = mergeAbortSignals(controller.signal, init.signal);
+      return { ok: true, value: await requestJson<T>(fetchImpl, url, options, init, signal) };
     } finally {
       clearTimeout(timeout);
     }
@@ -355,8 +370,12 @@ export async function getMedia(client: ApiClient, id: string): Promise<MediaItem
   return toMediaItem(await client.request<RawMediaItem>(`/api/v2/media/${encodeURIComponent(id)}`));
 }
 
-export async function getWatchState(client: ApiClient, mediaId: string): Promise<WatchState> {
-  const response = await client.request<RawWatchState>(watchStatePath(mediaId));
+export async function getWatchState(
+  client: ApiClient,
+  mediaId: string,
+  options: Pick<RequestInit, 'signal'> = {},
+): Promise<WatchState> {
+  const response = await client.request<RawWatchState>(watchStatePath(mediaId), options);
   return toWatchState(response);
 }
 
@@ -364,8 +383,10 @@ export async function updateWatchState(
   client: ApiClient,
   mediaId: string,
   event: WatchStateEvent,
+  options: Pick<RequestInit, 'keepalive' | 'signal'> = {},
 ): Promise<WatchStateUpdateResult> {
   const response = await client.request<RawWatchStateUpdateResult>(watchStatePath(mediaId), {
+    ...options,
     body: JSON.stringify(toRawWatchStateEvent(event)),
     headers: { 'Content-Type': 'application/json' },
     method: 'PUT',

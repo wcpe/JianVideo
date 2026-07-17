@@ -94,11 +94,13 @@ vi.mock('hls.js', () => {
       this.loadingEnabled = false;
     });
 
-    constructor(config: {
-      autoStartLoad?: boolean;
-      startFragPrefetch?: boolean;
-      xhrSetup?: (xhr: XMLHttpRequest) => void;
-    } = {}) {
+    constructor(
+      config: {
+        autoStartLoad?: boolean;
+        startFragPrefetch?: boolean;
+        xhrSetup?: (xhr: XMLHttpRequest) => void;
+      } = {},
+    ) {
       hlsMock.configs.push(config);
       hlsMock.instances.push(this);
     }
@@ -251,6 +253,37 @@ function stubTimeline(video: HTMLVideoElement, duration = 120) {
   });
 }
 
+function stubSeekPauseTimeline(video: HTMLVideoElement, duration = 120) {
+  let currentTime = 0;
+  let pauseOnWrite = false;
+  let paused = true;
+  Object.defineProperties(video, {
+    currentTime: {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+        if (pauseOnWrite) paused = true;
+      },
+    },
+    duration: { configurable: true, get: () => duration },
+    paused: { configurable: true, get: () => paused },
+    seekable: { configurable: true, get: () => timeRanges([[0, duration]]) },
+  });
+  vi.mocked(video.play).mockImplementation(() => {
+    paused = false;
+    return Promise.resolve();
+  });
+  return {
+    enablePauseOnWrite: () => {
+      pauseOnWrite = true;
+    },
+    setPaused: (value: boolean) => {
+      paused = value;
+    },
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((settle) => {
@@ -396,10 +429,16 @@ describe('WebPlaybackBackend ready 时序', () => {
   it('主 HLS 仅加载清单，播放后才启动分片，并暴露清晰度与加载分面', async () => {
     const video = createVideo();
     const backend = new WebPlaybackBackend(video);
-    const loading = backend.load(createSource('quality-hls', 'hls'), createCommand('quality-hls', 1));
+    const loading = backend.load(
+      createSource('quality-hls', 'hls'),
+      createCommand('quality-hls', 1),
+    );
     const hls = await waitForHlsInstance();
 
-    expect(hlsMock.configs.at(-1)).toMatchObject({ autoStartLoad: false, startFragPrefetch: false });
+    expect(hlsMock.configs.at(-1)).toMatchObject({
+      autoStartLoad: false,
+      startFragPrefetch: false,
+    });
     expect(video.preload).toBe('none');
     expect(hls.startLoad).not.toHaveBeenCalled();
 
@@ -417,10 +456,29 @@ describe('WebPlaybackBackend ready 时序', () => {
     expect(hls.stopLoad).toHaveBeenCalledOnce();
   });
 
+  it('play 失败时回滚播放意图且后续 seek 不重试失败命令', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    const play = vi.mocked(video.play);
+    play.mockRejectedValueOnce(new Error('播放被拒绝')).mockResolvedValue(undefined);
+    const backend = new WebPlaybackBackend(video);
+    await backend.load(createSource('native', 'native'), createCommand('native', 1));
+
+    await expect(backend.play(createCommand('native', 1, 2))).rejects.toThrow('播放被拒绝');
+    await expect(
+      backend.seek(createSeek(createCommand('native', 1, 3), 12)),
+    ).resolves.toMatchObject({ status: 'completed' });
+
+    expect(play).toHaveBeenCalledOnce();
+  });
+
   it('手动档 fatal level 降级后重新启动加载并恢复媒体', async () => {
     const video = createVideo();
     const backend = new WebPlaybackBackend(video);
-    const loading = backend.load(createSource('fallback-hls', 'hls'), createCommand('fallback-hls', 1));
+    const loading = backend.load(
+      createSource('fallback-hls', 'hls'),
+      createCommand('fallback-hls', 1),
+    );
     const hls = await waitForHlsInstance();
     hls.handlers.get('manifest')?.();
     await loading;
@@ -488,7 +546,10 @@ describe('WebPlaybackBackend 音轨源事务', () => {
     const video = createVideo();
     stubTimeline(video);
     const backend = new WebPlaybackBackend(video);
-    const loading = backend.load(createSource('source', 'hls', '/master.m3u8'), createCommand('source', 1));
+    const loading = backend.load(
+      createSource('source', 'hls', '/master.m3u8'),
+      createCommand('source', 1),
+    );
     const original = await waitForHlsInstance();
     original.handlers.get('manifest')?.();
     await loading;
@@ -981,6 +1042,302 @@ describe('WebPlaybackBackend 命令与快照', () => {
     });
   });
 
+  it('播放意图下 seek 若浏览器同步暂停则恢复播放', async () => {
+    const video = createVideo();
+    let currentTime = 0;
+    let paused = true;
+    Object.defineProperties(video, {
+      currentTime: {
+        configurable: true,
+        get: () => currentTime,
+        set: (value: number) => {
+          currentTime = value;
+          paused = true;
+          video.dispatchEvent(new Event('pause'));
+        },
+      },
+      duration: { configurable: true, get: () => 120 },
+      paused: { configurable: true, get: () => paused },
+      seekable: { configurable: true, get: () => timeRanges([[0, 120]]) },
+    });
+    vi.mocked(video.play).mockImplementation(() => {
+      paused = false;
+      return Promise.resolve();
+    });
+    const backend = new WebPlaybackBackend(video);
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+    await backend.play(createCommand('native', 1, 2));
+    await backend.seek(createSeek(createCommand('native', 1, 3), 50));
+
+    expect(video.play).toHaveBeenCalledTimes(2);
+    expect(backend.getSnapshot()).toMatchObject({ currentTime: 50, state: 'playing' });
+  });
+
+  it('seek 未导致 paused 状态变化时不建立 pause 令牌', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+    await backend.seek(createSeek(createCommand('native', 1, 2), 50));
+
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it('重叠 seek 各自触发 task pause 时按因果顺序消费两个令牌', async () => {
+    const video = createVideo();
+    let currentTime = 0;
+    let paused = false;
+    Object.defineProperties(video, {
+      currentTime: {
+        configurable: true,
+        get: () => currentTime,
+        set: (value: number) => {
+          currentTime = value;
+          paused = true;
+          setTimeout(() => video.dispatchEvent(new Event('pause')), 0);
+        },
+      },
+      duration: { configurable: true, get: () => 120 },
+      paused: { configurable: true, get: () => paused },
+      seekable: { configurable: true, get: () => timeRanges([[0, 120]]) },
+    });
+    vi.mocked(video.play).mockImplementation(() => {
+      paused = false;
+      return Promise.resolve();
+    });
+    const backend = new WebPlaybackBackend(video);
+    const consumed: boolean[] = [];
+    video.addEventListener('pause', () => consumed.push(backend.consumeControlledSeekPause()));
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+    await backend.play(createCommand('native', 1, 2));
+    const first = backend.seek(createSeek(createCommand('native', 1, 3), 30));
+    const second = backend.seek(createSeek(createCommand('native', 1, 4), 60));
+    await Promise.all([first, second]);
+    await flushTasks();
+
+    expect(consumed).toEqual([true, true]);
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it('后发 seek setter 抛错不撤销前一个 task pause 令牌', async () => {
+    const video = createVideo();
+    let currentTime = 0;
+    let paused = false;
+    let writes = 0;
+    Object.defineProperties(video, {
+      currentTime: {
+        configurable: true,
+        get: () => currentTime,
+        set: (value: number) => {
+          writes += 1;
+          if (writes === 2) throw new DOMException('第二次定位失败');
+          currentTime = value;
+          paused = true;
+          setTimeout(() => video.dispatchEvent(new Event('pause')), 0);
+        },
+      },
+      duration: { configurable: true, get: () => 120 },
+      paused: { configurable: true, get: () => paused },
+      seekable: { configurable: true, get: () => timeRanges([[0, 120]]) },
+    });
+    vi.mocked(video.play).mockImplementation(() => {
+      paused = false;
+      return Promise.resolve();
+    });
+    const backend = new WebPlaybackBackend(video);
+    const consumed: boolean[] = [];
+    video.addEventListener('pause', () => consumed.push(backend.consumeControlledSeekPause()));
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+    await backend.play(createCommand('native', 1, 2));
+    const first = backend.seek(createSeek(createCommand('native', 1, 3), 30));
+    const second = backend.seek(createSeek(createCommand('native', 1, 4), 60));
+    await expect(second).resolves.toMatchObject({ status: 'failed' });
+    await first;
+    await flushTasks();
+
+    expect(consumed).toEqual([true]);
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it('真实 false→true transition 的 pause 晚于旧任务边界仍必须消费', async () => {
+    const video = createVideo();
+    let currentTime = 0;
+    let paused = false;
+    Object.defineProperties(video, {
+      currentTime: {
+        configurable: true,
+        get: () => currentTime,
+        set: (value: number) => {
+          currentTime = value;
+          paused = true;
+        },
+      },
+      duration: { configurable: true, get: () => 120 },
+      paused: { configurable: true, get: () => paused },
+      seekable: { configurable: true, get: () => timeRanges([[0, 120]]) },
+    });
+    const backend = new WebPlaybackBackend(video);
+
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+    await backend.seek(createSeek(createCommand('native', 1, 2), 50));
+    await flushTasks();
+    await flushTasks();
+
+    expect(backend.consumeControlledSeekPause()).toBe(true);
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it.each(['play', 'pause'] as const)(
+    '后发 %s 命令不得撤销已建立的 seek pause tombstone',
+    async (intent) => {
+      const video = createVideo();
+      let currentTime = 0;
+      let paused = false;
+      Object.defineProperties(video, {
+        currentTime: {
+          configurable: true,
+          get: () => currentTime,
+          set: (value: number) => {
+            currentTime = value;
+            paused = true;
+          },
+        },
+        duration: { configurable: true, get: () => 120 },
+        paused: { configurable: true, get: () => paused },
+        seekable: { configurable: true, get: () => timeRanges([[0, 120]]) },
+      });
+      const backend = new WebPlaybackBackend(video);
+
+      await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+      await backend.seek(createSeek(createCommand('native', 1, 2), 50));
+      await backend[intent](createCommand('native', 1, 3));
+
+      expect(backend.consumeControlledSeekPause()).toBe(true);
+      expect(backend.consumeControlledSeekPause()).toBe(false);
+    },
+  );
+
+  it('replacePlayback 后丢弃旧代 tombstone 且不把当前 pause 判为受控', async () => {
+    const video = createVideo();
+    const timeline = stubSeekPauseTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+    await backend.load(createSource('source', 'native', '/old.mp4'), createCommand('source', 1, 1));
+    await backend.play(createCommand('source', 1, 2));
+    timeline.enablePauseOnWrite();
+    await backend.seek(createSeek(createCommand('source', 1, 3), 30));
+
+    const replacing = backend.transactAudioSource(
+      '/audio-b.m3u8',
+      'space-a',
+      createCommand('source', 1, 3),
+      new AbortController().signal,
+    );
+    const hls = await waitForHlsInstance();
+    completeHls(video, hls);
+    await replacing;
+    timeline.setPaused(true);
+
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it('消费端跳过未清理的旧媒体代际 tombstone', async () => {
+    const video = createVideo();
+    const timeline = stubSeekPauseTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+    await backend.load(createSource('source', 'native', '/old.mp4'), createCommand('source', 1, 1));
+    await backend.play(createCommand('source', 1, 2));
+    timeline.enablePauseOnWrite();
+    await backend.seek(createSeek(createCommand('source', 1, 3), 30));
+    const revoke = vi
+      .spyOn(backend, 'revokeControlledSeekPause')
+      .mockImplementation(() => undefined);
+
+    const replacing = backend.transactAudioSource(
+      '/audio-b.m3u8',
+      'space-a',
+      createCommand('source', 1, 3),
+      new AbortController().signal,
+    );
+    const hls = await waitForHlsInstance();
+    completeHls(video, hls);
+    await replacing;
+    revoke.mockRestore();
+    timeline.setPaused(true);
+
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it('replacePlayback 后仅消费当前代 seek 的副作用 pause 一次', async () => {
+    const video = createVideo();
+    const timeline = stubSeekPauseTimeline(video);
+    const backend = new WebPlaybackBackend(video);
+    await backend.load(createSource('source', 'native', '/old.mp4'), createCommand('source', 1, 1));
+    await backend.play(createCommand('source', 1, 2));
+    timeline.enablePauseOnWrite();
+    await backend.seek(createSeek(createCommand('source', 1, 3), 30));
+
+    const replacing = backend.transactAudioSource(
+      '/audio-b.m3u8',
+      'space-a',
+      createCommand('source', 1, 3),
+      new AbortController().signal,
+    );
+    const hls = await waitForHlsInstance();
+    completeHls(video, hls);
+    await replacing;
+    await backend.seek(createSeek(createCommand('source', 1, 4), 60));
+
+    expect(backend.consumeControlledSeekPause()).toBe(true);
+    expect(backend.consumeControlledSeekPause()).toBe(false);
+  });
+
+  it.each(['load', 'playing', 'dispose'] as const)(
+    '%s 生命周期继续清理受控 seek pause 状态',
+    async (lifecycle) => {
+      const video = createVideo();
+      const timeline = stubSeekPauseTimeline(video);
+      const backend = new WebPlaybackBackend(video);
+      await backend.load(createSource('source', 'native'), createCommand('source', 1, 1));
+      await backend.play(createCommand('source', 1, 2));
+      timeline.enablePauseOnWrite();
+      await backend.seek(createSeek(createCommand('source', 1, 3), 30));
+
+      if (lifecycle === 'load') {
+        await backend.load(createSource('next', 'native'), createCommand('next', 2, 4));
+      } else if (lifecycle === 'playing') {
+        video.dispatchEvent(new Event('playing'));
+      } else {
+        backend.dispose();
+      }
+
+      expect(backend.consumeControlledSeekPause()).toBe(false);
+    },
+  );
+
+  it('迟到的 play 完成后仍服从更新的暂停意图', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    let resolvePlay!: () => void;
+    const playing = new Promise<void>((resolve) => {
+      resolvePlay = resolve;
+    });
+    vi.mocked(video.play).mockReturnValueOnce(playing);
+    const backend = new WebPlaybackBackend(video);
+    await backend.load(createSource('native', 'native'), createCommand('native', 1, 1));
+
+    const play = backend.play(createCommand('native', 1, 2));
+    await backend.pause(createCommand('native', 1, 3));
+    resolvePlay();
+    await play;
+
+    expect(video.pause).toHaveBeenCalledTimes(2);
+    expect(backend.getSnapshot().state).toBe('paused');
+  });
+
   it('原生媒体 seeked 后从 seeking 回落到实际暂停态', async () => {
     const video = createVideo();
     stubTimeline(video);
@@ -1008,6 +1365,27 @@ describe('WebPlaybackBackend 命令与快照', () => {
 
     expect(player.play).toHaveBeenCalledOnce();
     expect(player.pause).toHaveBeenCalledOnce();
+  });
+
+  it('mpegts.js 暂停意图下 seek 后再次约束内核为暂停', async () => {
+    const video = createVideo();
+    stubTimeline(video);
+    const player = createMpegtsPlayer();
+    mpegtsMock.createPlayer.mockReturnValue(player);
+    const backend = new WebPlaybackBackend(video);
+    const loading = backend.load(createSource('ts', 'mpegts'), createCommand('ts', 1));
+    player.handlers.get('loadeddata')?.();
+    await loading;
+    await backend.pause(createCommand('ts', 1, 2));
+    player.pause.mockClear();
+
+    await backend.seek(createSeek(createCommand('ts', 1, 3), 50));
+    player.handlers.get('playing')?.();
+    video.dispatchEvent(new Event('playing'));
+    video.dispatchEvent(new Event('seeked'));
+
+    expect(player.pause).toHaveBeenCalledTimes(4);
+    expect(backend.getSnapshot()).toMatchObject({ currentTime: 50, state: 'paused' });
   });
 
   it('拒绝同源旧 requestId 命令，媒体自发事件沿用最新命令代次', async () => {

@@ -400,8 +400,9 @@ export default function SettingsPage() {
         [SETTING_KEY_MAGICK_PATH]: magickPath,
         [SETTING_KEY_DEBUG_LOG]: debugLog ? '1' : '0',
         [SETTING_KEY_MEDIA_INFERENCE_ENABLED]: mediaInferenceEnabled ? '1' : '0',
-        [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]:
-          serializeDisabledInferenceLibraries(inferenceDisabledLibraries),
+        [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]: serializeDisabledInferenceLibraries(
+          inferenceDisabledLibraries,
+        ),
         [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
         [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
       };

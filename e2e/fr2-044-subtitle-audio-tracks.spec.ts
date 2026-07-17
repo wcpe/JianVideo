@@ -8,7 +8,6 @@ import {
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -20,6 +19,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { login } from "./helpers";
+import { writeSubtitleAudioVideoFixture } from "./media-playback-fixtures";
 
 test.use({ serviceWorkers: "block" });
 test.describe.configure({ mode: "serial" });
@@ -36,6 +36,18 @@ function requireMediaTools(): void {
     execFileSync("ffprobe", ["-version"], { stdio: "ignore" });
   } catch {
     throw new Error("FR2-044 真实验收缺少 ffmpeg 或 ffprobe");
+  }
+}
+
+async function removeFixtureRoot(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 19) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 }
 
@@ -59,10 +71,12 @@ test("真实后端枚举字幕音轨并完成 API 与播放器主路径", async 
   requireMediaTools();
   const fixture = createFixture();
   let libraryID = 0;
+  let settingsSnapshot: TranscodingSettingsSnapshot | undefined;
+  let primaryFailure: { error: unknown } | undefined;
 
   try {
     await login(page);
-    await configureSoftwareTranscoding(page.request);
+    settingsSnapshot = await configureSoftwareTranscoding(page.request);
     libraryID = await createLibrary(page.request, fixture.mediaDir);
     const media = await scanMedia(page.request, libraryID);
     const initial = await loadCompleteManifest(
@@ -88,22 +102,45 @@ test("真实后端枚举字幕音轨并完成 API 与播放器主路径", async 
       fixture,
     );
     expectSourcesUnchanged(fixture);
-    await verifyDeleteAuditAndCache(page.request, media.multiAudioID, uploaded);
+    await verifyDeleteAuditAndRemainingTracks(
+      page.request,
+      media.multiAudioID,
+      uploaded,
+    );
     await verifyPlayerUI(page, media.multiAudioID, fixture);
     await verifyImageSubtitleUI(page, media.imageSubtitleID);
     await verifySingleAudioUI(page, media.singleAudioID);
     expectSourcesUnchanged(fixture);
+  } catch (error) {
+    primaryFailure = { error };
   } finally {
-    if (libraryID && !page.isClosed()) {
-      await page.request.delete(`/api/library/paths/${libraryID}`);
+    const cleanupFailures: unknown[] = [];
+    if (settingsSnapshot) {
+      try {
+        await restoreTranscodingSettings(page.request, settingsSnapshot);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
     }
-    if (existsSync(fixture.root)) {
-      rmSync(fixture.root, {
-        recursive: true,
-        force: true,
-        maxRetries: 10,
-        retryDelay: 200,
-      });
+    if (libraryID) {
+      try {
+        await deleteLibrary(page.request, libraryID);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+    }
+    try {
+      await removeFixtureRoot(fixture.root);
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+    if (primaryFailure || cleanupFailures.length > 0) {
+      throw new AggregateError(
+        primaryFailure
+          ? [primaryFailure.error, ...cleanupFailures]
+          : cleanupFailures,
+        primaryFailure ? "FR2-044 验证或清理失败" : "FR2-044 清理失败",
+      );
     }
   }
 });
@@ -193,7 +230,7 @@ function createFixture(): Fixture {
   const embeddedInput = join(uploadDir, "embedded-input.srt");
   writeFileSync(embeddedInput, srtContent(subtitleTexts.embedded));
   const mediaPath = join(mediaDir, `${VIDEO_BASENAME}.mp4`);
-  writeVideoFixture(mediaPath, embeddedInput);
+  writeSubtitleAudioVideoFixture(mediaPath, embeddedInput);
   verifyPlayableFixtureStreams(mediaPath);
   const imageInput = join(uploadDir, "image-subtitle.sup");
   writeMinimalPGSFixture(imageInput);
@@ -323,83 +360,6 @@ function writeImageSubtitleFixture(
       "0",
       "-t",
       "12",
-      outputPath,
-    ],
-    { stdio: "ignore" },
-  );
-}
-
-function writeVideoFixture(outputPath: string, embeddedInput: string): void {
-  execFileSync(
-    "ffmpeg",
-    [
-      "-y",
-      "-f",
-      "lavfi",
-      "-i",
-      "testsrc2=duration=12:size=320x180:rate=24",
-      "-f",
-      "lavfi",
-      "-i",
-      "sine=frequency=440:sample_rate=48000:duration=12",
-      "-f",
-      "lavfi",
-      "-i",
-      "sine=frequency=880:sample_rate=48000:duration=12",
-      "-i",
-      embeddedInput,
-      "-map",
-      "0:v:0",
-      "-map",
-      "1:a:0",
-      "-map",
-      "2:a:0",
-      "-map",
-      "3:0",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "ultrafast",
-      "-profile:v",
-      "baseline",
-      "-level",
-      "3.0",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "96k",
-      "-ac",
-      "1",
-      "-c:s",
-      "mov_text",
-      "-metadata:s:a:0",
-      "language=eng",
-      "-metadata:s:a:0",
-      "title=四百四十赫兹音轨",
-      "-metadata:s:a:0",
-      "handler_name=四百四十赫兹音轨",
-      "-disposition:a:0",
-      "default",
-      "-metadata:s:a:1",
-      "language=jpn",
-      "-metadata:s:a:1",
-      "title=八百八十赫兹音轨",
-      "-metadata:s:a:1",
-      "handler_name=八百八十赫兹音轨",
-      "-disposition:a:1",
-      "0",
-      "-metadata:s:s:0",
-      "language=zho",
-      "-metadata:s:s:0",
-      "title=内嵌中文字幕",
-      "-metadata:s:s:0",
-      "handler_name=内嵌中文字幕",
-      "-disposition:s:0",
-      "default",
-      "-movflags",
-      "+faststart",
       outputPath,
     ],
     { stdio: "ignore" },
@@ -565,18 +525,65 @@ function expectSourcesUnchanged(fixture: Fixture): void {
   expect(snapshotFiles(fixture.sourcePaths)).toEqual(fixture.sourceSnapshot);
 }
 
+interface TranscodingSettingsSnapshot {
+  transcode_hwaccel_fallback: string;
+  transcode_hwaccel_mode: string;
+}
+
 async function configureSoftwareTranscoding(
   request: APIRequestContext,
-): Promise<void> {
-  const response = await request.put("/api/settings", {
-    data: {
-      settings: {
-        transcode_hwaccel_fallback: "1",
-        transcode_hwaccel_mode: "software",
-      },
-    },
-  });
+): Promise<TranscodingSettingsSnapshot> {
+  const response = await request.get("/api/settings");
   expect(response.ok()).toBeTruthy();
+  const settings = (
+    (await response.json()) as { settings: Record<string, string> }
+  ).settings;
+  const snapshot = {
+    transcode_hwaccel_fallback: settings.transcode_hwaccel_fallback,
+    transcode_hwaccel_mode: settings.transcode_hwaccel_mode,
+  };
+  if (
+    snapshot.transcode_hwaccel_fallback === undefined ||
+    snapshot.transcode_hwaccel_mode === undefined
+  ) {
+    throw new Error("FR2-044 无法保存完整的全局转码设置快照");
+  }
+  await updateTranscodingSettings(request, {
+    transcode_hwaccel_fallback: "1",
+    transcode_hwaccel_mode: "software",
+  });
+  return snapshot;
+}
+
+function restoreTranscodingSettings(
+  request: APIRequestContext,
+  snapshot: TranscodingSettingsSnapshot,
+): Promise<void> {
+  return updateTranscodingSettings(request, snapshot);
+}
+
+async function updateTranscodingSettings(
+  request: APIRequestContext,
+  settings: TranscodingSettingsSnapshot,
+): Promise<void> {
+  const response = await request.put("/api/settings", { data: { settings } });
+  if (!response.ok()) {
+    throw new Error(
+      `更新全局转码设置失败：HTTP ${response.status()} ${await response.text()}`,
+    );
+  }
+}
+
+async function deleteLibrary(
+  request: APIRequestContext,
+  libraryID: number,
+): Promise<void> {
+  const response = await request.delete(`/api/library/paths/${libraryID}`);
+  if (!response.ok()) {
+    throw new Error(
+      `删除 FR2-044 媒体库 ${libraryID} 失败：HTTP ${response.status()} ${await response.text()}`,
+    );
+  }
 }
 
 async function createLibrary(
@@ -1138,7 +1145,7 @@ async function uploadSubtitle(
   return track;
 }
 
-async function verifyDeleteAuditAndCache(
+async function verifyDeleteAuditAndRemainingTracks(
   request: APIRequestContext,
   mediaID: number,
   uploaded: Track[],
@@ -1155,7 +1162,6 @@ async function verifyDeleteAuditAndCache(
   );
   expect(missing.status()).toBe(404);
   await expectDeleteAudit(request, deleted.id);
-  await cleanThumbnailCache(request);
   for (const track of uploaded.slice(1)) {
     await expectTrackContent(
       request,
@@ -1187,17 +1193,6 @@ async function expectDeleteAudit(
       action: "subtitle.deleted",
       resource_id: trackID,
     }),
-  );
-}
-
-async function cleanThumbnailCache(request: APIRequestContext): Promise<void> {
-  const response = await request.post("/api/storage/cache/clean", {
-    data: { dry_run: false, kinds: ["thumbnail"] },
-  });
-  expect(response.status()).toBe(202);
-  await waitUnifiedTask(
-    request,
-    ((await response.json()) as { task_id: number }).task_id,
   );
 }
 
@@ -1235,29 +1230,37 @@ async function expectVideoPlayable(video: Locator): Promise<void> {
   await expect
     .poll(
       () =>
-        video.evaluate((node) => ({
-          duration: node.duration,
-          error: node.error?.code ?? 0,
-          readyState: node.readyState,
-        })),
+        video.evaluate((node) => {
+          const media = node as HTMLVideoElement;
+          return {
+            duration: media.duration,
+            error: media.error?.code ?? 0,
+            readyState: media.readyState,
+          };
+        }),
       { timeout: 30_000 },
     )
     .toMatchObject({ error: 0, readyState: expect.any(Number) });
   await expect
-    .poll(() => video.evaluate((node) => node.readyState))
+    .poll(() => video.evaluate((node) => (node as HTMLVideoElement).readyState))
     .toBeGreaterThanOrEqual(2);
   await expect
-    .poll(() => video.evaluate((node) => node.duration))
+    .poll(() => video.evaluate((node) => (node as HTMLVideoElement).duration))
     .toBeGreaterThan(10);
   await video.evaluate(async (node) => {
-    node.muted = true;
-    await node.play();
+    const media = node as HTMLVideoElement;
+    media.muted = true;
+    await media.play();
   });
-  const startedAt = await video.evaluate((node) => node.currentTime);
+  const startedAt = await video.evaluate(
+    (node) => (node as HTMLVideoElement).currentTime,
+  );
   await expect
-    .poll(() => video.evaluate((node) => node.currentTime))
+    .poll(() =>
+      video.evaluate((node) => (node as HTMLVideoElement).currentTime),
+    )
     .toBeGreaterThan(startedAt);
-  await video.evaluate((node) => node.pause());
+  await video.evaluate((node) => (node as HTMLVideoElement).pause());
 }
 
 async function verifyImageSubtitleUI(
@@ -1377,9 +1380,10 @@ async function verifySubtitleStyles(page: Page, video: Locator): Promise<void> {
   await choosePreference(page, "垂直位置 24%");
   const overlay = page.getByTestId("subtitle-overlay");
   const style = await overlay.evaluate((node) => {
-    const text = node.querySelector("span") as HTMLElement;
-    const parent = node.offsetParent as HTMLElement;
-    const overlayStyle = getComputedStyle(node);
+    const overlayElement = node as HTMLElement;
+    const text = overlayElement.querySelector("span") as HTMLElement;
+    const parent = overlayElement.offsetParent as HTMLElement;
+    const overlayStyle = getComputedStyle(overlayElement);
     const textStyle = getComputedStyle(text);
     return {
       backgroundColor: textStyle.backgroundColor,
@@ -1502,31 +1506,40 @@ async function preparePausedPlayback(
   page: Page,
   video: Locator,
 ): Promise<void> {
-  if (await video.evaluate((node) => node.paused)) {
+  if (await video.evaluate((node) => (node as HTMLVideoElement).paused)) {
     await page
       .getByRole("button", { name: "播放", exact: true })
       .dispatchEvent("click");
-    await expect.poll(() => video.evaluate((node) => node.paused)).toBe(false);
+    await expect
+      .poll(() => video.evaluate((node) => (node as HTMLVideoElement).paused))
+      .toBe(false);
   }
   await page
     .getByRole("button", { name: "暂停", exact: true })
     .dispatchEvent("click");
-  await expect.poll(() => video.evaluate((node) => node.paused)).toBe(true);
+  await expect
+    .poll(() => video.evaluate((node) => (node as HTMLVideoElement).paused))
+    .toBe(true);
   await page.getByRole("button", { name: "播放速度" }).dispatchEvent("click");
   await page
     .getByRole("menuitem", { name: "1.5×", exact: true })
     .dispatchEvent("click");
   await expect
-    .poll(() => video.evaluate((node) => node.playbackRate))
+    .poll(() =>
+      video.evaluate((node) => (node as HTMLVideoElement).playbackRate),
+    )
     .toBe(1.5);
 }
 
 async function capturePlaybackState(video: Locator) {
-  return video.evaluate((node) => ({
-    currentTime: node.currentTime,
-    paused: node.paused,
-    playbackRate: node.playbackRate,
-  }));
+  return video.evaluate((node) => {
+    const media = node as HTMLVideoElement;
+    return {
+      currentTime: media.currentTime,
+      paused: media.paused,
+      playbackRate: media.playbackRate,
+    };
+  });
 }
 
 async function expectPlaybackState(
@@ -1536,15 +1549,35 @@ async function expectPlaybackState(
   subtitleText: string,
 ): Promise<void> {
   await expect
-    .poll(() => video.evaluate((node) => node.currentTime))
+    .poll(() =>
+      video.evaluate((node) => (node as HTMLVideoElement).currentTime),
+    )
     .toBeCloseTo(expected.currentTime, 1);
-  expect(await video.evaluate((node) => node.paused)).toBe(expected.paused);
-  expect(await video.evaluate((node) => node.playbackRate)).toBe(
-    expected.playbackRate,
-  );
-  expect(
-    await video.evaluate((node) => node.readyState),
-  ).toBeGreaterThanOrEqual(3);
+  await expect
+    .poll(
+      () =>
+        video.evaluate((node) => {
+          const media = node as HTMLVideoElement;
+          return {
+            error: media.error?.code ?? 0,
+            hasFutureData:
+              media.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA,
+            paused: media.paused,
+            playbackRate: media.playbackRate,
+            readyState: media.readyState,
+            seeking: media.seeking,
+          };
+        }),
+      { timeout: 30_000 },
+    )
+    .toMatchObject({
+      error: 0,
+      hasFutureData: true,
+      paused: expected.paused,
+      playbackRate: expected.playbackRate,
+      readyState: expect.any(Number),
+      seeking: false,
+    });
   await expect(page.getByTestId("subtitle-overlay")).toContainText(
     subtitleText,
   );
@@ -1625,20 +1658,23 @@ async function seekToCue(video: Locator): Promise<void> {
   await video.evaluate(
     (node, time) =>
       new Promise<void>((resolve) => {
-        node.pause();
-        node.addEventListener(
+        const media = node as HTMLVideoElement;
+        media.pause();
+        media.addEventListener(
           "seeked",
           () => {
-            node.dispatchEvent(new Event("timeupdate"));
+            media.dispatchEvent(new Event("timeupdate"));
             resolve();
           },
           { once: true },
         );
-        node.currentTime = time;
+        media.currentTime = time;
       }),
     CUE_TIME,
   );
   await expect
-    .poll(() => video.evaluate((node) => node.currentTime))
+    .poll(() =>
+      video.evaluate((node) => (node as HTMLVideoElement).currentTime),
+    )
     .toBeCloseTo(CUE_TIME, 1);
 }

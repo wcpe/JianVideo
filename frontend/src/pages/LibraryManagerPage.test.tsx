@@ -26,7 +26,7 @@ vi.mock('@mantine/notifications', () => ({
 
 function renderPage() {
   return render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <MemoryRouter initialEntries={['/library-manager']}>
         <LibraryManagerPage />
       </MemoryRouter>
@@ -75,7 +75,9 @@ describe('LibraryManagerPage', () => {
 
     renderPage();
 
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
     await waitFor(() => {
       expect(within(card).getByText(/42/)).toBeVisible();
     });
@@ -118,11 +120,13 @@ describe('LibraryManagerPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
     expect(within(card).getByText('源：本地')).toBeVisible();
     expect(within(card).getByText('内容：电影')).toBeVisible();
 
-    await user.click(within(card).getByLabelText('电影 内容分型'));
+    await user.click(within(card).getByLabelText('电影 内容分型', { selector: 'input' }));
     await user.click(await screen.findByRole('option', { name: '分型：剧集' }));
 
     await waitFor(() => {
@@ -156,8 +160,10 @@ describe('LibraryManagerPage', () => {
     fireEvent.change(await screen.findByPlaceholderText('输入目录路径，如 D:\\Videos'), {
       target: { value: 'D:\\Videos\\Family' },
     });
-    await user.click(screen.getAllByLabelText('新目录内容分型')[0]);
+    const kindSelect = screen.getByLabelText('新目录内容分型', { selector: 'input' });
+    await user.click(kindSelect);
     await user.click(await screen.findByRole('option', { name: '分型：家庭录像' }));
+    expect(kindSelect).toHaveValue('分型：家庭录像');
     await user.click(screen.getByRole('button', { name: '添加' }));
 
     await waitFor(() => {
@@ -237,14 +243,19 @@ describe('LibraryManagerPage', () => {
     const movieCard = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
       '.mantine-Card-root',
     ) as HTMLElement;
-    await user.type(within(movieCard).getByLabelText('电影 自定义后缀'), '.foo');
-    await user.click(within(movieCard).getByRole('button', { name: '图片' }));
+    const extensionInput = within(movieCard).getByLabelText('电影 自定义后缀');
+    fireEvent.change(extensionInput, { target: { value: '.foo' } });
+    expect(extensionInput).toHaveValue('.foo');
+
+    const imageButton = within(movieCard).getByRole('button', { name: '图片' });
+    await user.click(imageButton);
+    expect(imageButton).toHaveAttribute('data-variant', 'filled');
     await user.click(within(movieCard).getByRole('button', { name: '添加后缀' }));
 
     await waitFor(() => {
       expect(payload).toEqual({ library_id: 1, extension: '.foo', type: 'image' });
     });
-  }, 30000);
+  });
 
   it('存储库卡片以网格布局渲染，既有交互不回归（FR-65）', async () => {
     server.use(
@@ -335,7 +346,9 @@ describe('LibraryManagerPage', () => {
 
     const user = userEvent.setup();
     renderPage();
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
 
     // 后缀墙默认折叠（FR-100），先展开摘要行
     await user.click(await within(card).findByLabelText('电影 后缀列表'));
@@ -391,7 +404,9 @@ describe('LibraryManagerPage', () => {
 
     const user = userEvent.setup();
     renderPage();
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
 
     // 后缀墙默认折叠（FR-100），先展开摘要行
     await user.click(await within(card).findByLabelText('电影 后缀列表'));
@@ -454,7 +469,9 @@ describe('LibraryManagerPage', () => {
 
     const user = userEvent.setup();
     renderPage();
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
 
     // 后缀墙默认折叠（FR-100），先展开摘要行
     await user.click(await within(card).findByLabelText('电影 后缀列表'));
@@ -522,7 +539,9 @@ describe('LibraryManagerPage', () => {
 
     const user = userEvent.setup();
     renderPage();
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
 
     await user.click(await within(card).findByLabelText('电影 后缀列表'));
     await user.click(await within(card).findByLabelText('禁用后缀 mp4'));
@@ -631,7 +650,9 @@ describe('LibraryManagerPage', () => {
 
     const user = userEvent.setup();
     renderPage();
-    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest('.mantine-Card-root') as HTMLElement;
+    const card = (await screen.findByText('电影', {}, { timeout: 10000 })).closest(
+      '.mantine-Card-root',
+    ) as HTMLElement;
 
     // 摘要行存在且默认折叠：徽标未可见（Collapse 关闭态以 display:none 隐藏，元素仍在 DOM）
     const summary = await within(card).findByLabelText('电影 后缀列表');

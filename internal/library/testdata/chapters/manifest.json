@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "file": "embedded-chapters-three.mp4",
+      "purpose": "FR2-060 真实 ffprobe 三章节集成与端到端测试素材",
+      "sizeBytes": 29303,
+      "sha256": "07c0b000ea6a607a56237875628e0ee58d45beb45345037c723eb443123b1f73",
+      "durationSeconds": 15,
+      "chapters": [
+        { "startMs": 0, "endMs": 5000, "title": "开场" },
+        { "startMs": 5000, "endMs": 10000, "title": "Main" },
+        { "startMs": 10000, "endMs": 15000, "title": "结尾" }
+      ],
+      "generationCommand": "ffmpeg -y -f lavfi -i \"testsrc2=size=160x90:rate=5:duration=15\" -f ffmetadata -i chapters.ffmeta -map 0:v:0 -map_metadata 1 -c:v libx264 -preset veryslow -crf 38 -pix_fmt yuv420p -movflags +faststart embedded-chapters-three.mp4",
+      "chapterMetadata": ";FFMETADATA1\\n[CHAPTER]\\nTIMEBASE=1/1000\\nSTART=0\\nEND=5000\\ntitle=开场\\n[CHAPTER]\\nTIMEBASE=1/1000\\nSTART=5000\\nEND=10000\\ntitle=Main\\n[CHAPTER]\\nTIMEBASE=1/1000\\nSTART=10000\\nEND=15000\\ntitle=结尾\\n",
+      "ffmpegVersion": "2025-09-04-git-2611874a50-full_build-www.gyan.dev",
+      "ffprobeVersion": "2025-09-04-git-2611874a50-full_build-www.gyan.dev",
+      "license": "CC0-1.0",
+      "licenseNote": "完全由 FFmpeg lavfi testsrc2 生成，不含外部媒体或第三方内容。"
+    }
+  ]
+}

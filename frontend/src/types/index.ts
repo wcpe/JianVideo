@@ -190,9 +190,23 @@ export interface NormalizedEmbeddedMetadata {
     bitrate?: number;
     color?: { range?: string; space?: string; transfer?: string; primaries?: string };
   }>;
-  audio_streams?: Array<{ codec_name?: string; language?: string; title?: string; channels?: number }>;
-  subtitle_streams?: Array<{ codec_name?: string; language?: string; title?: string; forced?: boolean }>;
-  image?: { exif?: Record<string, unknown>; iptc?: Record<string, string>; xmp?: Record<string, string> };
+  audio_streams?: Array<{
+    codec_name?: string;
+    language?: string;
+    title?: string;
+    channels?: number;
+  }>;
+  subtitle_streams?: Array<{
+    codec_name?: string;
+    language?: string;
+    title?: string;
+    forced?: boolean;
+  }>;
+  image?: {
+    exif?: Record<string, unknown>;
+    iptc?: Record<string, string>;
+    xmp?: Record<string, string>;
+  };
   tags?: Record<string, string>;
 }
 

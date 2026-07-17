@@ -175,18 +175,18 @@ export default function TasksPage() {
       <Title order={2}>任务中心</Title>
 
       <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm">
-        {STATUS_OPTIONS.filter((item): item is { value: TaskStatus; label: string } => !!item.value).map(
-          (item) => (
-            <Card key={item.value} withBorder padding="sm" radius="md">
-              <Text size="xs" c="dimmed">
-                {item.label}
-              </Text>
-              <Text size="xl" fw={700}>
-                {stats?.by_status[item.value] ?? 0}
-              </Text>
-            </Card>
-          ),
-        )}
+        {STATUS_OPTIONS.filter(
+          (item): item is { value: TaskStatus; label: string } => !!item.value,
+        ).map((item) => (
+          <Card key={item.value} withBorder padding="sm" radius="md">
+            <Text size="xs" c="dimmed">
+              {item.label}
+            </Text>
+            <Text size="xl" fw={700}>
+              {stats?.by_status[item.value] ?? 0}
+            </Text>
+          </Card>
+        ))}
       </SimpleGrid>
 
       <Card withBorder padding="md" radius="md">
@@ -233,7 +233,11 @@ export default function TasksPage() {
           </SimpleGrid>
           <Group gap="xs">
             <Button onClick={applyFilters}>查询</Button>
-            <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={resetFilters}>
+            <Button
+              variant="default"
+              leftSection={<IconRefresh size={16} />}
+              onClick={resetFilters}
+            >
               重置
             </Button>
           </Group>
@@ -338,7 +342,11 @@ export default function TasksPage() {
                 第 {page} / {totalPages} 页，共 {total} 条
               </Text>
               <Group gap="xs">
-                <Button variant="default" disabled={page <= 1} onClick={() => setPage((n) => n - 1)}>
+                <Button
+                  variant="default"
+                  disabled={page <= 1}
+                  onClick={() => setPage((n) => n - 1)}
+                >
                   上一页
                 </Button>
                 <Button

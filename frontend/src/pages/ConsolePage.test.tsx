@@ -74,13 +74,17 @@ describe('ConsolePage（FR-113 一级 tab）', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
     });
-    expect(await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=settings');
   });
 
   it('设置 tab 内提供左侧锚点导航（账户安全/扫描/网络等）', async () => {
     renderPage('/system?tab=settings');
-    expect(await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: '区块导航' });
     expect(nav).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '账户安全' })).toBeInTheDocument();
@@ -90,7 +94,9 @@ describe('ConsolePage（FR-113 一级 tab）', () => {
   it('旧深链 ?tab=settings 定位到设置 tab', async () => {
     renderPage('/system?tab=settings');
     expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText('扫描周期（秒）', {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it('旧深链 ?tab=system&sys=update 定位到应用更新 tab', async () => {

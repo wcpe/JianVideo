@@ -25,6 +25,9 @@ vi.mock('@/components/VideoPlayer', () => ({
     frameMarker?: { bits: number; cellSize: number; x: number; y: number };
     frameTimeline?: Array<{ mediaTime: number; sourceFrameIndex?: number; stableFrameId?: string }>;
     nominalFrameRate?: number;
+    watchContextKey?: string;
+    watchState?: { completed: boolean; positionSeconds: number; revision: number };
+    watchStateTransport?: { send: (...args: unknown[]) => Promise<unknown> };
   }) => (
     <div
       data-testid="video-player"
@@ -42,6 +45,10 @@ vi.mock('@/components/VideoPlayer', () => ({
       data-frame-marker={props.frameMarker ? JSON.stringify(props.frameMarker) : ''}
       data-frame-timeline-size={props.frameTimeline?.length ?? ''}
       data-nominal-frame-rate={props.nominalFrameRate ?? ''}
+      data-watch-context={props.watchContextKey ?? ''}
+      data-watch-position={props.watchState?.positionSeconds ?? ''}
+      data-watch-revision={props.watchState?.revision ?? ''}
+      data-has-watch-transport={String(Boolean(props.watchStateTransport))}
     />
   ),
 }));
@@ -71,6 +78,26 @@ function useTrackManifest() {
         },
         sources: {},
         backend: {},
+      }),
+    ),
+  );
+}
+
+function useWatchState() {
+  server.use(
+    http.get('*/api/play/:id/watch-state', ({ params }) =>
+      HttpResponse.json({
+        completed: false,
+        completed_at: null,
+        created_at: '0001-01-01T00:00:00Z',
+        last_event_seq: 0,
+        last_session_id: '',
+        last_watched_at: '0001-01-01T00:00:00Z',
+        media_id: Number(params.id),
+        position_seconds: 0,
+        revision: 0,
+        space_id: 'space-default',
+        updated_at: '0001-01-01T00:00:00Z',
       }),
     ),
   );
@@ -126,6 +153,7 @@ describe('PlayPage', () => {
     vi.restoreAllMocks();
     usePendingTimelinePreview();
     useTrackManifest();
+    useWatchState();
   });
 
   it('渲染加载状态', () => {
@@ -460,12 +488,13 @@ describe('PlayPage', () => {
     });
   });
 
-  it('把媒体的 last_position 作为续播起点传给播放器（FR-44）', async () => {
+  it('读取 watch_states 真源作为续播状态并提供 media-client 写入边界', async () => {
     server.use(
       http.get('*/api/library/media/7', () =>
         HttpResponse.json({
           id: 7,
           library_id: 1,
+          space_id: 'space-default',
           file_path: 'D:/Videos/a.mp4',
           file_name: 'a.mp4',
           file_size: 1024,
@@ -483,6 +512,21 @@ describe('PlayPage', () => {
           watched: false,
         }),
       ),
+      http.get('*/api/play/7/watch-state', () =>
+        HttpResponse.json({
+          completed: false,
+          completed_at: null,
+          created_at: '2026-07-16T08:00:00Z',
+          last_event_seq: 3,
+          last_session_id: 'session-b',
+          last_watched_at: '2026-07-16T09:00:00Z',
+          media_id: 7,
+          position_seconds: 88,
+          revision: 5,
+          space_id: 'space-default',
+          updated_at: '2026-07-16T09:00:00Z',
+        }),
+      ),
       http.get('*/api/play/hls/7/master.m3u8', () =>
         HttpResponse.json({ code: 'NOT_FOUND' }, { status: 404 }),
       ),
@@ -492,7 +536,11 @@ describe('PlayPage', () => {
 
     const player = await screen.findByTestId('video-player');
     await waitFor(() => {
-      expect(player.getAttribute('data-initial-position')).toBe('123.4');
+      expect(player).toHaveAttribute('data-watch-position', '88');
+      expect(player).toHaveAttribute('data-watch-revision', '5');
+      expect(player).toHaveAttribute('data-watch-context', 'space-default:7');
+      expect(player).toHaveAttribute('data-has-watch-transport', 'true');
+      expect(player).not.toHaveAttribute('data-initial-position', '123.4');
     });
   });
 
@@ -599,6 +647,45 @@ describe('PlayPage', () => {
     });
   });
 
+  it('MPEG-TS 原文件直连使用 mpegts.js 内核', async () => {
+    server.use(
+      http.get('*/api/library/media/9', () =>
+        HttpResponse.json({
+          id: 9,
+          library_id: 1,
+          file_path: 'D:/V/numbered.ts',
+          file_name: 'numbered.ts',
+          file_size: 0,
+          format: 'mpegts',
+          video_codec: 'h264',
+          audio_codec: '',
+          duration: 8,
+          width: 320,
+          height: 180,
+          bitrate: 0,
+          subtitle_tracks: '',
+          added_at: '',
+          modified_at: '',
+        }),
+      ),
+      http.post('*/api/play/9/negotiate', () =>
+        HttpResponse.json({ code: 'INTERNAL' }, { status: 500 }),
+      ),
+      http.get('*/api/play/hls/9/master.m3u8', () =>
+        HttpResponse.json({ code: 'NOT_FOUND' }, { status: 404 }),
+      ),
+    );
+
+    renderPlayPage('/play/9');
+
+    const player = await screen.findByTestId('video-player');
+    await waitFor(() => {
+      expect(player.getAttribute('data-url')).toMatch(/\/api\/play\/9\/stream$/);
+      expect(player.getAttribute('data-stream-type')).toBe('mpegts');
+      expect(player.getAttribute('data-is-abr')).toBe('false');
+    });
+  });
+
   it('挂载时记录最近查看（PUT /viewed，FR-120）', async () => {
     let viewedId: number | null = null;
     server.use(
@@ -662,6 +749,7 @@ describe('PlayPage 操作收纳与影院模式（FR-85）', () => {
     vi.restoreAllMocks();
     usePendingTimelinePreview();
     useTrackManifest();
+    useWatchState();
   });
 
   it('头部仅外露返回 + 影院 + 更多，次要操作不平铺为按钮', async () => {
@@ -795,6 +883,7 @@ describe('PlayPage 全屏沉浸布局（FR-103）', () => {
     vi.restoreAllMocks();
     usePendingTimelinePreview();
     useTrackManifest();
+    useWatchState();
   });
 
   it('根容器 100dvh + overflow hidden（铺满视口、不可纵向滚动）', async () => {

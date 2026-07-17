@@ -620,7 +620,7 @@ func run() int {
 	go startTaskWorkers(taskWorkerCtx, taskWorkers)
 	defer stopTaskWorkers()
 
-	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc)
+	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

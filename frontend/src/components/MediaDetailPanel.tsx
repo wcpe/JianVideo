@@ -235,14 +235,35 @@ function EmbeddedMetadataInfo({ items }: { items: MediaMetadata[] }) {
     <>
       <Divider my={4} label="文件自带元数据" labelPosition="left" />
       <Box component="dl" style={{ margin: 0 }}>
-        <DetailRow label="解析来源" value={`${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`} />
+        <DetailRow
+          label="解析来源"
+          value={`${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`}
+        />
         <DetailRow label="容器" value={metadata.container?.format_name} />
         <DetailRow label="视频流" value={videoValue} />
-        <DetailRow label="音频流" value={metadata.audio_streams?.map(streamLabel).filter(Boolean).join('；')} />
-        <DetailRow label="字幕流" value={metadata.subtitle_streams?.map(streamLabel).filter(Boolean).join('；')} />
+        <DetailRow
+          label="音频流"
+          value={metadata.audio_streams?.map(streamLabel).filter(Boolean).join('；')}
+        />
+        <DetailRow
+          label="字幕流"
+          value={metadata.subtitle_streams?.map(streamLabel).filter(Boolean).join('；')}
+        />
         <DetailRow label="内嵌标题" value={metadata.tags?.title} />
-        <DetailRow label="IPTC" value={metadata.image?.iptc ? Object.values(metadata.image.iptc).filter(Boolean).join('；') : ''} />
-        <DetailRow label="XMP" value={metadata.image?.xmp ? Object.values(metadata.image.xmp).filter(Boolean).join('；') : ''} />
+        <DetailRow
+          label="IPTC"
+          value={
+            metadata.image?.iptc
+              ? Object.values(metadata.image.iptc).filter(Boolean).join('；')
+              : ''
+          }
+        />
+        <DetailRow
+          label="XMP"
+          value={
+            metadata.image?.xmp ? Object.values(metadata.image.xmp).filter(Boolean).join('；') : ''
+          }
+        />
       </Box>
     </>
   );
@@ -388,7 +409,10 @@ export default function MediaDetailPanel({
   useEffect(() => {
     let active = true;
     setEmbeddedMetadata([]);
-    if (!file) return () => { active = false; };
+    if (!file)
+      return () => {
+        active = false;
+      };
     void getMediaMetadata(file.id)
       .then((items) => {
         if (active) setEmbeddedMetadata(items);
@@ -405,7 +429,10 @@ export default function MediaDetailPanel({
     let active = true;
     setCovers({ cover: null, candidates: [] });
     setCoverGenerating(false);
-    if (!file) return () => { active = false; };
+    if (!file)
+      return () => {
+        active = false;
+      };
     void getMediaCovers(file.id)
       .then((result) => {
         if (active) setCovers(result);
@@ -855,7 +882,12 @@ export default function MediaDetailPanel({
                           component="img"
                           src={candidate.image_url}
                           alt={label}
-                          style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+                          style={{
+                            width: '100%',
+                            aspectRatio: '16/9',
+                            objectFit: 'cover',
+                            display: 'block',
+                          }}
                         />
                         <Text size="xs" ta="center" py={4} c={selected ? 'teal' : undefined}>
                           {candidate.source === 'image'

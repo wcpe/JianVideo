@@ -7,7 +7,7 @@ import {
 } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { login } from "./helpers";
@@ -185,7 +185,9 @@ test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
       timeout: 15_000,
     });
     await expect(page.getByRole("button", { name: "画中画" })).toBeVisible();
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
     await expect.poll(() => video.evaluate((node) => node.paused)).toBe(false);
     await expect
       .poll(
@@ -277,9 +279,7 @@ test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
       box.height * 0.2,
     );
     await expect(video).toHaveCSS("filter", "brightness(1.5)");
-    await page
-      .getByRole("button", { name: "重置播放器画面亮度" })
-      .click();
+    await page.getByRole("button", { name: "重置播放器画面亮度" }).click();
     await expect(video).toHaveCSS("filter", "brightness(1)");
 
     await dispatchTouchGesture(
@@ -298,8 +298,13 @@ test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
         .delete(`/api/library/paths/${libraryID}`, { timeout: 5_000 })
         .catch(() => undefined);
     }
-    if (existsSync(mediaDir))
-      rmSync(mediaDir, { recursive: true, force: true });
+    if (!page.isClosed()) await page.close();
+    await rm(mediaDir, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
   }
 });
 
@@ -505,7 +510,7 @@ async function expectFrameStepResult(
 ): Promise<void> {
   await expect(player).toHaveAttribute(
     "data-frame-step-result",
-    `completed:exact-verified:${expectedFrame}:ok`,
+    new RegExp(`^\\d+:completed:exact-verified:${expectedFrame}:ok$`),
     { timeout: 15_000 },
   );
 }

@@ -243,7 +243,11 @@ describe('VideoPlayer 倍速与 A-B 循环', () => {
       video.currentTime = 12;
       video.dispatchEvent(new Event('timeupdate'));
     });
-    await waitFor(() => expect(seek).toHaveBeenCalledWith(expect.objectContaining({ reason: 'ab_loop', targetTime: 10 })));
+    await waitFor(() =>
+      expect(seek).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'ab_loop', targetTime: 10 }),
+      ),
+    );
 
     const onEnded = vi.fn();
     view.rerender(

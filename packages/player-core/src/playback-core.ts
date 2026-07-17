@@ -254,8 +254,10 @@ export class PlaybackCore {
 
   async seek(requestedTime: number, reason: SeekReason = 'user'): Promise<SeekResult> {
     const requestId = this.allocateRequestId();
+    const identity = this.identity(requestId);
     this.interruptFrameCommands(requestId);
-    const result = await this.performSeek(requestedTime, reason, this.identity(requestId));
+    const result = await this.performSeek(requestedTime, reason, identity);
+    this.publishSeekCompleted(result, reason, identity);
     if (reason !== 'ab_loop' && result.status === 'completed') await this.enforceAbLoop(result.confirmedTime);
     return result;
   }
@@ -266,18 +268,26 @@ export class PlaybackCore {
     this.interruptFrameCommands(requestId);
     const fallbackRequestedTime = this.snapshot.currentTime + offset;
     const rejected = this.rejectSeek(fallbackRequestedTime, identity);
-    if (rejected !== null) return rejected;
+    if (rejected !== null) return this.completeSeekEvent(rejected, reason, identity);
     const snapshotOutcome = invokeSynchronously(() => this.backend.getSnapshot());
     if (snapshotOutcome.kind === 'failed') {
-      return this.failSeekSnapshotRead(fallbackRequestedTime, identity, snapshotOutcome.error);
+      return this.completeSeekEvent(
+        this.failSeekSnapshotRead(fallbackRequestedTime, identity, snapshotOutcome.error),
+        reason,
+        identity,
+      );
     }
     const backendSnapshot = snapshotOutcome.value;
     const requestedTime = backendSnapshot.currentTime + offset;
     if (!sameCommandSource(identity, backendSnapshot) || !sameCommandSource(identity, this.snapshot)) {
-      return this.publishSeekResult(this.basicSeekResult(requestedTime, requestId, 'superseded'), identity);
+      const result = this.publishSeekResult(this.basicSeekResult(requestedTime, requestId, 'superseded'), identity);
+      return this.completeSeekEvent(result, reason, identity);
     }
-    if (!Number.isFinite(requestedTime)) return this.unsupportedSeek(requestedTime, identity);
+    if (!Number.isFinite(requestedTime)) {
+      return this.completeSeekEvent(this.unsupportedSeek(requestedTime, identity), reason, identity);
+    }
     const result = await this.performSeekFromSnapshot(requestedTime, reason, identity, backendSnapshot);
+    this.publishSeekCompleted(result, reason, identity);
     if (reason !== 'ab_loop' && result.status === 'completed') await this.enforceAbLoop(result.confirmedTime);
     return result;
   }
@@ -716,9 +726,13 @@ export class PlaybackCore {
     this.qualityReconcilePending = true;
     try {
       const maxHeight = this.qualityState.dataSaver ? DATA_SAVER_MAX_HEIGHT : null;
-      if (this.qualityState.dataSaver && highestDataSaverQuality(this.qualityState.qualities) === null) {
+      const compatible = highestDataSaverQuality(this.qualityState.qualities);
+      if (this.qualityState.dataSaver && this.qualityState.qualities.length > 0 && compatible === null) {
         await this.blockDataSaver(command);
         return;
+      }
+      if (this.qualityState.dataSaver && this.qualityState.dataSaverBlocked && compatible !== null) {
+        this.applyQualityState({ ...this.qualityState, dataSaverBlocked: false }, command.requestId);
       }
       if (this.qualityState.qualityMode === 'manual' && this.qualityState.manualQuality !== null) {
         const target = qualityTarget(this.qualityState.manualQuality);
@@ -783,8 +797,10 @@ export class PlaybackCore {
     this.abLoopSeekPending = true;
     try {
       const requestId = this.allocateRequestId();
+      const identity = this.identity(requestId);
       this.interruptFrameCommands(requestId);
-      await this.performSeek(a, 'ab_loop', this.identity(requestId), resumeState);
+      const result = await this.performSeek(a, 'ab_loop', identity, resumeState);
+      this.publishSeekCompleted(result, 'ab_loop', identity);
     } finally {
       this.abLoopSeekPending = false;
     }
@@ -925,20 +941,25 @@ export class PlaybackCore {
     return this.finishSeek(command, startedTerminalRevision, base, await operation);
   }
 
-  private seekBySeconds(direction: FrameStepDirection, seconds: number): Promise<SeekResult> {
+  private async seekBySeconds(direction: FrameStepDirection, seconds: number): Promise<SeekResult> {
     const requestId = this.allocateRequestId();
     const identity = this.identity(requestId);
     this.interruptFrameCommands(requestId);
     const rejected = this.rejectSeek(this.snapshot.currentTime, identity);
     if (rejected !== null) {
-      return Promise.resolve(rejected);
+      return this.completeSeekEvent(rejected, 'tier', identity);
     }
     const outcome = invokeSynchronously(() => this.backend.getSnapshot());
     if (outcome.kind === 'failed') {
-      return Promise.resolve(this.failSeekSnapshotRead(this.snapshot.currentTime, identity, outcome.error));
+      return this.completeSeekEvent(
+        this.failSeekSnapshotRead(this.snapshot.currentTime, identity, outcome.error),
+        'tier',
+        identity,
+      );
     }
     const requestedTime = outcome.value.currentTime + directionSign(direction) * seconds;
-    return this.performSeekFromSnapshot(requestedTime, 'tier', identity, outcome.value, true);
+    const result = await this.performSeekFromSnapshot(requestedTime, 'tier', identity, outcome.value, true);
+    return this.completeSeekEvent(result, 'tier', identity);
   }
 
   private completeClampedSeek(
@@ -1809,6 +1830,23 @@ export class PlaybackCore {
   private publishSeekResult(result: SeekResult, identity: CommandIdentity): SeekResult {
     this.publishCompletion(result, identity);
     return result;
+  }
+
+  private completeSeekEvent(result: SeekResult, reason: SeekReason, identity: CommandIdentity): SeekResult {
+    this.publishSeekCompleted(result, reason, identity);
+    return result;
+  }
+
+  private publishSeekCompleted(result: SeekResult, reason: SeekReason, identity: CommandIdentity): void {
+    this.publish({
+      reason,
+      requestId: result.requestId,
+      result,
+      snapshot: this.completionSnapshot(identity),
+      sourceEpoch: identity.sourceEpoch,
+      sourceId: identity.sourceId,
+      type: 'seekCompleted',
+    });
   }
 
   private publishCompletion(

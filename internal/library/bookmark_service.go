@@ -16,6 +16,7 @@ import (
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
+// ErrBookmarkInvalidPosition 及同组错误表示书签输入校验失败。
 var (
 	ErrBookmarkInvalidPosition = errors.New("书签时间位置无效")
 	ErrBookmarkTitleRequired   = errors.New("书签标题不能为空")
@@ -90,22 +91,28 @@ func (s *Service) UpdateMediaBookmark(ctx context.Context, spaceID string, media
 		return nil, err
 	}
 	var updated *models.MediaBookmark
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, err := s.bookmarkRepo.GetTx(ctx, tx, media.SpaceID, media.ID, id)
-		if err != nil {
-			return bookmarkConflictFromLookup(err, nil)
-		}
-		if update.Revision <= 0 || current.Revision != update.Revision {
-			return &BookmarkConflictError{Current: current}
-		}
-		updated = bookmarkUpdatedCopy(current, normalized)
-		matched, err := s.bookmarkRepo.UpdateCASTx(ctx, tx, updated, update.Revision)
-		if err != nil || !matched {
-			return s.bookmarkCASResult(ctx, tx, media.SpaceID, media.ID, id, err)
-		}
-		return s.recordBookmarkAudit(ctx, tx, "bookmark.updated", current, updated)
-	})
-	return updated, err
+	operation := func() error {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			current, err := s.bookmarkRepo.GetTx(ctx, tx, media.SpaceID, media.ID, id)
+			if err != nil {
+				return bookmarkConflictFromLookup(err, nil)
+			}
+			if update.Revision <= 0 || current.Revision != update.Revision {
+				return &BookmarkConflictError{Current: current}
+			}
+			updated = bookmarkUpdatedCopy(current, normalized)
+			matched, err := s.bookmarkRepo.UpdateCASTx(ctx, tx, updated, update.Revision)
+			if err != nil || !matched {
+				return s.bookmarkCASResult(ctx, tx, media.SpaceID, media.ID, id, err)
+			}
+			return s.recordBookmarkAudit(ctx, tx, "bookmark.updated", current, updated)
+		})
+	}
+	err = s.runBookmarkCAS(ctx, media.SpaceID, media.ID, id, update.Revision, operation)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 // DeleteMediaBookmark 使用 revision CAS 物理删除书签业务行。
@@ -114,20 +121,23 @@ func (s *Service) DeleteMediaBookmark(ctx context.Context, spaceID string, media
 	if err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, err := s.bookmarkRepo.GetTx(ctx, tx, media.SpaceID, media.ID, id)
-		if err != nil {
-			return bookmarkConflictFromLookup(err, nil)
-		}
-		if revision <= 0 || current.Revision != revision {
-			return &BookmarkConflictError{Current: current}
-		}
-		matched, err := s.bookmarkRepo.DeleteCASTx(ctx, tx, media.SpaceID, media.ID, id, revision)
-		if err != nil || !matched {
-			return s.bookmarkCASResult(ctx, tx, media.SpaceID, media.ID, id, err)
-		}
-		return s.recordBookmarkAudit(ctx, tx, "bookmark.deleted", current, nil)
-	})
+	operation := func() error {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			current, err := s.bookmarkRepo.GetTx(ctx, tx, media.SpaceID, media.ID, id)
+			if err != nil {
+				return bookmarkConflictFromLookup(err, nil)
+			}
+			if revision <= 0 || current.Revision != revision {
+				return &BookmarkConflictError{Current: current}
+			}
+			matched, err := s.bookmarkRepo.DeleteCASTx(ctx, tx, media.SpaceID, media.ID, id, revision)
+			if err != nil || !matched {
+				return s.bookmarkCASResult(ctx, tx, media.SpaceID, media.ID, id, err)
+			}
+			return s.recordBookmarkAudit(ctx, tx, "bookmark.deleted", current, nil)
+		})
+	}
+	return s.runBookmarkCAS(ctx, media.SpaceID, media.ID, id, revision, operation)
 }
 
 func normalizeBookmarkInput(input BookmarkInput, durationSeconds float64) (BookmarkInput, error) {
@@ -175,12 +185,59 @@ func bookmarkConflictFromLookup(err error, current *models.MediaBookmark) error 
 	return &BookmarkConflictError{Current: current}
 }
 
+const bookmarkCASMaxAttempts = 2
+
+type bookmarkCASBusyError struct {
+	cause error
+}
+
+func (e *bookmarkCASBusyError) Error() string { return e.cause.Error() }
+func (e *bookmarkCASBusyError) Unwrap() error { return e.cause }
+
 func (s *Service) bookmarkCASResult(ctx context.Context, tx *gorm.DB, spaceID string, mediaID int64, id string, operationErr error) error {
 	if operationErr != nil {
+		if isSQLiteBusyError(operationErr) {
+			return &bookmarkCASBusyError{cause: operationErr}
+		}
 		return operationErr
 	}
 	current, err := s.bookmarkRepo.GetTx(ctx, tx, spaceID, mediaID, id)
 	return bookmarkConflictFromLookup(err, current)
+}
+
+func (s *Service) runBookmarkCAS(ctx context.Context, spaceID string, mediaID int64, id string, expectedRevision int64, operation func() error) error {
+	for attempt := 0; attempt < bookmarkCASMaxAttempts; attempt++ {
+		err := operation()
+		var busy *bookmarkCASBusyError
+		if !errors.As(err, &busy) {
+			return err
+		}
+		conflict, lookupErr := s.bookmarkConflictAfterBusy(ctx, spaceID, mediaID, id, expectedRevision)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if conflict != nil {
+			return conflict
+		}
+		if attempt == bookmarkCASMaxAttempts-1 {
+			return busy.cause
+		}
+	}
+	return nil
+}
+
+func (s *Service) bookmarkConflictAfterBusy(ctx context.Context, spaceID string, mediaID int64, id string, expectedRevision int64) (*BookmarkConflictError, error) {
+	current, err := s.bookmarkRepo.GetTx(ctx, s.db, spaceID, mediaID, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &BookmarkConflictError{Deleted: true}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != expectedRevision {
+		return &BookmarkConflictError{Current: current}, nil
+	}
+	return nil, nil
 }
 
 func (s *Service) recordBookmarkAudit(ctx context.Context, tx *gorm.DB, action string, before, after *models.MediaBookmark) error {

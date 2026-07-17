@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/audit"
@@ -37,6 +38,11 @@ var (
 	ErrInvalidMoveTarget = errors.New("移动目标目录不合法")
 )
 
+const deleteLibraryPathMaxAttempts = 3
+
+// ErrRecycleMediaNotFound 表示指定媒体当前不在回收站中。
+var ErrRecycleMediaNotFound = errors.New("回收站中不存在该媒体文件")
+
 // Service 媒体库业务逻辑。
 type Service struct {
 	db                           *gorm.DB
@@ -52,6 +58,8 @@ type Service struct {
 	inferenceCompensationWake    func()
 	beforeAutoInferenceSave      func()
 	inferenceBackfillBatchHook   func(int)
+	beforeRecycleFinalLock       func(string)
+	afterRecycleDelete           func()
 	now                          func() time.Time
 	smbCreds                     *smb.CredentialStore
 	smbCredsMu                   sync.RWMutex
@@ -404,12 +412,24 @@ func (s *Service) DeleteLibraryPath(id int64) error {
 // DeleteLibraryPathInSpace 删除指定 Space 的媒体库目录及其关联媒体记录。
 func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
 	spaceID = normalizeSpaceID(spaceID)
+	var err error
+	for attempt := 0; attempt < deleteLibraryPathMaxAttempts; attempt++ {
+		err = s.deleteLibraryPathInSpaceOnce(spaceID, id)
+		if !isSQLiteBusySnapshot(err) {
+			return err
+		}
+	}
+	return err
+}
+
+func (s *Service) deleteLibraryPathInSpaceOnce(spaceID string, id int64) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var before models.LibraryPath
 		if err := tx.Where("space_id = ? AND id = ?", spaceID, id).First(&before).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("space_id = ? AND library_id = ?", spaceID, id).Delete(&models.MediaFile{}).Error; err != nil {
+		mediaQuery := tx.Where("space_id = ? AND library_id = ?", spaceID, id)
+		if err := deleteMediaRecordsTx(tx, mediaQuery); err != nil {
 			return err
 		}
 		if err := tx.Where("library_id = ?", id).Delete(&models.MediaExtension{}).Error; err != nil {
@@ -432,6 +452,56 @@ func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
 			Before:       libraryAuditPayload(&before),
 		})
 	})
+}
+
+func isSQLiteBusySnapshot(err error) bool {
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
+}
+
+type mediaDeleteRef struct {
+	ID      int64
+	SpaceID string
+}
+
+func deleteMediaRecordsTx(tx, query *gorm.DB) error {
+	_, err := deleteMediaRecordsAffectedTx(tx, query)
+	return err
+}
+
+func deleteMediaRecordsAffectedTx(tx, query *gorm.DB) (int64, error) {
+	var refs []mediaDeleteRef
+	candidateQuery := query.Session(&gorm.Session{})
+	if err := candidateQuery.Model(&models.MediaFile{}).Select("id", "space_id").Find(&refs).Error; err != nil {
+		return 0, err
+	}
+	if len(refs) == 0 {
+		return 0, nil
+	}
+	ids := make([]int64, 0, len(refs))
+	idsBySpace := make(map[string][]int64)
+	for _, ref := range refs {
+		ids = append(ids, ref.ID)
+		idsBySpace[ref.SpaceID] = append(idsBySpace[ref.SpaceID], ref.ID)
+	}
+	for _, related := range []any{&models.WatchState{}, &models.MediaMetadata{}} {
+		if !tx.Migrator().HasTable(related) {
+			continue
+		}
+		for spaceID, spaceIDs := range idsBySpace {
+			if err := tx.Where("space_id = ? AND media_id IN ?", spaceID, spaceIDs).Delete(related).Error; err != nil {
+				return 0, err
+			}
+		}
+	}
+	result := query.Where("id IN ?", ids).Delete(&models.MediaFile{})
+	if result.Error != nil {
+		return result.RowsAffected, result.Error
+	}
+	if result.RowsAffected != int64(len(refs)) {
+		return result.RowsAffected, fmt.Errorf("媒体记录条件删除影响行数异常: expected=%d, actual=%d", len(refs), result.RowsAffected)
+	}
+	return result.RowsAffected, nil
 }
 
 // CreateMediaFile 添加媒体文件记录。
@@ -681,11 +751,23 @@ func (s *Service) RestoreMediaFileInSpace(spaceID string, id int64) error {
 	spaceID = normalizeSpaceID(spaceID)
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var before models.MediaFile
-		if err := tx.Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", spaceID, id).First(&before).Error; err != nil {
-			return fmt.Errorf("回收站中不存在该媒体文件")
+		err := tx.Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", spaceID, id).
+			Where("file_state IS NULL OR file_state NOT LIKE ?", recycleClaimStatePrefix+"%").
+			First(&before).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrRecycleMediaNotFound
 		}
-		if err := tx.Model(&models.MediaFile{}).Where("space_id = ? AND id = ?", spaceID, id).Update("deleted_at", nil).Error; err != nil {
+		if err != nil {
 			return err
+		}
+		result := tx.Model(&models.MediaFile{}).
+			Where("space_id = ? AND id = ? AND deleted_at = ?", spaceID, id, before.DeletedAt).
+			UpdateColumn("deleted_at", nil)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrRecycleMediaNotFound
 		}
 		return s.recordAuditTx(tx, audit.EventInput{
 			Scope:        audit.ScopeSpace,
@@ -1086,13 +1168,17 @@ func (s *Service) getMediaFileAnyStateByLibraryAndPathInSpace(spaceID string, li
 // DeleteMediaFileByPath 根据文件路径删除媒体文件记录。
 func (s *Service) DeleteMediaFileByPath(filePath string) error {
 	filePath = filepath.ToSlash(filePath)
-	return s.db.Where("file_path = ?", filePath).Delete(&models.MediaFile{}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		return deleteMediaRecordsTx(tx, tx.Where("file_path = ?", filePath))
+	})
 }
 
 // DeleteMediaFileByLibraryAndPath 根据媒体库和文件路径删除媒体文件记录。
 func (s *Service) DeleteMediaFileByLibraryAndPath(libraryID int64, filePath string) error {
 	filePath = filepath.ToSlash(filePath)
-	return s.db.Where("library_id = ? AND file_path = ?", libraryID, filePath).Delete(&models.MediaFile{}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		return deleteMediaRecordsTx(tx, tx.Where("library_id = ? AND file_path = ?", libraryID, filePath))
+	})
 }
 
 // MarkMediaMissingByLibraryAndPath 标记源文件丢失，不进入回收站、不物理删除记录。

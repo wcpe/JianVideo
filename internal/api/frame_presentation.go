@@ -194,6 +194,7 @@ func probeFrameMetadata(ctx context.Context, path string) (frameProbeMetadata, b
 		"-show_entries", "stream=codec_name,avg_frame_rate,nb_frames,width,height:frame=best_effort_timestamp_time",
 		"-of", "json", filepath.FromSlash(path),
 	}
+	// #nosec G204 -- ffprobe 路径来自受控配置，参数按固定模板构造并直接传递，不经过 shell。
 	output, err := exec.CommandContext(ctx, transcoder.GetFFprobePath(), args...).Output()
 	if err != nil {
 		return frameProbeMetadata{}, false, false
@@ -270,6 +271,7 @@ func extractMarkerFrames(ctx context.Context, path string, frameCount int) ([][]
 		"-v", "error", "-i", filepath.FromSlash(path), "-map", "0:v:0", "-an",
 		"-vf", filter, "-vsync", "0", "-f", "rawvideo", "-pix_fmt", "gray", "-",
 	}
+	// #nosec G204 -- ffmpeg 路径来自受控配置，参数按固定模板构造并直接传递，不经过 shell。
 	output, err := exec.CommandContext(ctx, transcoder.GetFFmpegPath(), args...).Output()
 	if err != nil {
 		return nil, false

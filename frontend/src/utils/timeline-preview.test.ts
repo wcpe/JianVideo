@@ -73,15 +73,20 @@ describe('parseTimelinePreviewVtt', () => {
     ['坐标非整数', 'WEBVTT\n\n00:00.000 --> 00:01.000\nsprite-000.jpg#xywh=1.5,2,160,90'],
     ['尺寸非正', 'WEBVTT\n\n00:00.000 --> 00:01.000\nsprite-000.jpg#xywh=0,0,0,90'],
     ['多余 cue 内容', 'WEBVTT\n\n00:00.000 --> 00:01.000\nsprite-000.jpg#xywh=1,2,160,90\nextra'],
-    ['时间行包含设置', 'WEBVTT\n\n00:00.000 --> 00:01.000 align:start\nsprite-000.jpg#xywh=1,2,160,90'],
+    [
+      '时间行包含设置',
+      'WEBVTT\n\n00:00.000 --> 00:01.000 align:start\nsprite-000.jpg#xywh=1,2,160,90',
+    ],
   ])('拒绝%s', (_label, vtt) => {
     expect(() => parseTimelinePreviewVtt(vtt, IDENTITY)).toThrow(Error);
   });
 
   it('拒绝空轨道身份字段', () => {
-    expect(() => parseTimelinePreviewVtt(
-      'WEBVTT\n\n00:00.000 --> 00:01.000\nsprite-000.jpg#xywh=1,2,160,90',
-      { ...IDENTITY, generationId: ' ' },
-    )).toThrow(Error);
+    expect(() =>
+      parseTimelinePreviewVtt('WEBVTT\n\n00:00.000 --> 00:01.000\nsprite-000.jpg#xywh=1,2,160,90', {
+        ...IDENTITY,
+        generationId: ' ',
+      }),
+    ).toThrow(Error);
   });
 });

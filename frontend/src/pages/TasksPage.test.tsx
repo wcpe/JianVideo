@@ -138,7 +138,13 @@ describe('TasksPage（FR2-037）', () => {
       http.get('*/api/tasks/stats', () =>
         HttpResponse.json({
           total: 2,
-          by_status: { pending: retried ? 1 : 0, running: canceled ? 0 : 1, succeeded: 0, failed: retried ? 0 : 1, canceled: canceled ? 1 : 0 },
+          by_status: {
+            pending: retried ? 1 : 0,
+            running: canceled ? 0 : 1,
+            succeeded: 0,
+            failed: retried ? 0 : 1,
+            canceled: canceled ? 1 : 0,
+          },
           by_type: { 'library.scan': 1, 'transcode.hls': 1 },
         }),
       ),

@@ -82,7 +82,10 @@ function useBaseHandlers() {
       }),
     ),
     http.get('*/api/play/:id/timeline-preview', () =>
-      HttpResponse.json({ duration: 0, profile_id: 'timeline-v1', status: 'pending', version: 1 }, { status: 202 }),
+      HttpResponse.json(
+        { duration: 0, profile_id: 'timeline-v1', status: 'pending', version: 1 },
+        { status: 202 },
+      ),
     ),
   );
 }
@@ -165,10 +168,15 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
     );
   });
 
-  it('revision CAS 冲突后重新加载服务端真源并显示明确提示', async () => {
+  it('revision CAS 冲突后重新加载服务端真源、提示并保持失败语义', async () => {
     mediaClient.listMediaBookmarks
       .mockResolvedValueOnce([bookmark('旧端标题', 1)])
       .mockResolvedValue([bookmark('服务端标题', 2)]);
+    const conflict = new BookmarkConflictError(
+      '书签已被其他客户端修改或删除',
+      bookmark('服务端标题', 2),
+      false,
+    );
     mediaClient.updateMediaBookmark.mockImplementation(
       async (
         _client: unknown,
@@ -178,11 +186,7 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
         options: BookmarkMutationOptions,
       ) => {
         await options.reload();
-        throw new BookmarkConflictError(
-          '书签已被其他客户端修改或删除',
-          bookmark('服务端标题', 2),
-          false,
-        );
+        throw conflict;
       },
     );
     const notify = vi.spyOn(notifications, 'show');
@@ -195,12 +199,14 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
       input: MediaBookmarkUpdate,
     ) => Promise<void>;
     await act(async () => {
-      await update('bookmark-1', {
-        note: null,
-        positionMs: 5_000,
-        revision: 1,
-        title: '尝试覆盖',
-      });
+      await expect(
+        update('bookmark-1', {
+          note: null,
+          positionMs: 5_000,
+          revision: 1,
+          title: '尝试覆盖',
+        }),
+      ).rejects.toBe(conflict);
     });
 
     await waitFor(() => expect(player).toHaveAttribute('data-bookmarks', '服务端标题:2'));
@@ -296,14 +302,16 @@ describe('PlayPage 章节与书签数据接线（FR2-060）', () => {
         HttpResponse.json(media(Number(params.id), currentSpace)),
       ),
     );
-    mediaClient.getMediaChapters.mockImplementation(async (client: { space: { spaceId: string } }) => {
-      if (client.space.spaceId === 'space-a') await oldGate;
-      return {
-        items: [chapter(client.space.spaceId === 'space-a' ? '旧空间章节' : '新空间章节')],
-        parsedAt: null,
-        stale: false,
-      };
-    });
+    mediaClient.getMediaChapters.mockImplementation(
+      async (client: { space: { spaceId: string } }) => {
+        if (client.space.spaceId === 'space-a') await oldGate;
+        return {
+          items: [chapter(client.space.spaceId === 'space-a' ? '旧空间章节' : '新空间章节')],
+          parsedAt: null,
+          stale: false,
+        };
+      },
+    );
     mediaClient.listMediaBookmarks.mockImplementation(
       async (client: { space: { spaceId: string } }) => {
         if (client.space.spaceId === 'space-a') await oldGate;

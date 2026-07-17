@@ -2,7 +2,14 @@
 import { JSDOM } from 'jsdom';
 
 // 测试只访问本机 MSW mock，清理宿主机代理变量，避免 Axios/Node 适配器把 localhost 拼成非法代理 URL。
-for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
+for (const key of [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+]) {
   delete process.env[key];
 }
 process.env.NO_PROXY = 'localhost,127.0.0.1,::1';

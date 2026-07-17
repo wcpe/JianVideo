@@ -1,6 +1,6 @@
 # 功能规格：画中画、后台音频与移动手势
 
-> 状态：开发中　·　关联 PRD：FR2-058　·　阶段：P3 `0.24.x`（Web/PWA）/ P7 `0.28.x`（Android/iOS 收口）　·　分支：待定
+> 状态：已交付@v0.24.0（Web/PWA）　·　关联 PRD：FR2-058　·　阶段：P3 `0.24.x`（Web/PWA）/ P7 `0.28.x`（Android/iOS 收口）　·　分支：待定
 
 ## 1. 背景与目标
 
@@ -140,9 +140,9 @@ L1/L2 全绿不能替代 L3/L4。L3 与 L4 均为 P3 阻断门，证据需记录
 - [x] 保持 Web 系统亮度为 unsupported，补播放器视觉亮度的独立能力、无障碍提示和重置边界。
 - [x] 补单元/组件测试：能力探测、PiP 状态机、Media Session handler、手势纯函数、取消和边界。
 - [x] 补 Playwright：触摸仿真、前后台切换、能力降级和播放器视觉亮度不冒充系统能力。
-- [ ] 完成 Windows 真实 Chrome headed 阻断验收并保存证据。
-- [ ] 完成 Windows 已安装 PWA headed 阻断验收并保存证据。
-- [ ] 文档同步：实现完成后更新 PRD 状态、兼容矩阵、API/架构说明和 CHANGELOG；Android/iOS 收口留 P7。
+- [x] 完成 Windows 真实 Chrome headed 阻断验收并保存证据。
+- [x] 完成 Windows 已安装 PWA headed 阻断验收并保存证据。
+- [x] 文档同步：实现完成后更新 PRD 状态、兼容矩阵、API/架构说明和 CHANGELOG；Android/iOS 收口留 P7。
 
 ## 5. 验收标准
 

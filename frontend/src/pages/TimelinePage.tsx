@@ -15,12 +15,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import {
-  IconRefresh,
-  IconFilter,
-  IconCalendarSearch,
-  IconFilterOff,
-} from '@tabler/icons-react';
+import { IconRefresh, IconFilter, IconCalendarSearch, IconFilterOff } from '@tabler/icons-react';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useInfiniteMedia } from '@/hooks/useInfiniteMedia';
 import { useScanProgress } from '@/hooks/useScanProgress';

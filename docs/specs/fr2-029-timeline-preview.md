@@ -1,6 +1,6 @@
 # 功能规格：视频进度条悬停预览
 
-> 状态：开发中　·　关联 PRD：FR2-029　·　阶段：P3 `0.24.x`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-029　·　阶段：P3 `0.24.x`
 
 ## 1. 背景与目标
 
@@ -70,20 +70,20 @@
 
 ## 4. 任务拆分
 
-- [ ] 定义版本化 timeline preview profile、源文件指纹、generation、任务幂等键和独立缓存 `cache_key`。
-- [ ] 实现 ffmpeg 采样、sprite 拼接、WebVTT 生成及产物完整性校验。
-- [ ] 接入 `preview.timeline.generate` 任务处理器、进度、取消、重试与恢复；`force_rebuild` 每次创建新 generation。
-- [ ] 按 Space/media/profile/source_fingerprint/generation 发布产物并登记 `cache_assets(kind=timeline_preview)`。
-- [ ] 增加当前预览指针记录与事务切换，实现旧 generation 延后安全回收和失败保留。
-- [ ] 将 `timeline_preview` kind 与 `timeline_previews/` root 加入 FR2-048 类型、路径、盘点、清理白名单及双向映射测试。
-- [ ] 新增预览状态、资源读取和重建 API，补齐 Space 与版本身份鉴权及路径安全校验。
-- [ ] 在 player-core 可选 `PreviewFacet` 实现 VTT 解析、时间命中、sprite 坐标和请求代次控制。
-- [ ] 在 Web 播放器实现桌面 hover、移动长按、时间占位、浮层边界和取消语义。
-- [ ] 补单元测试：VTT 边界、cue 命中、profile/generation 隔离、幂等键、`cache_key`、指针事务、路径白名单、迟到响应丢弃。
-- [ ] 补真实集成测试：真实 ffmpeg fixture 生成、VTT/sprite 一致性、取消、失败重试、清理后重建、源文件变化与强制重建换代。
-- [ ] 补 Playwright E2E：桌面悬停、快速移动取消旧请求、媒体切换，以及基于 Pointer/touch 仿真的移动长按与抬手 seek。
-- [ ] 在 Windows 安装态 PWA 完成 headed 人工验收并由用户确认：真实长视频上帧图、时间、交互延迟和仿真移动手势符合预期；真实 Android/iOS 触摸验收留 P7。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 定义版本化 timeline preview profile、源文件指纹、generation、任务幂等键和独立缓存 `cache_key`。
+- [x] 实现 ffmpeg 采样、sprite 拼接、WebVTT 生成及产物完整性校验。
+- [x] 接入 `preview.timeline.generate` 任务处理器、进度、取消、重试与恢复；`force_rebuild` 每次创建新 generation。
+- [x] 按 Space/media/profile/source_fingerprint/generation 发布产物并登记 `cache_assets(kind=timeline_preview)`。
+- [x] 增加当前预览指针记录与事务切换，实现旧 generation 延后安全回收和失败保留。
+- [x] 将 `timeline_preview` kind 与 `timeline_previews/` root 加入 FR2-048 类型、路径、盘点、清理白名单及双向映射测试。
+- [x] 新增预览状态、资源读取和重建 API，补齐 Space 与版本身份鉴权及路径安全校验。
+- [x] 在 player-core 可选 `PreviewFacet` 实现 VTT 解析、时间命中、sprite 坐标和请求代次控制。
+- [x] 在 Web 播放器实现桌面 hover、移动长按、时间占位、浮层边界和取消语义。
+- [x] 补单元测试：VTT 边界、cue 命中、profile/generation 隔离、幂等键、`cache_key`、指针事务、路径白名单、迟到响应丢弃。
+- [x] 补真实集成测试：真实 ffmpeg fixture 生成、VTT/sprite 一致性、取消、失败重试、清理后重建、源文件变化与强制重建换代。
+- [x] 补 Playwright E2E：桌面悬停、快速移动取消旧请求、媒体切换，以及基于 Pointer/touch 仿真的移动长按与抬手 seek。
+- [x] 在 Windows 安装态 PWA 完成 headed 人工验收并由用户确认：真实长视频上帧图、时间、交互延迟和仿真移动手势符合预期；真实 Android/iOS 触摸验收留 P7。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

@@ -165,7 +165,9 @@ describe('时间轴预览 API', () => {
     const status = await getTimelinePreviewStatus(9, 'desktop');
 
     expect(status.vtt_url).toMatch(/^https?:\/\/.+\/api\/play\/9\/timeline-preview\/index\.vtt$/);
-    expect(status.sprite_urls?.['sprite-000.jpg']).toMatch(/^https?:\/\/.+\/api\/play\/9\/timeline-preview\/sprite-000\.jpg$/);
+    expect(status.sprite_urls?.['sprite-000.jpg']).toMatch(
+      /^https?:\/\/.+\/api\/play\/9\/timeline-preview\/sprite-000\.jpg$/,
+    );
   });
 
   it('POST rebuild 并返回正常 202 状态', async () => {

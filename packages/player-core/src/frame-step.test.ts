@@ -313,6 +313,28 @@ describe('PlaybackCore 逐帧控制', () => {
     expect(facet.waitCount).toBe(0);
   });
 
+  it('近似逐帧连续命令基于上一确认位置累积，不复用旧呈现帧时间', async () => {
+    const facet = new ScriptedFrameFacet(frame(10), null, []);
+    const snapshot = createSnapshot({
+      capabilities: { ...EMPTY_CAPABILITIES, framePresentation: 'approximate', seek: 'available' },
+      currentTime: 10 * FRAME_DURATION,
+      seekable: [{ end: 20, start: 0 }],
+    });
+    const { backend, core } = await createFrameCore(facet, snapshot);
+
+    const results = await Promise.all(Array.from({ length: 4 }, () => core.stepFrame('next')));
+
+    const expectedTimes = [11, 12, 13, 14].map((index) => index * FRAME_DURATION);
+    results.forEach(({ confirmedMediaTime }, index) => {
+      expect(confirmedMediaTime).toBeCloseTo(expectedTimes[index] ?? 0);
+    });
+    backend.calls
+      .filter(({ method }) => method === 'seek')
+      .forEach(({ targetTime }, index) => {
+        expect(targetTime).toBeCloseTo(expectedTimes[index] ?? 0);
+      });
+  });
+
   it('缺少相邻目标但有名义帧时长时降级为 approximate', async () => {
     const facet = new ScriptedFrameFacet(frame(10), null, []);
     const { core } = await createFrameCore(facet);

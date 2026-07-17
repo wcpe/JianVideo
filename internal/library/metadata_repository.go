@@ -28,6 +28,9 @@ func newGormMetadataRepository(db *gorm.DB) metadataRepository {
 
 func (r *gormMetadataRepository) Upsert(ctx context.Context, row *models.MediaMetadata, chapters []models.MediaChapter, mediaUpdates map[string]any) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockMetadataParent(tx, row.SpaceID, row.MediaID); err != nil {
+			return err
+		}
 		conflict := clause.OnConflict{
 			Columns:   []clause.Column{{Name: "space_id"}, {Name: "media_id"}, {Name: "source"}},
 			DoUpdates: clause.AssignmentColumns([]string{"tool", "tool_version", "raw_json", "normalized_json", "parsed_at", "stale"}),
@@ -38,13 +41,37 @@ func (r *gormMetadataRepository) Upsert(ctx context.Context, row *models.MediaMe
 		if err := replaceEmbeddedChapters(tx, row.SpaceID, row.MediaID, chapters); err != nil {
 			return err
 		}
-		if len(mediaUpdates) == 0 {
-			return nil
-		}
-		return tx.Model(&models.MediaFile{}).
-			Where("space_id = ? AND id = ?", row.SpaceID, row.MediaID).
-			Updates(mediaUpdates).Error
+		return updateMetadataParent(tx, row.SpaceID, row.MediaID, mediaUpdates)
 	})
+}
+
+func lockMetadataParent(tx *gorm.DB, spaceID string, mediaID int64) error {
+	result := tx.Model(&models.MediaFile{}).
+		Where("space_id = ? AND id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), mediaID).
+		UpdateColumn("id", gorm.Expr("id"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func updateMetadataParent(tx *gorm.DB, spaceID string, mediaID int64, updates map[string]any) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	result := tx.Model(&models.MediaFile{}).
+		Where("space_id = ? AND id = ?", normalizeSpaceID(spaceID), mediaID).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func replaceEmbeddedChapters(tx *gorm.DB, spaceID string, mediaID int64, chapters []models.MediaChapter) error {

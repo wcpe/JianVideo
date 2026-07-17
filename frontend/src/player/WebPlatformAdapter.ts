@@ -235,6 +235,17 @@ export class WebPictureInPictureAdapter {
   private readonly doc: Document;
   private readonly onStateChange: (state: PictureInPictureState) => void;
   private readonly onError: (message: string) => void;
+  private activeSession = 0;
+  private currentEnterGeneration: number | null = null;
+  private disposed = false;
+  private exitInFlight: {
+    promise: Promise<boolean>;
+    reportFailure: boolean;
+    session: number;
+  } | null = null;
+  private generation = 0;
+  private sessionGeneration = 0;
+  private staleEnterExpected = false;
   private state: PictureInPictureState;
 
   constructor(
@@ -258,54 +269,176 @@ export class WebPictureInPictureAdapter {
   }
 
   async toggle(): Promise<void> {
+    if (this.disposed) return;
     if (!this.isAvailable()) {
       this.setState('unsupported');
       return;
     }
     if (this.doc.pictureInPictureElement === this.video || this.state === 'active') {
-      await this.exit();
+      await this.requestExit(true);
       return;
     }
     if (this.state === 'requesting' || this.state === 'exiting') return;
+    const generation = ++this.generation;
+    this.currentEnterGeneration = generation;
     this.setState('requesting');
     try {
       await this.video.requestPictureInPicture();
+      await this.completeEnterRequest(generation);
     } catch (error: unknown) {
-      this.fail(error, '进入画中画失败');
+      await this.failEnterRequest(generation, error);
     }
   }
 
   async resetForSourceChange(): Promise<void> {
-    if (this.doc.pictureInPictureElement === this.video && !(await this.exit())) return;
-    if (this.state !== 'unsupported') this.setState(this.isAvailable() ? 'idle' : 'unsupported');
+    this.invalidateEntry();
+    if (this.disposed) return;
+    if (this.exitInFlight || this.doc.pictureInPictureElement === this.video) {
+      await this.requestExit(true);
+      return;
+    }
+    this.setState(this.isAvailable() ? 'idle' : 'unsupported');
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.invalidateEntry();
+    this.disposed = true;
     this.video.removeEventListener('enterpictureinpicture', this.handleEnter);
     this.video.removeEventListener('leavepictureinpicture', this.handleLeave);
-    if (this.doc.pictureInPictureElement === this.video) {
-      void this.doc.exitPictureInPicture?.().catch((error: unknown) => {
-        this.onError(error instanceof Error && error.message ? error.message : '退出画中画失败');
-      });
-    }
     this.state = 'unsupported';
+    void this.requestExit(false);
   }
 
-  private readonly handleEnter = () => this.setState('active');
-  private readonly handleLeave = () => this.setState(this.isAvailable() ? 'idle' : 'unsupported');
-
-  private async exit(): Promise<boolean> {
-    this.setState('exiting');
-    try {
-      await this.doc.exitPictureInPicture?.();
-      return true;
-    } catch (error: unknown) {
-      this.fail(error, '退出画中画失败');
-      return false;
+  private readonly handleEnter = () => {
+    this.activeSession = ++this.sessionGeneration;
+    if (this.disposed) {
+      void this.requestExit(false);
+      return;
     }
+    if (this.currentEnterGeneration !== null) {
+      this.currentEnterGeneration = null;
+      this.setState('active');
+      return;
+    }
+    if (this.staleEnterExpected) {
+      void this.requestExit(false);
+      return;
+    }
+    this.setState('active');
+  };
+
+  private readonly handleLeave = () => {
+    if (this.disposed) return;
+    this.activeSession = 0;
+    this.setState(
+      this.currentEnterGeneration === null
+        ? this.isAvailable()
+          ? 'idle'
+          : 'unsupported'
+        : 'requesting',
+    );
+  };
+
+  private async completeEnterRequest(generation: number): Promise<void> {
+    if (generation !== this.currentEnterGeneration) {
+      if (generation < this.generation) this.staleEnterExpected = false;
+      if (this.disposed && this.doc.pictureInPictureElement === this.video) {
+        await this.requestExit(false);
+      }
+      return;
+    }
+    if (this.disposed) {
+      this.currentEnterGeneration = null;
+      await this.requestExit(false);
+      return;
+    }
+    if (this.doc.pictureInPictureElement === this.video) {
+      this.activeSession = ++this.sessionGeneration;
+      this.currentEnterGeneration = null;
+      this.setState('active');
+    }
+  }
+
+  private async failEnterRequest(generation: number, error: unknown): Promise<void> {
+    if (generation !== this.currentEnterGeneration) {
+      if (generation < this.generation) this.staleEnterExpected = false;
+      return;
+    }
+    this.currentEnterGeneration = null;
+    if (this.doc.pictureInPictureElement === this.video) {
+      this.activeSession = this.activeSession || ++this.sessionGeneration;
+      this.setState('active');
+      return;
+    }
+    this.fail(error, '进入画中画失败');
+  }
+
+  private async requestExit(reportFailure: boolean): Promise<boolean> {
+    while (true) {
+      const inFlight = this.exitInFlight;
+      if (inFlight) {
+        inFlight.reportFailure ||= reportFailure;
+        const result = await inFlight.promise;
+        if (this.doc.pictureInPictureElement !== this.video) return result;
+        if (this.activeSession === inFlight.session) return false;
+        continue;
+      }
+      if (this.doc.pictureInPictureElement !== this.video) return true;
+      const session = this.activeSession || ++this.sessionGeneration;
+      this.activeSession = session;
+      return this.startExit(session, reportFailure);
+    }
+  }
+
+  private startExit(session: number, reportFailure: boolean): Promise<boolean> {
+    if (!this.disposed) this.setState('exiting');
+    const exit = {
+      promise: Promise.resolve(false),
+      reportFailure,
+      session,
+    };
+    exit.promise = (async () => {
+      try {
+        await this.doc.exitPictureInPicture?.();
+        return true;
+      } catch (error: unknown) {
+        if (!this.disposed && this.activeSession === session && exit.reportFailure) {
+          this.fail(error, '退出画中画失败');
+        } else if (!this.disposed && this.activeSession === session) {
+          this.restorePendingState();
+        }
+        return false;
+      } finally {
+        if (this.exitInFlight === exit) this.exitInFlight = null;
+      }
+    })();
+    this.exitInFlight = exit;
+    return exit.promise;
+  }
+
+  private restorePendingState(): void {
+    if (this.doc.pictureInPictureElement === this.video) {
+      this.setState('active');
+      return;
+    }
+    this.setState(
+      this.currentEnterGeneration === null
+        ? this.isAvailable()
+          ? 'idle'
+          : 'unsupported'
+        : 'requesting',
+    );
+  }
+
+  private invalidateEntry(): void {
+    if (this.currentEnterGeneration !== null) this.staleEnterExpected = true;
+    this.currentEnterGeneration = null;
+    this.generation += 1;
   }
 
   private fail(error: unknown, fallback: string): void {
+    if (this.disposed) return;
     this.setState('error');
     this.onError(error instanceof Error && error.message ? error.message : fallback);
   }
@@ -319,6 +452,7 @@ export class WebPictureInPictureAdapter {
   }
 
   private setState(state: PictureInPictureState): void {
+    if (this.disposed) return;
     this.state = state;
     this.onStateChange(state);
   }

@@ -1,6 +1,6 @@
 # 功能规格：可复用播放核心
 
-> 状态：开发中　·　关联 PRD：FR2-036　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-036-player-core`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-036　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-036-player-core`
 
 ## 1. 背景与目标
 
@@ -206,18 +206,18 @@ type PlaybackBackendBinding = {
 
 ## 4. 任务拆分
 
-- [ ] 测试先行：为状态机、边界夹取、命令代次、受控取消和错误归类编写失败测试。
-- [ ] 测试先行：建立可复用的基础 `PlaybackBackend` 与五个可选分面契约测试套件和确定性伪后端。
-- [ ] 测试先行：覆盖同一后端加载不同播放源时能力快照变化、`capabilitiesChanged` 事件、旧源事件隔离和分面不可用降级。
-- [ ] 测试先行：覆盖 `FramePresentationFacet` 仅在返回稳定 `sourceFrameIndex` 或 `stableFrameId` 时声明 `exact`，字段缺失、身份不稳定或只有 `mediaTime` 时声明 `approximate`；同时覆盖 `PreviewFacet` 的 VTT 解析、命中边界、generation/请求代次隔离与无网络访问约束。
-- [ ] 定义端无关的播放源、能力快照、状态、Seek、呈现帧稳定身份、预览轨、`TrackKind='audio' | 'subtitle'`、selected/effective 轨道状态、清晰度、事件和错误类型。
-- [ ] 实现 player-core 状态机、命令调度、请求代次和过期结果隔离。
-- [ ] 在当前 `frontend/` 实现薄 `PlaybackBackend` 与所需分面，包裹既有 mpegts.js/MSE、hls.js/MSE 与原文件直出路径。
-- [ ] 在当前 `frontend/` 保持 `WebPlatformAdapter`/壳层边界，确认 PiP、Media Session、Pointer Events 未进入 player-core 或后端分面。
-- [ ] 接入 FR2-034 逐帧命令与 FR2-035 阶梯 Seek 命令。
-- [ ] 补回归测试：现有直连、TS、HLS ABR、fMP4/CMAF、追播、续播和播放源切换不回归。
-- [ ] 使用真实编号帧 fixture 完成 Windows 桌面 Web 与桌面安装态 PWA headed 真机验收，不以 jsdom 或 headless 结果替代。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 测试先行：为状态机、边界夹取、命令代次、受控取消和错误归类编写失败测试。
+- [x] 测试先行：建立可复用的基础 `PlaybackBackend` 与五个可选分面契约测试套件和确定性伪后端。
+- [x] 测试先行：覆盖同一后端加载不同播放源时能力快照变化、`capabilitiesChanged` 事件、旧源事件隔离和分面不可用降级。
+- [x] 测试先行：覆盖 `FramePresentationFacet` 仅在返回稳定 `sourceFrameIndex` 或 `stableFrameId` 时声明 `exact`，字段缺失、身份不稳定或只有 `mediaTime` 时声明 `approximate`；同时覆盖 `PreviewFacet` 的 VTT 解析、命中边界、generation/请求代次隔离与无网络访问约束。
+- [x] 定义端无关的播放源、能力快照、状态、Seek、呈现帧稳定身份、预览轨、`TrackKind='audio' | 'subtitle'`、selected/effective 轨道状态、清晰度、事件和错误类型。
+- [x] 实现 player-core 状态机、命令调度、请求代次和过期结果隔离。
+- [x] 在当前 `frontend/` 实现薄 `PlaybackBackend` 与所需分面，包裹既有 mpegts.js/MSE、hls.js/MSE 与原文件直出路径。
+- [x] 在当前 `frontend/` 保持 `WebPlatformAdapter`/壳层边界，确认 PiP、Media Session、Pointer Events 未进入 player-core 或后端分面。
+- [x] 接入 FR2-034 逐帧命令与 FR2-035 阶梯 Seek 命令。
+- [x] 补回归测试：现有直连、TS、HLS ABR、fMP4/CMAF、追播、续播和播放源切换不回归。
+- [x] 使用真实编号帧 fixture 完成 Windows 桌面 Web 与桌面安装态 PWA headed 真机验收，不以 jsdom 或 headless 结果替代。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

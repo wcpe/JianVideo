@@ -143,10 +143,13 @@ export async function getTimelinePreviewStatus(
   signal?: AbortSignal,
 ): Promise<TimelinePreviewStatus> {
   const params = profileID ? { profile: profileID } : undefined;
-  const response = await client.get<TimelinePreviewStatus>(`/api/play/${mediaID}/timeline-preview`, {
-    params,
-    signal,
-  });
+  const response = await client.get<TimelinePreviewStatus>(
+    `/api/play/${mediaID}/timeline-preview`,
+    {
+      params,
+      signal,
+    },
+  );
   return absoluteTimelinePreviewUrls(response.data);
 }
 
@@ -174,9 +177,12 @@ export async function rebuildTimelinePreview(
 
 function absoluteTimelinePreviewUrls(status: TimelinePreviewStatus): TimelinePreviewStatus {
   const absolute = (value: string) => new URL(value, window.location.href).toString();
-  const spriteUrls = status.sprite_urls === undefined
-    ? undefined
-    : Object.fromEntries(Object.entries(status.sprite_urls).map(([name, url]) => [name, absolute(url)]));
+  const spriteUrls =
+    status.sprite_urls === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(status.sprite_urls).map(([name, url]) => [name, absolute(url)]),
+        );
   return {
     ...status,
     ...(spriteUrls === undefined ? {} : { sprite_urls: spriteUrls }),

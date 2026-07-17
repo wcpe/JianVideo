@@ -2,6 +2,7 @@ package models
 
 import "time"
 
+// MediaChapterSourceEmbedded 表示媒体文件内嵌章节来源。
 const MediaChapterSourceEmbedded = "embedded"
 
 // MediaChapter 保存媒体文件内嵌章节的当前规范化结果。

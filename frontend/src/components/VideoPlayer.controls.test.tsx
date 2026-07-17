@@ -297,29 +297,35 @@ describe('VideoPlayer 六档定位（FR2-034）', () => {
       timestampError: 0,
     };
 
-    act(() => coreListener?.({
-      requestId: result.requestId,
-      result,
-      sourceEpoch: snapshot.sourceEpoch,
-      sourceId: snapshot.sourceId,
-      type: 'frameStepCompleted',
-    }));
+    act(() =>
+      coreListener?.({
+        requestId: result.requestId,
+        result,
+        sourceEpoch: snapshot.sourceEpoch,
+        sourceId: snapshot.sourceId,
+        type: 'frameStepCompleted',
+      }),
+    );
     expect(screen.getByText('近似逐帧')).toBeInTheDocument();
-    act(() => coreListener?.({
-      requestId: result.requestId,
-      result: { ...result, precision: 'unsupported', status: 'canceled' },
-      sourceEpoch: snapshot.sourceEpoch,
-      sourceId: snapshot.sourceId,
-      type: 'frameStepCompleted',
-    }));
+    act(() =>
+      coreListener?.({
+        requestId: result.requestId,
+        result: { ...result, precision: 'unsupported', status: 'canceled' },
+        sourceEpoch: snapshot.sourceEpoch,
+        sourceId: snapshot.sourceId,
+        type: 'frameStepCompleted',
+      }),
+    );
     expect(screen.getByText('近似逐帧')).toBeInTheDocument();
-    act(() => coreListener?.({
-      requestId: result.requestId,
-      result: { ...result, precision: 'exact-verified' },
-      sourceEpoch: snapshot.sourceEpoch,
-      sourceId: snapshot.sourceId,
-      type: 'frameStepCompleted',
-    }));
+    act(() =>
+      coreListener?.({
+        requestId: result.requestId,
+        result: { ...result, precision: 'exact-verified' },
+        sourceEpoch: snapshot.sourceEpoch,
+        sourceId: snapshot.sourceId,
+        type: 'frameStepCompleted',
+      }),
+    );
     expect(screen.queryByText('近似逐帧')).not.toBeInTheDocument();
   });
 

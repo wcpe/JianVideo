@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { login } from "./helpers";
@@ -160,15 +160,23 @@ test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失�
     });
   } finally {
     if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
-    if (existsSync(mediaDir))
-      rmSync(mediaDir, {
-        recursive: true,
-        force: true,
-        maxRetries: 20,
-        retryDelay: 250,
-      });
+    await removeMediaDir(mediaDir);
   }
 });
+
+async function removeMediaDir(mediaDir: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      await rm(mediaDir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw lastError;
+}
 
 function writeVideoFixture(path: string) {
   execFileSync(

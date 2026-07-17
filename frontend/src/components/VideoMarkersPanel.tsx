@@ -13,6 +13,7 @@ import {
   Divider,
   Drawer,
   Group,
+  NumberInput,
   Stack,
   Text,
   Textarea,
@@ -29,10 +30,13 @@ import {
 } from '@tabler/icons-react';
 import { formatMarkerTime } from '@/components/VideoPlayer.helpers';
 
+const BOOKMARK_TITLE_MAX_LENGTH = 120;
+const BOOKMARK_NOTE_MAX_LENGTH = 2000;
+
 type BookmarkDraft = {
   bookmark: MediaBookmark | null;
   note: string;
-  positionMs: number;
+  positionSeconds: number | string;
   title: string;
 };
 
@@ -53,7 +57,17 @@ interface VideoMarkersPanelProps {
 }
 
 function emptyDraft(positionMs: number): BookmarkDraft {
-  return { bookmark: null, note: '', positionMs, title: '' };
+  return { bookmark: null, note: '', positionSeconds: positionMs / 1000, title: '' };
+}
+
+function draftPositionMs(draft: BookmarkDraft): number | null {
+  const seconds = Number(draft.positionSeconds);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.round(seconds * 1000);
+}
+
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
 }
 
 export default function VideoMarkersPanel({
@@ -75,19 +89,30 @@ export default function VideoMarkersPanel({
   const [draft, setDraft] = useState<BookmarkDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaBookmark | null>(null);
   const [saving, setSaving] = useState(false);
+  const [positionError, setPositionError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   useEffect(() => {
     setOpened(false);
     setDraft(null);
     setDeleteTarget(null);
+    setPositionError(null);
     setValidationError(null);
+    setNoteError(null);
   }, [contextKey]);
 
   const startEdit = (item: MediaBookmark) => {
     setDeleteTarget(null);
+    setPositionError(null);
     setValidationError(null);
-    setDraft({ bookmark: item, note: item.note ?? '', positionMs: item.positionMs, title: item.title });
+    setNoteError(null);
+    setDraft({
+      bookmark: item,
+      note: item.note ?? '',
+      positionSeconds: item.positionMs / 1000,
+      title: item.title,
+    });
   };
 
   const submitDraft = async () => {
@@ -97,21 +122,37 @@ export default function VideoMarkersPanel({
       setValidationError('书签标题不能为空');
       return;
     }
-    const note = draft.note.trim() || null;
+    if (unicodeLength(title) > BOOKMARK_TITLE_MAX_LENGTH) {
+      setValidationError(`书签标题不能超过 ${BOOKMARK_TITLE_MAX_LENGTH} 个字符`);
+      return;
+    }
+    const positionMs = draftPositionMs(draft);
+    if (positionMs === null) {
+      setPositionError('书签时间必须是非负数字');
+      return;
+    }
+    const normalizedNote = draft.note.trim();
+    if (unicodeLength(normalizedNote) > BOOKMARK_NOTE_MAX_LENGTH) {
+      setNoteError(`书签备注不能超过 ${BOOKMARK_NOTE_MAX_LENGTH} 个字符`);
+      return;
+    }
+    const note = normalizedNote || null;
     setSaving(true);
     try {
       if (draft.bookmark && onUpdateBookmark) {
         await onUpdateBookmark(draft.bookmark.id, {
           note,
-          positionMs: draft.positionMs,
+          positionMs,
           revision: draft.bookmark.revision,
           title,
         });
       } else if (onCreateBookmark) {
-        await onCreateBookmark({ note, positionMs: draft.positionMs, title });
+        await onCreateBookmark({ note, positionMs, title });
       }
       setDraft(null);
+      setPositionError(null);
       setValidationError(null);
+      setNoteError(null);
     } catch {
       // 数据层已展示具体错误，保留草稿供用户修正或重试。
     } finally {
@@ -170,7 +211,9 @@ export default function VideoMarkersPanel({
               disabled={!onCreateBookmark}
               onClick={() => {
                 setDeleteTarget(null);
+                setPositionError(null);
                 setValidationError(null);
+                setNoteError(null);
                 setDraft(emptyDraft(Math.round(Math.max(0, currentTime) * 1000)));
               }}
             >
@@ -189,23 +232,48 @@ export default function VideoMarkersPanel({
                 {error}
               </Text>
               {onReload && (
-                <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={13} />} onClick={onReload}>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  leftSection={<IconRefresh size={13} />}
+                  onClick={onReload}
+                >
                   重试
                 </Button>
               )}
             </Group>
           )}
-          {stale && <Badge color="yellow" variant="light">章节数据待刷新</Badge>}
+          {stale && (
+            <Badge color="yellow" variant="light">
+              章节数据待刷新
+            </Badge>
+          )}
 
           {draft && (
-            <Stack gap="xs" p="sm" style={{ border: '1px solid var(--mantine-color-default-border)' }}>
+            <Stack
+              gap="xs"
+              p="sm"
+              style={{ border: '1px solid var(--mantine-color-default-border)' }}
+            >
               <Text size="xs" c="dimmed">
-                {draft.bookmark ? `编辑 ${formatMarkerTime(draft.positionMs)}` : `新建于 ${formatMarkerTime(draft.positionMs)}`}
+                {draft.bookmark
+                  ? `编辑 ${formatMarkerTime(draftPositionMs(draft) ?? 0)}`
+                  : `新建于 ${formatMarkerTime(draftPositionMs(draft) ?? 0)}`}
               </Text>
+              <NumberInput
+                label="书签时间（秒）"
+                value={draft.positionSeconds}
+                min={0}
+                decimalScale={3}
+                error={positionError}
+                onChange={(value) => {
+                  setPositionError(null);
+                  setDraft({ ...draft, positionSeconds: value });
+                }}
+              />
               <TextInput
                 label="书签标题"
                 value={draft.title}
-                maxLength={120}
                 error={validationError}
                 onChange={(event) => {
                   setValidationError(null);
@@ -215,11 +283,14 @@ export default function VideoMarkersPanel({
               <Textarea
                 label="书签备注"
                 value={draft.note}
-                maxLength={2000}
+                error={noteError}
                 autosize
                 minRows={2}
                 maxRows={5}
-                onChange={(event) => setDraft({ ...draft, note: event.currentTarget.value })}
+                onChange={(event) => {
+                  setNoteError(null);
+                  setDraft({ ...draft, note: event.currentTarget.value });
+                }}
               />
               <Group justify="flex-end" gap="xs">
                 <Button size="xs" variant="subtle" color="gray" onClick={() => setDraft(null)}>
@@ -235,7 +306,9 @@ export default function VideoMarkersPanel({
           <Divider label={`章节 ${chapters.length}`} labelPosition="left" />
           <Stack gap={4}>
             {chapters.length === 0 && !loading ? (
-              <Text size="sm" c="dimmed">未检测到内嵌章节</Text>
+              <Text size="sm" c="dimmed">
+                未检测到内嵌章节
+              </Text>
             ) : (
               chapters.map((item) => {
                 const active = currentChapter?.id === item.id;
@@ -249,8 +322,12 @@ export default function VideoMarkersPanel({
                     aria-label={`跳转到章节 ${item.title}，${formatMarkerTime(item.startMs)}`}
                     onClick={() => onSeek(item.startMs)}
                   >
-                    <Text component="span" size="sm" truncate>{item.title}</Text>
-                    <Text component="span" size="xs" c="dimmed">{formatMarkerTime(item.startMs)}</Text>
+                    <Text component="span" size="sm" truncate>
+                      {item.title}
+                    </Text>
+                    <Text component="span" size="xs" c="dimmed">
+                      {formatMarkerTime(item.startMs)}
+                    </Text>
                   </Button>
                 );
               })
@@ -260,18 +337,32 @@ export default function VideoMarkersPanel({
           <Divider label={`书签 ${bookmarks.length}`} labelPosition="left" />
           <Stack gap="xs">
             {bookmarks.length === 0 && !loading ? (
-              <Text size="sm" c="dimmed">暂无书签</Text>
+              <Text size="sm" c="dimmed">
+                暂无书签
+              </Text>
             ) : (
               bookmarks.map((item) => (
-                <Box key={item.id} p="xs" style={{ border: '1px solid var(--mantine-color-default-border)' }}>
+                <Box
+                  key={item.id}
+                  p="xs"
+                  style={{ border: '1px solid var(--mantine-color-default-border)' }}
+                >
                   <Group justify="space-between" wrap="nowrap" align="flex-start">
                     <Box style={{ minWidth: 0 }}>
                       <Group gap={6} wrap="nowrap">
                         <IconBookmark size={14} />
-                        <Text size="sm" fw={600} truncate>{item.title}</Text>
-                        <Text size="xs" c="dimmed">{formatMarkerTime(item.positionMs)}</Text>
+                        <Text size="sm" fw={600} truncate>
+                          {item.title}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {formatMarkerTime(item.positionMs)}
+                        </Text>
                       </Group>
-                      {item.note && <Text size="xs" c="dimmed" mt={4}>{item.note}</Text>}
+                      {item.note && (
+                        <Text size="xs" c="dimmed" mt={4}>
+                          {item.note}
+                        </Text>
+                      )}
                     </Box>
                     <Group gap={2} wrap="nowrap">
                       <ActionIcon
@@ -310,7 +401,9 @@ export default function VideoMarkersPanel({
                   </Group>
                   {deleteTarget?.id === item.id && (
                     <Group justify="space-between" mt="xs" gap="xs" wrap="nowrap">
-                      <Text size="xs" c="red">确认删除「{item.title}」{formatMarkerTime(item.positionMs)}？</Text>
+                      <Text size="xs" c="red">
+                        确认删除「{item.title}」{formatMarkerTime(item.positionMs)}？
+                      </Text>
                       <Button
                         size="compact-xs"
                         color="red"

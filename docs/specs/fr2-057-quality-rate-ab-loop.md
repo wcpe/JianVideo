@@ -1,6 +1,6 @@
 # 功能规格：手动清晰度、省流量、变速与 A-B 循环
 
-> 状态：开发中　·　关联 PRD：FR2-057　·　阶段：P3 `0.24.x`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-057　·　阶段：P3 `0.24.x`
 
 ## 1. 背景与目标
 
@@ -138,13 +138,13 @@ FR2-026 已提供 HLS 多码率产物和 hls.js 自动码率切换，当前播�
 
 ## 4. 任务拆分
 
-- [ ] 在 `player-core` 实现清晰度、省流量、倍速和 A-B 状态机及纯逻辑测试。
-- [ ] 在 Web 适配层实现 `QualityFacet` 与 `LoadControlFacet`：适配 hls.js level、cap、加载控制，由 `QualityFacet.setPlaybackRate` 接入倍速，A-B 回跳复用基础 `PlaybackBackend.seek`。
-- [ ] 实现清晰度菜单、实际档位展示、省流量阻断提示和 A-B 控件。
-- [ ] 实现省流量下延迟启动、暂停停止调度、无 `<=480p` 档位停止播放和关闭省流量后的恢复加载。
-- [ ] 补 manifest 变化、手动档失效、低档缺失阻断、fatal level 错误和实例重建降级测试；分别覆盖 `dataSaver=false` 可降到最低可用档，以及 `dataSaver=true` 先过滤 `<=480p`、无合规档位即阻断且不回退高档。
-- [ ] 补真实 HLS fixture 的 Playwright 浏览器测试与弱网测试。
-- [ ] 在 Chrome/Edge 真实浏览器和从系统入口启动的安装态 PWA 中，使用真实媒体完成弱网、预加载、倍速和 A-B 手动验收。
+- [x] 在 `player-core` 实现清晰度、省流量、倍速和 A-B 状态机及纯逻辑测试。
+- [x] 在 Web 适配层实现 `QualityFacet` 与 `LoadControlFacet`：适配 hls.js level、cap、加载控制，由 `QualityFacet.setPlaybackRate` 接入倍速，A-B 回跳复用基础 `PlaybackBackend.seek`。
+- [x] 实现清晰度菜单、实际档位展示、省流量阻断提示和 A-B 控件。
+- [x] 实现省流量下延迟启动、暂停停止调度、无 `<=480p` 档位停止播放和关闭省流量后的恢复加载。
+- [x] 补 manifest 变化、手动档失效、低档缺失阻断、fatal level 错误和实例重建降级测试；分别覆盖 `dataSaver=false` 可降到最低可用档，以及 `dataSaver=true` 先过滤 `<=480p`、无合规档位即阻断且不回退高档。
+- [x] 补真实 HLS fixture 的 Playwright 浏览器测试与弱网测试。
+- [x] 在 Chrome/Edge 真实浏览器和从系统入口启动的安装态 PWA 中，使用真实媒体完成弱网、预加载、倍速和 A-B 手动验收。
 
 ## 5. 验收标准
 

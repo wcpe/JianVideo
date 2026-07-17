@@ -1,5 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { createPreviewFacet, PlaybackCore, SEEK_TIERS } from '@jianvideo/player-core';
+import {
+  createPreviewFacet,
+  PlaybackCore,
+  SEEK_TIERS,
+  WatchStateReporter,
+} from '@jianvideo/player-core';
 import type {
   AbLoopState,
   FrameStepDirection,
@@ -13,6 +18,9 @@ import type {
   PreviewHit,
   SeekTier,
   TrackKind,
+  WatchStateReportInput,
+  WatchStateSnapshot,
+  WatchStateTransport,
 } from '@jianvideo/player-core';
 import type {
   MediaBookmark,
@@ -138,6 +146,12 @@ interface VideoPlayerProps {
    * 续播起始位置（秒，FR-44）。大于 1 时在媒体可定位后 seek 到该位置一次。
    */
   initialPosition?: number;
+  /** 当前 Space 与媒体的观看状态上下文键。 */
+  watchContextKey?: string;
+  /** 服务端 watch_states 真源快照。 */
+  watchState?: WatchStateSnapshot;
+  /** 观看状态事件传输端口。 */
+  watchStateTransport?: WatchStateTransport;
   /**
    * 定期上报当前播放位置（秒，FR-44）。约每 10s 触发一次，暂停时补报一次。
    */
@@ -163,8 +177,12 @@ interface VideoPlayerProps {
 
 // 播放位置上报节流间隔（秒，FR-44）
 const POSITION_REPORT_INTERVAL = 10;
-// 「看完」判定：剩余时长小于该秒数即视为已看完（FR-44）
-const WATCHED_REMAINING_THRESHOLD = 15;
+function createWatchSessionId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
 // 默认定位档位与核心初始档保持一致。
 const DEFAULT_SEEK_TIER = { kind: 'seconds', value: 5 } as const satisfies SeekTier;
 // 键盘音量调节步长（FR-104）
@@ -369,7 +387,10 @@ function bufferedPercent(snapshot: PlaybackSnapshot): number {
   return Math.min(100, (bufferedEnd / snapshot.duration) * 100);
 }
 
-function currentChapterAt(chapters: readonly MediaChapter[], currentTime: number): MediaChapter | null {
+function currentChapterAt(
+  chapters: readonly MediaChapter[],
+  currentTime: number,
+): MediaChapter | null {
   const positionMs = Math.max(0, currentTime) * 1000;
   return (
     chapters.find((chapter) => positionMs >= chapter.startMs && positionMs < chapter.endMs) ??
@@ -401,7 +422,6 @@ function isSameSource(left: PlaybackCommandContext, right: PlaybackCommandContex
 }
 
 export default function VideoPlayer({
-
   url,
   descriptor,
   poster,
@@ -423,6 +443,9 @@ export default function VideoPlayer({
   streamType = 'mpegts',
   fill = false,
   initialPosition,
+  watchContextKey,
+  watchState,
+  watchStateTransport,
   onPositionReport,
   onEnded,
   onPlaybackError,
@@ -439,6 +462,16 @@ export default function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const coreRef = useRef<PlaybackCore | null>(null);
+  const watchReporterRef = useRef<WatchStateReporter | null>(null);
+  const pendingPauseReasonRef = useRef<{
+    readonly reason: WatchStateReportInput['reason'];
+    readonly revision: number;
+    readonly sourceEpoch: number;
+    readonly sourceId: string;
+  } | null>(null);
+  const playbackIntentRevisionRef = useRef(0);
+  const playbackIntentContextRef = useRef<string | null>(null);
+  const manualPlaybackIntentRef = useRef<'paused' | 'playing' | null>(null);
   const backendRef = useRef<WebPlaybackBackend | null>(null);
   const mediaSessionRef = useRef<WebMediaSessionAdapter | null>(null);
   const pipAdapterRef = useRef<WebPictureInPictureAdapter | null>(null);
@@ -475,7 +508,11 @@ export default function VideoPlayer({
   const onPlaybackErrorRef = useRef(onPlaybackError);
   const lastReportRef = useRef(0);
   const endedReportedRef = useRef(false);
-  initialPositionRef.current = initialPosition;
+  initialPositionRef.current = watchState
+    ? watchState.completed
+      ? undefined
+      : watchState.positionSeconds
+    : initialPosition;
   onPositionReportRef.current = onPositionReport;
   onEndedRef.current = onEnded;
   onPlaybackErrorRef.current = onPlaybackError;
@@ -499,6 +536,8 @@ export default function VideoPlayer({
   );
   const [abrLevel, setAbrLevel] = useState<string | null>(null);
   const [qualityState, setQualityState] = useState<PlaybackQualityState>(INITIAL_QUALITY_STATE);
+  const qualityStateRef = useRef(qualityState);
+  qualityStateRef.current = qualityState;
   const [abLoopState, setAbLoopState] = useState<AbLoopState>(INITIAL_AB_LOOP_STATE);
   const abLoopStateRef = useRef(abLoopState);
   abLoopStateRef.current = abLoopState;
@@ -533,6 +572,12 @@ export default function VideoPlayer({
   // 缺省描述符时直接沿用现有入参，行为不变；fmp4 路径前先做客户端能力校验，
   // 不支持时回退 fallbackUrl（按 TS 路径加载），无回退源则标记为不可播。
   const resolved = resolveDescriptor(descriptor, { url, isABR: isABRProp, streamType });
+  const playbackIntentContext = mediaId === undefined ? resolved.url : String(mediaId);
+  if (playbackIntentContextRef.current !== playbackIntentContext) {
+    playbackIntentContextRef.current = playbackIntentContext;
+    manualPlaybackIntentRef.current = null;
+    playbackIntentRevisionRef.current += 1;
+  }
 
   // 判断是否为 ABR 模式
   const isABR = resolved.isABR ?? resolved.url.endsWith('master.m3u8');
@@ -556,11 +601,6 @@ export default function VideoPlayer({
     if (!core || !video || hasSeekedRef.current || restoreInFlightRef.current !== null) return;
     const position = initialPositionRef.current;
     if (!position || position <= 1 || !isFinite(video.duration) || video.duration <= 0) return;
-    if (video.duration - position <= WATCHED_REMAINING_THRESHOLD) {
-      hasSeekedRef.current = true;
-      restoreRetryPendingRef.current = false;
-      return;
-    }
     const generation = restoreGenerationRef.current;
     restoreInFlightRef.current = generation;
     restoreRetryPendingRef.current = false;
@@ -591,7 +631,9 @@ export default function VideoPlayer({
     const state = core.getPreviewState();
     const track = previewTrackRef.current;
     const sourceChanged =
-      state === null || state.sourceEpoch !== command.sourceEpoch || state.sourceId !== command.sourceId;
+      state === null ||
+      state.sourceEpoch !== command.sourceEpoch ||
+      state.sourceId !== command.sourceId;
     const trackChanged = track?.generationId !== state?.generationId;
     if (sourceChanged) core.setPreviewTrack(null, command);
     if (sourceChanged || trackChanged) core.setPreviewTrack(track ?? null, command);
@@ -614,15 +656,26 @@ export default function VideoPlayer({
         void seekToInitialOnce();
       }
     },
-    [seekToInitialOnce, syncPreviewFacet],
+    [
+      seekToInitialOnce,
+      setBufferedProgress,
+      setCurrentTime,
+      setDuration,
+      setFramePresentationCapability,
+      setIsPlaying,
+      syncPreviewFacet,
+    ],
   );
 
-  const syncTrackState = useCallback((core: PlaybackCore) => {
-    const audio = core.getTrackSelection('audio');
-    const subtitle = core.getTrackSelection('subtitle');
-    setTracks([...core.getTracks('subtitle'), ...core.getTracks('audio')]);
-    if (audio && subtitle) setTrackSelections({ audio, subtitle });
-  }, []);
+  const syncTrackState = useCallback(
+    (core: PlaybackCore) => {
+      const audio = core.getTrackSelection('audio');
+      const subtitle = core.getTrackSelection('subtitle');
+      setTracks([...core.getTracks('subtitle'), ...core.getTracks('audio')]);
+      if (audio && subtitle) setTrackSelections({ audio, subtitle });
+    },
+    [setTrackSelections, setTracks],
+  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -665,16 +718,41 @@ export default function VideoPlayer({
         setRate(event.state.playbackRate);
       }
       if (event.type === 'abLoopChanged') setAbLoopState(event.state);
+      if (event.type === 'seekCompleted' && event.result.status === 'completed') {
+        const video = videoRef.current;
+        watchReporterRef.current?.report({
+          ...(video && isFinite(video.duration) && video.duration > 0
+            ? { durationSeconds: video.duration }
+            : {}),
+          eventType: 'seek',
+          positionSeconds: event.result.confirmedTime,
+          reason: event.reason === 'ab_loop' || event.reason === 'restore' ? event.reason : 'user',
+        });
+      }
       if (event.type === 'frameStepCompleted') {
         const snapshot = core.getSnapshot();
         const isCurrentSource =
           event.sourceEpoch === snapshot.sourceEpoch && event.sourceId === snapshot.sourceId;
         if (!isCurrentSource) return;
+        if (event.result.status === 'completed') {
+          const video = videoRef.current;
+          watchReporterRef.current?.report({
+            ...(video && isFinite(video.duration) && video.duration > 0
+              ? { durationSeconds: video.duration }
+              : {}),
+            eventType: 'seek',
+            positionSeconds: event.result.confirmedMediaTime,
+            reason: 'user',
+          });
+        }
         setLastFrameStepResult(
           [
+            event.result.requestId,
             event.result.status,
             event.result.precision,
-            event.result.confirmedSourceFrameIndex ?? event.result.confirmedStableFrameId ?? 'unknown',
+            event.result.confirmedSourceFrameIndex ??
+              event.result.confirmedStableFrameId ??
+              'unknown',
             event.result.error?.code ?? 'ok',
           ].join(':'),
         );
@@ -693,6 +771,95 @@ export default function VideoPlayer({
     };
   }, [syncCoreSnapshot, syncTrackState]);
 
+  const markManualPlaybackIntent = useCallback((intent: 'paused' | 'playing') => {
+    manualPlaybackIntentRef.current = intent;
+    playbackIntentRevisionRef.current += 1;
+  }, []);
+
+  const beginManualPlaybackIntent = useCallback(
+    (intent: 'paused' | 'playing') => {
+      const core = coreRef.current;
+      const snapshot = core?.getSnapshot();
+      const wasPlaying = snapshot?.state === 'playing' || videoRef.current?.paused === false;
+      const previousIntent = manualPlaybackIntentRef.current ?? (wasPlaying ? 'playing' : 'paused');
+      markManualPlaybackIntent(intent);
+      const revision = playbackIntentRevisionRef.current;
+      const source = snapshot ? commandFromSnapshot(snapshot) : null;
+      const pauseReason =
+        intent === 'paused' && source && wasPlaying
+          ? {
+              reason: 'user' as const,
+              revision,
+              sourceEpoch: source.sourceEpoch,
+              sourceId: source.sourceId,
+            }
+          : null;
+      if (intent === 'playing') pendingPauseReasonRef.current = null;
+      else if (pauseReason) pendingPauseReasonRef.current = pauseReason;
+      return { pauseReason, previousIntent, revision, source };
+    },
+    [markManualPlaybackIntent],
+  );
+
+  const finishManualPlaybackIntent = useCallback(
+    (
+      lifecycle: ReturnType<typeof beginManualPlaybackIntent>,
+      result: { readonly status: string },
+    ) => {
+      const currentCore = coreRef.current;
+      const currentSource = currentCore ? commandFromSnapshot(currentCore.getSnapshot()) : null;
+      const sourceCurrent =
+        lifecycle.source === null
+          ? currentSource === null
+          : isSameSource(lifecycle.source, currentSource);
+      const clearReason = () => {
+        if (pendingPauseReasonRef.current === lifecycle.pauseReason) {
+          pendingPauseReasonRef.current = null;
+        }
+      };
+      if (result.status === 'completed') {
+        if (lifecycle.pauseReason && (!sourceCurrent || !videoRef.current?.paused)) clearReason();
+        return;
+      }
+      clearReason();
+      if (!sourceCurrent || playbackIntentRevisionRef.current !== lifecycle.revision) return;
+      manualPlaybackIntentRef.current = lifecycle.previousIntent;
+      playbackIntentRevisionRef.current += 1;
+    },
+    [],
+  );
+
+  const requestManualPlay = useCallback(() => {
+    const core = coreRef.current;
+    if (!core || qualityStateRef.current.dataSaverBlocked) return;
+    const lifecycle = beginManualPlaybackIntent('playing');
+    setAutoPlayBlocked(false);
+    return core.play().then((result) => {
+      finishManualPlaybackIntent(lifecycle, result);
+      return result;
+    });
+  }, [beginManualPlaybackIntent, finishManualPlaybackIntent, setAutoPlayBlocked]);
+
+  const requestManualPause = useCallback(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    const lifecycle = beginManualPlaybackIntent('paused');
+    return core.pause().then((result) => {
+      finishManualPlaybackIntent(lifecycle, result);
+      return result;
+    });
+  }, [beginManualPlaybackIntent, finishManualPlaybackIntent]);
+
+  const requestManualStop = useCallback(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    const lifecycle = beginManualPlaybackIntent('paused');
+    return core.stop().then((result) => {
+      finishManualPlaybackIntent(lifecycle, result);
+      return result;
+    });
+  }, [beginManualPlaybackIntent, finishManualPlaybackIntent]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -704,11 +871,11 @@ export default function VideoPlayer({
     const session = navigator.mediaSession as unknown as MediaSessionPort | undefined;
     const mediaSession = session
       ? new WebMediaSessionAdapter(session, {
-          pause: () => coreRef.current?.pause(),
-          play: () => coreRef.current?.play(),
+          pause: requestManualPause,
+          play: requestManualPlay,
           seekBy: (offset) => coreRef.current?.seekBy(offset),
           seekTo: (time) => coreRef.current?.seek(time, 'user'),
-          stop: () => coreRef.current?.stop(),
+          stop: requestManualStop,
         })
       : null;
     mediaSessionRef.current = mediaSession;
@@ -727,7 +894,7 @@ export default function VideoPlayer({
       pip.dispose();
       pipAdapterRef.current = null;
     };
-  }, []);
+  }, [requestManualPause, requestManualPlay, requestManualStop]);
 
   useEffect(() => {
     mediaSessionRef.current?.setMetadata({ applicationName, artwork: poster, title: mediaTitle });
@@ -755,15 +922,18 @@ export default function VideoPlayer({
   }, [expectedSourceId, syncTrackState, trackResponse]);
 
   // FR-102：自动播放仍由壳层先静音，但播放命令统一进入 PlaybackCore。
-  const attemptAutoPlay = useCallback(async (core: PlaybackCore) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = true;
-    setIsMuted(true);
-    setAutoMuted(true);
-    const result = await core.play();
-    if (result.status === 'failed') setAutoPlayBlocked(true);
-  }, []);
+  const attemptAutoPlay = useCallback(
+    async (core: PlaybackCore) => {
+      const video = videoRef.current;
+      if (!video) return;
+      video.muted = true;
+      setIsMuted(true);
+      setAutoMuted(true);
+      const result = await core.play();
+      if (result.status === 'failed') setAutoPlayBlocked(true);
+    },
+    [setAutoMuted, setAutoPlayBlocked, setIsMuted],
+  );
 
   useEffect(() => {
     const core = coreRef.current;
@@ -800,6 +970,7 @@ export default function VideoPlayer({
     setGestureStatus(null);
     setSeekPreviewTime(null);
     setVisualBrightness(DEFAULT_PLAYER_VISUAL_BRIGHTNESS);
+    pendingPauseReasonRef.current = null;
     void pipAdapterRef.current?.resetForSourceChange();
     restoreGenerationRef.current += 1;
     restoreInFlightRef.current = null;
@@ -812,14 +983,26 @@ export default function VideoPlayer({
     setLastFrameStepResult('pending');
     previewRequestRef.current += 1;
     setTimelinePreview(null);
+    const intentRevision = playbackIntentRevisionRef.current;
     void core.load(source).then(async (result) => {
-      if (!current || result.status !== 'completed') return;
+      if (!current || result.status === 'failed' || core.getSnapshot().sourceId !== source.id)
+        return;
       syncTrackState(core);
       setQualityState(core.getQualityState());
       setAbLoopState(core.getAbLoopState());
       setRate(core.getQualityState().playbackRate);
       await seekToInitialOnce();
-      if (current && autoPlay && !resolved.unsupported) await attemptAutoPlay(core);
+      if (!current || resolved.unsupported) return;
+      const latestIntent = manualPlaybackIntentRef.current;
+      if (latestIntent === 'playing') {
+        await core.play();
+      } else if (
+        latestIntent === null &&
+        intentRevision === playbackIntentRevisionRef.current &&
+        autoPlay
+      ) {
+        await attemptAutoPlay(core);
+      }
     });
     return () => {
       current = false;
@@ -847,39 +1030,89 @@ export default function VideoPlayer({
     endedReportedRef.current = false;
   }, [resolved.url]);
 
-  const reportEndedOnce = useCallback(() => {
-    const ended = onEndedRef.current;
-    if (!ended || endedReportedRef.current) return;
-    endedReportedRef.current = true;
-    ended();
-  }, []);
+  const createWatchReport = useCallback(
+    (
+      video: HTMLVideoElement,
+      eventType: WatchStateReportInput['eventType'],
+      reason: WatchStateReportInput['reason'],
+    ): WatchStateReportInput => ({
+      ...(isFinite(video.duration) && video.duration > 0
+        ? { durationSeconds: video.duration }
+        : {}),
+      eventType,
+      positionSeconds: video.currentTime,
+      reason,
+    }),
+    [],
+  );
 
-  const reportPausedPosition = useCallback((video: HTMLVideoElement) => {
-    const report = onPositionReportRef.current;
-    if (!report || video.currentTime <= 0) return;
-    lastReportRef.current = video.currentTime;
-    report(video.currentTime);
-  }, []);
+  useEffect(() => {
+    const mountedVideo = videoRef.current;
+    watchReporterRef.current?.dispose();
+    watchReporterRef.current = null;
+    if (!watchContextKey || !watchState || !watchStateTransport) return;
+    const reporter = new WatchStateReporter({
+      getPlaybackState: () => {
+        const video = videoRef.current ?? mountedVideo;
+        return {
+          ...(video && isFinite(video.duration) && video.duration > 0
+            ? { durationSeconds: video.duration }
+            : {}),
+          foreground: document.visibilityState !== 'hidden',
+          playing: video ? !video.paused : false,
+          positionSeconds: video?.currentTime ?? 0,
+        };
+      },
+      initialState: watchState,
+      sessionId: createWatchSessionId(),
+      transport: watchStateTransport,
+    });
+    watchReporterRef.current = reporter;
+    return () => {
+      reporter.close(mountedVideo ? createWatchReport(mountedVideo, 'pause', 'system') : undefined);
+      if (watchReporterRef.current === reporter) watchReporterRef.current = null;
+    };
+  }, [createWatchReport, watchContextKey, watchState, watchStateTransport]);
+
+  const reportEndedOnce = useCallback(
+    (video: HTMLVideoElement) => {
+      if (endedReportedRef.current) return;
+      endedReportedRef.current = true;
+      watchReporterRef.current?.report(createWatchReport(video, 'ended', 'system'));
+      onEndedRef.current?.();
+    },
+    [createWatchReport],
+  );
+
+  const reportPausedPosition = useCallback(
+    (video: HTMLVideoElement) => {
+      const pendingReason = pendingPauseReasonRef.current;
+      const core = coreRef.current;
+      const source = core ? commandFromSnapshot(core.getSnapshot()) : null;
+      const reason =
+        pendingReason &&
+        source?.sourceEpoch === pendingReason.sourceEpoch &&
+        source.sourceId === pendingReason.sourceId
+          ? pendingReason.reason
+          : 'system';
+      pendingPauseReasonRef.current = null;
+      watchReporterRef.current?.report(createWatchReport(video, 'pause', reason));
+      const report = onPositionReportRef.current;
+      if (!report || video.currentTime <= 0) return;
+      lastReportRef.current = video.currentTime;
+      report(video.currentTime);
+    },
+    [createWatchReport],
+  );
 
   const reportWatchProgress = useCallback(
     (video: HTMLVideoElement) => {
-      const report = onPositionReportRef.current;
-      if (report && video.currentTime - lastReportRef.current >= POSITION_REPORT_INTERVAL) {
-        lastReportRef.current = video.currentTime;
-        report(video.currentTime);
-      }
-      const loop = abLoopStateRef.current;
-      const reachedLoopEnd = loop.enabled && loop.b !== null && video.currentTime >= loop.b;
-      if (
-        !reachedLoopEnd &&
-        isFinite(video.duration) &&
-        video.duration > 0 &&
-        video.duration - video.currentTime <= WATCHED_REMAINING_THRESHOLD
-      ) {
-        reportEndedOnce();
-      }
+      if (video.currentTime - lastReportRef.current < POSITION_REPORT_INTERVAL) return;
+      lastReportRef.current = video.currentTime;
+      watchReporterRef.current?.report(createWatchReport(video, 'progress', 'system'));
+      onPositionReportRef.current?.(video.currentTime);
     },
-    [reportEndedOnce],
+    [createWatchReport],
   );
 
   // 观看上报与音量仍属于 Web 壳层；播放状态、时间和缓冲只订阅 core 快照。
@@ -890,11 +1123,14 @@ export default function VideoPlayer({
     const onDuration = () => {
       void seekToInitialOnce();
     };
-    const onPause = () => reportPausedPosition(video);
+    const onPause = () => {
+      if (backendRef.current?.consumeControlledSeekPause()) return;
+      reportPausedPosition(video);
+    };
     const onNativeEnded = () => {
       const loop = abLoopStateRef.current;
       if (loop.enabled) return;
-      reportEndedOnce();
+      reportEndedOnce(video);
     };
     const onVolume = () => {
       setVolume(video.volume);
@@ -915,6 +1151,26 @@ export default function VideoPlayer({
       video.removeEventListener('volumechange', onVolume);
     };
   }, [reportEndedOnce, reportPausedPosition, reportWatchProgress, seekToInitialOnce]);
+
+  useEffect(() => {
+    const reportLifecyclePause = (close: boolean) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const report = createWatchReport(video, 'pause', 'system');
+      if (close) watchReporterRef.current?.close(report);
+      else watchReporterRef.current?.report(report, { keepalive: true });
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') reportLifecyclePause(false);
+    };
+    const onPageHide = () => reportLifecyclePause(true);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [createWatchReport]);
 
   // 字幕同步
   useEffect(() => {
@@ -950,49 +1206,49 @@ export default function VideoPlayer({
   }, []);
 
   const togglePlay = () => {
-    const core = coreRef.current;
-    if (!core || qualityState.dataSaverBlocked) return;
     if (isPlaying) {
-      void core.pause();
+      void requestManualPause();
       return;
     }
-    setAutoPlayBlocked(false);
-    void core.play();
+    void requestManualPlay();
   };
 
   const hideTimelinePreview = useCallback(() => {
     previewRequestRef.current += 1;
     setTimelinePreview(null);
-  }, []);
+  }, [setTimelinePreview]);
 
   const clearTimelinePreviewImage = useCallback(() => {
     setTimelinePreview((current) => (current ? { ...current, imageUrl: null } : null));
-  }, []);
+  }, [setTimelinePreview]);
 
-  const showTimelinePreview = useCallback((element: HTMLElement, clientX: number) => {
-    const core = coreRef.current;
-    if (!core) return;
-    const snapshot = core.getSnapshot();
-    const command = commandFromSnapshot(snapshot);
-    if (!command || snapshot.duration <= 0) return;
-    const mediaTime = mediaTimeAtClientX(element, clientX, snapshot.duration);
-    const hit = core.hitTestPreview(mediaTime, command);
-    const imageUrl = hit ? previewSpriteUrlsRef.current?.[hit.sprite.assetId] : undefined;
-    const rawPercent = (mediaTime / snapshot.duration) * 100;
-    const spriteWidth = hit?.sprite.width ?? 0;
-    const leftPercent = previewLeftPercent(element, rawPercent, spriteWidth, Boolean(imageUrl));
-    const request = ++previewRequestRef.current;
-    setTimelinePreview({ hit, imageUrl: null, leftPercent, mediaTime });
-    if (!hit || !imageUrl) return;
-    void loadImage(imageUrl, previewImageCacheRef.current).then(
-      () => {
-        if (previewRequestRef.current === request) {
-          setTimelinePreview({ hit, imageUrl, leftPercent, mediaTime });
-        }
-      },
-      () => undefined,
-    );
-  }, []);
+  const showTimelinePreview = useCallback(
+    (element: HTMLElement, clientX: number) => {
+      const core = coreRef.current;
+      if (!core) return;
+      const snapshot = core.getSnapshot();
+      const command = commandFromSnapshot(snapshot);
+      if (!command || snapshot.duration <= 0) return;
+      const mediaTime = mediaTimeAtClientX(element, clientX, snapshot.duration);
+      const hit = core.hitTestPreview(mediaTime, command);
+      const imageUrl = hit ? previewSpriteUrlsRef.current?.[hit.sprite.assetId] : undefined;
+      const rawPercent = (mediaTime / snapshot.duration) * 100;
+      const spriteWidth = hit?.sprite.width ?? 0;
+      const leftPercent = previewLeftPercent(element, rawPercent, spriteWidth, Boolean(imageUrl));
+      const request = ++previewRequestRef.current;
+      setTimelinePreview({ hit, imageUrl: null, leftPercent, mediaTime });
+      if (!hit || !imageUrl) return;
+      void loadImage(imageUrl, previewImageCacheRef.current).then(
+        () => {
+          if (previewRequestRef.current === request) {
+            setTimelinePreview({ hit, imageUrl, leftPercent, mediaTime });
+          }
+        },
+        () => undefined,
+      );
+    },
+    [setTimelinePreview],
+  );
 
   const clearPreviewPointerTimer = () => {
     const session = previewPointerRef.current;
@@ -1196,7 +1452,12 @@ export default function VideoPlayer({
     const rect = event.currentTarget.getBoundingClientRect();
     const deltaX = event.clientX - rect.left - session.startX;
     const deltaY = event.clientY - session.startY;
-    session.kind ??= classifyPlayerGesture({ deltaX, deltaY, startX: session.startX, width: session.width });
+    session.kind ??= classifyPlayerGesture({
+      deltaX,
+      deltaY,
+      startX: session.startX,
+      width: session.width,
+    });
     if (session.kind === null) return;
     event.preventDefault();
     suppressGestureDoubleClick();
@@ -1252,12 +1513,39 @@ export default function VideoPlayer({
 
   const seekByTier = (direction: FrameStepDirection) => {
     const core = coreRef.current;
-    if (core) void core.seekByTier(direction);
+    if (!core) return;
+    const lifecycle = seekTier.kind === 'frame' ? beginManualPlaybackIntent('paused') : null;
+    const isCurrentFrameFlow = () => {
+      if (!lifecycle?.source || coreRef.current !== core) return false;
+      return (
+        playbackIntentRevisionRef.current === lifecycle.revision &&
+        manualPlaybackIntentRef.current === 'paused' &&
+        isSameSource(lifecycle.source, commandFromSnapshot(core.getSnapshot()))
+      );
+    };
+    void (async () => {
+      let result = await core.seekByTier(direction);
+      if (result.status === 'unsupported') {
+        if (lifecycle && !isCurrentFrameFlow()) {
+          finishManualPlaybackIntent(lifecycle, result);
+          return;
+        }
+        await Promise.resolve();
+        if (lifecycle && !isCurrentFrameFlow()) {
+          finishManualPlaybackIntent(lifecycle, result);
+          return;
+        }
+        result = await core.seekByTier(direction);
+      }
+      if (lifecycle) finishManualPlaybackIntent(lifecycle, result);
+    })();
   };
 
   const stepFrame = (direction: FrameStepDirection) => {
     const core = coreRef.current;
-    if (core) void core.stepFrame(direction);
+    if (!core) return;
+    const lifecycle = beginManualPlaybackIntent('paused');
+    void core.stepFrame(direction).then((result) => finishManualPlaybackIntent(lifecycle, result));
   };
 
   const changeSeekTier = (tier: SeekTier) => {
@@ -1356,8 +1644,8 @@ export default function VideoPlayer({
     const uploaded = tracks.find((track) => track.id === trackId && track.source === 'uploaded');
     const shouldClose = Boolean(
       uploaded &&
-        selection &&
-        (selection.selectedTrackId === trackId || selection.effectiveTrackId === trackId),
+      selection &&
+      (selection.selectedTrackId === trackId || selection.effectiveTrackId === trackId),
     );
     const restoreTrackId = selection?.effectiveTrackId ?? selection?.selectedTrackId ?? null;
     if (shouldClose && !(await selectTrack('subtitle', null, '关闭字幕失败'))) return;
@@ -1392,15 +1680,16 @@ export default function VideoPlayer({
     const core = coreRef.current;
     if (!core) return;
     const disabledSaver = qualityState.dataSaver && (quality?.height ?? 0) > 480;
-    const selection = quality === null
-      ? ({ mode: 'auto' } as const)
-      : {
-          mode: 'manual' as const,
-          quality: {
-            ...(quality.bandwidth === undefined ? {} : { bandwidth: quality.bandwidth }),
-            height: quality.height!,
-          },
-        };
+    const selection =
+      quality === null
+        ? ({ mode: 'auto' } as const)
+        : {
+            mode: 'manual' as const,
+            quality: {
+              ...(quality.bandwidth === undefined ? {} : { bandwidth: quality.bandwidth }),
+              height: quality.height!,
+            },
+          };
     const result = await core.selectQuality(selection);
     if (result.status === 'failed' || result.status === 'unsupported') {
       notifyError(result.error?.message ?? '目标清晰度当前不可用', '切换清晰度失败');
@@ -1473,7 +1762,7 @@ export default function VideoPlayer({
       // 仅在播放中淡出；暂停时常驻可见
       if (videoRef.current && !videoRef.current.paused) setControlsVisible(false);
     }, CONTROLS_HIDE_DELAY);
-  }, []);
+  }, [setControlsVisible]);
 
   useEffect(
     () => () => {
@@ -2103,7 +2392,10 @@ export default function VideoPlayer({
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Label>清晰度</Menu.Label>
-              <Menu.Item onClick={() => void changeQuality(null)} fw={qualityState.qualityMode === 'auto' ? 700 : 400}>
+              <Menu.Item
+                onClick={() => void changeQuality(null)}
+                fw={qualityState.qualityMode === 'auto' ? 700 : 400}
+              >
                 自动
               </Menu.Item>
               {qualityState.qualities.map((quality) => (
@@ -2285,7 +2577,6 @@ export default function VideoPlayer({
             近似逐帧
           </Text>
         )}
-
       </Box>
     </Box>
   );

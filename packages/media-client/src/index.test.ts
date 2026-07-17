@@ -745,7 +745,7 @@ describe("media-client package", () => {
       positionSeconds: 42,
       reason: "user",
       sessionId: "session-a",
-    });
+    }, { keepalive: true });
 
     expect(initial).toMatchObject({
       createdAt: "0001-01-01T00:00:00Z",
@@ -768,6 +768,7 @@ describe("media-client package", () => {
       "GET https://mock.local/api/play/9/watch-state",
       "PUT https://mock.local/api/play/9/watch-state",
     ]);
+    expect(requests[1]?.keepalive).toBe(true);
     expect(await requests[1]?.json()).toEqual({
       duration_seconds: 120,
       event_seq: 3,

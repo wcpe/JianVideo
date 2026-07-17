@@ -1,6 +1,6 @@
 # 功能规格：逐帧前后步进
 
-> 状态：开发中　·　关联 PRD：FR2-034　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-034-frame-stepping`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-034　·　阶段：P3 `0.24.x`　·　分支：`feature/fr2-034-frame-stepping`
 
 ## 1. 背景与目标
 
@@ -127,17 +127,17 @@
 
 ## 4. 任务拆分
 
-- [ ] 测试先行：为 `next` 严格晚于起始、`previous` 严格早于起始、恰好相邻、暂停保持、起止边界、连续命令和受控取消编写失败测试。
-- [ ] 测试先行：为相同帧、反方向帧、跨过多帧、时间戳超过 ±1 帧容差、有限校正失败和近似降级编写失败测试。
-- [ ] 测试先行：覆盖 `PresentedFrame.sourceFrameIndex`、`stableFrameId` 两种精确身份路径，以及身份字段缺失、身份不稳定、只有 `mediaTime` 时能力降为 `approximate`；禁止以时间戳接近目标替代帧号断言。
-- [ ] 建立真实编号帧 fixture 与帧号/`mediaTime` 期望映射。
-- [ ] 实现 `FramePresentationFacet` 当前源能力和 `PresentedFrame.mediaTime`/`sourceFrameIndex`/`stableFrameId` 契约。
-- [ ] 实现 player-core 逐帧队列、方向性相邻目标计算、边界夹取、验证和精度结果。
-- [ ] Web 分面接入 `requestVideoFrameCallback`，并处理注册、取消、切源和卸载。
-- [ ] 将桌面按钮、键盘与 Windows 桌面安装态 PWA 入口映射到同一逐帧命令；移动端手势留 P7。
-- [ ] 补 Web 内核回归：直出、mpegts.js/TS、hls.js/HLS 均不替换内核且不出现伪 `Network Error`。
-- [ ] 执行 Windows 桌面 Web 与安装态 PWA headed 真机验收并记录浏览器、Windows/PWA 运行模式、内核路径和精度模式；Android/iOS 移动真机留 P7。
-- [ ] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
+- [x] 测试先行：为 `next` 严格晚于起始、`previous` 严格早于起始、恰好相邻、暂停保持、起止边界、连续命令和受控取消编写失败测试。
+- [x] 测试先行：为相同帧、反方向帧、跨过多帧、时间戳超过 ±1 帧容差、有限校正失败和近似降级编写失败测试。
+- [x] 测试先行：覆盖 `PresentedFrame.sourceFrameIndex`、`stableFrameId` 两种精确身份路径，以及身份字段缺失、身份不稳定、只有 `mediaTime` 时能力降为 `approximate`；禁止以时间戳接近目标替代帧号断言。
+- [x] 建立真实编号帧 fixture 与帧号/`mediaTime` 期望映射。
+- [x] 实现 `FramePresentationFacet` 当前源能力和 `PresentedFrame.mediaTime`/`sourceFrameIndex`/`stableFrameId` 契约。
+- [x] 实现 player-core 逐帧队列、方向性相邻目标计算、边界夹取、验证和精度结果。
+- [x] Web 分面接入 `requestVideoFrameCallback`，并处理注册、取消、切源和卸载。
+- [x] 将桌面按钮、键盘与 Windows 桌面安装态 PWA 入口映射到同一逐帧命令；移动端手势留 P7。
+- [x] 补 Web 内核回归：直出、mpegts.js/TS、hls.js/HLS 均不替换内核且不出现伪 `Network Error`。
+- [x] 执行 Windows 桌面 Web 与安装态 PWA headed 真机验收并记录浏览器、Windows/PWA 运行模式、内核路径和精度模式；Android/iOS 移动真机留 P7。
+- [x] 文档同步：PRD 状态、ARCHITECTURE、API、CHANGELOG。
 
 ## 5. 验收标准
 

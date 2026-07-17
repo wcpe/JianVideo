@@ -33,9 +33,7 @@ export type ResolvePresentedFrameIdentity = (
   metadata: VideoFrameCallbackMetadata,
 ) => WebPresentedFrameIdentity | null;
 
-export type FramePresentationCapabilityListener = (
-  capability: FramePresentationCapability,
-) => void;
+export type FramePresentationCapabilityListener = (capability: FramePresentationCapability) => void;
 
 export function createBinaryFrameMarkerResolver(
   video: HTMLVideoElement,

@@ -648,10 +648,13 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     renderSection('update');
 
     await user.click(screen.getByRole('button', { name: '检查更新' }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '立即更新并重启' })).toBeEnabled();
-    });
-    await user.click(screen.getByRole('button', { name: '立即更新并重启' }));
+    const updateButton = await screen.findByRole(
+      'button',
+      { name: '立即更新并重启' },
+      { timeout: 5000 },
+    );
+    expect(updateButton).toBeEnabled();
+    await user.click(updateButton);
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: '确认更新' }));
 

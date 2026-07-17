@@ -1,6 +1,6 @@
 # 功能规格：字幕与多音轨
 
-> 状态：开发中（Web 真服务与 Windows Chromium headed 门禁已通过，待安装态 PWA 人工验收）　·　关联 PRD：FR2-044　·　阶段：P3 `0.24.x`
+> 状态：已交付@v0.24.0　·　关联 PRD：FR2-044　·　阶段：P3 `0.24.x`
 
 ## 1. 背景与目标
 
@@ -104,8 +104,8 @@
 - [x] 补真实集成测试：真实多音轨/多字幕 fixture 的 ffprobe 枚举、内嵌提取、本地外挂关联、SMB unsupported、单音轨 unsupported、四种上传格式、删除和缓存清理隔离。
 - [x] 补 Playwright E2E：字幕关闭/切换/样式、上传/删除、真实 HLS 音轨切换、冻结 API 契约、`selected/effective` 状态、快照恢复、HLS 凭据与 unsupported 降级。
 - [x] CI 的 Linux e2e job 显式安装并校验 ffmpeg/ffprobe；安装或版本探测失败直接使 job 失败，FR2-044 真实 fixture 不再把 CI 缺工具解释为可接受 skip。Windows headed 继续作为开发者本机门，不塞入无交互 CI。
-- [ ] 在浏览器与已安装 PWA 中完成真实媒体 headed 人工验收并由用户确认：Windows Chromium headed 真服务自动验收已通过；安装态 PWA 的人工听辨与最终用户确认仍待 P3 整体验收。
-- [x] 文档同步：本功能规格、API、ARCHITECTURE 与 CHANGELOG 已同步真实 audio reload、任务资产隔离、字幕受限读取和前端事务契约；安装态 PWA 人工验收完成前仍保持“开发中”，不提前写入最终发布状态。
+- [x] 在浏览器与已安装 PWA 中完成真实媒体 headed 人工验收并由用户确认：Windows Chromium headed 真服务自动验收与安装态 PWA 人工听辨均已通过。
+- [x] 文档同步：本功能规格、API、ARCHITECTURE 与 CHANGELOG 已同步真实 audio reload、任务资产隔离、字幕受限读取、前端事务契约与最终发布状态。
 
 ## 5. 验收标准
 
@@ -132,7 +132,7 @@
 - player-core 门禁：build、lint、全量测试与覆盖率全部通过；音轨事务只在后端确认后收敛 `selected/effective`，并保留原 `effective_track_id=null` 的回滚语义。
 - 前端全量门禁：lint、typecheck、build 通过；Vitest 139 个文件、1033 个测试全部通过；V8 覆盖率为 statements 81.59%、branches 81.87%、functions 71.31%、lines 81.59%。测试运行仍有既有 React `act(...)`、jsdom `scrollTo/navigation` 与未匹配 MSW 请求的 stderr 痕迹，但进程与覆盖率门均成功。
 - 真服务 E2E：`pnpm exec playwright test e2e/fr2-044-subtitle-audio-tracks.spec.ts` 在 Chromium headless 通过 1/1；同一用例追加 `--headed` 在 Windows Chromium headed 通过 1/1。用例覆盖双音轨 `reload`、单音轨 `unsupported`、冻结的 202/task/profile/url 契约、按 task 查询 HLS 状态、切片可读、HLS 请求头、播放位置/暂停/速率/字幕恢复。
-- 尚未完成的唯一人工门：Windows 安装态 PWA 的真实听辨与用户明确确认；在该证据补齐前，PRD 与本规格保持“开发中”，不标记为 `已交付@v0.24.0`。
+- Windows 安装态 PWA 的真实听辨与用户确认已于 2026-07-17 完成；FR2-044 满足 P3 发布门并标记为 `已交付@v0.24.0`。
 
 ## 7. 风险 / 待定
 
