@@ -13,10 +13,19 @@ const workflows = {
 }
 const publishScript = read('scripts/publish-release.sh')
 
+const expectedActionPins = new Map([
+  ['actions/checkout', '11bd71901bbe5b1630ceea73d27597364c9af683'],
+  ['actions/setup-go', '40f1582b2485089dde7abd97c1529aa768e1baff'],
+  ['actions/setup-node', '49933ea5288caeca8642d1e84afbd3f7d6820020'],
+  ['actions/upload-artifact', 'ea165f8d65b6e75b540449e92b4886f43607fa02'],
+  ['actions/download-artifact', 'd3f86a106a0bac45b974a628896c90dbdf5c8093'],
+])
+
 const assertPinnedActions = (content) => {
   for (const match of content.matchAll(/uses:\s+([^\s]+)@([^\s]+)/g)) {
     if (match[1].startsWith('./')) continue
     assert.match(match[2], /^[0-9a-f]{40}$/, `Action 必须固定完整提交：${match[0]}`)
+    assert.equal(match[2], expectedActionPins.get(match[1]), `Action 提交必须属于正确仓库：${match[0]}`)
   }
 }
 
