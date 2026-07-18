@@ -5,7 +5,7 @@ import type {
   WatchStateSendResult,
   WatchStateSnapshot,
   WatchStateTransport,
-} from './types';
+} from "./types";
 
 interface WatchStateReporterOptions {
   readonly getPlaybackState: () => WatchStatePlaybackContext;
@@ -34,9 +34,16 @@ export class WatchStateReporter {
     this.state = options.initialState;
   }
 
-  report(input: WatchStateReportInput, options?: { readonly keepalive?: boolean }): void {
+  report(
+    input: WatchStateReportInput,
+    options?: { readonly keepalive?: boolean },
+  ): void {
     if (this.closed || this.disposed) return;
-    this.enqueue({ input, keepalive: options?.keepalive === true, retried: false });
+    this.enqueue({
+      input,
+      keepalive: options?.keepalive === true,
+      retried: false,
+    });
   }
 
   close(input?: WatchStateReportInput): void {
@@ -78,7 +85,10 @@ export class WatchStateReporter {
     this.inFlight = operation;
   }
 
-  private async send(event: WatchStateReport, report: PendingReport): Promise<void> {
+  private async send(
+    event: WatchStateReport,
+    report: PendingReport,
+  ): Promise<void> {
     try {
       const options = report.keepalive ? { keepalive: true } : undefined;
       const result = await this.options.transport.send(event, options);
@@ -111,9 +121,12 @@ export class WatchStateReporter {
     this.state = result.current;
   }
 
-  private shouldRetry(result: WatchStateSendResult, report: PendingReport): boolean {
+  private shouldRetry(
+    result: WatchStateSendResult,
+    report: PendingReport,
+  ): boolean {
     if (
-      result.kind !== 'conflict' ||
+      result.kind !== "conflict" ||
       report.retried ||
       this.closed ||
       this.disposed ||
@@ -122,7 +135,10 @@ export class WatchStateReporter {
       return false;
     }
     const playback = this.options.getPlaybackState();
-    return playback.foreground && (playback.playing || isActiveUserSeek(report.input));
+    return (
+      playback.foreground &&
+      (playback.playing || isActiveUserSeek(report.input))
+    );
   }
 
   private retryReport(report: PendingReport): PendingReport {
@@ -143,12 +159,19 @@ export class WatchStateReporter {
 }
 
 function isActiveUserSeek(input: WatchStateReportInput): boolean {
-  return input.eventType === 'seek' && input.reason === 'user';
+  return input.eventType === "seek" && input.reason === "user";
 }
 
-function mergePending(current: PendingReport | null, next: PendingReport): PendingReport {
-  if (current === null || next.input.eventType === 'ended') return next;
-  if (current.input.eventType === 'ended') return current;
-  if (next.input.eventType === 'progress' && current.input.eventType !== 'progress') return current;
+function mergePending(
+  current: PendingReport | null,
+  next: PendingReport,
+): PendingReport {
+  if (current === null || next.input.eventType === "ended") return next;
+  if (current.input.eventType === "ended") return current;
+  if (
+    next.input.eventType === "progress" &&
+    current.input.eventType !== "progress"
+  )
+    return current;
   return next;
 }

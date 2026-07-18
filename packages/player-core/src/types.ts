@@ -1,23 +1,26 @@
 export type PlaybackState =
-  | 'idle'
-  | 'loading'
-  | 'ready'
-  | 'playing'
-  | 'paused'
-  | 'seeking'
-  | 'ended'
-  | 'error'
-  | 'disposed';
+  | "idle"
+  | "loading"
+  | "ready"
+  | "playing"
+  | "paused"
+  | "seeking"
+  | "ended"
+  | "error"
+  | "disposed";
 
-export type PlaybackCompletionStatus = 'completed' | 'superseded' | 'canceled' | 'unsupported' | 'failed';
-export type PlaybackErrorCategory = 'network' | 'media' | 'decode' | 'unsupported' | 'unknown';
-export type CapabilityAvailability = 'available' | 'unavailable';
-export type FramePresentationCapability = 'exact' | 'approximate' | 'unavailable';
-export type PlaybackSourceMode = 'direct' | 'stream' | 'adaptive' | 'live';
-export type SeekReason = 'user' | 'step' | 'tier' | 'restore' | 'ab_loop';
-export type WatchStateEventType = 'progress' | 'pause' | 'seek' | 'ended';
-export type WatchStateEventReason = 'user' | 'ab_loop' | 'restore' | 'system';
-export type SeekBoundaryPolicy = 'clamp';
+export type PlaybackCompletionStatus =
+  "completed" | "superseded" | "canceled" | "unsupported" | "failed";
+export type PlaybackErrorCategory =
+  "network" | "media" | "decode" | "unsupported" | "unknown";
+export type CapabilityAvailability = "available" | "unavailable";
+export type FramePresentationCapability =
+  "exact" | "approximate" | "unavailable";
+export type PlaybackSourceMode = "direct" | "stream" | "adaptive" | "live";
+export type SeekReason = "user" | "step" | "tier" | "restore" | "ab_loop";
+export type WatchStateEventType = "progress" | "pause" | "seek" | "ended";
+export type WatchStateEventReason = "user" | "ab_loop" | "restore" | "system";
+export type SeekBoundaryPolicy = "clamp";
 
 export interface WatchStateSnapshot {
   readonly completed: boolean;
@@ -46,17 +49,25 @@ export interface WatchStateReport extends WatchStateReportInput {
 }
 
 export type WatchStateSendResult =
-  | { readonly applied: boolean; readonly current: WatchStateSnapshot; readonly kind: 'applied' }
-  | { readonly current: WatchStateSnapshot; readonly kind: 'conflict' };
+  | {
+      readonly applied: boolean;
+      readonly current: WatchStateSnapshot;
+      readonly kind: "applied";
+    }
+  | { readonly current: WatchStateSnapshot; readonly kind: "conflict" };
 
 export interface WatchStateTransport {
-  send(event: WatchStateReport, options?: { readonly keepalive?: boolean }): Promise<WatchStateSendResult>;
+  send(
+    event: WatchStateReport,
+    options?: { readonly keepalive?: boolean },
+  ): Promise<WatchStateSendResult>;
 }
 export type SeekTier =
-  | { readonly count: 1; readonly kind: 'frame' }
-  | { readonly kind: 'seconds'; readonly value: 0.5 | 1 | 5 | 30 | 60 };
-export type FrameStepDirection = 'next' | 'previous';
-export type FrameStepPrecision = 'exact-verified' | 'approximate' | 'unsupported';
+  | { readonly count: 1; readonly kind: "frame" }
+  | { readonly kind: "seconds"; readonly value: 0.5 | 1 | 5 | 30 | 60 };
+export type FrameStepDirection = "next" | "previous";
+export type FrameStepPrecision =
+  "exact-verified" | "approximate" | "unsupported";
 
 export interface TimeRange {
   readonly end: number;
@@ -140,10 +151,13 @@ interface PlaybackBackendEventContext {
 
 export type PlaybackBackendEvent = PlaybackBackendEventContext &
   (
-    | { readonly snapshot: PlaybackSnapshot; readonly type: 'snapshotChanged' }
-    | { readonly capabilities: PlaybackCapabilities; readonly type: 'capabilitiesChanged' }
-    | { readonly type: 'ended' }
-    | { readonly error: PlaybackError; readonly type: 'error' }
+    | { readonly snapshot: PlaybackSnapshot; readonly type: "snapshotChanged" }
+    | {
+        readonly capabilities: PlaybackCapabilities;
+        readonly type: "capabilitiesChanged";
+      }
+    | { readonly type: "ended" }
+    | { readonly error: PlaybackError; readonly type: "error" }
   );
 
 export type PlaybackBackendListener = (event: PlaybackBackendEvent) => void;
@@ -161,7 +175,7 @@ export interface PlaybackBackend {
 export interface PresentedFrame {
   readonly mediaTime: number;
   readonly presentationSequence: number;
-  readonly sampleSource: 'video-frame-callback' | 'backend';
+  readonly sampleSource: "video-frame-callback" | "backend";
   readonly sourceEpoch: number;
   readonly sourceFrameIndex?: number;
   readonly sourceId: string;
@@ -193,17 +207,22 @@ export interface FrameStepResult extends PlaybackCommandResult {
   readonly timestampError: number | null;
 }
 
-export type TierSeekResult = PlaybackCommandResult | SeekResult | FrameStepResult;
+export type TierSeekResult =
+  PlaybackCommandResult | SeekResult | FrameStepResult;
 
 export interface FramePresentationFacet {
-  getCurrentPresentedFrame(command: PlaybackCommandContext): PresentedFrame | null;
+  getCurrentPresentedFrame(
+    command: PlaybackCommandContext,
+  ): PresentedFrame | null;
   getAdjacentFrameTarget(
     current: PresentedFrame,
     direction: FrameStepDirection,
     command: PlaybackCommandContext,
   ): AdjacentFrameTarget | null;
   getNominalFrameDuration(command: PlaybackCommandContext): number | null;
-  waitForPresentedFrame(command: PlaybackCommandContext): Promise<PresentedFrame>;
+  waitForPresentedFrame(
+    command: PlaybackCommandContext,
+  ): Promise<PresentedFrame>;
 }
 
 export interface PreviewSprite {
@@ -240,18 +259,24 @@ export interface PreviewTrackState {
   readonly requestId: number;
   readonly sourceEpoch: number;
   readonly sourceId: string | null;
-  readonly status: 'empty' | 'ready';
+  readonly status: "empty" | "ready";
 }
 
 export interface PreviewFacet {
-  setTrack(track: PreparedPreviewTrack | null, command: PlaybackCommandContext): PreviewTrackState;
-  hitTest(mediaTime: number, command: PlaybackCommandContext): PreviewHit | null;
+  setTrack(
+    track: PreparedPreviewTrack | null,
+    command: PlaybackCommandContext,
+  ): PreviewTrackState;
+  hitTest(
+    mediaTime: number,
+    command: PlaybackCommandContext,
+  ): PreviewHit | null;
   getState(): PreviewTrackState;
 }
 
-export type TrackKind = 'audio' | 'subtitle';
-export type TrackSource = 'sidecar' | 'uploaded' | 'embedded' | 'derived';
-export type TrackSwitchCapability = 'seamless' | 'reload' | 'unsupported';
+export type TrackKind = "audio" | "subtitle";
+export type TrackSource = "sidecar" | "uploaded" | "embedded" | "derived";
+export type TrackSwitchCapability = "seamless" | "reload" | "unsupported";
 
 export interface PlaybackTrack {
   readonly available?: boolean;
@@ -283,7 +308,11 @@ export interface TrackSelectionState {
 export interface TrackFacet {
   getTracks(kind: TrackKind): readonly PlaybackTrack[];
   getSelectionState(kind: TrackKind): TrackSelectionState;
-  selectTrack(kind: TrackKind, trackId: string | null, command: PlaybackCommandContext): Promise<void>;
+  selectTrack(
+    kind: TrackKind,
+    trackId: string | null,
+    command: PlaybackCommandContext,
+  ): Promise<void>;
 }
 
 export interface TrackSelectionResult extends PlaybackCommandResult {
@@ -305,8 +334,8 @@ export interface QualityTarget {
 }
 
 export type QualitySelection =
-  | { readonly mode: 'auto' }
-  | { readonly mode: 'manual'; readonly quality: QualityTarget };
+  | { readonly mode: "auto" }
+  | { readonly mode: "manual"; readonly quality: QualityTarget };
 
 export interface QualityFacetState {
   readonly actualQualityId: string | null;
@@ -315,18 +344,27 @@ export interface QualityFacetState {
   readonly selection: QualitySelection;
 }
 
-export type QualityFacetListener = (state: QualityFacetState, command: PlaybackCommandContext) => void;
+export type QualityFacetListener = (
+  state: QualityFacetState,
+  command: PlaybackCommandContext,
+) => void;
 
 export interface QualityFacet {
   getState(): QualityFacetState;
-  selectQuality(selection: QualitySelection, command: PlaybackCommandContext): Promise<void>;
-  setAutoQualityCap(maxHeight: number | null, command: PlaybackCommandContext): Promise<void>;
+  selectQuality(
+    selection: QualitySelection,
+    command: PlaybackCommandContext,
+  ): Promise<void>;
+  setAutoQualityCap(
+    maxHeight: number | null,
+    command: PlaybackCommandContext,
+  ): Promise<void>;
   setPlaybackRate(rate: number, command: PlaybackCommandContext): Promise<void>;
   subscribe(listener: QualityFacetListener): () => void;
 }
 
 export interface LoadControlFacet {
-  getLoadingState(): 'loading' | 'stopped';
+  getLoadingState(): "loading" | "stopped";
   startLoading(command: PlaybackCommandContext): Promise<void>;
   stopLoading(command: PlaybackCommandContext): Promise<void>;
 }
@@ -337,7 +375,7 @@ export interface PlaybackQualityState {
   readonly dataSaverBlocked: boolean;
   readonly manualQuality: PlaybackQuality | null;
   readonly playbackRate: number;
-  readonly qualityMode: 'auto' | 'manual';
+  readonly qualityMode: "auto" | "manual";
   readonly qualities: readonly PlaybackQuality[];
 }
 
@@ -365,27 +403,31 @@ interface PlaybackEventContext {
 
 export type PlaybackEvent = PlaybackEventContext &
   (
-    | { readonly snapshot: PlaybackSnapshot; readonly type: 'snapshotChanged' }
+    | { readonly snapshot: PlaybackSnapshot; readonly type: "snapshotChanged" }
     | {
         readonly capabilities: PlaybackCapabilities;
         readonly eventId: number;
         readonly sourceEpoch: number;
         readonly sourceId: string;
-        readonly type: 'capabilitiesChanged';
+        readonly type: "capabilitiesChanged";
       }
     | {
-        readonly result: PlaybackCommandResult | SeekResult | FrameStepResult | TrackSelectionResult;
+        readonly result:
+          | PlaybackCommandResult
+          | SeekResult
+          | FrameStepResult
+          | TrackSelectionResult;
         readonly snapshot?: PlaybackSnapshot;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'commandCompleted';
+        readonly type: "commandCompleted";
       }
     | {
         readonly result: FrameStepResult;
         readonly snapshot?: PlaybackSnapshot;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'frameStepCompleted';
+        readonly type: "frameStepCompleted";
       }
     | {
         readonly reason: SeekReason;
@@ -393,7 +435,7 @@ export type PlaybackEvent = PlaybackEventContext &
         readonly snapshot?: PlaybackSnapshot;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'seekCompleted';
+        readonly type: "seekCompleted";
       }
     | {
         readonly effectiveTrackId: string | null;
@@ -401,40 +443,40 @@ export type PlaybackEvent = PlaybackEventContext &
         readonly selectedTrackId: string | null;
         readonly sourceEpoch: number;
         readonly sourceId: string;
-        readonly type: 'trackSelectionChanged';
+        readonly type: "trackSelectionChanged";
       }
     | {
         readonly result: TrackSelectionResult;
         readonly snapshot?: PlaybackSnapshot;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'trackSelectionCompleted';
+        readonly type: "trackSelectionCompleted";
       }
     | {
         readonly previousTier: SeekTier | null;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
         readonly tier: SeekTier;
-        readonly type: 'seekTierChanged';
+        readonly type: "seekTierChanged";
       }
     | {
         readonly state: PlaybackQualityState;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'qualityStateChanged';
+        readonly type: "qualityStateChanged";
       }
     | {
         readonly state: AbLoopState;
         readonly sourceEpoch: number;
         readonly sourceId: string | null;
-        readonly type: 'abLoopChanged';
+        readonly type: "abLoopChanged";
       }
     | {
         readonly error: PlaybackError;
         readonly eventId: number;
         readonly sourceEpoch: number;
         readonly sourceId: string;
-        readonly type: 'error';
+        readonly type: "error";
       }
   );
 

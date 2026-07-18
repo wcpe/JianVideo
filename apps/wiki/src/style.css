@@ -62,7 +62,7 @@ body {
   cursor: pointer;
 }
 
-.wiki-tabs button[aria-pressed='true'] {
+.wiki-tabs button[aria-pressed="true"] {
   border-color: #2563eb;
   background: #dbeafe;
 }

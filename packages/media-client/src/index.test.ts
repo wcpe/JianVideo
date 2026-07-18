@@ -80,15 +80,23 @@ describe("media-client package", () => {
       requests.push(new Request(input, init));
       return Promise.resolve(Response.json({ items: [] }));
     };
-    const clientA = createApiClient({ fetch: fetchMock, space: { spaceId: "space-a" } });
-    const clientB = createApiClient({ fetch: fetchMock, space: { spaceId: "space-b" } });
+    const clientA = createApiClient({
+      fetch: fetchMock,
+      space: { spaceId: "space-a" },
+    });
+    const clientB = createApiClient({
+      fetch: fetchMock,
+      space: { spaceId: "space-b" },
+    });
 
-    await Promise.all([listMediaBookmarks(clientA, 1), listMediaBookmarks(clientB, 1)]);
-
-    expect(requests.map((request) => request.headers.get("X-JianVideo-Space-Id"))).toEqual([
-      "space-a",
-      "space-b",
+    await Promise.all([
+      listMediaBookmarks(clientA, 1),
+      listMediaBookmarks(clientB, 1),
     ]);
+
+    expect(
+      requests.map((request) => request.headers.get("X-JianVideo-Space-Id")),
+    ).toEqual(["space-a", "space-b"]);
   });
 
   it("规范化接口错误", async () => {
@@ -308,7 +316,11 @@ describe("media-client package", () => {
         { note: null, positionMs: 1000, title: "已保存" },
         { onReloadError, reload: vi.fn().mockRejectedValue(reloadError) },
       ),
-    ).resolves.toMatchObject({ id: "bookmark-1", revision: 1, title: "已保存" });
+    ).resolves.toMatchObject({
+      id: "bookmark-1",
+      revision: 1,
+      title: "已保存",
+    });
     expect(postCount).toBe(1);
     expect(onReloadError).toHaveBeenCalledWith(reloadError);
   });
@@ -338,7 +350,11 @@ describe("media-client package", () => {
         { note: null, positionMs: 1000, title: "已保存" },
         { reload, reloadAfterSuccess: false },
       ),
-    ).resolves.toMatchObject({ id: "bookmark-1", revision: 1, title: "已保存" });
+    ).resolves.toMatchObject({
+      id: "bookmark-1",
+      revision: 1,
+      title: "已保存",
+    });
     expect(reload).not.toHaveBeenCalled();
   });
 
@@ -737,15 +753,20 @@ describe("media-client package", () => {
     });
 
     const initial = await getWatchState(client, "9");
-    const updated = await updateWatchState(client, "9", {
-      durationSeconds: 120,
-      eventSeq: 3,
-      eventType: "seek",
-      expectedRevision: initial.revision,
-      positionSeconds: 42,
-      reason: "user",
-      sessionId: "session-a",
-    }, { keepalive: true });
+    const updated = await updateWatchState(
+      client,
+      "9",
+      {
+        durationSeconds: 120,
+        eventSeq: 3,
+        eventType: "seek",
+        expectedRevision: initial.revision,
+        positionSeconds: 42,
+        reason: "user",
+        sessionId: "session-a",
+      },
+      { keepalive: true },
+    );
 
     expect(initial).toMatchObject({
       createdAt: "0001-01-01T00:00:00Z",

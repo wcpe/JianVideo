@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState } from "react";
 import {
   filterWikiCatalog,
   getWikiPixiMetricSummary,
@@ -7,17 +7,21 @@ import {
   listWikiGroups,
   listWikiScenarioTitles,
   type WikiGroupId,
-} from './catalog';
-import { mockScenarios, type MockScenarioId } from '@jianvideo/mock';
-import type { ComponentState } from '@jianvideo/ui';
-import './style.css';
+} from "./catalog";
+import { mockScenarios, type MockScenarioId } from "@jianvideo/mock";
+import type { ComponentState } from "@jianvideo/ui";
+import "./style.css";
 
 export function App() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [group, setGroup] = useState<WikiGroupId | undefined>();
-  const [scenarioId, setScenarioId] = useState<MockScenarioId>('normal-library');
-  const [activeState, setActiveState] = useState<ComponentState>('default');
-  const previews = useMemo(() => filterWikiCatalog(group ? { group, query } : { query }), [group, query]);
+  const [scenarioId, setScenarioId] =
+    useState<MockScenarioId>("normal-library");
+  const [activeState, setActiveState] = useState<ComponentState>("default");
+  const previews = useMemo(
+    () => filterWikiCatalog(group ? { group, query } : { query }),
+    [group, query],
+  );
   const firstPreview = previews[0];
 
   return (
@@ -73,7 +77,18 @@ export function App() {
           </select>
         </label>
         <div className="wiki-state-list">
-          {(['default', 'loading', 'disabled', 'empty', 'error', 'selected', 'dense', 'mobile'] as const).map((state) => (
+          {(
+            [
+              "default",
+              "loading",
+              "disabled",
+              "empty",
+              "error",
+              "selected",
+              "dense",
+              "mobile",
+            ] as const
+          ).map((state) => (
             <button
               data-testid={`wiki-state-${state}`}
               key={state}
@@ -90,20 +105,34 @@ export function App() {
 
       <section className="wiki-grid" aria-label="组件预览">
         {previews.map((item) => (
-          <article className="wiki-card" data-testid={`wiki-preview-${item.id}`} key={item.id}>
+          <article
+            className="wiki-card"
+            data-testid={`wiki-preview-${item.id}`}
+            key={item.id}
+          >
             <h2>{item.title}</h2>
-            <p className="wiki-card-meta">{item.group} · {item.states.join(' / ')}</p>
-            <pre data-testid={`wiki-snippet-${item.id}`}>{item.snippet.code}</pre>
+            <p className="wiki-card-meta">
+              {item.group} · {item.states.join(" / ")}
+            </p>
+            <pre data-testid={`wiki-snippet-${item.id}`}>
+              {item.snippet.code}
+            </pre>
           </article>
         ))}
       </section>
 
       <aside className="wiki-inspector" aria-label="当前预览">
         <strong data-testid="wiki-active-state">状态：{activeState}</strong>
-        <span data-testid="wiki-selected-scenario">{getWikiScenarioSummary(scenarioId)}</span>
+        <span data-testid="wiki-selected-scenario">
+          {getWikiScenarioSummary(scenarioId)}
+        </span>
         <span>{getWikiPixiMetricSummary()}</span>
-        <span>{listThemeProfileTitles().join(' / ')}</span>
-        {firstPreview ? <code>{firstPreview.snippet.importPath}</code> : <code>无匹配预览</code>}
+        <span>{listThemeProfileTitles().join(" / ")}</span>
+        {firstPreview ? (
+          <code>{firstPreview.snippet.importPath}</code>
+        ) : (
+          <code>无匹配预览</code>
+        )}
       </aside>
 
       <section className="wiki-scenarios" aria-label="Mock 场景">

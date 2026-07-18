@@ -5,8 +5,8 @@ import {
   listMedia,
   taskPollInterval,
   type TaskState,
-} from '@jianvideo/media-client';
-import { createMockFetch } from '@jianvideo/mock';
+} from "@jianvideo/media-client";
+import { createMockFetch } from "@jianvideo/mock";
 
 export interface ClientDemoPage {
   readonly firstPageTitles: readonly string[];
@@ -16,21 +16,24 @@ export interface ClientDemoPage {
 export interface ClientDemoSnapshot {
   readonly defaultSpace: ClientDemoPage;
   readonly detailTitle: string;
-  readonly studioSpace: Pick<ClientDemoPage, 'firstPageTitles'>;
+  readonly studioSpace: Pick<ClientDemoPage, "firstPageTitles">;
   readonly taskPollInterval: 2000 | false;
   readonly taskStatuses: readonly TaskState[];
 }
 
 export async function loadClientDemoSnapshot(): Promise<ClientDemoSnapshot> {
   const mockFetch = createMockFetch();
-  const defaultClient = createApiClient({ fetch: mockFetch, space: { spaceId: 'space-default' } });
-  const studioClient = defaultClient.withSpace({ spaceId: 'space-studio' });
+  const defaultClient = createApiClient({
+    fetch: mockFetch,
+    space: { spaceId: "space-default" },
+  });
+  const studioClient = defaultClient.withSpace({ spaceId: "space-studio" });
   const firstPage = await listMedia(defaultClient, { page: 1, pageSize: 1 });
   const secondPage = await listMedia(defaultClient, { page: 2, pageSize: 1 });
   const studioPage = await listMedia(studioClient, { page: 1, pageSize: 1 });
-  const detail = await getMedia(defaultClient, firstPage.items[0]?.id ?? '');
-  const runningTask = await getTask(defaultClient, 'task-transcode-default');
-  const finishedTask = await getTask(defaultClient, 'task-transcode-default');
+  const detail = await getMedia(defaultClient, firstPage.items[0]?.id ?? "");
+  const runningTask = await getTask(defaultClient, "task-transcode-default");
+  const finishedTask = await getTask(defaultClient, "task-transcode-default");
 
   return {
     defaultSpace: {

@@ -1,12 +1,12 @@
-import js from '@eslint/js';
-import prettier from 'eslint-config-prettier';
-import globals from 'globals';
-import tseslint from 'typescript-eslint';
+import js from "@eslint/js";
+import prettier from "eslint-config-prettier";
+import globals from "globals";
+import tseslint from "typescript-eslint";
 
 export function createJianVideoConfig(tsconfigRootDir) {
   return tseslint.config(
     {
-      ignores: ['dist/**', 'coverage/**', '*.config.js', '*.config.ts'],
+      ignores: ["dist/**", "coverage/**", "*.config.js", "*.config.ts"],
     },
     js.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
@@ -22,10 +22,10 @@ export function createJianVideoConfig(tsconfigRootDir) {
         },
       },
       rules: {
-        '@typescript-eslint/consistent-type-imports': 'error',
-        '@typescript-eslint/no-floating-promises': 'error',
-        '@typescript-eslint/no-misused-promises': 'error',
-        '@typescript-eslint/no-unnecessary-condition': 'error',
+        "@typescript-eslint/consistent-type-imports": "error",
+        "@typescript-eslint/no-floating-promises": "error",
+        "@typescript-eslint/no-misused-promises": "error",
+        "@typescript-eslint/no-unnecessary-condition": "error",
       },
     },
     prettier,

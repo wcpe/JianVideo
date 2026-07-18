@@ -1,58 +1,96 @@
 # 功能规格：CI 质量门工作流
 
-> 状态：开发中　·　关联 PRD：FR-128　·　分支：claude/suspicious-snyder-718ae6　·　决策：ADR-0047
+> 状态：已实现　·　关联 PRD：FR-128　·　决策：ADR-0047、ADR-0054
 
 ## 1. 背景与目标
 
-现 CI（build/prerelease/release）只编译产物、从不跑任何 lint/测试/E2E。本 FR 新增独立 `.github/workflows/ci.yml`，在 PR 与 push main 触发，统一执行 FR-122~127 落地的全部质量门，任一失败挡合并。`build.yml` 等发版工作流职责不变。属第十三期（P13），收口本批。见 ADR-0047。
+构建、预发布与正式发布工作流只负责产物构建和发布。独立 `.github/workflows/ci.yml` 在 Pull Request 与 push 到 `main` 时执行完整质量门，覆盖根 workspace、独立前端、Go 后端和 Playwright E2E；任一阻断项失败即阻止合并。
 
-## 2. 需求（要什么）
-- 新增 `.github/workflows/ci.yml`，触发：`pull_request` + `push`（branches: main）。
-- 三个 job（均 ubuntu-latest），任一失败即整体失败：
-  - **go-quality**：Go 静态检查门禁 + 测试。
-  - **web-quality**：前端 lint + 格式检查 + 覆盖率门禁。
-  - **e2e**：Playwright 端到端（独立 job，失败挡合并；复用 retries:2）。
-- 工具版本固定（golangci-lint pin 到与本地一致的 v2.12.x；setup-go 用 go.mod 版本；node 20）。
-- `build.yml`/`release.yml`/`prerelease.yml` 不改。
-- 不做（范围外）：改业务代码、改既有发版工作流。
+本地与 CI 必须复用同一组 `quality:*` 权威入口，避免 YAML 内维护另一套容易漂移的命令。`build.yml`、`prerelease.yml`、`release.yml` 的职责保持不变。
 
-## 3. 设计（怎么做）
+## 2. 需求
 
-各 job 步骤（命令与本地已验证一致，保证本地 = CI）：
+- CI 使用四个相互独立、可并行的阻断 job：
+  - **workspace-quality**：`apps/*`、`packages/*` 的构建、类型检查、lint、格式、测试与覆盖率，以及根生产依赖审计。
+  - **web-quality**：独立 `frontend/` 的构建、类型检查、lint、格式、测试与覆盖率，以及前端生产依赖审计。
+  - **go-quality**：Go vet、漏洞扫描、覆盖率门与 golangci-lint；golangci-lint 显式启用 staticcheck、gofmt 和 goimports。
+  - **e2e**：真实 Go 服务、隔离数据库和 Chromium 上的全部 Ubuntu 可执行 Playwright 用例。
+- 根 `pnpm quality` 聚合四类门禁，作为本地全仓严格入口。
+- 新失败、覆盖率阈值失败、未解释跳过、发生过重试的测试均阻断。
+- Linux CI 安装并验证 ffmpeg/ffprobe；依赖真实媒体的 Linux 用例不得以缺少工具为由跳过。
+- 不修改发版工作流，不自动提交或推送。
 
-- **go-quality**：
-  1. checkout；setup-go（`go-version-file: go.mod`）；setup-node（20, cache npm, cache-dependency-path frontend/package-lock.json）。
-  2. 构建前端（`npm --prefix frontend ci && npm --prefix frontend run build`）——golangci-lint 与 `go test` 分析 main 包依赖 go:embed 的 `frontend/dist`，必须先构建。
-  3. golangci-lint：用 `golangci/golangci-lint-action@v6`（`version: v2.12.2`）跑 `golangci-lint run ./...`（含 gofmt/goimports formatters）。
-  4. `go test ./...`。
-- **web-quality**：
-  1. checkout；setup-node（20, cache npm, frontend/package-lock.json）。
-  2. `npm --prefix frontend ci`。
-  3. `npm --prefix frontend run lint`。
-  4. `npm --prefix frontend run format:check`。
-  5. `npm --prefix frontend run test:coverage`（阈值门禁，不达标失败）。
-- **e2e**：
-  1. checkout；setup-go（go.mod）；setup-node（20）。
-  2. `npm ci`（根，装 @playwright/test 等）+ `npm --prefix frontend ci`（webServer 会 build 前端）。
-  3. `npx playwright install --with-deps chromium`。
-  4. `npm run e2e`（playwright；webServer 自行 `npm --prefix frontend run build && go run .`、隔离 DB）。CI 环境 `CI=true` 启用 retries:2、单 worker。
+## 3. 本地权威入口
 
-可加 `concurrency`（同 ref 取消旧跑）降资源占用。
+根 `package.json` 提供以下入口：
 
-## 4. 任务拆分
-- [ ] 写 `.github/workflows/ci.yml`（三 job、触发、版本固定）
-- [ ] 校验 YAML 合法（actionlint 若可用；否则人工核对缩进/字段）
-- [ ] 核对每步命令与本地已验证命令一致（make lint=golangci-lint run、npm 各脚本、npm run e2e）
-- [ ] 文档同步：PRD 状态、CHANGELOG（用户可见性低，按需）、ARCHITECTURE/CONTRIBUTING 若需写明 CI 质量门
+- `quality:workspace`：`build` → `typecheck` → `lint` → `format:check` → `coverage`。
+  - `coverage` 已执行 Vitest，不重复运行独立 `test`。
+  - `format:check` 检查 `apps/*`、`packages/*` 的源码与包根配置，不扫描构建、覆盖率或依赖产物。
+- `quality:frontend`：`frontend:build` → `frontend:typecheck` → `frontend:lint` → `frontend:format:check` → `frontend:test:coverage`。
+- `quality:go`：`go:vet` → `go:vuln` → `go:coverage` → `go:lint`。
+  - `go:coverage` 已执行 Go 测试，不重复运行独立 `go:test`。
+- `quality:e2e`：先验证 Playwright 跳过/重试策略，再以零重试运行全部 Playwright spec。
+- `quality`：依次组合上述四个入口。
 
-## 5. 验收标准（AC-32，CI 实跑为真机维度）
-- `ci.yml` 在 PR 与 push main 触发，依次/并行跑 go-quality / web-quality / e2e；任一失败即整体失败、阻断合并。
-- 本地 `golangci-lint run ./...`、`npm run lint`/`format:check`/`test:coverage`、`npm run e2e` 与 CI 行为一致（命令对齐）。
-- `build.yml` 发版职责不变。
-- **CI 实跑验证须 push 后在 GitHub Actions 观测**——本机无法运行 GitHub Actions，标「CI 待实跑」，由用户 push 后确认（不自动 push）。
+独立的 `test`、`frontend:test`、`go:test` 等快速命令继续保留，供开发阶段按组件使用。
 
-## 6. 风险 / 待定
-- 本机无法运行 GitHub Actions，ci.yml 只能做 YAML 正确性 + 命令对齐验证，真实绿需 push 后观测。
-- e2e job 重（构建前端 + go run + 浏览器），CI 时长增加；retries:2 缓解抖动。
-- golangci-lint v2 action 版本与本地 2.12.2 对齐，避免版本漂移致结果不一致。
-- 不自动 push、不改既有发版工作流。
+## 4. CI 设计
+
+### 4.1 workspace-quality
+
+1. checkout；setup-node 20；启用 Corepack。
+2. `pnpm install --frozen-lockfile`。
+3. `pnpm audit --prod --audit-level high`。
+4. `pnpm quality:workspace`。
+
+### 4.2 web-quality
+
+1. checkout；setup-node 20，并按 `frontend/package-lock.json` 缓存 npm 依赖。
+2. 启用 Corepack；执行 `npm --prefix frontend install`。
+3. `npm --prefix frontend audit --omit=dev --audit-level=high`。
+4. `pnpm quality:frontend`。
+
+旧前端继续使用 `npm install`，避免 Windows 生成的 lock 在 Linux 上缺少平台可选依赖时触发严格同步失败。
+
+### 4.3 go-quality
+
+1. checkout；setup-go 使用 `go.mod`；setup-node 20；启用 Corepack。
+2. 安装 ffmpeg，并构建 `frontend/dist`，满足 `go:embed`。
+3. 安装 govulncheck v1.4.0 与 golangci-lint v2.12.2。
+4. 运行 `pnpm quality:go`；golangci-lint 按 `.golangci.yml` 执行 staticcheck、gofmt、goimports 等固定检查器。
+
+Go 覆盖率由 `scripts/go-coverage-gate.mjs` 统一执行测试并按现有包级阈值判定；缺少结果或低于阈值均失败。govulncheck 发现项目代码可达漏洞时失败。
+
+### 4.4 e2e
+
+1. checkout；setup-go；setup-node 20。
+2. 安装并校验 ffmpeg/ffprobe；安装根依赖、前端依赖和 Chromium。
+3. `pnpm quality:e2e` 启动 Playwright webServer，构建前端并运行真实 Go 服务，数据库位于 `.tmp/e2e-run`。
+4. 命令行固定 `--retries=0`；自定义 reporter 再次检查 retry 记录，防止配置漂移后仅重试通过。
+
+CI 不排除真实媒体用例。允许跳过的范围仅为：
+
+- `windows-headed-pwa.acceptance.spec.ts`：要求 Windows 原生 Chrome、安装态 PWA 与人工证据，不适用于 Ubuntu runner，由 Windows 专项验收补偿。
+- `key_flows_e2e.spec.ts` 的“进入播放路由即发起编码协商”：仅当同文件更强的真实媒体播放用例已通过时，允许跳过该无 ffmpeg 降级路径。
+
+其他任何跳过均由 reporter 将整次测试结果改为失败。新增允许跳过项必须同时更新本规格、reporter 和 reporter 单测，并说明不可在 Ubuntu CI 执行的环境依赖与补偿证据。
+
+## 5. 验收标准
+
+- PR 与 push 到 `main` 时启动 workspace-quality、web-quality、go-quality、e2e；任一失败阻断合并。
+- `pnpm quality` 覆盖 `apps/*`、`packages/*`、`frontend/`、Go 与 Playwright。
+- 根 workspace 和独立前端均执行构建、类型、lint、格式、测试与覆盖率门。
+- 根和前端生产依赖审计不得报告 high/critical 漏洞。
+- Go 实际执行 govulncheck 与包级覆盖率门，不能退化为仅 `go test`。
+- E2E 在 Ubuntu+ffmpeg 上执行全部可运行用例，包括真实媒体用例；不得依赖重试变绿。
+- reporter 仅放行本规格列出的跳过，其他跳过自动失败。
+- 发版工作流保持不变。
+- GitHub Actions 真机结果由用户 push 后观察；本任务不自动 push。
+
+## 6. 风险与限制
+
+- 四类门禁总耗时较长，CI 通过独立 job 并行执行；本地可按 `quality:*` 分拆运行。
+- Go SQLite 测试和覆盖率依赖 CGO/C 编译器；CI 使用 Ubuntu runner 的现有工具链。
+- E2E 会构建前端、启动 Go 服务、生成真实媒体并运行 Chromium，资源消耗高于组件测试，但仍作为阻断门。
+- Windows headed 与安装态 PWA 无法在 Ubuntu runner 验证，必须继续保留 Windows 专项验收证据。

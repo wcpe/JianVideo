@@ -1,52 +1,69 @@
-# 质量门工作流：在 PR 与 push main 时统一执行 Go 静态检查/测试、前端 lint/格式/覆盖率、E2E。
-# 任一 job 失败即整体失败、阻断合并。发版工作流（build/release/prerelease）职责不变（见 ADR-0047 / FR-128）。
-# 依赖安装统一用 npm install 而非 npm ci：package-lock 在 Windows 生成，缺 Linux 平台的可选依赖
-# （@emnapi/* 等 napi WASM 垫片），npm ci 的严格同步校验在 Linux runner 会失败；npm install 按目标
-# 平台重新解析依赖，跨平台可靠（牺牲少量可复现性，可接受）。与 build.yml 的既定决策保持一致。
+# 质量门工作流：在 PR 与 push main 时统一执行根工作区、独立前端、Go 与 Playwright 门禁。
+# 任一 job 失败即整体失败、阻断合并。发版工作流职责不变（见 ADR-0047 / FR-128）。
+# 根工作区使用 pnpm 锁文件；独立前端继续使用 npm install，避免 Windows 生成的 lock
+# 缺少 Linux 平台可选依赖时触发 npm ci 严格同步失败。
 name: 质量门
 
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
-# 同一 ref 仅保留最新一次运行，旧的进行中运行自动取消，降低资源占用。
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Go 静态检查门禁 + 测试。golangci-lint 与 go test 分析 main 包，依赖 go:embed 的 frontend/dist，须先构建前端。
+  # 根工作区门禁：覆盖 apps/* 与 packages/* 的构建、类型、lint、格式、测试、覆盖率与生产依赖审计。
+  workspace-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 安装工作区依赖
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: 审计工作区生产依赖
+        run: pnpm audit --prod --audit-level high
+      - name: 运行工作区质量门
+        run: pnpm quality:workspace
+
+  # Go 门禁依赖 go:embed 的 frontend/dist，先构建前端再执行静态检查、漏洞扫描和覆盖率门。
   go-quality:
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Go（按 go.mod 版本）
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: 安装 ffmpeg（transcoder 版本键控能力缓存测试依赖）
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: 安装 ffmpeg（转码与真实媒体测试依赖）
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 构建前端（供 go:embed 内嵌）
         run: |
+          corepack enable
           npm --prefix frontend install
           npm --prefix frontend run build
-      - name: Go 静态检查门禁（golangci-lint）
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.12.2
-          args: ./...
-      - name: Go 测试
-        run: go test ./...
+      - name: 安装 Go 质量工具
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      - name: 运行 Go 质量门
+        run: pnpm quality:go
 
-  # 前端 lint + 格式检查 + 覆盖率门禁。
+  # 独立前端门禁：覆盖构建、类型、lint、格式、测试、覆盖率与生产依赖审计。
   web-quality:
     runs-on: ubuntu-latest
     steps:
@@ -58,15 +75,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: 安装前端依赖
-        run: npm --prefix frontend install
-      - name: 前端 lint
-        run: npm --prefix frontend run lint
-      - name: 前端格式检查
-        run: npm --prefix frontend run format:check
-      - name: 前端测试与覆盖率门禁
-        run: npm --prefix frontend run test:coverage
+        run: |
+          corepack enable
+          npm --prefix frontend install
+      - name: 审计前端生产依赖
+        run: npm --prefix frontend audit --omit=dev --audit-level=high
+      - name: 运行前端质量门
+        run: pnpm quality:frontend
 
-  # Playwright 端到端：webServer 自行构建前端 + go run，用隔离 DB；CI 环境启用 retries:2 与单 worker。
+  # Playwright 全量端到端：运行全部 Ubuntu 可执行用例，零重试并自动阻断未解释跳过。
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -75,7 +92,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: 安装并校验 ffmpeg/ffprobe（FR2-044 真实素材）
+      - name: 安装并校验 ffmpeg/ffprobe（真实媒体用例依赖）
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
@@ -87,11 +104,13 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: 安装根依赖（@playwright/test 等）
-        run: npm install
+      - name: 安装根工作区依赖
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
       - name: 安装前端依赖（webServer 构建前端用）
         run: npm --prefix frontend install
       - name: 安装 Playwright 浏览器
-        run: npx playwright install --with-deps chromium
-      - name: 运行端到端测试
-        run: npm run e2e
+        run: pnpm exec playwright install --with-deps chromium
+      - name: 运行端到端质量门
+        run: pnpm quality:e2e

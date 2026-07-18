@@ -5,7 +5,7 @@ import type {
   PreviewFacet,
   PreviewHit,
   PreviewTrackState,
-} from './types';
+} from "./types";
 
 const EMPTY_STATE: PreviewTrackState = {
   generationId: null,
@@ -14,13 +14,13 @@ const EMPTY_STATE: PreviewTrackState = {
   requestId: 0,
   sourceEpoch: 0,
   sourceId: null,
-  status: 'empty',
+  status: "empty",
 };
 
 export class PreviewTrackValidationError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'PreviewTrackValidationError';
+    this.name = "PreviewTrackValidationError";
   }
 }
 
@@ -28,19 +28,30 @@ export class PreparedPreviewFacet implements PreviewFacet {
   private state: PreviewTrackState = EMPTY_STATE;
   private track: PreparedPreviewTrack | null = null;
 
-  setTrack(track: PreparedPreviewTrack | null, command: PlaybackCommandContext): PreviewTrackState {
+  setTrack(
+    track: PreparedPreviewTrack | null,
+    command: PlaybackCommandContext,
+  ): PreviewTrackState {
     if (isStaleCommand(command, this.state)) {
       return this.getState();
     }
     const prepared = track === null ? null : validateAndCopyTrack(track);
     this.track = prepared;
-    this.state = prepared === null ? emptyState(command) : readyState(prepared, command);
+    this.state =
+      prepared === null ? emptyState(command) : readyState(prepared, command);
     return this.getState();
   }
 
-  hitTest(mediaTime: number, command: PlaybackCommandContext): PreviewHit | null {
+  hitTest(
+    mediaTime: number,
+    command: PlaybackCommandContext,
+  ): PreviewHit | null {
     const track = this.track;
-    if (!Number.isFinite(mediaTime) || track === null || !matchesContext(command, this.state)) {
+    if (
+      !Number.isFinite(mediaTime) ||
+      track === null ||
+      !matchesContext(command, this.state)
+    ) {
       return null;
     }
     const cue = findCue(track.cues, mediaTime);
@@ -56,7 +67,9 @@ export function createPreviewFacet(): PreviewFacet {
   return new PreparedPreviewFacet();
 }
 
-function validateAndCopyTrack(track: PreparedPreviewTrack): PreparedPreviewTrack {
+function validateAndCopyTrack(
+  track: PreparedPreviewTrack,
+): PreparedPreviewTrack {
   validateTrackFields(track);
   const cues: PreparedPreviewCue[] = [];
   let previousEnd = 0;
@@ -69,32 +82,42 @@ function validateAndCopyTrack(track: PreparedPreviewTrack): PreparedPreviewTrack
 }
 
 function validateTrackFields(track: PreparedPreviewTrack): void {
-  const fields = [track.generationId, track.mediaId, track.profileId, track.sourceFingerprint];
+  const fields = [
+    track.generationId,
+    track.mediaId,
+    track.profileId,
+    track.sourceFingerprint,
+  ];
   if (fields.some((field) => !isNonEmpty(field))) {
-    throw new PreviewTrackValidationError('预览轨道字段不能为空');
+    throw new PreviewTrackValidationError("预览轨道字段不能为空");
   }
   if (track.cues.length === 0) {
-    throw new PreviewTrackValidationError('预览轨道片段不能为空');
+    throw new PreviewTrackValidationError("预览轨道片段不能为空");
   }
 }
 
 function validateCue(cue: PreparedPreviewCue, previousEnd: number): void {
-  const validTimes = Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime);
+  const validTimes =
+    Number.isFinite(cue.startTime) && Number.isFinite(cue.endTime);
   if (!validTimes || cue.startTime < 0 || cue.endTime <= cue.startTime) {
-    throw new PreviewTrackValidationError('预览片段时间范围无效');
+    throw new PreviewTrackValidationError("预览片段时间范围无效");
   }
   if (cue.startTime < previousEnd) {
-    throw new PreviewTrackValidationError('预览片段必须严格有序且不重叠');
+    throw new PreviewTrackValidationError("预览片段必须严格有序且不重叠");
   }
   validateSprite(cue);
 }
 
 function validateSprite(cue: PreparedPreviewCue): void {
   const { assetId, height, width, x, y } = cue.sprite;
-  const invalidSize = [height, width].some((value) => !Number.isFinite(value) || value <= 0);
-  const invalidPosition = [x, y].some((value) => !Number.isFinite(value) || value < 0);
+  const invalidSize = [height, width].some(
+    (value) => !Number.isFinite(value) || value <= 0,
+  );
+  const invalidPosition = [x, y].some(
+    (value) => !Number.isFinite(value) || value < 0,
+  );
   if (!isNonEmpty(assetId) || invalidSize || invalidPosition) {
-    throw new PreviewTrackValidationError('预览精灵字段无效');
+    throw new PreviewTrackValidationError("预览精灵字段无效");
   }
 }
 
@@ -103,10 +126,13 @@ function copyCue(cue: PreparedPreviewCue): PreparedPreviewCue {
 }
 
 function isNonEmpty(value: string): boolean {
-  return typeof value === 'string' && value.trim().length > 0;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
-function isStaleCommand(command: PlaybackCommandContext, state: PreviewTrackState): boolean {
+function isStaleCommand(
+  command: PlaybackCommandContext,
+  state: PreviewTrackState,
+): boolean {
   if (command.sourceEpoch !== state.sourceEpoch) {
     return command.sourceEpoch < state.sourceEpoch;
   }
@@ -116,7 +142,10 @@ function isStaleCommand(command: PlaybackCommandContext, state: PreviewTrackStat
   return command.requestId < state.requestId;
 }
 
-function matchesContext(command: PlaybackCommandContext, state: PreviewTrackState): boolean {
+function matchesContext(
+  command: PlaybackCommandContext,
+  state: PreviewTrackState,
+): boolean {
   return (
     command.sourceId === state.sourceId &&
     command.sourceEpoch === state.sourceEpoch &&
@@ -124,7 +153,10 @@ function matchesContext(command: PlaybackCommandContext, state: PreviewTrackStat
   );
 }
 
-function findCue(cues: readonly PreparedPreviewCue[], mediaTime: number): PreparedPreviewCue | null {
+function findCue(
+  cues: readonly PreparedPreviewCue[],
+  mediaTime: number,
+): PreparedPreviewCue | null {
   let low = 0;
   let high = cues.length - 1;
   while (low <= high) {
@@ -144,7 +176,10 @@ function findCue(cues: readonly PreparedPreviewCue[], mediaTime: number): Prepar
   return null;
 }
 
-function createHit(cue: PreparedPreviewCue, track: PreparedPreviewTrack): PreviewHit {
+function createHit(
+  cue: PreparedPreviewCue,
+  track: PreparedPreviewTrack,
+): PreviewHit {
   return {
     ...copyCue(cue),
     generationId: track.generationId,
@@ -161,7 +196,10 @@ function emptyState(command: PlaybackCommandContext): PreviewTrackState {
   };
 }
 
-function readyState(track: PreparedPreviewTrack, command: PlaybackCommandContext): PreviewTrackState {
+function readyState(
+  track: PreparedPreviewTrack,
+  command: PlaybackCommandContext,
+): PreviewTrackState {
   return {
     generationId: track.generationId,
     mediaId: track.mediaId,
@@ -169,6 +207,6 @@ function readyState(track: PreparedPreviewTrack, command: PlaybackCommandContext
     requestId: command.requestId,
     sourceEpoch: command.sourceEpoch,
     sourceId: command.sourceId,
-    status: 'ready',
+    status: "ready",
   };
 }

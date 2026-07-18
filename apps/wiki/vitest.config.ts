@@ -1,13 +1,13 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    environment: 'jsdom',
+    environment: "jsdom",
     coverage: {
-      exclude: ['src/main.tsx'],
-      include: ['src/**/*.{ts,tsx}'],
-      provider: 'v8',
-      reporter: ['text', 'lcov'],
+      exclude: ["src/main.tsx"],
+      include: ["src/**/*.{ts,tsx}"],
+      provider: "v8",
+      reporter: ["text", "lcov"],
       thresholds: {
         branches: 75,
         functions: 60,

@@ -87,13 +87,22 @@ export interface RenderMetricsSnapshot {
   readonly visibleItems: number;
 }
 
-export function resolveVisibleWindow(total: number, firstVisible: number, visibleCount: number, overscan: number): VisibleWindow {
+export function resolveVisibleWindow(
+  total: number,
+  firstVisible: number,
+  visibleCount: number,
+  overscan: number,
+): VisibleWindow {
   const start = Math.max(0, firstVisible - overscan);
   const end = Math.min(total, firstVisible + visibleCount + overscan);
   return { start, end };
 }
 
-export function estimateTextureMemoryBytes(textureCount: number, width: number, height: number): number {
+export function estimateTextureMemoryBytes(
+  textureCount: number,
+  width: number,
+  height: number,
+): number {
   return textureCount * width * height * 4;
 }
 
@@ -107,11 +116,16 @@ export function resolveGridWindow(input: GridWindowInput): GridWindow {
   const firstVisible = Math.min(total, firstRow * columns);
   const visibleCount = Math.min(total - firstVisible, visibleRows * columns);
   const start = Math.max(0, (firstRow - overscanRows) * columns);
-  const end = Math.min(total, (firstRow + visibleRows + overscanRows) * columns);
+  const end = Math.min(
+    total,
+    (firstRow + visibleRows + overscanRows) * columns,
+  );
   return { start, end, firstVisible, visibleCount };
 }
 
-export function createPixiPreviewCells(input: PixiPreviewCellInput): readonly PixiPreviewCell[] {
+export function createPixiPreviewCells(
+  input: PixiPreviewCellInput,
+): readonly PixiPreviewCell[] {
   const cells: PixiPreviewCell[] = [];
   for (let row = 0; row < input.rows; row += 1) {
     for (let column = 0; column < input.columns; column += 1) {
@@ -127,16 +141,18 @@ export function createPixiPreviewCells(input: PixiPreviewCellInput): readonly Pi
   return cells;
 }
 
-export async function mountPixiGridPreview(options: PixiGridPreviewOptions): Promise<PixiGridPreviewHandle> {
-  const { Application, Graphics, VERSION } = await import('pixi.js');
+export async function mountPixiGridPreview(
+  options: PixiGridPreviewOptions,
+): Promise<PixiGridPreviewHandle> {
+  const { Application, Graphics, VERSION } = await import("pixi.js");
   const app = new Application();
   await app.init({
     antialias: false,
     autoDensity: true,
     backgroundColor: 0x0f172a,
     height: options.height,
-    powerPreference: 'high-performance',
-    preference: 'webgl',
+    powerPreference: "high-performance",
+    preference: "webgl",
     preserveDrawingBuffer: true,
     resolution: globalThis.devicePixelRatio || 1,
     width: options.width,
@@ -155,7 +171,9 @@ export async function mountPixiGridPreview(options: PixiGridPreviewOptions): Pro
     gap: 12,
     rows: options.rows ?? 3,
   })) {
-    graphics.rect(12 + cell.x, 12 + cell.y, cell.width, cell.height).fill(cell.color);
+    graphics
+      .rect(12 + cell.x, 12 + cell.y, cell.width, cell.height)
+      .fill(cell.color);
   }
   app.stage.addChild(graphics);
   app.render();
@@ -210,7 +228,10 @@ export class TexturePool {
   }
 
   #evictUntilWithinBudget(): void {
-    while (this.#entries.size > this.#options.maxTextures || this.#textureMemoryBytes > this.#options.maxBytes) {
+    while (
+      this.#entries.size > this.#options.maxTextures ||
+      this.#textureMemoryBytes > this.#options.maxBytes
+    ) {
       const oldest = this.#entries.entries().next().value;
       if (oldest === undefined) {
         return;
@@ -227,7 +248,9 @@ export function shouldRequestHlsPreview(state: PreviewState): boolean {
   return state.hovered || state.selected;
 }
 
-export function createRenderMetricsSnapshot(input: RenderMetricsInput): RenderMetricsSnapshot {
+export function createRenderMetricsSnapshot(
+  input: RenderMetricsInput,
+): RenderMetricsSnapshot {
   const visibleItems = Math.max(0, input.window.end - input.window.start);
   return {
     hlsRequests: input.hlsRequests,

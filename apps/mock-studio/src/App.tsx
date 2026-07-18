@@ -1,13 +1,20 @@
-import { mountPixiGridPreview, type PixiGridPreviewHandle } from '@jianvideo/render-pixi';
-import { useEffect, useRef, useState } from 'react';
-import { resolveBenchmarkDashboard, resolveBenchmarkEntranceSummary, resolveDatasetSummary } from './summary';
-import './style.css';
+import {
+  mountPixiGridPreview,
+  type PixiGridPreviewHandle,
+} from "@jianvideo/render-pixi";
+import { useEffect, useRef, useState } from "react";
+import {
+  resolveBenchmarkDashboard,
+  resolveBenchmarkEntranceSummary,
+  resolveDatasetSummary,
+} from "./summary";
+import "./style.css";
 
 export function App() {
   const dashboard = resolveBenchmarkDashboard();
   const pixiHostRef = useRef<HTMLDivElement>(null);
   const [hlsPreviewRequests, setHlsPreviewRequests] = useState(0);
-  const [pixiStatus, setPixiStatus] = useState('初始化中');
+  const [pixiStatus, setPixiStatus] = useState("初始化中");
   const [selected, setSelected] = useState(false);
 
   useEffect(() => {
@@ -25,14 +32,16 @@ export function App() {
           return;
         }
         preview = nextPreview;
-        nextPreview.canvas.classList.add('benchmark-canvas');
-        nextPreview.canvas.setAttribute('data-testid', 'benchmark-canvas');
-        setPixiStatus(`真实 PixiJS ${nextPreview.rendererType} ${nextPreview.pixiVersion}`);
+        nextPreview.canvas.classList.add("benchmark-canvas");
+        nextPreview.canvas.setAttribute("data-testid", "benchmark-canvas");
+        setPixiStatus(
+          `真实 PixiJS ${nextPreview.rendererType} ${nextPreview.pixiVersion}`,
+        );
       })
       .catch(() => {
         if (!disposed) {
           drawFallbackCanvas(host);
-          setPixiStatus('fallback：Pixi 初始化失败');
+          setPixiStatus("fallback：Pixi 初始化失败");
         }
       });
 
@@ -67,7 +76,7 @@ export function App() {
             </div>
             <div>
               <dt>后端数据集</dt>
-              <dd>{dashboard.backendDatasets.join(' / ')}</dd>
+              <dd>{dashboard.backendDatasets.join(" / ")}</dd>
             </div>
             <div>
               <dt>HLS 预览请求</dt>
@@ -82,7 +91,9 @@ export function App() {
           ref={pixiHostRef}
         />
         <article
-          className={selected ? 'preview-card preview-card-selected' : 'preview-card'}
+          className={
+            selected ? "preview-card preview-card-selected" : "preview-card"
+          }
           data-testid="hls-preview-card"
           onMouseEnter={recordPreviewRequest}
           tabIndex={0}
@@ -105,18 +116,18 @@ export function App() {
 }
 
 function drawFallbackCanvas(host: HTMLDivElement): void {
-  const canvas = document.createElement('canvas');
-  canvas.className = 'benchmark-canvas';
-  canvas.dataset.testid = 'benchmark-canvas';
+  const canvas = document.createElement("canvas");
+  canvas.className = "benchmark-canvas";
+  canvas.dataset.testid = "benchmark-canvas";
   canvas.width = 336;
   canvas.height = 128;
-  const context = canvas.getContext('2d');
+  const context = canvas.getContext("2d");
   if (context) {
-    context.fillStyle = '#0f172a';
+    context.fillStyle = "#0f172a";
     context.fillRect(0, 0, canvas.width, canvas.height);
     for (let row = 0; row < 3; row += 1) {
       for (let column = 0; column < 8; column += 1) {
-        context.fillStyle = (row + column) % 3 === 0 ? '#38bdf8' : '#22c55e';
+        context.fillStyle = (row + column) % 3 === 0 ? "#38bdf8" : "#22c55e";
         context.fillRect(12 + column * 38, 12 + row * 32, 26, 20);
       }
     }

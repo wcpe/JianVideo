@@ -1,7 +1,8 @@
-export type TaskState = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled';
-export type DevicePlatform = 'web' | 'desktop' | 'mobile' | 'tv' | 'automotive';
-export type PointerCapability = 'fine' | 'coarse';
-export type NetworkCapability = 'offline' | 'constrained' | 'standard' | 'fast';
+export type TaskState =
+  "pending" | "running" | "succeeded" | "failed" | "canceled";
+export type DevicePlatform = "web" | "desktop" | "mobile" | "tv" | "automotive";
+export type PointerCapability = "fine" | "coarse";
+export type NetworkCapability = "offline" | "constrained" | "standard" | "fast";
 
 export interface SpaceContext {
   readonly spaceId: string;
@@ -23,13 +24,13 @@ export interface MediaItem {
   readonly id: string;
   readonly spaceId: string;
   readonly title: string;
-  readonly kind: 'video' | 'image';
+  readonly kind: "video" | "image";
   readonly durationSeconds: number;
   readonly createdAt: string;
 }
 
-export type WatchEventType = 'progress' | 'pause' | 'seek' | 'ended';
-export type WatchEventReason = 'user' | 'ab_loop' | 'restore' | 'system';
+export type WatchEventType = "progress" | "pause" | "seek" | "ended";
+export type WatchEventReason = "user" | "ab_loop" | "restore" | "system";
 
 export interface WatchState {
   readonly completed: boolean;
@@ -88,7 +89,7 @@ export interface MediaChapter {
   readonly endMs: number;
   readonly id: string;
   readonly language: string;
-  readonly source: 'embedded';
+  readonly source: "embedded";
   readonly sourceIndex: number;
   readonly startMs: number;
   readonly title: string;
@@ -158,7 +159,10 @@ export interface TaskStats {
   readonly total: number;
 }
 
-export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export interface ApiClientOptions {
   readonly authToken?: string;
@@ -184,39 +188,55 @@ export interface QueryKeyFactory {
   readonly mediaList: (
     space: SpaceContext,
     page: number | PageParams,
-  ) => readonly ['media', 'list', string, number | PageParams];
-  readonly mediaDetail: (space: SpaceContext, id: string) => readonly ['media', 'detail', string, string];
+  ) => readonly ["media", "list", string, number | PageParams];
+  readonly mediaDetail: (
+    space: SpaceContext,
+    id: string,
+  ) => readonly ["media", "detail", string, string];
   readonly mediaChapters: (
     space: SpaceContext,
     mediaId: MediaIdentifier,
-  ) => readonly ['media', 'chapters', string, string];
+  ) => readonly ["media", "chapters", string, string];
   readonly mediaBookmarks: (
     space: SpaceContext,
     mediaId: MediaIdentifier,
-  ) => readonly ['media', 'bookmarks', string, string];
-  readonly taskDetail: (space: SpaceContext, id: string) => readonly ['tasks', 'detail', string, string];
-  readonly taskList: (space: SpaceContext) => readonly ['tasks', 'list', string];
+  ) => readonly ["media", "bookmarks", string, string];
+  readonly taskDetail: (
+    space: SpaceContext,
+    id: string,
+  ) => readonly ["tasks", "detail", string, string];
+  readonly taskList: (
+    space: SpaceContext,
+  ) => readonly ["tasks", "list", string];
 }
 
 export function createQueryKeys(): QueryKeyFactory {
   return {
-    mediaList: (space, page) => ['media', 'list', space.spaceId, page] as const,
-    mediaDetail: (space, id) => ['media', 'detail', space.spaceId, id] as const,
-    mediaChapters: (space, mediaId) => ['media', 'chapters', space.spaceId, String(mediaId)] as const,
-    mediaBookmarks: (space, mediaId) => ['media', 'bookmarks', space.spaceId, String(mediaId)] as const,
-    taskDetail: (space, id) => ['tasks', 'detail', space.spaceId, id] as const,
-    taskList: (space) => ['tasks', 'list', space.spaceId] as const,
+    mediaList: (space, page) => ["media", "list", space.spaceId, page] as const,
+    mediaDetail: (space, id) => ["media", "detail", space.spaceId, id] as const,
+    mediaChapters: (space, mediaId) =>
+      ["media", "chapters", space.spaceId, String(mediaId)] as const,
+    mediaBookmarks: (space, mediaId) =>
+      ["media", "bookmarks", space.spaceId, String(mediaId)] as const,
+    taskDetail: (space, id) => ["tasks", "detail", space.spaceId, id] as const,
+    taskList: (space) => ["tasks", "list", space.spaceId] as const,
   };
 }
 
 export function normalizeLegacyTaskState(state: string): TaskState {
-  if (state === 'completed') {
-    return 'succeeded';
+  if (state === "completed") {
+    return "succeeded";
   }
-  if (state === 'error') {
-    return 'failed';
+  if (state === "error") {
+    return "failed";
   }
-  if (state === 'pending' || state === 'running' || state === 'succeeded' || state === 'failed' || state === 'canceled') {
+  if (
+    state === "pending" ||
+    state === "running" ||
+    state === "succeeded" ||
+    state === "failed" ||
+    state === "canceled"
+  ) {
     return state;
   }
   throw new Error(`未知任务状态：${state}`);
@@ -228,7 +248,7 @@ export class ApiError extends Error {
 
   constructor(status: number, code: string, message: string) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
     this.status = status;
     this.code = code;
   }
@@ -238,8 +258,8 @@ export class WatchStateConflictError extends ApiError {
   readonly current: WatchState;
 
   constructor(message: string, current: WatchState) {
-    super(409, 'WATCH_STATE_CONFLICT', message);
-    this.name = 'WatchStateConflictError';
+    super(409, "WATCH_STATE_CONFLICT", message);
+    this.name = "WatchStateConflictError";
     this.current = current;
   }
 }
@@ -248,19 +268,26 @@ export class BookmarkConflictError extends ApiError {
   readonly current: MediaBookmark | null;
   readonly deleted: boolean;
 
-  constructor(message: string, current: MediaBookmark | null, deleted: boolean) {
-    super(409, 'BOOKMARK_CONFLICT', message);
-    this.name = 'BookmarkConflictError';
+  constructor(
+    message: string,
+    current: MediaBookmark | null,
+    deleted: boolean,
+  ) {
+    super(409, "BOOKMARK_CONFLICT", message);
+    this.name = "BookmarkConflictError";
     this.current = current;
     this.deleted = deleted;
   }
 }
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
-  const baseUrl = options.baseUrl ?? 'http://localhost';
+  const baseUrl = options.baseUrl ?? "http://localhost";
   const fetchImpl = options.fetch ?? fetch;
 
-  const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+  const request = async <T>(
+    path: string,
+    init: RequestInit = {},
+  ): Promise<T> => {
     const url = new URL(path, baseUrl);
     const attempts = Math.max(1, options.retry?.attempts ?? 1);
     let lastError: ApiError | undefined;
@@ -274,7 +301,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         throw result.error;
       }
     }
-    throw lastError ?? new ApiError(0, 'NETWORK_ERROR', '网络请求失败');
+    throw lastError ?? new ApiError(0, "NETWORK_ERROR", "网络请求失败");
   };
 
   return {
@@ -284,19 +311,25 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   };
 }
 
-export function detectDeviceCapabilities(input: DeviceDetectionInput = {}): DeviceCapabilities {
+export function detectDeviceCapabilities(
+  input: DeviceDetectionInput = {},
+): DeviceCapabilities {
   const navigatorLike = input.navigator;
-  const userAgent = navigatorLike?.userAgent?.toLowerCase() ?? '';
-  const touch = (navigatorLike?.maxTouchPoints ?? 0) > 0 || input.matchMedia?.('(pointer: coarse)').matches === true;
+  const userAgent = navigatorLike?.userAgent?.toLowerCase() ?? "";
+  const touch =
+    (navigatorLike?.maxTouchPoints ?? 0) > 0 ||
+    input.matchMedia?.("(pointer: coarse)").matches === true;
   return {
     network: detectNetwork(navigatorLike),
     platform: detectPlatform(userAgent),
-    pointer: touch ? 'coarse' : 'fine',
+    pointer: touch ? "coarse" : "fine",
     touch,
   };
 }
 
-type RequestResult<T> = { readonly ok: true; readonly value: T } | { readonly error: ApiError; readonly ok: false };
+type RequestResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly error: ApiError; readonly ok: false };
 
 interface DeviceDetectionInput {
   readonly matchMedia?: (query: string) => { readonly matches: boolean };
@@ -312,7 +345,10 @@ interface DeviceDetectionInput {
   };
 }
 
-function mergeAbortSignals(primary: AbortSignal, secondary?: AbortSignal | null): AbortSignal {
+function mergeAbortSignals(
+  primary: AbortSignal,
+  secondary?: AbortSignal | null,
+): AbortSignal {
   if (!secondary) return primary;
   const controller = new AbortController();
   const abort = () => {
@@ -320,8 +356,8 @@ function mergeAbortSignals(primary: AbortSignal, secondary?: AbortSignal | null)
   };
   if (primary.aborted || secondary.aborted) abort();
   else {
-    primary.addEventListener('abort', abort, { once: true });
-    secondary.addEventListener('abort', abort, { once: true });
+    primary.addEventListener("abort", abort, { once: true });
+    secondary.addEventListener("abort", abort, { once: true });
   }
   return controller.signal;
 }
@@ -340,24 +376,35 @@ async function requestAttempt<T>(
     }, timeoutMs);
     try {
       const signal = mergeAbortSignals(controller.signal, init.signal);
-      return { ok: true, value: await requestJson<T>(fetchImpl, url, options, init, signal) };
+      return {
+        ok: true,
+        value: await requestJson<T>(fetchImpl, url, options, init, signal),
+      };
     } finally {
       clearTimeout(timeout);
     }
   } catch (error) {
     return {
-      error: error instanceof ApiError ? error : new ApiError(0, 'NETWORK_ERROR', '网络请求失败'),
+      error:
+        error instanceof ApiError
+          ? error
+          : new ApiError(0, "NETWORK_ERROR", "网络请求失败"),
       ok: false,
     };
   }
 }
 
-export async function listMedia(client: ApiClient, params: PageParams): Promise<PageResult<MediaItem>> {
+export async function listMedia(
+  client: ApiClient,
+  params: PageParams,
+): Promise<PageResult<MediaItem>> {
   const searchParams = new URLSearchParams({
     page: String(params.page),
     page_size: String(params.pageSize),
   });
-  const response = await client.request<RawMediaPage>(`/api/v2/media?${searchParams.toString()}`);
+  const response = await client.request<RawMediaPage>(
+    `/api/v2/media?${searchParams.toString()}`,
+  );
   return {
     items: response.items.map(toMediaItem),
     page: response.page,
@@ -366,16 +413,26 @@ export async function listMedia(client: ApiClient, params: PageParams): Promise<
   };
 }
 
-export async function getMedia(client: ApiClient, id: string): Promise<MediaItem> {
-  return toMediaItem(await client.request<RawMediaItem>(`/api/v2/media/${encodeURIComponent(id)}`));
+export async function getMedia(
+  client: ApiClient,
+  id: string,
+): Promise<MediaItem> {
+  return toMediaItem(
+    await client.request<RawMediaItem>(
+      `/api/v2/media/${encodeURIComponent(id)}`,
+    ),
+  );
 }
 
 export async function getWatchState(
   client: ApiClient,
   mediaId: string,
-  options: Pick<RequestInit, 'signal'> = {},
+  options: Pick<RequestInit, "signal"> = {},
 ): Promise<WatchState> {
-  const response = await client.request<RawWatchState>(watchStatePath(mediaId), options);
+  const response = await client.request<RawWatchState>(
+    watchStatePath(mediaId),
+    options,
+  );
   return toWatchState(response);
 }
 
@@ -383,14 +440,17 @@ export async function updateWatchState(
   client: ApiClient,
   mediaId: string,
   event: WatchStateEvent,
-  options: Pick<RequestInit, 'keepalive' | 'signal'> = {},
+  options: Pick<RequestInit, "keepalive" | "signal"> = {},
 ): Promise<WatchStateUpdateResult> {
-  const response = await client.request<RawWatchStateUpdateResult>(watchStatePath(mediaId), {
-    ...options,
-    body: JSON.stringify(toRawWatchStateEvent(event)),
-    headers: { 'Content-Type': 'application/json' },
-    method: 'PUT',
-  });
+  const response = await client.request<RawWatchStateUpdateResult>(
+    watchStatePath(mediaId),
+    {
+      ...options,
+      body: JSON.stringify(toRawWatchStateEvent(event)),
+      headers: { "Content-Type": "application/json" },
+      method: "PUT",
+    },
+  );
   return { applied: response.applied, current: toWatchState(response.current) };
 }
 
@@ -399,11 +459,13 @@ export async function listWatchHistory<TMedia = unknown>(
   params: WatchHistoryParams = {},
 ): Promise<WatchHistoryPage<TMedia>> {
   const response = await client.request<RawWatchHistoryPage<TMedia>>(
-    buildPath('/api/library/watch-history', watchListSearchParams(params)),
+    buildPath("/api/library/watch-history", watchListSearchParams(params)),
   );
   return {
     items: response.items.map(toWatchMediaEntry),
-    ...(response.next_cursor === undefined ? {} : { nextCursor: response.next_cursor }),
+    ...(response.next_cursor === undefined
+      ? {}
+      : { nextCursor: response.next_cursor }),
   };
 }
 
@@ -413,7 +475,7 @@ export async function listContinueWatching<TMedia = unknown>(
 ): Promise<readonly WatchMediaEntry<TMedia>[]> {
   const params: WatchHistoryParams = limit === undefined ? {} : { limit };
   const response = await client.request<RawWatchList<TMedia>>(
-    buildPath('/api/library/continue-watching', watchListSearchParams(params)),
+    buildPath("/api/library/continue-watching", watchListSearchParams(params)),
   );
   return response.items.map(toWatchMediaEntry);
 }
@@ -422,7 +484,9 @@ export async function getMediaChapters(
   client: ApiClient,
   mediaId: MediaIdentifier,
 ): Promise<MediaChaptersResult> {
-  const response = await client.request<RawMediaChaptersResult>(`${mediaLibraryPath(mediaId)}/chapters`);
+  const response = await client.request<RawMediaChaptersResult>(
+    `${mediaLibraryPath(mediaId)}/chapters`,
+  );
   return {
     items: response.items.map(toMediaChapter),
     parsedAt: response.parsed_at,
@@ -434,7 +498,9 @@ export async function listMediaBookmarks(
   client: ApiClient,
   mediaId: MediaIdentifier,
 ): Promise<readonly MediaBookmark[]> {
-  const response = await client.request<RawMediaBookmarksResult>(`${mediaLibraryPath(mediaId)}/bookmarks`);
+  const response = await client.request<RawMediaBookmarksResult>(
+    `${mediaLibraryPath(mediaId)}/bookmarks`,
+  );
   return response.items.map(toMediaBookmark);
 }
 
@@ -447,7 +513,10 @@ export async function createMediaBookmark(
   return mutateBookmark(
     () =>
       client
-        .request<RawMediaBookmark>(`${mediaLibraryPath(mediaId)}/bookmarks`, jsonRequest('POST', bookmarkBody(input)))
+        .request<RawMediaBookmark>(
+          `${mediaLibraryPath(mediaId)}/bookmarks`,
+          jsonRequest("POST", bookmarkBody(input)),
+        )
         .then(toMediaBookmark),
     options,
   );
@@ -462,7 +531,13 @@ export async function updateMediaBookmark(
 ): Promise<MediaBookmark> {
   const path = `${mediaLibraryPath(mediaId)}/bookmarks/${encodeURIComponent(bookmarkId)}`;
   return mutateBookmark(
-    () => client.request<RawMediaBookmark>(path, jsonRequest('PUT', bookmarkBody(input))).then(toMediaBookmark),
+    () =>
+      client
+        .request<RawMediaBookmark>(
+          path,
+          jsonRequest("PUT", bookmarkBody(input)),
+        )
+        .then(toMediaBookmark),
     options,
   );
 }
@@ -476,11 +551,19 @@ export async function deleteMediaBookmark(
 ): Promise<void> {
   const query = new URLSearchParams({ revision: String(revision) });
   const path = `${mediaLibraryPath(mediaId)}/bookmarks/${encodeURIComponent(bookmarkId)}?${query.toString()}`;
-  return mutateBookmark(() => client.request<undefined>(path, { method: 'DELETE' }), options);
+  return mutateBookmark(
+    () => client.request<undefined>(path, { method: "DELETE" }),
+    options,
+  );
 }
 
-export async function listTasks(client: ApiClient, params: TaskListParams = {}): Promise<PageResult<TaskItem>> {
-  const response = await client.request<RawTaskPage>(buildPath('/api/tasks', taskSearchParams(params)));
+export async function listTasks(
+  client: ApiClient,
+  params: TaskListParams = {},
+): Promise<PageResult<TaskItem>> {
+  const response = await client.request<RawTaskPage>(
+    buildPath("/api/tasks", taskSearchParams(params)),
+  );
   return {
     items: response.items.map(toTaskItem),
     page: response.page,
@@ -489,12 +572,22 @@ export async function listTasks(client: ApiClient, params: TaskListParams = {}):
   };
 }
 
-export async function getTask(client: ApiClient, id: string): Promise<TaskItem> {
-  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}`));
+export async function getTask(
+  client: ApiClient,
+  id: string,
+): Promise<TaskItem> {
+  return toTaskItem(
+    await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}`),
+  );
 }
 
-export async function getTaskStats(client: ApiClient, params: Pick<TaskListParams, 'status' | 'type'> = {}): Promise<TaskStats> {
-  const response = await client.request<RawTaskStats>(buildPath('/api/tasks/stats', taskSearchParams(params)));
+export async function getTaskStats(
+  client: ApiClient,
+  params: Pick<TaskListParams, "status" | "type"> = {},
+): Promise<TaskStats> {
+  const response = await client.request<RawTaskStats>(
+    buildPath("/api/tasks/stats", taskSearchParams(params)),
+  );
   return {
     byStatus: normalizeTaskStatusCounts(response.by_status),
     byType: response.by_type,
@@ -502,16 +595,32 @@ export async function getTaskStats(client: ApiClient, params: Pick<TaskListParam
   };
 }
 
-export async function cancelTask(client: ApiClient, id: string): Promise<TaskItem> {
-  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }));
+export async function cancelTask(
+  client: ApiClient,
+  id: string,
+): Promise<TaskItem> {
+  return toTaskItem(
+    await client.request<RawTaskItem>(
+      `/api/tasks/${encodeURIComponent(id)}/cancel`,
+      { method: "POST" },
+    ),
+  );
 }
 
-export async function retryTask(client: ApiClient, id: string): Promise<TaskItem> {
-  return toTaskItem(await client.request<RawTaskItem>(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST' }));
+export async function retryTask(
+  client: ApiClient,
+  id: string,
+): Promise<TaskItem> {
+  return toTaskItem(
+    await client.request<RawTaskItem>(
+      `/api/tasks/${encodeURIComponent(id)}/retry`,
+      { method: "POST" },
+    ),
+  );
 }
 
 export function taskPollInterval(task: TaskItem): 2000 | false {
-  return task.status === 'pending' || task.status === 'running' ? 2_000 : false;
+  return task.status === "pending" || task.status === "running" ? 2_000 : false;
 }
 
 interface RawMediaPage {
@@ -525,7 +634,7 @@ interface RawMediaItem {
   readonly created_at: string;
   readonly duration_seconds: number;
   readonly id: string;
-  readonly kind: 'video' | 'image';
+  readonly kind: "video" | "image";
   readonly space_id: string;
   readonly title: string;
 }
@@ -563,7 +672,7 @@ interface RawWatchHistoryPage<TMedia> extends RawWatchList<TMedia> {
 }
 
 interface RawWatchStateConflictBody {
-  readonly code: 'WATCH_STATE_CONFLICT';
+  readonly code: "WATCH_STATE_CONFLICT";
   readonly current: RawWatchState;
   readonly message: string;
 }
@@ -572,7 +681,7 @@ interface RawMediaChapter {
   readonly end_ms: number;
   readonly id: string;
   readonly language?: string;
-  readonly source: 'embedded';
+  readonly source: "embedded";
   readonly source_index: number;
   readonly start_ms: number;
   readonly title: string;
@@ -606,7 +715,7 @@ interface RawTaskItem {
   readonly progress: number;
   readonly space_id: string | null;
   readonly status: string;
-  readonly type: TaskItem['type'];
+  readonly type: TaskItem["type"];
   readonly updated_at: string;
 }
 
@@ -658,11 +767,15 @@ function toRawWatchStateEvent(event: WatchStateEvent): Record<string, unknown> {
     event_seq: event.eventSeq,
     event_type: event.eventType,
     reason: event.reason,
-    ...(event.durationSeconds === undefined ? {} : { duration_seconds: event.durationSeconds }),
+    ...(event.durationSeconds === undefined
+      ? {}
+      : { duration_seconds: event.durationSeconds }),
   };
 }
 
-function toWatchMediaEntry<TMedia>(entry: RawWatchMediaEntry<TMedia>): WatchMediaEntry<TMedia> {
+function toWatchMediaEntry<TMedia>(
+  entry: RawWatchMediaEntry<TMedia>,
+): WatchMediaEntry<TMedia> {
   return { media: entry.media, watchState: toWatchState(entry.watch_state) };
 }
 
@@ -670,7 +783,7 @@ function toMediaChapter(item: RawMediaChapter): MediaChapter {
   return {
     endMs: item.end_ms,
     id: item.id,
-    language: item.language ?? '',
+    language: item.language ?? "",
     source: item.source,
     sourceIndex: item.source_index,
     startMs: item.start_ms,
@@ -711,10 +824,10 @@ function watchStatePath(mediaId: string): string {
 function watchListSearchParams(params: WatchHistoryParams): URLSearchParams {
   const searchParams = new URLSearchParams();
   if (params.cursor !== undefined) {
-    searchParams.set('cursor', params.cursor);
+    searchParams.set("cursor", params.cursor);
   }
   if (params.limit !== undefined) {
-    searchParams.set('limit', String(params.limit));
+    searchParams.set("limit", String(params.limit));
   }
   return searchParams;
 }
@@ -723,7 +836,9 @@ function mediaLibraryPath(mediaId: MediaIdentifier): string {
   return `/api/library/media/${encodeURIComponent(String(mediaId))}`;
 }
 
-function bookmarkBody(input: MediaBookmarkInput | MediaBookmarkUpdate): Record<string, number | string | null> {
+function bookmarkBody(
+  input: MediaBookmarkInput | MediaBookmarkUpdate,
+): Record<string, number | string | null> {
   const body: Record<string, number | string | null> = {
     position_ms: input.positionMs,
     title: input.title,
@@ -731,21 +846,23 @@ function bookmarkBody(input: MediaBookmarkInput | MediaBookmarkUpdate): Record<s
   if (input.note !== undefined) {
     body.note = input.note;
   }
-  if ('revision' in input) {
+  if ("revision" in input) {
     body.revision = input.revision;
   }
   return body;
 }
 
-function jsonRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
+function jsonRequest(method: "POST" | "PUT", body: unknown): RequestInit {
   return {
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
     method,
   };
 }
 
-async function reloadAfterBookmarkMutation(options: BookmarkMutationOptions): Promise<void> {
+async function reloadAfterBookmarkMutation(
+  options: BookmarkMutationOptions,
+): Promise<void> {
   try {
     await options.reload();
   } catch (error) {
@@ -757,15 +874,20 @@ async function reloadAfterBookmarkMutation(options: BookmarkMutationOptions): Pr
   }
 }
 
-async function mutateBookmark<T>(mutation: () => Promise<T>, options: BookmarkMutationOptions): Promise<T> {
+async function mutateBookmark<T>(
+  mutation: () => Promise<T>,
+  options: BookmarkMutationOptions,
+): Promise<T> {
   let result: T;
   try {
     result = await mutation();
   } catch (error) {
-    if (error instanceof BookmarkConflictError) await reloadAfterBookmarkMutation(options);
+    if (error instanceof BookmarkConflictError)
+      await reloadAfterBookmarkMutation(options);
     throw error;
   }
-  if (options.reloadAfterSuccess !== false) await reloadAfterBookmarkMutation(options);
+  if (options.reloadAfterSuccess !== false)
+    await reloadAfterBookmarkMutation(options);
   return result;
 }
 
@@ -774,30 +896,37 @@ function buildPath(path: string, params: URLSearchParams): string {
   return query ? `${path}?${query}` : path;
 }
 
-function taskSearchParams(params: Pick<TaskListParams, 'page' | 'pageSize' | 'resourceId' | 'resourceType' | 'status' | 'type'>): URLSearchParams {
+function taskSearchParams(
+  params: Pick<
+    TaskListParams,
+    "page" | "pageSize" | "resourceId" | "resourceType" | "status" | "type"
+  >,
+): URLSearchParams {
   const searchParams = new URLSearchParams();
   if (params.page !== undefined) {
-    searchParams.set('page', String(params.page));
+    searchParams.set("page", String(params.page));
   }
   if (params.pageSize !== undefined) {
-    searchParams.set('page_size', String(params.pageSize));
+    searchParams.set("page_size", String(params.pageSize));
   }
   if (params.type !== undefined) {
-    searchParams.set('type', params.type);
+    searchParams.set("type", params.type);
   }
   if (params.status !== undefined) {
-    searchParams.set('status', params.status);
+    searchParams.set("status", params.status);
   }
   if (params.resourceType !== undefined) {
-    searchParams.set('resource_type', params.resourceType);
+    searchParams.set("resource_type", params.resourceType);
   }
   if (params.resourceId !== undefined) {
-    searchParams.set('resource_id', params.resourceId);
+    searchParams.set("resource_id", params.resourceId);
   }
   return searchParams;
 }
 
-function normalizeTaskStatusCounts(counts: Record<string, number>): Partial<Record<TaskState, number>> {
+function normalizeTaskStatusCounts(
+  counts: Record<string, number>,
+): Partial<Record<TaskState, number>> {
   const result: Partial<Record<TaskState, number>> = {};
   for (const [status, count] of Object.entries(counts)) {
     const normalized = normalizeLegacyTaskState(status);
@@ -827,12 +956,15 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-function buildHeaders(headers: HeadersInit | undefined, options: ApiClientOptions): Headers {
+function buildHeaders(
+  headers: HeadersInit | undefined,
+  options: ApiClientOptions,
+): Headers {
   const result = new Headers(headers);
-  result.set('Accept', 'application/json');
-  result.set('X-JianVideo-Space-Id', options.space.spaceId);
+  result.set("Accept", "application/json");
+  result.set("X-JianVideo-Space-Id", options.space.spaceId);
   if (options.authToken !== undefined) {
-    result.set('Authorization', `Bearer ${options.authToken}`);
+    result.set("Authorization", `Bearer ${options.authToken}`);
   }
   return result;
 }
@@ -840,7 +972,10 @@ function buildHeaders(headers: HeadersInit | undefined, options: ApiClientOption
 async function toApiError(response: Response): Promise<ApiError> {
   const body = (await response.json().catch(() => undefined)) as unknown;
   if (response.status === 409 && isWatchStateConflictBody(body)) {
-    return new WatchStateConflictError(body.message, toWatchState(body.current));
+    return new WatchStateConflictError(
+      body.message,
+      toWatchState(body.current),
+    );
   }
   if (response.status === 409 && isBookmarkConflictBody(body)) {
     return new BookmarkConflictError(
@@ -852,50 +987,70 @@ async function toApiError(response: Response): Promise<ApiError> {
   if (isErrorBody(body)) {
     return new ApiError(response.status, body.code, body.message);
   }
-  return new ApiError(response.status, `HTTP_${String(response.status)}`, '接口请求失败');
+  return new ApiError(
+    response.status,
+    `HTTP_${String(response.status)}`,
+    "接口请求失败",
+  );
 }
 
-function isWatchStateConflictBody(value: unknown): value is RawWatchStateConflictBody {
-  return isErrorBody(value) && value.code === 'WATCH_STATE_CONFLICT' && 'current' in value;
-}
-
-function isBookmarkConflictBody(
+function isWatchStateConflictBody(
   value: unknown,
-): value is {
-  readonly code: 'BOOKMARK_CONFLICT';
+): value is RawWatchStateConflictBody {
+  return (
+    isErrorBody(value) &&
+    value.code === "WATCH_STATE_CONFLICT" &&
+    "current" in value
+  );
+}
+
+function isBookmarkConflictBody(value: unknown): value is {
+  readonly code: "BOOKMARK_CONFLICT";
   readonly current: RawMediaBookmark | null;
   readonly deleted: boolean;
   readonly message: string;
 } {
   return (
     isErrorBody(value) &&
-    value.code === 'BOOKMARK_CONFLICT' &&
-    'current' in value &&
+    value.code === "BOOKMARK_CONFLICT" &&
+    "current" in value &&
     (value.current === null || isRawMediaBookmark(value.current)) &&
-    'deleted' in value &&
-    typeof value.deleted === 'boolean'
+    "deleted" in value &&
+    typeof value.deleted === "boolean"
   );
 }
 
 function isRawMediaBookmark(value: unknown): value is RawMediaBookmark {
   return (
-    typeof value === 'object' &&
+    typeof value === "object" &&
     value !== null &&
-    'created_at' in value &&
-    'id' in value &&
-    'note' in value &&
-    'position_ms' in value &&
-    'revision' in value &&
-    'title' in value &&
-    'updated_at' in value
+    "created_at" in value &&
+    "id" in value &&
+    "note" in value &&
+    "position_ms" in value &&
+    "revision" in value &&
+    "title" in value &&
+    "updated_at" in value
   );
 }
 
-function isErrorBody(value: unknown): value is { readonly code: string; readonly message: string } {
-  return typeof value === 'object' && value !== null && 'code' in value && 'message' in value;
+function isErrorBody(
+  value: unknown,
+): value is { readonly code: string; readonly message: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    "message" in value
+  );
 }
 
-function shouldRetry(error: ApiError, attempt: number, attempts: number, retry: RetryOptions | undefined): boolean {
+function shouldRetry(
+  error: ApiError,
+  attempt: number,
+  attempts: number,
+  retry: RetryOptions | undefined,
+): boolean {
   if (attempt >= attempts) {
     return false;
   }
@@ -906,48 +1061,54 @@ function shouldRetry(error: ApiError, attempt: number, attempts: number, retry: 
 }
 
 function detectPlatform(userAgent: string): DevicePlatform {
-  if (userAgent.includes('automotive')) {
-    return 'automotive';
+  if (userAgent.includes("automotive")) {
+    return "automotive";
   }
   if (
-    userAgent.includes('android tv') ||
-    userAgent.includes('appletv') ||
-    userAgent.includes('smart-tv') ||
-    userAgent.includes('hbbtv') ||
-    userAgent.includes('tizen') ||
-    userAgent.includes('webos')
+    userAgent.includes("android tv") ||
+    userAgent.includes("appletv") ||
+    userAgent.includes("smart-tv") ||
+    userAgent.includes("hbbtv") ||
+    userAgent.includes("tizen") ||
+    userAgent.includes("webos")
   ) {
-    return 'tv';
+    return "tv";
   }
   if (
-    userAgent.includes('mobile') ||
-    userAgent.includes('android') ||
-    userAgent.includes('iphone') ||
-    userAgent.includes('ipad')
+    userAgent.includes("mobile") ||
+    userAgent.includes("android") ||
+    userAgent.includes("iphone") ||
+    userAgent.includes("ipad")
   ) {
-    return 'mobile';
+    return "mobile";
   }
   if (
-    userAgent.includes('windows') ||
-    userAgent.includes('macintosh') ||
-    userAgent.includes('x11') ||
-    userAgent.includes('linux')
+    userAgent.includes("windows") ||
+    userAgent.includes("macintosh") ||
+    userAgent.includes("x11") ||
+    userAgent.includes("linux")
   ) {
-    return 'desktop';
+    return "desktop";
   }
-  return 'web';
+  return "web";
 }
 
-function detectNetwork(navigatorLike: DeviceDetectionInput['navigator']): NetworkCapability {
+function detectNetwork(
+  navigatorLike: DeviceDetectionInput["navigator"],
+): NetworkCapability {
   if (navigatorLike?.onLine === false) {
-    return 'offline';
+    return "offline";
   }
   const connection = navigatorLike?.connection;
-  if (connection?.saveData === true || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g') {
-    return 'constrained';
+  if (
+    connection?.saveData === true ||
+    connection?.effectiveType === "slow-2g" ||
+    connection?.effectiveType === "2g"
+  ) {
+    return "constrained";
   }
-  if (connection?.effectiveType === '4g' || (connection?.downlink ?? 0) >= 10) {
-    return 'fast';
+  if (connection?.effectiveType === "4g" || (connection?.downlink ?? 0) >= 10) {
+    return "fast";
   }
-  return 'standard';
+  return "standard";
 }
