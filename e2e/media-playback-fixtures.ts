@@ -331,7 +331,11 @@ export async function createHlsAbr(
   const response = await request.post(`/api/play/${mediaID}/hls-abr`, {
     data: { force_rebuild: true, priority: 8 },
   });
-  expect(response.status()).toBe(202);
+  if (response.status() !== 202) {
+    throw new Error(
+      `创建 HLS ABR 任务失败：HTTP ${response.status()} ${await response.text()}`,
+    );
+  }
   const body = (await response.json()) as { task_id: number; url: string };
   await waitUnifiedTask(request, body.task_id);
   return body.url;

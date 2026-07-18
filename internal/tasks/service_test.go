@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -148,6 +149,71 @@ func TestConcurrentEnqueueSameIdempotencyKeyCreatesOneUnfinishedTask(t *testing.
 	if got := countTasks(t, db, "idempotency_key = ?", input.IdempotencyKey); got != 1 {
 		t.Fatalf("并发同幂等键只应产生一条未完成任务: %d", got)
 	}
+}
+
+func TestEnqueueRetriesWALSnapshotConflict(t *testing.T) {
+	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "tasks-snapshot.db")) + "?_busy_timeout=1000&_journal_mode=WAL"
+	dbA := openTaskWALDB(t, dsn)
+	dbB := openTaskWALDB(t, dsn)
+	if err := dbA.AutoMigrate(&models.Task{}); err != nil {
+		t.Fatalf("迁移任务表失败: %v", err)
+	}
+
+	const callbackName = "test:task-enqueue-busy-snapshot"
+	var attempts atomic.Int32
+	var injected atomic.Bool
+	if err := dbA.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "tasks" {
+			return
+		}
+		attempts.Add(1)
+		if !injected.CompareAndSwap(false, true) {
+			return
+		}
+		now := time.Now().UTC()
+		if err := dbB.Create(&models.Task{
+			Scope: models.TaskScopeSystem, Type: "test.concurrent-write", Status: models.TaskStatusSucceeded,
+			MaxAttempts: 1, CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			t.Errorf("注入 WAL 并发写失败: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("注册 WAL 快照冲突回调失败: %v", err)
+	}
+	t.Cleanup(func() { _ = dbA.Callback().Query().Remove(callbackName) })
+
+	service := NewService(dbA)
+	task, err := service.Enqueue(context.Background(), EnqueueInput{
+		Scope: models.TaskScopeSpace, SpaceID: models.DefaultSpaceID, Type: "transcode.hls.abr",
+		IdempotencyKey: "hls-abr:space-default:42", ResourceType: "media", ResourceID: "42",
+	})
+	if err != nil {
+		t.Fatalf("WAL 快照冲突后入队应自动重试: %v", err)
+	}
+	if !injected.Load() || attempts.Load() != 2 {
+		t.Fatalf("WAL 快照冲突应触发一次重试: injected=%t attempts=%d", injected.Load(), attempts.Load())
+	}
+	if task == nil || task.ID == 0 {
+		t.Fatalf("重试后应返回已创建任务: %+v", task)
+	}
+	if got := countTasks(t, dbA, "idempotency_key = ?", "hls-abr:space-default:42"); got != 1 {
+		t.Fatalf("重试后只应创建一条目标任务: %d", got)
+	}
+}
+
+func openTaskWALDB(t *testing.T, dsn string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开任务 WAL 测试库失败: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("读取任务 WAL 底层数据库失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return db
 }
 
 func TestSyncLegacyUpsertsAndMapsStatus(t *testing.T) {
