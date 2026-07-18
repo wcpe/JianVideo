@@ -46,6 +46,11 @@ linters:
         linters:
           - gosec
         text: "G304:"
+      # 回收清理只打开已入库源文件或经回收根边界校验的暂存文件，调用方还会比对文件身份并拒绝链接或替换
+      - path: internal/library/recycle_path_other\.go
+        linters:
+          - gosec
+        text: "G304:"
       # 内嵌元数据解析只执行配置解析后的 ffprobe，输入路径来自已入库媒体记录
       - path: internal/library/embedded_metadata_parser\.go
         linters:
