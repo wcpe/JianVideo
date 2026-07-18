@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/audit"
+	"github.com/wcpe/JianVideo/internal/db"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/smb"
 )
@@ -37,8 +37,6 @@ var (
 	// ErrInvalidMoveTarget 移动目标目录不合法。
 	ErrInvalidMoveTarget = errors.New("移动目标目录不合法")
 )
-
-const deleteLibraryPathMaxAttempts = 3
 
 // ErrRecycleMediaNotFound 表示指定媒体当前不在回收站中。
 var ErrRecycleMediaNotFound = errors.New("回收站中不存在该媒体文件")
@@ -412,14 +410,9 @@ func (s *Service) DeleteLibraryPath(id int64) error {
 // DeleteLibraryPathInSpace 删除指定 Space 的媒体库目录及其关联媒体记录。
 func (s *Service) DeleteLibraryPathInSpace(spaceID string, id int64) error {
 	spaceID = normalizeSpaceID(spaceID)
-	var err error
-	for attempt := 0; attempt < deleteLibraryPathMaxAttempts; attempt++ {
-		err = s.deleteLibraryPathInSpaceOnce(spaceID, id)
-		if !isSQLiteBusySnapshot(err) {
-			return err
-		}
-	}
-	return err
+	return db.RetrySQLiteBusySnapshot(context.Background(), func() error {
+		return s.deleteLibraryPathInSpaceOnce(spaceID, id)
+	})
 }
 
 func (s *Service) deleteLibraryPathInSpaceOnce(spaceID string, id int64) error {
@@ -452,11 +445,6 @@ func (s *Service) deleteLibraryPathInSpaceOnce(spaceID string, id int64) error {
 			Before:       libraryAuditPayload(&before),
 		})
 	})
-}
-
-func isSQLiteBusySnapshot(err error) bool {
-	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
 }
 
 type mediaDeleteRef struct {

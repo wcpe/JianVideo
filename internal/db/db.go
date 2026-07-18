@@ -2,9 +2,53 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/mattn/go-sqlite3"
 )
+
+const (
+	sqliteBusySnapshotMaxAttempts = 5
+	sqliteBusySnapshotRetryDelay  = 10 * time.Millisecond
+)
+
+// RetrySQLiteBusySnapshot 在 SQLite WAL 读快照失效时重跑完整原子操作。
+func RetrySQLiteBusySnapshot(ctx context.Context, operation func() error) error {
+	var err error
+	for attempt := 0; attempt < sqliteBusySnapshotMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err = operation()
+		if err == nil || !isSQLiteBusySnapshot(err) || attempt == sqliteBusySnapshotMaxAttempts-1 {
+			return err
+		}
+		if err := waitSQLiteBusySnapshotRetry(ctx, attempt); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func waitSQLiteBusySnapshotRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt+1) * sqliteBusySnapshotRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isSQLiteBusySnapshot(err error) bool {
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
+}
 
 // Open 打开 SQLite 数据库并启用 WAL 模式
 func Open(dataSourceName string) (*sql.DB, error) {

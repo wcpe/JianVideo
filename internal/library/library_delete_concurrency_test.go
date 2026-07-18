@@ -1,6 +1,7 @@
 package library
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -51,22 +52,24 @@ func TestDeleteLibraryPathInSpace重试WAL快照写冲突(t *testing.T) {
 	}
 
 	const callbackName = "test:library-delete-busy-snapshot"
+	const conflictCount = int32(4)
 	var attempts atomic.Int32
-	var injected atomic.Bool
+	var injected atomic.Int32
 	if err := dbA.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
 		if tx.Statement.Table != "library_paths" {
 			return
 		}
-		attempts.Add(1)
-		if !injected.CompareAndSwap(false, true) {
+		attempt := attempts.Add(1)
+		if attempt > conflictCount {
 			return
 		}
+		injection := injected.Add(1)
 		if err := dbB.Create(&models.MediaExtension{
 			LibraryID: libraryPath.ID,
-			Extension: "snapshot-race",
+			Extension: fmt.Sprintf("snapshot-race-%d", injection),
 			Type:      "video",
 		}).Error; err != nil {
-			t.Errorf("注入 WAL 并发写失败: %v", err)
+			t.Errorf("第 %d 次注入 WAL 并发写失败: %v", injection, err)
 		}
 	}); err != nil {
 		t.Fatalf("注册 WAL 快照冲突回调失败: %v", err)
@@ -76,11 +79,11 @@ func TestDeleteLibraryPathInSpace重试WAL快照写冲突(t *testing.T) {
 	if err := service.DeleteLibraryPathInSpace(models.DefaultSpaceID, libraryPath.ID); err != nil {
 		t.Fatalf("WAL 快照冲突后删除媒体库应自动重试: %v", err)
 	}
-	if !injected.Load() {
-		t.Fatal("WAL 快照冲突必须已注入")
+	if injected.Load() != conflictCount {
+		t.Fatalf("应连续注入 %d 次 WAL 快照冲突，实际注入 %d 次", conflictCount, injected.Load())
 	}
-	if attempts.Load() != 2 {
-		t.Fatalf("WAL 快照冲突后应重试一次, 实际事务尝试 %d 次", attempts.Load())
+	if attempts.Load() != conflictCount+1 {
+		t.Fatalf("连续 WAL 快照冲突后应在第 5 次事务成功，实际事务尝试 %d 次", attempts.Load())
 	}
 	if err := dbA.Callback().Query().Remove(callbackName); err != nil {
 		t.Fatalf("移除 WAL 快照冲突回调失败: %v", err)

@@ -1,6 +1,10 @@
 package settings
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,6 +160,85 @@ func TestSetManyAtomicAndPersist(t *testing.T) {
 	if all[KeyRecycleBinPaths] != `{"E":"E:/trash"}` {
 		t.Fatalf("回收站路径未持久化, 实际 %q", all[KeyRecycleBinPaths])
 	}
+}
+
+func TestSetManyWithHookRetriesRepeatedWALSnapshotConflicts(t *testing.T) {
+	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "settings-snapshot.db")) + "?_busy_timeout=1000&_journal_mode=WAL"
+	dbA := openSettingsWALDB(t, dsn)
+	dbB := openSettingsWALDB(t, dsn)
+	if err := dbA.AutoMigrate(&models.Setting{}); err != nil {
+		t.Fatalf("迁移设置表失败: %v", err)
+	}
+	if err := dbA.Create(&models.Setting{Key: KeyScanInterval, Value: "100", UpdatedAt: time.Now()}).Error; err != nil {
+		t.Fatalf("写入初始设置失败: %v", err)
+	}
+
+	const (
+		callbackName     = "test:settings-busy-snapshot"
+		conflictAttempts = 4
+	)
+	var attempts atomic.Int32
+	var injected atomic.Int32
+	if err := dbA.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "settings" {
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt > conflictAttempts {
+			return
+		}
+		injected.Add(1)
+		value := fmt.Sprintf("10%d", attempt)
+		if err := dbB.Model(&models.Setting{}).Where("key = ?", KeyScanInterval).Updates(map[string]any{
+			"value":      value,
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+			t.Errorf("注入 WAL 并发写失败: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("注册 WAL 快照冲突回调失败: %v", err)
+	}
+	t.Cleanup(func() { _ = dbA.Callback().Query().Remove(callbackName) })
+
+	var hookCalls atomic.Int32
+	var hookBefore string
+	svc := NewService(dbA)
+	err := svc.SetManyWithHook(context.Background(), map[string]string{KeyScanInterval: "900"}, func(_ context.Context, _ *gorm.DB, before, _ map[string]string) error {
+		hookCalls.Add(1)
+		hookBefore = before[KeyScanInterval]
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("连续 WAL 快照冲突后设置事务应自动重试: %v", err)
+	}
+	if attempts.Load() != conflictAttempts+1 || injected.Load() != conflictAttempts {
+		t.Fatalf("连续 WAL 快照冲突应在第 5 次事务成功：事务尝试=%d 冲突注入=%d", attempts.Load(), injected.Load())
+	}
+	if hookCalls.Load() != 1 || hookBefore != "104" {
+		t.Fatalf("成功重试应使用最新事务快照执行事务钩子：调用次数=%d 前值=%q", hookCalls.Load(), hookBefore)
+	}
+	var setting models.Setting
+	if err := dbB.First(&setting, "key = ?", KeyScanInterval).Error; err != nil {
+		t.Fatalf("读取最终设置失败: %v", err)
+	}
+	if setting.Value != "900" {
+		t.Fatalf("目标设置最终值应为 900, 实际 %q", setting.Value)
+	}
+}
+
+func openSettingsWALDB(t *testing.T, dsn string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开设置 WAL 测试库失败: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("读取设置 WAL 底层数据库失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return db
 }
 
 func TestSetManyRejectsUnknownKeyAtomically(t *testing.T) {

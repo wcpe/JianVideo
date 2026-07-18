@@ -1,13 +1,49 @@
 package db
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRetrySQLiteBusySnapshotRetriesUntilSuccess(t *testing.T) {
+	attempts := 0
+	err := RetrySQLiteBusySnapshot(context.Background(), func() error {
+		attempts++
+		if attempts < 5 {
+			return sqlite3.Error{Code: sqlite3.ErrBusy, ExtendedCode: sqlite3.ErrBusySnapshot}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 5, attempts)
+}
+
+func TestRetrySQLiteBusySnapshotDoesNotRetryOrdinaryBusy(t *testing.T) {
+	attempts := 0
+	err := RetrySQLiteBusySnapshot(context.Background(), func() error {
+		attempts++
+		return sqlite3.Error{Code: sqlite3.ErrBusy}
+	})
+	require.Error(t, err)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestRetrySQLiteBusySnapshotHonorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	err := RetrySQLiteBusySnapshot(ctx, func() error {
+		attempts++
+		cancel()
+		return sqlite3.Error{Code: sqlite3.ErrBusy, ExtendedCode: sqlite3.ErrBusySnapshot}
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, attempts)
+}
 
 func TestOpen_MemoryDB(t *testing.T) {
 	d, err := Open("file::memory:?cache=shared")

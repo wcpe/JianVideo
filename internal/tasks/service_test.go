@@ -151,7 +151,7 @@ func TestConcurrentEnqueueSameIdempotencyKeyCreatesOneUnfinishedTask(t *testing.
 	}
 }
 
-func TestEnqueueRetriesWALSnapshotConflict(t *testing.T) {
+func TestEnqueueRetriesRepeatedWALSnapshotConflicts(t *testing.T) {
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "tasks-snapshot.db")) + "?_busy_timeout=1000&_journal_mode=WAL"
 	dbA := openTaskWALDB(t, dsn)
 	dbB := openTaskWALDB(t, dsn)
@@ -159,17 +159,20 @@ func TestEnqueueRetriesWALSnapshotConflict(t *testing.T) {
 		t.Fatalf("迁移任务表失败: %v", err)
 	}
 
-	const callbackName = "test:task-enqueue-busy-snapshot"
+	const (
+		callbackName     = "test:task-enqueue-busy-snapshot"
+		conflictAttempts = 4
+	)
 	var attempts atomic.Int32
-	var injected atomic.Bool
+	var injected atomic.Int32
 	if err := dbA.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
 		if tx.Statement.Table != "tasks" {
 			return
 		}
-		attempts.Add(1)
-		if !injected.CompareAndSwap(false, true) {
+		if attempts.Add(1) > conflictAttempts {
 			return
 		}
+		injected.Add(1)
 		now := time.Now().UTC()
 		if err := dbB.Create(&models.Task{
 			Scope: models.TaskScopeSystem, Type: "test.concurrent-write", Status: models.TaskStatusSucceeded,
@@ -188,10 +191,10 @@ func TestEnqueueRetriesWALSnapshotConflict(t *testing.T) {
 		IdempotencyKey: "hls-abr:space-default:42", ResourceType: "media", ResourceID: "42",
 	})
 	if err != nil {
-		t.Fatalf("WAL 快照冲突后入队应自动重试: %v", err)
+		t.Fatalf("连续 WAL 快照冲突后入队应自动重试: %v", err)
 	}
-	if !injected.Load() || attempts.Load() != 2 {
-		t.Fatalf("WAL 快照冲突应触发一次重试: injected=%t attempts=%d", injected.Load(), attempts.Load())
+	if injected.Load() != conflictAttempts || attempts.Load() != conflictAttempts+1 {
+		t.Fatalf("连续 WAL 快照冲突应重试至成功: injected=%d attempts=%d", injected.Load(), attempts.Load())
 	}
 	if task == nil || task.ID == 0 {
 		t.Fatalf("重试后应返回已创建任务: %+v", task)

@@ -9,16 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/audit"
+	dbutil "github.com/wcpe/JianVideo/internal/db"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
 const (
 	fairnessHighPriorityLimit = 3
-	taskEnqueueMaxAttempts    = 3
 	retryBackoffBase          = time.Second
 )
 
@@ -161,21 +160,14 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Task
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var task *models.Task
-	var err error
-	for attempt := 0; attempt < taskEnqueueMaxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	err := dbutil.RetrySQLiteBusySnapshot(ctx, func() error {
 		task = nil
-		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var enqueueErr error
 			task, enqueueErr = s.enqueueTxLocked(ctx, tx, input)
 			return enqueueErr
 		})
-		if !isSQLiteBusySnapshot(err) {
-			return task, err
-		}
-	}
+	})
 	return task, err
 }
 
@@ -221,11 +213,6 @@ func (s *Service) enqueueTxLocked(ctx context.Context, tx *gorm.DB, input Enqueu
 		return nil, err
 	}
 	return &task, nil
-}
-
-func isSQLiteBusySnapshot(err error) bool {
-	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
 }
 
 // SyncLegacy 将旧扫描或转码队列任务同步到通用任务真源。

@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/wcpe/JianVideo/internal/audit"
+	dbhelper "github.com/wcpe/JianVideo/internal/db"
 	"github.com/wcpe/JianVideo/internal/db/models"
 )
 
@@ -229,22 +230,24 @@ func (s *Service) SetManyWithHook(ctx context.Context, values map[string]string,
 			return err
 		}
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		before, err := s.getValuesTx(tx, values)
-		if err != nil {
-			return err
-		}
-		for key, value := range values {
-			if err := s.upsert(tx, key, value); err != nil {
+	return dbhelper.RetrySQLiteBusySnapshot(ctx, func() error {
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			before, err := s.getValuesTx(tx, values)
+			if err != nil {
 				return err
 			}
-		}
-		if hook != nil {
-			if err := hook(ctx, tx, before, values); err != nil {
-				return err
+			for key, value := range values {
+				if err := s.upsert(tx, key, value); err != nil {
+					return err
+				}
 			}
-		}
-		return s.recordSettingsAudit(ctx, tx, before, values)
+			if hook != nil {
+				if err := hook(ctx, tx, before, values); err != nil {
+					return err
+				}
+			}
+			return s.recordSettingsAudit(ctx, tx, before, values)
+		})
 	})
 }
 
