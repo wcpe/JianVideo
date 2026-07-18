@@ -119,7 +119,7 @@ JianVideo v2 从“轻量单用户家庭媒体库”升级为“自托管优先�
 | FR2-011 | AI 可替换管线：模型注册、推理节点、任务队列、结果表、重建策略和审计元数据 | P6 | 计划 |
 | FR2-012 | AI 搜索、去重与审核流：人脸、OCR、对象/场景、视频理解、向量语义搜索、AI 去重和人工审核 | P6 | 计划 |
 | FR2-013 | 多端交付基线：Web、Desktop、Android、iOS、Android TV、安卓车机按端能力复用同一后端和媒体能力 | P7 | 计划 |
-| FR2-014 | 运维与质量门：初始化向导、设置、诊断、队列监控、Benchmark、E2E、发布包和 1.0 RC 质量门 | P7 | 计划 |
+| FR2-014 | 运维与质量门：初始化向导、设置、诊断、队列监控、Benchmark、E2E、发布包和 1.0 RC 质量门；当前仅落地门控式 RC/GA 发布与 `dev` 实验工件切片，其余运维能力仍待后续 | P7 | 开发中 |
 | FR2-015 | 前端技术栈冻结：pnpm、Turborepo、Vite、React Router、TanStack Query、Zustand、react-i18next、MSW、PixiJS 的职责边界和迁移顺序确认 | P0.5 | 已交付@v0.21.0 |
 | FR2-016 | 最严静态检查门：Go 严格 lint/style/security，TypeScript strict-type-checked，Rust clippy pedantic，Kotlin detekt 全规则，SwiftLint strict + 11 个配置模板 | P0.5 | 已交付@v0.21.0 |
 | FR2-017 | v0.20 到 v2 数据迁移与升级安全：版本化 schema、Runner 单步事务原子性、settings blocker/warning 预检、高风险未知 key 阻断、真实旧库演练、旧任务幂等映射、迁移前备份校验与失败恢复具备可验证路径；`-migration-dry-run` 与 1m/5m/10m 规模迁移验收通过 | P2 | 已交付@v0.23.0 |

@@ -4,6 +4,14 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+### 变更
+
+- **FR2-014 门控式 RC/GA 发布切片**：`dev` 改为只生成短期 Actions 实验工件，公开 RC/GA 必须在 `main` 的固定提交上通过全仓四项质量门、Linux/Windows 原生构建、校验和与 Release 资产回下载复验后，才由最终 publish job 创建 tag 并公开；禁止人工预先 push 或占位 `v*` tag。RC 序号必须严格递增，RC/GA 公开发布串行执行，GA 必须显式指定同基线最高、已公开且资产校验通过的 `final_rc_tag`，并在打标签前再次复检；其后只允许 `VERSION`、CHANGELOG 与正式文档收口。分支名校验、失败清理归属与本地 checksums 信任根均按失败关闭处理。
+- **自更新候选频道归真**：原“测试版”频道收口为“候选版 RC”，只选择合法公开的 `X.Y.Z-rc.N` Release；历史滚动 `dev` Release 与 `dev` Actions 实验工件不再作为更新目标。Release 列表按每页 100 条顺序分页，超过 10 个满页时拒绝使用不完整结果，避免合法 RC 被固定前 20 条挤出。
+- **发布治理文档同步**：新增 ADR-0064 与 FR2-014 发布门规格，取代 ADR-0032/0042；同步 `dev`/`main` 分支职责、P8 RC `0.29.x` 版本线、自动发布现状与 FR-128 历史衔接。FR2-014 仅标记为开发中，不把整个运维与质量门能力误报为完成。
+
 ## 0.24.0（2026-07-17）
 
 ### 新增

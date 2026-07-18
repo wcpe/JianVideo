@@ -1,26 +1,35 @@
-# 质量门工作流：在 PR 与 push main 时统一执行根工作区、独立前端、Go 与 Playwright 门禁。
-# 任一 job 失败即整体失败、阻断合并。发版工作流职责不变（见 ADR-0047 / FR-128）。
-# 根工作区使用 pnpm 锁文件；独立前端继续使用 npm install，避免 Windows 生成的 lock
-# 缺少 Linux 平台可选依赖时触发 npm ci 严格同步失败。
+# 统一质量门。日常 PR/main push 与发布工作流复用同一组四项门禁。
 name: 质量门
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: 固定检出并验证的源码提交
+        required: false
+        type: string
   pull_request:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
-  # 根工作区门禁：覆盖 apps/* 与 packages/* 的构建、类型、lint、格式、测试、覆盖率与生产依赖审计。
   workspace-quality:
-    runs-on: ubuntu-latest
+    name: 根工作区质量门
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出固定源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           node-version: 20
       - name: 安装工作区依赖
@@ -31,30 +40,35 @@ jobs:
         run: pnpm audit --prod --audit-level high
       - name: 运行工作区质量门
         run: pnpm quality:workspace
+      - name: 运行发布工作流契约门
+        run: pnpm quality:release
 
-  # Go 门禁依赖 go:embed 的 frontend/dist，先构建前端再执行静态检查、漏洞扫描和覆盖率门。
   go-quality:
-    runs-on: ubuntu-latest
+    name: Go 质量门
+    runs-on: ubuntu-24.04
     env:
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
-      - name: 安装 Go（按 go.mod 版本）
-        uses: actions/setup-go@v5
+      - name: 检出固定源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: 安装 Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: 安装 ffmpeg（转码与真实媒体测试依赖）
+      - name: 安装媒体测试工具
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: 构建前端（供 go:embed 内嵌）
+      - name: 构建内嵌前端
         run: |
           corepack enable
-          npm --prefix frontend install
+          npm --prefix frontend install --no-audit --no-fund
           npm --prefix frontend run build
       - name: 安装 Go 质量工具
         run: |
@@ -63,13 +77,16 @@ jobs:
       - name: 运行 Go 质量门
         run: pnpm quality:go
 
-  # 独立前端门禁：覆盖构建、类型、lint、格式、测试、覆盖率与生产依赖审计。
   web-quality:
-    runs-on: ubuntu-latest
+    name: 独立前端质量门
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出固定源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           node-version: 20
           cache: npm
@@ -77,39 +94,41 @@ jobs:
       - name: 安装前端依赖
         run: |
           corepack enable
-          npm --prefix frontend install
+          npm --prefix frontend install --no-audit --no-fund
       - name: 审计前端生产依赖
         run: npm --prefix frontend audit --omit=dev --audit-level=high
       - name: 运行前端质量门
         run: pnpm quality:frontend
 
-  # Playwright 全量端到端：运行全部 Ubuntu 可执行用例，零重试并自动阻断未解释跳过。
   e2e:
-    runs-on: ubuntu-latest
+    name: Playwright 端到端质量门
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: 安装 Go（按 go.mod 版本）
-        uses: actions/setup-go@v5
+      - name: 检出固定源码
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: 安装 Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - name: 安装并校验 ffmpeg/ffprobe（真实媒体用例依赖）
+      - name: 安装媒体测试工具
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           ffmpeg -version
           ffprobe -version
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: 安装根工作区依赖
+      - name: 安装测试依赖
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-      - name: 安装前端依赖（webServer 构建前端用）
-        run: npm --prefix frontend install
+          npm --prefix frontend install --no-audit --no-fund
       - name: 安装 Playwright 浏览器
         run: pnpm exec playwright install --with-deps chromium
       - name: 运行端到端质量门

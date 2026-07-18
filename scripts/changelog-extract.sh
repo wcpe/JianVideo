@@ -1,43 +1,47 @@
 #!/usr/bin/env bash
-# 从 CHANGELOG.md 抽取指定版本段的正文，输出到 stdout（供发布工作流生成 Release notes）。
-# 用法：changelog-extract.sh <版本> [CHANGELOG 路径]
-#   <版本>：正式版号（如 0.16.1，匹配标题「## 0.16.1（日期）」）或字面量 unreleased（匹配「## 未发布」）。
-#   [CHANGELOG 路径]：默认仓库根的 CHANGELOG.md。
-# 抽取范围：目标 ## 标题的下一行起，到下一个 ## 标题之前（不含两端 ## 标题行），并去除首尾空行。
-# fence 状态机：代码块（``` 围栏）内的 ## 行不计为段落结束（参照 prerelease.yml 既有处理）。
+# 抽取 CHANGELOG 的未发布段或指定版本段；目标标题必须唯一且正文非空。
 set -euo pipefail
 
 version="${1:?用法：changelog-extract.sh <版本|unreleased> [CHANGELOG 路径]}"
 changelog="${2:-CHANGELOG.md}"
+[ -f "$changelog" ] || { echo "错误：找不到 CHANGELOG 文件：$changelog" >&2; exit 1; }
 
-if [ ! -f "$changelog" ]; then
-  echo "错误：找不到 CHANGELOG 文件：$changelog" >&2
-  exit 1
+if [ "$version" != "unreleased" ]; then
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo "错误：版本格式无效：$version" >&2; exit 2; }
 fi
 
-if [ "$version" = "unreleased" ]; then
-  # 未发布段标题固定为「## 未发布」（与 CHANGELOG 实际一致）。
-  header_re='^## 未发布[[:space:]]*$'
-else
-  # 正式版段标题形如「## 0.16.1（2026-06-26）」：精确匹配版本号后紧跟「（」。
-  header_re="^## ${version}（"
-fi
-
-awk -v header_re="$header_re" '
-  # 遇到 ``` 围栏切换 fence 状态。
-  /^```/ { fence = !fence }
-  # 命中目标版本标题：开始抽取，跳过标题行本身。
-  $0 ~ header_re { f = 1; next }
-  # 非围栏内遇到下一个 ## 标题：抽取结束。
-  f && !fence && /^## / { f = 0 }
-  f { print }
-' "$changelog" | awk '
-  # 去除首尾空行：缓冲非空内容，遇内容时先补齐之前累积的空行。
-  { lines[NR] = $0 }
+awk -v version="$version" '
+  {
+    is_fence = $0 ~ /^```/
+    prefix = "## " version "（"
+    suffix = substr($0, length(prefix) + 1)
+    is_target = version == "unreleased" ? $0 ~ /^## 未发布[[:space:]]*$/ : index($0, prefix) == 1 && suffix ~ /^[^）]+）[[:space:]]*$/
+    if (!fence && is_target) {
+      found++
+      active = found == 1
+      next
+    }
+    if (active && !fence && $0 ~ /^## /) active = 0
+    if (active) lines[++count] = $0
+    if (is_fence) fence = !fence
+  }
   END {
-    start = 1; end = NR
+    if (found == 0) {
+      print "错误：找不到目标版本标题。" > "/dev/stderr"
+      exit 3
+    }
+    if (found != 1) {
+      print "错误：目标版本标题必须唯一。" > "/dev/stderr"
+      exit 4
+    }
+    start = 1
+    end = count
     while (start <= end && lines[start] ~ /^[[:space:]]*$/) start++
     while (end >= start && lines[end] ~ /^[[:space:]]*$/) end--
+    if (start > end) {
+      print "错误：目标版本正文不能为空。" > "/dev/stderr"
+      exit 5
+    }
     for (i = start; i <= end; i++) print lines[i]
   }
-'
+' "$changelog"

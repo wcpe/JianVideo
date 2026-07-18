@@ -32,6 +32,80 @@ func mockService(t *testing.T, releases func(base string) []Release, binContent,
 	return &Service{baseURL: srv.URL, owner: "wcpe", repo: "JianVideo", client: srv.Client(), cache: map[Channel]cachedCheck{}}
 }
 
+// TestCheck_PrereleaseFindsRCOnSecondPage 验证候选版会遍历分页全集，并按 GitHub 参数请求。
+func TestCheck_PrereleaseFindsRCOnSecondPage(t *testing.T) {
+	var requests []string
+	var base string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/wcpe/JianVideo/releases", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		requests = append(requests, query.Get("per_page")+"/"+query.Get("page"))
+		if query.Get("page") == "2" {
+			_ = json.NewEncoder(w).Encode([]Release{{
+				TagName:    "v9.9.9-rc.2",
+				Prerelease: true,
+				Assets:     completeRCAssets(base),
+			}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(make([]Release, 100))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	base = srv.URL
+	s := &Service{baseURL: base, owner: "wcpe", repo: "JianVideo", client: srv.Client(), cache: map[Channel]cachedCheck{}}
+
+	res, err := s.Check(context.Background(), "0.6.2", "prerelease", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Latest != "v9.9.9-rc.2" || !res.HasUpdate {
+		t.Fatalf("应选择第二页的合法候选版，得到 %+v", res)
+	}
+	if len(requests) != 2 || requests[0] != "100/1" || requests[1] != "100/2" {
+		t.Fatalf("分页请求参数错误，得到 %v", requests)
+	}
+}
+
+// TestFetchReleases_ShortPageStopsWhenHandlerIgnoresPage 验证短页响应不会因处理器忽略页码而重复请求。
+func TestFetchReleases_ShortPageStopsWhenHandlerIgnoresPage(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode([]Release{{TagName: "v1.0.0"}})
+	}))
+	t.Cleanup(srv.Close)
+
+	rels, err := fetchReleases(context.Background(), srv.Client(), srv.URL, "wcpe", "JianVideo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rels) != 1 || requests != 1 {
+		t.Fatalf("短页应只请求一次，发布数=%d，请求数=%d", len(rels), requests)
+	}
+}
+
+// TestFetchReleases_FailsClosedAtPageLimit 验证连续满页达到上限时拒绝返回部分结果。
+func TestFetchReleases_FailsClosedAtPageLimit(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(make([]Release, 100))
+	}))
+	t.Cleanup(srv.Close)
+
+	rels, err := fetchReleases(context.Background(), srv.Client(), srv.URL, "wcpe", "JianVideo")
+	if err == nil || !strings.Contains(err.Error(), "分页上限") || !strings.Contains(err.Error(), "不完整结果") {
+		t.Fatalf("达到分页上限应返回中文错误，得到 %v", err)
+	}
+	if rels != nil {
+		t.Fatalf("达到分页上限不应返回部分结果，得到 %d 项", len(rels))
+	}
+	if requests != 10 {
+		t.Fatalf("应在第 10 个满页后停止，实际请求 %d 次", requests)
+	}
+}
+
 // oneStableRelease 构造单个含当前平台产物 + 校验和的正式 release。
 func oneStableRelease(tag string) func(base string) []Release {
 	return func(base string) []Release {
@@ -72,12 +146,9 @@ func TestCheck_NoUpdateWhenSameVersion(t *testing.T) {
 func TestCheck_StableSkipsPrerelease(t *testing.T) {
 	releases := func(base string) []Release {
 		mk := func(tag string, pre bool) Release {
-			return Release{TagName: tag, Prerelease: pre, Assets: []Asset{
-				{Name: platAsset(), URL: base + "/dl/" + platAsset()},
-				{Name: checksumsFileName, URL: base + "/sums"},
-			}}
+			return Release{TagName: tag, Prerelease: pre, Assets: completeRCAssets(base)}
 		}
-		return []Release{mk("v9.9.9", true), mk("v0.6.1", false)} // 最新是预发布，正式版较旧
+		return []Release{mk("v9.9.9-rc.1", true), mk("v0.6.1", false)} // 最新是候选版，正式版较旧
 	}
 	s := mockService(t, releases, "", "")
 
@@ -85,9 +156,9 @@ func TestCheck_StableSkipsPrerelease(t *testing.T) {
 	if res, _ := s.Check(context.Background(), "0.6.2", "stable", false); res.HasUpdate || res.Latest != "v0.6.1" {
 		t.Errorf("稳定频道应选 v0.6.1 且无更新，得到 %+v", res)
 	}
-	// 预发布频道取最新 v9.9.9 → 有更新
-	if res, _ := s.Check(context.Background(), "0.6.2", "prerelease", false); !res.HasUpdate || res.Latest != "v9.9.9" {
-		t.Errorf("预发布频道应选 v9.9.9 且有更新，得到 %+v", res)
+	// 候选版频道取 v9.9.9-rc.1 → 有更新
+	if res, _ := s.Check(context.Background(), "0.6.2", "prerelease", false); !res.HasUpdate || res.Latest != "v9.9.9-rc.1" {
+		t.Errorf("候选版频道应选 v9.9.9-rc.1 且有更新，得到 %+v", res)
 	}
 }
 
@@ -108,81 +179,105 @@ func TestApply_RejectsWhenNotNewer(t *testing.T) {
 	}
 }
 
-// devReleaseList 构造 CI 风格列表：正式版 v0.7.0 在前、滚动 dev 预发布在后
-// （模拟 GitHub 把正式版排在预发布之前——用户实际遇到的顺序），dev 名内嵌完整版本。
-func devReleaseList(stableTag, devEmbedded string) func(base string) []Release {
-	return func(b string) []Release {
-		mk := func(tag string, pre bool, name string) Release {
-			return Release{TagName: tag, Prerelease: pre, Name: name, Assets: []Asset{
-				{Name: platAsset(), URL: b + "/dl/" + platAsset()},
-				{Name: checksumsFileName, URL: b + "/sums"},
-			}}
+// completeRCAssets 构造候选发布契约要求的三项非空资产。
+func completeRCAssets(base string) []Asset {
+	return []Asset{
+		{Name: "jianvideo-linux-amd64", URL: base + "/dl/jianvideo-linux-amd64", Size: 1},
+		{Name: "jianvideo-windows-amd64.exe", URL: base + "/dl/jianvideo-windows-amd64.exe", Size: 1},
+		{Name: checksumsFileName, URL: base + "/sums", Size: 1},
+	}
+}
+
+// rcReleaseList 构造包含正式版、旧 dev、非法候选版与多个合法 RC 的发布列表。
+func rcReleaseList(base string) []Release {
+	mk := func(tag string, prerelease, draft bool) Release {
+		return Release{TagName: tag, Prerelease: prerelease, Draft: draft, Assets: completeRCAssets(base)}
+	}
+	return []Release{
+		mk("dev", true, false),
+		mk("0.19.0-rc.1", true, false),
+		mk("v0.19.0-rc.01", true, false),
+		mk("v0.18.0-rc.x", true, false),
+		mk("v0.18.0-rc.20", true, true),
+		mk("v0.17.1-rc.9", true, false),
+		mk("v0.17.1-rc.10", true, false),
+		mk("v0.17.1", false, false),
+	}
+}
+
+// TestSelectRelease_PrereleaseOnlyHighestRC 验证候选版频道忽略旧 dev/非法/draft，且按数字选择最高 RC。
+func TestSelectRelease_PrereleaseOnlyHighestRC(t *testing.T) {
+	rel := selectRelease(rcReleaseList(""), true)
+	if rel == nil || rel.TagName != "v0.17.1-rc.10" {
+		t.Fatalf("候选版频道应选择 v0.17.1-rc.10，得到 %+v", rel)
+	}
+}
+
+// TestSelectRelease_PrereleaseFallsBackFromIncompleteRC 验证高版本候选发布资产不完整时回退。
+func TestSelectRelease_PrereleaseFallsBackFromIncompleteRC(t *testing.T) {
+	zeroSizeAssets := completeRCAssets("")
+	zeroSizeAssets[1].Size = 0
+	emptyURLAssets := completeRCAssets("")
+	emptyURLAssets[0].URL = " "
+	rels := []Release{
+		{TagName: "v0.19.0-rc.4", Prerelease: true, Assets: completeRCAssets("")[:2]},
+		{TagName: "v0.19.0-rc.3", Prerelease: true, Assets: zeroSizeAssets},
+		{TagName: "v0.19.0-rc.2", Prerelease: true, Assets: emptyURLAssets},
+		{TagName: "v0.19.0-rc.1", Prerelease: true, Assets: completeRCAssets("")},
+	}
+	rel := selectRelease(rels, true)
+	if rel == nil || rel.TagName != "v0.19.0-rc.1" {
+		t.Fatalf("应跳过资产不完整的高版本 RC 并回退到 v0.19.0-rc.1，得到 %+v", rel)
+	}
+}
+
+// TestSelectRelease_StableKeepsHistoricalAssetCompatibility 确保正式频道不新增候选发布资产门槛。
+func TestSelectRelease_StableKeepsHistoricalAssetCompatibility(t *testing.T) {
+	rels := []Release{{
+		TagName:    "v0.18.0",
+		Prerelease: false,
+		Assets:     []Asset{{Name: platAsset(), URL: "/dl/" + platAsset()}},
+	}}
+	if rel := selectRelease(rels, false); rel == nil || rel.TagName != "v0.18.0" {
+		t.Fatalf("正式频道应保持历史选择兼容，得到 %+v", rel)
+	}
+}
+
+// TestSelectRelease_PrereleaseBaselineBeforeRC 验证候选版先比较版本基线，再比较 RC 数字。
+func TestSelectRelease_PrereleaseBaselineBeforeRC(t *testing.T) {
+	rels := []Release{
+		{TagName: "v0.17.1-rc.99", Prerelease: true, Assets: completeRCAssets("")},
+		{TagName: "v0.18.0-rc.1", Prerelease: true, Assets: completeRCAssets("")},
+	}
+	rel := selectRelease(rels, true)
+	if rel == nil || rel.TagName != "v0.18.0-rc.1" {
+		t.Fatalf("更高基线应优先于更大的低基线 RC，得到 %+v", rel)
+	}
+}
+
+// TestCheck_PrereleaseRCMigration 覆盖旧 dev 迁移 RC、低 RC 与同基线正式版不降级。
+func TestCheck_PrereleaseRCMigration(t *testing.T) {
+	s := mockService(t, rcReleaseList, "", "")
+
+	cases := []struct {
+		name    string
+		current string
+		want    bool
+	}{
+		{"旧开发版升级同基线候选版", "0.17.1-dev.3.gabc1234", true},
+		{"较低候选版升级", "0.17.1-rc.9", true},
+		{"相同候选版不更新", "0.17.1-rc.10", false},
+		{"较高候选版不降级", "0.17.1-rc.11", false},
+		{"同基线正式版不降级", "0.17.1", false},
+	}
+	for _, tc := range cases {
+		res, err := s.Check(context.Background(), tc.current, "prerelease", true)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return []Release{
-			mk(stableTag, false, stableTag),
-			mk("dev", true, "开发预览（dev · "+devEmbedded+"）"),
+		if res.Latest != "v0.17.1-rc.10" || res.HasUpdate != tc.want {
+			t.Errorf("%s: 得到 %+v", tc.name, res)
 		}
-	}
-}
-
-// TestCheck_PrereleaseSelectsDevNotNewestStable 回归核心 bug：
-// 即便正式版排在列表最前，测试版频道也要选「最新预发布」（dev）而非最新整体。
-func TestCheck_PrereleaseSelectsDevNotNewestStable(t *testing.T) {
-	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
-
-	// 测试版：选 dev，latest 取内嵌版本，相对正式版 0.7.0 视为有更新（可切换）
-	res, err := s.Check(context.Background(), "0.7.0", "prerelease", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Latest != "0.7.0-dev.abc1234" || !res.Prerelease || !res.HasUpdate {
-		t.Fatalf("测试版应选 dev 内嵌版本且有更新，得到 %+v", res)
-	}
-	// 正式版：仍选 v0.7.0，当前即 0.7.0 → 无更新
-	st, _ := s.Check(context.Background(), "0.7.0", "stable", false)
-	if st.Latest != "v0.7.0" || st.HasUpdate {
-		t.Errorf("正式版应选 v0.7.0 且无更新，得到 %+v", st)
-	}
-}
-
-// TestCheck_PrereleaseSameDevNoUpdate 已在最新 dev 时测试版不应再提示更新。
-func TestCheck_PrereleaseSameDevNoUpdate(t *testing.T) {
-	s := mockService(t, devReleaseList("v0.7.0", "0.7.0-dev.abc1234"), "", "")
-	res, _ := s.Check(context.Background(), "0.7.0-dev.abc1234", "prerelease", false)
-	if res.HasUpdate {
-		t.Errorf("已在最新 dev 不应提示更新，得到 %+v", res)
-	}
-}
-
-// TestCheck_PrereleaseSeqNoChurn 回归 FIX-1：dev 版本号采用 <基线>-dev.<提交距离>.g<SHA> 后，
-// ① 装上最新 dev 再检查不提示更新；② 仅短 SHA 改写（序号未变）不误报；③ 序号增大（主干新提交）仍提示。
-func TestCheck_PrereleaseSeqNoChurn(t *testing.T) {
-	// CI 列表：正式版 v0.17.1 + 滚动 dev（内嵌 0.17.1-dev.3.gabc1234）
-	s := mockService(t, devReleaseList("v0.17.1", "0.17.1-dev.3.gabc1234"), "", "")
-
-	// ① 当前即最新 dev → 无更新
-	if res, _ := s.Check(context.Background(), "0.17.1-dev.3.gabc1234", "prerelease", true); res.HasUpdate {
-		t.Errorf("装上最新 dev 不应提示更新，得到 %+v", res)
-	}
-	// ② 当前 dev 同序号、仅短 SHA 不同（历史改写）→ 不误报
-	if res, _ := s.Check(context.Background(), "0.17.1-dev.3.gold9999", "prerelease", true); res.HasUpdate {
-		t.Errorf("同序号仅短 SHA 不同不应误报更新，得到 %+v", res)
-	}
-	// ③ 当前 dev 序号更小（主干已新增提交，latest 序号更大）→ 提示更新
-	if res, _ := s.Check(context.Background(), "0.17.1-dev.1.gold1111", "prerelease", true); !res.HasUpdate {
-		t.Errorf("主干新提交（序号增大）应提示更新，得到 %+v", res)
-	}
-}
-
-// TestCheck_PrereleaseAfterStableReleaseNoNewCommit 回归 FIX-1 验收②：
-// 发布正式版后主干无新提交时，dev 预发布基线低于新正式版 → 测试版频道不提示 dev 更新。
-// （提交距离为 0 时 CI 不会重建 dev，旧 dev 仍指向上个基线，对已升到新正式版的用户即基线更低。）
-func TestCheck_PrereleaseAfterStableReleaseNoNewCommit(t *testing.T) {
-	// 已发布 v0.18.0，旧 dev 仍内嵌上个基线 0.17.1-dev.3.gabc1234（无新提交未重建）
-	s := mockService(t, devReleaseList("v0.18.0", "0.17.1-dev.3.gabc1234"), "", "")
-	// 用户已在正式版 0.18.0，测试版频道看到更旧基线的 dev → 不降级、不提示
-	if res, _ := s.Check(context.Background(), "0.18.0", "prerelease", true); res.HasUpdate {
-		t.Errorf("发完正式版且主干无新提交时不应提示 dev 更新，得到 %+v", res)
 	}
 }
 

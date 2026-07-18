@@ -81,17 +81,25 @@
 
 ## 8. 分支模型与发布渠道
 
-采用 GitHub Flow（适合小团队 + 持续发布）：
+采用 `dev` 集成、`main` 发布的门控流程（见 [ADR-0064](adr/0064-gated-rc-ga-release.md)）：
 
-- **`main`**：始终可发布、受保护；改动经 PR 合入（PR 模板含防漂移自检）。main 每次推送由 CI 发**快照**（`latest` 预发布，见对应版本 ADR 与 `sdd-publish-snapshot` 技能）。
-- **`feature/*`、`fix/*`、`refactor/*`**：短生命周期分支，做完发 PR 回 main。
-- **稳定发布**：在 main 打 `vX.Y.Z` tag（`sdd-release-version` 技能），CI 据 tag 出正式 Release。
-- **`hotfix/*`**：从出问题的发布 tag 切分支紧急修，出补丁版后**回流 main**（`sdd-hotfix` 技能）。
+- **`dev`**：长期集成与实验分支；`feature/*`、`fix/*`、`refactor/*` 等短分支经 PR 合入 `dev`。push `dev` 运行质量门并生成短期 Actions 实验工件，但不创建 tag、GitHub Release，也不进入自更新频道。
+- **`main`**：唯一可发布、受保护分支；候选提交从 `dev` 经 PR 或受控提升进入 `main`。push `main` 只运行质量门，不自动发布。
+- **`hotfix/*`**：从出问题的发布 tag 切分支做最小修复，修复必须回流 `dev`，再按 RC/GA 或稳定补丁流程提升到 `main`。
 - **回滚**优先 `git revert`，不重写已 push 历史（`sdd-rollback-change` 技能）。
 
-版本号唯一来源是根 `VERSION` 文件，构建把版本号注入到编译产物中，恒一致。
+版本号唯一来源是根 `VERSION` 文件，构建把版本号注入到编译产物中。**禁止人工预先 push `v*` tag，也禁止创建占位 tag**；RC/GA tag 只能在全部门禁通过后由发布工作流的最终 publish job 创建。仓库托管侧应通过 `v*` tag Ruleset 阻止普通用户创建、改写或删除发布 tag，仅放行指定发布自动化身份。
 
-### 8.1 v2 版本线规则
+### 8.1 RC/GA 发布流程
+
+1. 在 `main` 准备 RC 元数据：`VERSION=X.Y.Z-rc.N`，CHANGELOG 有对应非空版本段。
+2. 从 `main` 手动运行无输入 RC 工作流；工作流固定 SHA，依次通过版本/CHANGELOG 校验、四项质量门、Linux/Windows 原生构建与校验。
+3. 最终 publish job 才创建 RC tag 与 draft Release；上传并回下载校验资产后，公开为候选版、非 latest。
+4. RC 发现代码问题时回 `dev` 修复，重新提升并递增 `rc.N`；不得覆盖既有 RC。
+5. final RC 通过后，只允许收口 `VERSION`、CHANGELOG 与正式文档；工作流、脚本、依赖或业务代码再变化都必须重发 RC。随后从 `main` 运行 GA 工作流并填写 `final_rc_tag`。
+6. GA 校验 final RC 为同基线祖先、已公开候选 Release 且资产元数据完整，再重跑四项质量门和双平台构建；全部通过后创建稳定 tag/draft，回下载校验成功才公开为 latest。
+
+### 8.2 v2 版本线规则
 
 从 `0.21.0` 开始，JianVideo v2 使用固定的阶段版本线：
 
@@ -99,11 +107,12 @@
 - P0.5：`0.21.x` 架构与工具链冻结门
 - P1：`0.22.x` Mockup、UI 博物馆与 PixiJS 原型实现
 - P2：`0.23.x` 存储库、索引与转码队列
-- P3：`0.24.x` 高密度视频浏览与时间轴
-- P4：`0.25.x` Space、多用户、安全与分享
-- P5：`0.26.x` AI 索引、语义搜索与审核流
-- P6：`0.27.x` 多端适配、一体化部署与质量门
-- P7 RC：`0.28.x`
+- P3：`0.24.x` 播放体验（王牌）
+- P4：`0.25.x` 高密度媒体浏览器
+- P5：`0.26.x` Space、安全与多用户
+- P6：`0.27.x` AI 索引、搜索与审核
+- P7：`0.28.x` 多端与交付质量门
+- P8 RC：`0.29.x` 1.0 候选
 - GA：`1.0.0`
 
 同一 `MINOR` 下的所有 patch 都属于同一阶段，`PATCH` 按需要递增且不设固定上限。P0.5 是 `0.21.x` 内部冻结门，不单独占用新的 minor 版本线。`1.0.0` 前属于 `0.y.z` 预稳定阶段；`1.0.0` 后严格按 SemVer 执行：patch=兼容修复，minor=兼容新增，major=破坏性变更。
@@ -145,9 +154,9 @@ P0 规格冻结后进入 v2 稳态迭代。**每个工作项的标准循环**：
 1. **识别工作项**，选对应技能（路由见下表）。
 2. **开分支**：`feature/*` / `fix/*` / `refactor/*` / `hotfix/*`（§8）。
 3. **按技能走**：读相关 PRD / ARCHITECTURE / ADR → 测试先行 → 实现（守不变量、简单优先）→ 过验证门 → `doc-sync` 同步文档。
-4. **发 PR**：填防漂移自检模板 → 评审 → 合入 `main`。
-5. **main 自动出快照**（CI / `sdd-publish-snapshot`），可随时让人试用。
-6. **攒够一批 → 发版**（`sdd-release-version`：CHANGELOG 分段、定 SemVer、bump `VERSION`、打 `vX.Y.Z` → CI 出正式 Release）。
+4. **发 PR**：填防漂移自检模板 → 评审 → 合入 `dev`。
+5. **dev 自动出实验工件**（Actions artifact，不建 tag/Release），供集成试用。
+6. **攒够一批 → 从 dev 受控提升到 main 并走门控 RC/GA**：先准备 VERSION/CHANGELOG，再由发布工作流过门后自动创建 tag；禁止人工先推 tag。
 7. **生产事故** → `sdd-hotfix` 旁路：从发布 tag 切分支最小修 → 出补丁版 → 回流 `main`。
 
 → 回到 1。
@@ -180,11 +189,12 @@ P0 规格冻结后进入 v2 稳态迭代。**每个工作项的标准循环**：
 | **rollback 回滚** | FR2 状态回退 · 取代相关 ADR · `CHANGELOG` +1（移除） | 阶段线 |
 | **依赖升级** | 锁文件 · 有感知影响才记 `CHANGELOG` · 全测试绿 | PRD · 阶段线 · ADR |
 | **架构决策** | **ADR +1 条（或取代旧的，编号 = 现有最大 +1）** · 更新 `ARCHITECTURE` | 阶段线（除非顺带开新阶段） |
-| **发版 release** | **`VERSION` 改到当前阶段版本线的下一个 patch** · `CHANGELOG` 未发布段 → `## X.Y.Z` · 交付的 FR2 翻 `已交付@vX.Y.Z` · 打 tag | 阶段线 |
-| **发快照** | 构建发预发布 / 快照（产物标 `-SNAPSHOT+<sha>`） | `VERSION` · `CHANGELOG` · 阶段线 |
+| **发布 RC** | `VERSION` 改为 `X.Y.Z-rc.N` · CHANGELOG 建对应版本段 · 从 `main` 运行 RC 门 · 门禁通过后由工作流创建 tag/候选 Release | 阶段线 · 人工预推 tag |
+| **发布 GA** | `VERSION` 改为 `X.Y.Z` · CHANGELOG 建稳定版段 · 指定 `final_rc_tag` 运行 GA 门 · 交付的 FR2 按真实范围翻状态 | 阶段线 · RC 后业务代码变化 · 人工预推 tag |
+| **发实验工件** | push `dev` 后先过四门，再构建保留 7 天的 Actions artifact（版本按最近稳定 tag 生成 `<base>-dev.N.g<sha>`） | `VERSION` · `CHANGELOG` · tag · Release · 阶段线 |
 | **进入下一阶段** | 更新 `docs/ROADMAP.md` 进入 / 退出条件、PRD 阶段状态，并把 `VERSION` 切到下一条 minor 版本线 | P0.5 这类内部冻结门除外，它仍归属当前 minor 版本线 |
 
 **谁常动 / 谁不动**：
-- 🔥 高频：`CHANGELOG`（几乎每次）、PRD FR2 表（每个 feat 加行 / 发版翻状态）、`VERSION`（每次发版）。
+- 🔥 高频：`CHANGELOG`（几乎每次）、PRD FR2 表（每个 feat 加行 / 发版按真实范围翻状态）、`VERSION`（RC/GA 发布准备时）。
 - ❄ 低频：ADR（只在架构决策时 +1 或取代）。
 - 🧊 几乎不动：**阶段版本线**（只在进入下一阶段时动）、`.claude/rules`（项目内）/ 全局 `sdd-*` 技能（动它 = 动根基，要配 ADR）。

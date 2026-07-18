@@ -32,7 +32,7 @@ type Channel string
 // 更新频道取值：决定自更新是否纳入预发布版本。
 const (
 	ChannelStable     Channel = "stable"     // 仅正式 Release
-	ChannelPrerelease Channel = "prerelease" // 含滚动 dev 预发布
+	ChannelPrerelease Channel = "prerelease" // 仅候选版 RC Release
 )
 
 // includesPrerelease 该频道是否纳入预发布。
@@ -213,13 +213,8 @@ func copyResult(r *CheckResult) *CheckResult {
 }
 
 // hasUpdate 判断目标版本相对当前版本是否应提示更新。
-// 正式版（stable）：按语义版本比较，仅更高才提示。
-// 测试版（prerelease，dev 滚动）：按 MAJOR.MINOR.PATCH 基线比较——基线更高才有更新、
-// 基线更低绝不降级（修复「更旧的 dev 误报可更新」）。同基线下进一步用「dev 提交距离序号」判定：
-//   - 当前为同基线正式版（无预发布标识）→ 可切换到 dev，视为有更新；
-//   - 双方均为 dev.<序号>.g<sha>：仅当 latest 序号严格大于 current 序号才有更新——
-//     这样「主干无新提交、仅短 SHA 改写」时序号不变即不误报（修复 FIX-1）；
-//   - 序号无法解析时退回「标识不同即更新」的保守兜底。
+// 正式版按语义版本比较；候选版先比较版本基线，同基线仅允许 RC 数字严格递增。
+// 同基线正式版不会降到 RC；旧 dev 等非 RC 预发布可迁移到同基线 RC。
 func hasUpdate(latest, current string, ch Channel) bool {
 	latest = strings.TrimSpace(latest)
 	if latest == "" {
@@ -228,41 +223,32 @@ func hasUpdate(latest, current string, ch Channel) bool {
 	if ch == ChannelPrerelease {
 		l := parseVersion(latest)
 		c := parseVersion(current)
-		// 任一无法解析：沿用保守兜底——与当前不同即视为有更新
 		if !l.ok || !c.ok {
-			return latest != strings.TrimSpace(current)
+			return false
 		}
 		switch baselineCmp(l, c) {
 		case 1:
-			return true // 基线更高：有更新
+			return true
 		case -1:
-			return false // 基线更低：不降级
+			return false
 		default:
-			return samBaselinePrereleaseHasUpdate(l, c)
+			return sameBaselineRCHasUpdate(l, c)
 		}
 	}
 	return isNewer(latest, current)
 }
 
-// samBaselinePrereleaseHasUpdate 处理「同基线」下测试版是否有更新（hasUpdate 的子判定）。
-// 仅当确有更新（dev 序号增大，或当前是同基线正式版可切 dev）才返回 true。
-func samBaselinePrereleaseHasUpdate(l, c parsedVersion) bool {
-	// 完全相同的预发布标识：必然无更新（含同一 dev 重复检测）
-	if l.pre == c.pre {
+// sameBaselineRCHasUpdate 处理同基线候选版比较。
+func sameBaselineRCHasUpdate(latest, current parsedVersion) bool {
+	latestRC, ok := rcSeq(latest.pre)
+	if !ok || current.pre == "" {
 		return false
 	}
-	// 当前为同基线正式版：可切换到 dev 预发布，视为有更新
-	if c.pre == "" {
-		return l.pre != ""
+	currentRC, currentIsRC := rcSeq(current.pre)
+	if !currentIsRC {
+		return true
 	}
-	// 双方均为 dev：比较提交距离序号，仅严格更新（序号更大）才提示，避免短 SHA churn 误报
-	ls, lok := devSeq(l.pre)
-	cs, cok := devSeq(c.pre)
-	if lok && cok {
-		return ls > cs
-	}
-	// 序号无法解析：保守兜底——标识不同即视为有更新
-	return l.pre != c.pre
+	return latestRC > currentRC
 }
 
 // Apply 下载目标频道最新版、校验 sha256 后替换二进制并重启。

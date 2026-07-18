@@ -1725,9 +1725,9 @@ export const handlers = [
     const prerelease = channel === 'prerelease';
     return HttpResponse.json({
       current: '0.3.0',
-      latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+      latest: prerelease ? 'v0.6.3-rc.10' : 'v0.6.3',
       has_update: true,
-      tag: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+      tag: prerelease ? 'v0.6.3-rc.10' : 'v0.6.3',
       prerelease,
       channel,
       notes: '示例发布说明',

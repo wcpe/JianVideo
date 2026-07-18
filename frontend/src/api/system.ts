@@ -224,9 +224,9 @@ async function mockCheckUpdate(channel: string, _force = false): Promise<UpdateC
   const prerelease = channel === 'prerelease';
   return {
     current: '0.6.2',
-    latest: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+    latest: prerelease ? 'v0.6.3-rc.10' : 'v0.6.3',
     has_update: true,
-    tag: prerelease ? 'v0.6.3-dev.abc1234' : 'v0.6.3',
+    tag: prerelease ? 'v0.6.3-rc.10' : 'v0.6.3',
     prerelease,
     channel: prerelease ? 'prerelease' : 'stable',
     notes: '示例发布说明：修复若干问题。',

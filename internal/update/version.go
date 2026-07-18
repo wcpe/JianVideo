@@ -21,23 +21,34 @@ type parsedVersion struct {
 	ok                  bool   // 是否成功解析为 MAJOR.MINOR.PATCH
 }
 
-// devSeqPattern 提取 dev 预发布标识中的「提交距离序号」：
-// 新版本号格式 <基线>-dev.<提交距离>.g<短SHA>，序号即自上个正式版 tag 起的真实提交数。
-// 该序号随主干新增实质提交单调递增，是判断「测试版是否真有更新」的可靠依据
-// （短 SHA 仅在序号相同时表示同一提交点的不同改写，不应视为更新）。
-var devSeqPattern = regexp.MustCompile(`^dev\.(\d+)\.`)
+// RC 标签与预发布标识的严格格式；数字段遵循语义版本规则，不允许无意义的前导零。
+var (
+	rcTagPattern = regexp.MustCompile(`^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.([1-9]\d*)$`)
+	rcPrePattern = regexp.MustCompile(`^rc\.([1-9]\d*)$`)
+)
 
-// devSeq 从预发布标识中解析提交距离序号；非 dev.N.g<sha> 形态时 ok=false。
-func devSeq(pre string) (int, bool) {
-	m := devSeqPattern.FindStringSubmatch(pre)
+// parseRCTag 解析合法 vX.Y.Z-rc.N 标签，并返回基线版本与 RC 数字。
+func parseRCTag(tag string) (parsedVersion, int, bool) {
+	m := rcTagPattern.FindStringSubmatch(strings.TrimSpace(tag))
+	if m == nil {
+		return parsedVersion{}, 0, false
+	}
+	v := parseVersion(tag)
+	n, err := strconv.Atoi(m[1])
+	if !v.ok || err != nil {
+		return parsedVersion{}, 0, false
+	}
+	return v, n, true
+}
+
+// rcSeq 从预发布标识中解析 rc.N 数字。
+func rcSeq(pre string) (int, bool) {
+	m := rcPrePattern.FindStringSubmatch(pre)
 	if m == nil {
 		return 0, false
 	}
 	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, false
-	}
-	return n, true
+	return n, err == nil
 }
 
 // parseVersion 解析 "v1.2.3" / "1.2.3" / "1.2.3-dev.abc" 为结构；无法解析时 ok=false。
@@ -92,7 +103,7 @@ func baselineCmp(a, b parsedVersion) int {
 
 // isNewer 判断 latest 是否比 current 更新（值得更新）。
 // 规则：① 主/次/修订按数值比较；② 同基线下「正式版」优于「预发布」；
-// ③ 同基线两个预发布标识不同则视为有更新（用于滚动 dev 预发布频道）；
+// ③ 同基线两个预发布标识不同则视为有更新（通用预发布比较）；
 // ④ 任一无法解析时，按字符串非空且不等保守判定为有更新。
 func isNewer(latest, current string) bool {
 	l := parseVersion(latest)

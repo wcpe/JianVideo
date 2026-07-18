@@ -43,7 +43,7 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
         }
       },
     );
-    // 频道默认稳定：共享 MSW settingsStore 会被「切换到测试版」用例写入 update_channel=prerelease 并跨用例残留，
+    // 频道默认稳定：共享 MSW settingsStore 会被「切换到候选版」用例写入 update_channel=prerelease 并跨用例残留，
     // 这里每例重置 GET /api/settings 返回 stable，保证各更新用例频道确定（不受用例顺序污染）。
     server.use(
       http.get('*/api/settings', () =>
@@ -357,18 +357,37 @@ describe('SystemPage（FR-113 区块化渲染）', () => {
     expect(screen.queryByText(/timeout of/i)).toBeNull();
   });
 
-  it('切换到测试版后检查更新走预发布频道（FR-46）', async () => {
+  it('切换到候选版后仍使用 prerelease API 值并展示 RC（FR-46）', async () => {
     const user = userEvent.setup();
+    let requestedChannel: string | null = null;
+    server.use(
+      http.get('*/api/system/update/check', ({ request }) => {
+        requestedChannel = new URL(request.url).searchParams.get('channel');
+        return HttpResponse.json({
+          current: '0.6.2',
+          latest: 'v0.6.3-rc.10',
+          has_update: true,
+          tag: 'v0.6.3-rc.10',
+          prerelease: true,
+          channel: 'prerelease',
+          notes: '候选版示例发布说明',
+          asset_name: 'jianvideo-linux-amd64',
+          rollback_available: false,
+        });
+      }),
+    );
     renderSection('update');
 
-    // 切到「测试版」频道（Mantine SegmentedControl 点标签文本）
-    await user.click(screen.getByText('测试版'));
+    // 仅修改用户可见文案，持久化与 API 频道值仍为 prerelease。
+    await user.click(screen.getByText('候选版'));
     await user.click(screen.getByRole('button', { name: '检查更新' }));
 
     await waitFor(() => {
-      expect(screen.getByText('v0.6.3-dev.abc1234')).toBeVisible();
+      expect(screen.getByText('v0.6.3-rc.10')).toBeVisible();
     });
+    expect(requestedChannel).toBe('prerelease');
     expect(screen.getByText('预发布')).toBeVisible();
+    expect(screen.queryByText('测试版')).toBeNull();
   });
 
   it('面板仅一个「检查更新」按钮，无「获取更新」（FR-112）', async () => {

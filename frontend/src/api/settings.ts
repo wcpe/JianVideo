@@ -18,7 +18,7 @@ const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 // 已知设置键，与后端 internal/settings 常量保持一致。
 export const SETTING_KEY_RECYCLE_BIN_PATHS = 'recycle_bin_paths';
 export const SETTING_KEY_SCAN_INTERVAL = 'scan_interval';
-// 更新频道：stable=正式版（拉正式 release）/ prerelease=测试版（拉最新预发布 dev）
+// 更新频道：stable=正式版（拉正式 release）/ prerelease=候选版（拉最高 RC）
 export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel';
 // 转码目标编码优先级，JSON 数组；与后端 settings 常量一致
 export const SETTING_KEY_TRANSCODE_CODEC_PRIORITY = 'transcode_codec_priority';
@@ -136,7 +136,7 @@ const mockDefinitions: SettingDefinition[] = [
     consumer: 'update',
     options: [
       { value: 'stable', label: '正式版' },
-      { value: 'prerelease', label: '测试版' },
+      { value: 'prerelease', label: '候选版' },
     ],
   },
   {

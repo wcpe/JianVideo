@@ -21,10 +21,11 @@
     "go:vet": "go vet ./...",
     "go:vuln": "govulncheck ./...",
     "lint": "turbo run lint",
-    "quality": "pnpm run quality:workspace && pnpm run quality:frontend && pnpm run quality:go && pnpm run quality:e2e",
+    "quality": "pnpm run quality:workspace && pnpm run quality:frontend && pnpm run quality:go && pnpm run quality:e2e && pnpm run quality:release",
     "quality:e2e": "node --test scripts/playwright-quality-reporter.test.mjs && playwright test --retries=0 --reporter=line,./scripts/playwright-quality-reporter.mjs",
     "quality:frontend": "pnpm run frontend:build && pnpm run frontend:typecheck && pnpm run frontend:lint && pnpm run frontend:format:check && pnpm run frontend:test:coverage",
     "quality:go": "pnpm run go:vet && pnpm run go:vuln && pnpm run go:coverage && pnpm run go:lint",
+    "quality:release": "bash scripts/dev-version_test.sh && bash scripts/changelog-extract_test.sh && bash scripts/publish-release_test.sh && node --test scripts/release-workflow-contract.test.mjs",
     "quality:workspace": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run coverage",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"

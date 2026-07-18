@@ -1,65 +1,58 @@
 #!/usr/bin/env bash
-# changelog-extract.sh 的测试集（本地与 CI 共用同一抽取实现）。
-# 覆盖：① 抽某正式版段；② 抽未发布段非空；③ 段边界不串到下一段；④ 代码块内 ## 不误判；
-#       ⑤ 真实仓库 CHANGELOG 抽未发布段非空。
+# changelog-extract.sh 的段落边界、围栏与错误路径测试。
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXTRACT="$SCRIPT_DIR/changelog-extract.sh"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+extract="$script_dir/changelog-extract.sh"
+repo_root="$(cd "$script_dir/.." && pwd)"
+passed=0
+failed=0
+fixture="$(mktemp)"
+trap 'rm -f "$fixture"' EXIT
 
-pass=0
-fail=0
-
-# 断言：实际输出等于期望，否则打印差异。
-assert_eq() {
+assert_equal() {
   local name="$1" expected="$2" actual="$3"
   if [ "$expected" = "$actual" ]; then
-    pass=$((pass + 1))
-    echo "PASS: $name"
+    echo "通过：$name"
+    passed=$((passed + 1))
   else
-    fail=$((fail + 1))
-    echo "FAIL: $name"
-    echo "----- 期望 -----"
-    printf '%s\n' "$expected"
-    echo "----- 实际 -----"
-    printf '%s\n' "$actual"
-    echo "----------------"
+    echo "失败：$name"
+    failed=$((failed + 1))
   fi
 }
 
-# 断言：实际输出非空。
-assert_nonempty() {
-  local name="$1" actual="$2"
-  if [ -n "$(printf '%s' "$actual" | tr -d '[:space:]')" ]; then
-    pass=$((pass + 1))
-    echo "PASS: $name"
+assert_fails() {
+  local name="$1"
+  shift
+  if "$@" >/dev/null 2>&1; then
+    echo "失败：$name，应拒绝但执行成功"
+    failed=$((failed + 1))
   else
-    fail=$((fail + 1))
-    echo "FAIL: $name（输出为空）"
+    echo "通过：$name"
+    passed=$((passed + 1))
   fi
 }
 
-# 构造测试用 CHANGELOG 夹具，含代码块内的 ## 行以验证 fence 处理。
-FIXTURE="$(mktemp)"
-trap 'rm -f "$FIXTURE"' EXIT
-cat > "$FIXTURE" <<'EOF'
+cat > "$fixture" <<'EOF'
 # 变更日志
 
 ## 未发布
 
 ### 新增
-- 新功能 A
+- 功能 A
+
+## 1.2.0-rc.2（2026-01-03）
+
+### 修复
+- 候选修复
 
 ## 1.2.0（2026-01-02）
 
 ### 新增
 - 功能 B
-- 示例代码块（内含 ## 不应被误判为段落结束）：
 
 ```md
-## 这是代码块内的二级标题
-更多内容
+## 围栏内标题
 ```
 
 - 功能 C
@@ -70,59 +63,46 @@ cat > "$FIXTURE" <<'EOF'
 - 修复 D
 EOF
 
-# ① 抽正式版 1.2.0 段：应含功能 B/C 与代码块整体，且不串到 1.1.0。
-expected_120="$(cat <<'EOF'
-### 新增
-- 功能 B
-- 示例代码块（内含 ## 不应被误判为段落结束）：
+expected_unreleased=$'### 新增\n- 功能 A'
+expected_rc=$'### 修复\n- 候选修复'
+expected_version=$'### 新增\n- 功能 B\n\n```md\n## 围栏内标题\n```\n\n- 功能 C'
+assert_equal "抽取未发布段" "$expected_unreleased" "$(bash "$extract" unreleased "$fixture")"
+assert_equal "抽取 RC 版本段" "$expected_rc" "$(bash "$extract" 1.2.0-rc.2 "$fixture")"
+assert_equal "抽取稳定版本并保留围栏内容" "$expected_version" "$(bash "$extract" 1.2.0 "$fixture")"
+assert_fails "缺少目标版本标题时失败" bash "$extract" 9.9.9 "$fixture"
+assert_fails "拒绝非法版本" bash "$extract" 1.2 "$fixture"
+assert_fails "缺少 CHANGELOG 文件时失败" bash "$extract" unreleased "$fixture.missing"
 
-```md
-## 这是代码块内的二级标题
-更多内容
-```
+printf '\n## 1.2.0-rc.2（2026-01-04）\n\n- 重复段\n' >> "$fixture"
+assert_fails "拒绝重复的目标版本标题" bash "$extract" 1.2.0-rc.2 "$fixture"
 
-- 功能 C
+cat > "$fixture" <<'EOF'
+# 变更日志
+
+## 2.0.0（2026-02-01）
+
+
+## 1.9.0（2026-01-01）
+- 旧内容
 EOF
-)"
-actual_120="$(bash "$EXTRACT" 1.2.0 "$FIXTURE")"
-assert_eq "抽正式版 1.2.0 段（含代码块、不串到下一段）" "$expected_120" "$actual_120"
+assert_fails "拒绝正文为空的目标版本段" bash "$extract" 2.0.0 "$fixture"
 
-# ② 抽未发布段：应为「### 新增 / - 新功能 A」，不串到 1.2.0。
-expected_unrel="$(cat <<'EOF'
-### 新增
-- 新功能 A
-EOF
-)"
-actual_unrel="$(bash "$EXTRACT" unreleased "$FIXTURE")"
-assert_eq "抽未发布段（边界不串到 1.2.0）" "$expected_unrel" "$actual_unrel"
-
-# ③ 抽末段 1.1.0：到文件结尾。
-expected_110="$(cat <<'EOF'
-### 修复
-- 修复 D
-EOF
-)"
-actual_110="$(bash "$EXTRACT" 1.1.0 "$FIXTURE")"
-assert_eq "抽末段 1.1.0（到文件结尾）" "$expected_110" "$actual_110"
-
-# ④ 代码块内的 ## 不被当作段落结束：1.2.0 段输出必须包含代码块内标题行。
-if printf '%s\n' "$actual_120" | grep -q '^## 这是代码块内的二级标题$'; then
-  pass=$((pass + 1))
-  echo "PASS: 代码块内 ## 不误判为段落结束"
+if bash "$extract" unreleased "$repo_root/CHANGELOG.md" >/dev/null; then
+  echo "通过：真实 CHANGELOG 未发布段存在且非空"
+  passed=$((passed + 1))
 else
-  fail=$((fail + 1))
-  echo "FAIL: 代码块内 ## 被误判为段落结束"
+  echo "失败：真实 CHANGELOG 缺少未发布标题"
+  failed=$((failed + 1))
 fi
 
-# ⑤ 真实仓库 CHANGELOG：未发布段非空（防回归到「暂无记录」）。
-actual_repo_unrel="$(bash "$EXTRACT" unreleased "$REPO_ROOT/CHANGELOG.md")"
-assert_nonempty "真实 CHANGELOG 未发布段非空" "$actual_repo_unrel"
+version="$(tr -d '\r\n' < "$repo_root/VERSION")"
+if bash "$extract" "$version" "$repo_root/CHANGELOG.md" >/dev/null; then
+  echo "通过：真实 CHANGELOG 存在当前稳定版本标题"
+  passed=$((passed + 1))
+else
+  echo "失败：真实 CHANGELOG 缺少当前稳定版本标题"
+  failed=$((failed + 1))
+fi
 
-# ⑥ 真实仓库 CHANGELOG：当前 VERSION 对应正式版段非空。
-ver="$(cat "$REPO_ROOT/VERSION")"
-actual_repo_ver="$(bash "$EXTRACT" "$ver" "$REPO_ROOT/CHANGELOG.md")"
-assert_nonempty "真实 CHANGELOG 版本 $ver 段非空" "$actual_repo_ver"
-
-echo ""
-echo "通过 $pass 项，失败 $fail 项。"
-[ "$fail" -eq 0 ]
+printf '\n通过 %d 项，失败 %d 项。\n' "$passed" "$failed"
+[ "$failed" -eq 0 ]

@@ -1,7 +1,7 @@
 # ADR-0042：预发布版本号策略与同基线更新判定语义
 
 ## 状态
-已接受（扩展 [ADR-0032](0032-release-engineering.md) 的预发布/自更新决策）
+已被 [ADR-0064](0064-gated-rc-ga-release.md) 取代
 
 ## 背景
 ADR-0032 确立了「正式发布（tag 触发）+ 滚动 dev 预发布（push main 触发）+ 二进制自更新」体系。

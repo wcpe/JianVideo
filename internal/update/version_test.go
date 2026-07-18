@@ -27,56 +27,49 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
-// TestHasUpdate_PrereleaseNoBaselineDowngrade 回归核心 bug：
-// 预发布频道不得把「基线更低」的版本误报为有更新
-// （用户实测：当前 0.16.0，测试版 latest 为更旧的 0.14.1-dev 仍提示可更新）。
-func TestHasUpdate_PrereleaseNoBaselineDowngrade(t *testing.T) {
-	cases := []struct {
-		name            string
-		latest, current string
-		ch              Channel
-		want            bool
-	}{
-		{"预发布·基线更低不更新", "0.14.1-dev.e62a6e4", "0.16.0", ChannelPrerelease, false},
-		{"预发布·基线更高有更新", "0.17.0-dev.abc1234", "0.16.0", ChannelPrerelease, true},
-		{"预发布·同基线正式切dev可更新", "0.7.0-dev.abc1234", "0.7.0", ChannelPrerelease, true},
-		{"预发布·同一dev不更新", "0.7.0-dev.abc1234", "0.7.0-dev.abc1234", ChannelPrerelease, false},
-		{"预发布·同基线两dev不同可更新", "0.7.0-dev.def5678", "0.7.0-dev.abc1234", ChannelPrerelease, true},
-		{"正式·基线更低不更新", "0.14.0", "0.16.0", ChannelStable, false},
-		{"正式·基线更高有更新", "0.17.0", "0.16.0", ChannelStable, true},
+// TestRCPatternsRejectZero 确保候选版序号从 1 开始，拒绝 rc.0。
+func TestRCPatternsRejectZero(t *testing.T) {
+	if _, _, ok := parseRCTag("v1.2.3-rc.0"); ok {
+		t.Error("RC 标签不应接受 rc.0")
 	}
-	for _, c := range cases {
-		if got := hasUpdate(c.latest, c.current, c.ch); got != c.want {
-			t.Errorf("%s: hasUpdate(%q, %q, %v)=%v, 期望 %v", c.name, c.latest, c.current, c.ch, got, c.want)
-		}
+	if _, ok := rcSeq("rc.0"); ok {
+		t.Error("RC 预发布标识不应接受 rc.0")
+	}
+	if _, n, ok := parseRCTag("v1.2.3-rc.1"); !ok || n != 1 {
+		t.Error("RC 标签应接受 rc.1")
+	}
+	if n, ok := rcSeq("rc.1"); !ok || n != 1 {
+		t.Error("RC 预发布标识应接受 rc.1")
 	}
 }
 
-// TestHasUpdate_PrereleaseSameBaselineCompareBySeq 回归 FIX-1 核心 bug：
-// 同基线下，仅凭短 SHA 变化（dev 序号未增）不得误报「有更新」；
-// 只有 dev 序号（自上个正式版 tag 起的真实提交距离）增大才算有更新。
-// 新 dev 版本号格式：<基线>-dev.<提交距离>.g<短SHA>。
-func TestHasUpdate_PrereleaseSameBaselineCompareBySeq(t *testing.T) {
+// TestHasUpdate_PrereleaseRC 覆盖候选版频道的升降级规则。
+func TestHasUpdate_PrereleaseRC(t *testing.T) {
 	cases := []struct {
 		name            string
 		latest, current string
 		want            bool
 	}{
-		// 同基线、同提交距离、仅短 SHA 不同（如 force-push/amend 改写历史）→ 不误报
-		{"同基线同序号仅SHA变化不更新", "0.17.1-dev.3.gdef5678", "0.17.1-dev.3.gabc1234", false},
-		// 同基线、提交距离增大（主干有新实质提交）→ 有更新
-		{"同基线序号增大有更新", "0.17.1-dev.5.gabc1234", "0.17.1-dev.3.gdef5678", true},
-		// 同基线、提交距离减小（主干被回退/构建更旧）→ 不降级
-		{"同基线序号减小不降级", "0.17.1-dev.3.gabc1234", "0.17.1-dev.5.gdef5678", false},
-		// 完全相同的 dev → 不更新
-		{"完全相同dev不更新", "0.17.1-dev.3.gabc1234", "0.17.1-dev.3.gabc1234", false},
-		// 同基线正式版切到 dev → 视为有更新（正式→同基线预发布可切换）
-		{"同基线正式切dev有更新", "0.17.1-dev.3.gabc1234", "0.17.1", true},
+		{"更高基线候选版可更新", "v0.17.0-rc.1", "0.16.0", true},
+		{"更低基线候选版不降级", "v0.14.1-rc.9", "0.16.0", false},
+		{"同基线更高候选版可更新", "v0.17.1-rc.10", "0.17.1-rc.9", true},
+		{"同基线更低候选版不降级", "v0.17.1-rc.9", "0.17.1-rc.10", false},
+		{"相同候选版不更新", "v0.17.1-rc.10", "0.17.1-rc.10", false},
+		{"同基线正式版不降到候选版", "v0.17.1-rc.10", "0.17.1", false},
+		{"旧开发版可升同基线候选版", "v0.17.1-rc.1", "0.17.1-dev.3.gabc1234", true},
+		{"旧开发版可升更高基线候选版", "v0.18.0-rc.1", "0.17.1-dev.3.gabc1234", true},
 	}
 	for _, c := range cases {
 		if got := hasUpdate(c.latest, c.current, ChannelPrerelease); got != c.want {
 			t.Errorf("%s: hasUpdate(%q, %q, prerelease)=%v, 期望 %v", c.name, c.latest, c.current, got, c.want)
 		}
+	}
+}
+
+// TestHasUpdate_StableFromRCToGA 确保正式频道仍支持同基线候选版升级正式版。
+func TestHasUpdate_StableFromRCToGA(t *testing.T) {
+	if !hasUpdate("v0.17.1", "0.17.1-rc.10", ChannelStable) {
+		t.Error("正式频道应允许同基线候选版升级正式版")
 	}
 }
 

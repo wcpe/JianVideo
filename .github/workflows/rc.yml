@@ -1,13 +1,8 @@
-# GA 仅允许从 main 手动发布，并要求最终 RC 到 GA 之间只有发布元数据变更。
-name: 发布稳定版本
+# RC 仅允许从 main 手动发布；VERSION 必须直接包含 rc 序号。
+name: 发布候选版本
 
 on:
   workflow_dispatch:
-    inputs:
-      final_rc_tag:
-        description: 已公开且通过验收的最终 RC tag
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -18,55 +13,43 @@ concurrency:
 
 jobs:
   prepare:
-    name: 校验 GA 发布元数据
+    name: 校验 RC 发布元数据
     runs-on: ubuntu-24.04
     outputs:
       source_sha: ${{ steps.meta.outputs.source_sha }}
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
-      final_rc_tag: ${{ steps.meta.outputs.final_rc_tag }}
       artifact_prefix: ${{ steps.meta.outputs.artifact_prefix }}
     steps:
       - name: 拒绝非 main 手动运行
         shell: bash
         env:
           REF_NAME: ${{ github.ref_name }}
-        run: test "$REF_NAME" = "main" || { echo "错误：GA 只能从 main 分支手动运行。" >&2; exit 1; }
-      - name: 检出固定源码与 tag
+        run: test "$REF_NAME" = "main" || { echo "错误：RC 只能从 main 分支手动运行。" >&2; exit 1; }
+      - name: 检出固定源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - id: meta
-        name: 读取并校验 GA 版本
-        env:
-          FINAL_RC_TAG: ${{ inputs.final_rc_tag }}
+        name: 读取并校验 RC 版本
         shell: bash
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "错误：GA 的 VERSION 必须是稳定版 X.Y.Z。" >&2; exit 1; }
-          rc_number="${FINAL_RC_TAG#v${version}-rc.}"
-          [ "$FINAL_RC_TAG" = "v${version}-rc.${rc_number}" ] && [[ "$rc_number" =~ ^[1-9][0-9]*$ ]] || { echo "错误：最终 RC tag 与 GA 版本基线不一致。" >&2; exit 1; }
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]] || { echo "错误：RC 的 VERSION 必须形如 X.Y.Z-rc.N。" >&2; exit 1; }
           source_sha="$(git rev-parse HEAD)"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
-          echo "final_rc_tag=$FINAL_RC_TAG" >> "$GITHUB_OUTPUT"
-          echo "artifact_prefix=jianvideo-ga-${source_sha:0:7}" >> "$GITHUB_OUTPUT"
-      - name: 预检目标 GA 引用不存在
+          echo "artifact_prefix=jianvideo-rc-${source_sha:0:7}" >> "$GITHUB_OUTPUT"
+      - name: 预检 RC 序号与目标引用
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-        run: bash scripts/publish-release.sh preflight "${{ steps.meta.outputs.tag }}"
-      - name: 校验最终 RC 元数据
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: bash scripts/publish-release.sh verify-final-rc "${{ steps.meta.outputs.final_rc_tag }}" "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.source_sha }}"
-      - name: 校验 GA 发布说明
+        run: bash scripts/publish-release.sh preflight-rc "${{ steps.meta.outputs.tag }}"
+      - name: 校验 RC 发布说明
         shell: bash
         run: bash scripts/changelog-extract.sh "${{ steps.meta.outputs.version }}" CHANGELOG.md >/dev/null
 
@@ -78,24 +61,23 @@ jobs:
       source_sha: ${{ needs.prepare.outputs.source_sha }}
 
   build:
-    name: 构建固定 GA 源码
+    name: 构建固定 RC 源码
     needs: [prepare, quality]
     uses: ./.github/workflows/build.yml
     with:
       source_sha: ${{ needs.prepare.outputs.source_sha }}
       version: ${{ needs.prepare.outputs.version }}
       artifact_prefix: ${{ needs.prepare.outputs.artifact_prefix }}
-      artifact_retention_days: 7
+      artifact_retention_days: 14
 
   publish:
-    name: 安全发布 GA
+    name: 安全发布 RC
     needs: [prepare, quality, build]
     runs-on: ubuntu-24.04
-    environment: production
     permissions:
       contents: write
     steps:
-      - name: 检出发布脚本、变更日志与 tag
+      - name: 检出发布脚本与变更日志
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ needs.prepare.outputs.source_sha }}
@@ -106,18 +88,12 @@ jobs:
           pattern: ${{ needs.prepare.outputs.artifact_prefix }}-*
           path: artifacts
           merge-multiple: true
-      - name: 生成 GA 发布说明
+      - name: 生成 RC 发布说明
         shell: bash
         run: bash scripts/changelog-extract.sh "${{ needs.prepare.outputs.version }}" CHANGELOG.md > release-notes.md
-      - name: 打标签前复检最终 RC
+      - name: 创建、校验并公开 RC
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-        run: bash scripts/publish-release.sh verify-final-rc "${{ needs.prepare.outputs.final_rc_tag }}" "${{ needs.prepare.outputs.version }}" "${{ needs.prepare.outputs.source_sha }}"
-      - name: 创建、校验并公开 GA
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: bash scripts/publish-release.sh publish artifacts "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.source_sha }}" ga release-notes.md
+        run: bash scripts/publish-release.sh publish artifacts "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.source_sha }}" rc release-notes.md

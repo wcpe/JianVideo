@@ -19,7 +19,7 @@
   - **模态框确认**：更新 / 回滚的二次确认由原生 `window.confirm` 改为 Mantine `<Modal>` 自建确认对话框（标题 / 正文 / 确认 / 取消按钮）。`@mantine/modals` 不在依赖中（见 §6），故用 `@mantine/core` 的 `<Modal>` + `useDisclosure`，**不新增依赖**。
 - 不做（范围外）：
   - 不改后端 `/api/system/update/*` 任一端点（`force` 后端已支持）。
-  - 不改更新频道（正式版 / 测试版）持久化逻辑、不改重启轮询逻辑。
+  - 不改更新频道（正式版 / 候选版 RC）持久化逻辑、不改重启轮询逻辑。
   - 不引入 `@mantine/modals`（禁 npm install）。
 
 ## 3. 设计（怎么做）
@@ -34,6 +34,8 @@
 2. **确认模态框**：用 `@mantine/core` 的 `Modal` + `@mantine/hooks` 的 `useDisclosure` 自建两个确认对话框（更新、回滚各一）。点「立即更新并重启」/「回滚到上一版」先开对应模态框，模态框内「确认」执行原 `applyUpdate`/`rollbackUpdate`+重启轮询逻辑、「取消」关闭模态框。原 `window.confirm` 分支移除，原有副作用（busy 态、错误兜底、`waitForRestart`）不变。
 
 无后端改动、无数据模型改动、无新 ADR、无新依赖。
+
+频道用户界面术语统一为“候选版 RC”。候选版缓存迁移后仅接受严格合法的 RC 结果；历史 `dev` 缓存在读取时失效并清除，正式版缓存保持兼容。
 
 ## 4. 任务拆分
 

@@ -293,7 +293,7 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     };
   }, []);
 
-  // 加载持久化的更新频道（正式版/测试版），读失败回退 stable
+  // 加载持久化的更新频道（正式版/候选版），读失败回退 stable
   useEffect(() => {
     let active = true;
     getSettings()
@@ -394,7 +394,7 @@ export default function SystemPage({ section }: { section: SystemSection }) {
     [channel],
   );
 
-  // 切换并持久化更新频道（正式版/测试版）；切换后由 [channel] 副作用回填该频道缓存并后台刷新
+  // 切换并持久化更新频道（正式版/候选版）；切换后由 [channel] 副作用回填该频道缓存并后台刷新
   const handleChannelChange = useCallback((v: string) => {
     const ch: 'stable' | 'prerelease' = v === 'prerelease' ? 'prerelease' : 'stable';
     setChannel(ch);
@@ -753,7 +753,7 @@ export default function SystemPage({ section }: { section: SystemSection }) {
                   onChange={handleChannelChange}
                   data={[
                     { label: '正式版', value: 'stable' },
-                    { label: '测试版', value: 'prerelease' },
+                    { label: '候选版', value: 'prerelease' },
                   ]}
                   disabled={updateBusy}
                 />
