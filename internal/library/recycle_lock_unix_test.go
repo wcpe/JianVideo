@@ -59,29 +59,31 @@ func TestCleanupRecycle_PostCASWriteAtRestoresSourceAndDatabase(t *testing.T) {
 	recycleDir := filepath.Join(sourceDir, ".recycle")
 	target := expectedRecycleTarget(recycleDir, media)
 	var held *os.File
-	var targetModTime time.Time
-	var openErr error
-	svc.beforeRecycleFinalLock = func(path string) {
-		held, openErr = os.OpenFile(path, os.O_RDWR, 0)
-		if openErr == nil {
-			var info os.FileInfo
-			info, openErr = held.Stat()
-			if openErr == nil {
-				targetModTime = info.ModTime()
-			}
-		}
-	}
 	var mutationErr error
 	svc.afterRecycleDelete = func() {
-		if held == nil {
-			mutationErr = errors.New("未取得 post-CAS 篡改句柄")
+		held, mutationErr = os.OpenFile(target, os.O_RDWR, 0)
+		if mutationErr != nil {
+			return
+		}
+		heldInfo, err := held.Stat()
+		if err != nil {
+			mutationErr = err
+			return
+		}
+		targetInfo, err := os.Lstat(target)
+		if err != nil {
+			mutationErr = err
+			return
+		}
+		if !os.SameFile(heldInfo, targetInfo) {
+			mutationErr = errors.New("post-CAS 篡改句柄未指向最终回收目标")
 			return
 		}
 		if _, mutationErr = held.WriteAt(tampered, 0); mutationErr == nil {
 			mutationErr = held.Sync()
 		}
 		if mutationErr == nil {
-			mutationErr = os.Chtimes(target, targetModTime, targetModTime)
+			mutationErr = os.Chtimes(target, targetInfo.ModTime(), targetInfo.ModTime())
 		}
 	}
 	t.Cleanup(func() {
@@ -91,8 +93,8 @@ func TestCleanupRecycle_PostCASWriteAtRestoresSourceAndDatabase(t *testing.T) {
 	})
 
 	completed, err := svc.cleanupRecycleItem(media.SpaceID, map[string]string{"": recycleDir}, *media)
-	if openErr != nil || mutationErr != nil {
-		t.Fatalf("Unix post-CAS WriteAt 注入失败: openErr=%v mutationErr=%v", openErr, mutationErr)
+	if mutationErr != nil {
+		t.Fatalf("Unix post-CAS WriteAt 注入失败: %v", mutationErr)
 	}
 	var recoveryErr *RecycleRecoveryError
 	if completed || !errors.As(err, &recoveryErr) {
