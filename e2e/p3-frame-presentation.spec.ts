@@ -181,6 +181,9 @@ test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
       "data-player-visual-brightness",
       "available",
     );
+    await expect(player).toHaveAttribute("data-frame-presentation", "exact", {
+      timeout: 15_000,
+    });
     await expect(page.getByRole("button", { name: "暂停" })).toBeVisible({
       timeout: 15_000,
     });
