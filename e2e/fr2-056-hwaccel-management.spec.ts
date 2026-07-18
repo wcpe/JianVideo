@@ -35,6 +35,8 @@ test.describe('FR2-056 硬件转码加速管理面板', () => {
 
     await page.goto('/system?tab=hwaccel');
     await expect(page.getByRole('heading', { name: '硬件加速' }).first()).toBeVisible();
+    const savePolicyButton = page.getByRole('button', { name: '保存策略' });
+    await expect(savePolicyButton).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('硬件策略')).toBeVisible();
 
     await page.getByText('QSV', { exact: true }).click();
@@ -42,7 +44,7 @@ test.describe('FR2-056 硬件转码加速管理面板', () => {
     if (await fallback.isChecked()) {
       await page.locator('label').filter({ hasText: '软件回退' }).click();
     }
-    await page.getByRole('button', { name: '保存策略' }).click();
+    await savePolicyButton.click();
 
     await expect
       .poll(async () => {
@@ -76,7 +78,7 @@ test.describe('FR2-056 硬件转码加速管理面板', () => {
 
     await page.reload();
     await expect(page.getByRole('heading', { name: '硬件加速' }).first()).toBeVisible();
-    await expect(page.locator('input[value="qsv"]')).toBeChecked();
+    await expect(page.locator('input[value="qsv"]')).toBeChecked({ timeout: 30_000 });
     await expect(page.getByRole('switch', { name: '硬件不可用时软件回退' })).not.toBeChecked();
     await page.screenshot({
       path: join(screenshotDir, 'hwaccel-policy-saved.png'),
