@@ -126,6 +126,17 @@ test('构建保留天数由各发布通道显式传入', () => {
   assert.match(workflows.release, /artifact_retention_days: 7/)
 })
 
+test('Node 工具链支持仓库锁定的 pnpm 版本', () => {
+  const packageJson = JSON.parse(read('package.json'))
+  assert.equal(packageJson.packageManager, 'pnpm@11.7.0')
+
+  const nodeVersions = [workflows.build, workflows.ci].flatMap((content) =>
+    [...content.matchAll(/node-version:\s*([^\s]+)/g)].map((match) => match[1]),
+  )
+  assert.ok(nodeVersions.length > 0)
+  assert.deepEqual([...new Set(nodeVersions)], ['24'])
+})
+
 test('RC 与 GA 在质量和构建前完成目标引用预检', () => {
   const rcPrepareEnd = workflows.rc.indexOf('\n  quality:')
   const rcPreflight = workflows.rc.indexOf('publish-release.sh preflight-rc')
