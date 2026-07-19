@@ -12,30 +12,39 @@ import (
 )
 
 const (
-	sqliteBusySnapshotMaxAttempts = 5
-	sqliteBusySnapshotRetryDelay  = 10 * time.Millisecond
+	sqliteBusyMaxAttempts = 5
+	sqliteBusyRetryDelay  = 10 * time.Millisecond
 )
 
 // RetrySQLiteBusySnapshot 在 SQLite WAL 读快照失效时重跑完整原子操作。
 func RetrySQLiteBusySnapshot(ctx context.Context, operation func() error) error {
+	return retrySQLiteBusy(ctx, operation, isSQLiteBusySnapshot)
+}
+
+// RetrySQLiteBusy 在 SQLite 短事务遇到写锁冲突时重跑完整原子操作。
+func RetrySQLiteBusy(ctx context.Context, operation func() error) error {
+	return retrySQLiteBusy(ctx, operation, isSQLiteBusy)
+}
+
+func retrySQLiteBusy(ctx context.Context, operation func() error, shouldRetry func(error) bool) error {
 	var err error
-	for attempt := 0; attempt < sqliteBusySnapshotMaxAttempts; attempt++ {
+	for attempt := 0; attempt < sqliteBusyMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		err = operation()
-		if err == nil || !isSQLiteBusySnapshot(err) || attempt == sqliteBusySnapshotMaxAttempts-1 {
+		if err == nil || !shouldRetry(err) || attempt == sqliteBusyMaxAttempts-1 {
 			return err
 		}
-		if err := waitSQLiteBusySnapshotRetry(ctx, attempt); err != nil {
+		if err := waitSQLiteBusyRetry(ctx, attempt); err != nil {
 			return err
 		}
 	}
 	return err
 }
 
-func waitSQLiteBusySnapshotRetry(ctx context.Context, attempt int) error {
-	timer := time.NewTimer(time.Duration(attempt+1) * sqliteBusySnapshotRetryDelay)
+func waitSQLiteBusyRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt+1) * sqliteBusyRetryDelay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -46,8 +55,32 @@ func waitSQLiteBusySnapshotRetry(ctx context.Context, attempt int) error {
 }
 
 func isSQLiteBusySnapshot(err error) bool {
+	sqliteErr, ok := unwrapSQLiteError(err)
+	return ok && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
+}
+
+func isSQLiteBusy(err error) bool {
+	sqliteErr, ok := unwrapSQLiteError(err)
+	if !ok {
+		return false
+	}
+	code := sqliteErr.Code
+	if code == 0 {
+		code = sqlite3.ErrNo(int(sqliteErr.ExtendedCode) & int(sqlite3.ErrNoMask))
+	}
+	return code == sqlite3.ErrBusy || code == sqlite3.ErrLocked
+}
+
+func unwrapSQLiteError(err error) (sqlite3.Error, bool) {
 	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrBusySnapshot
+	if errors.As(err, &sqliteErr) {
+		return sqliteErr, true
+	}
+	var sqliteErrPtr *sqlite3.Error
+	if errors.As(err, &sqliteErrPtr) && sqliteErrPtr != nil {
+		return *sqliteErrPtr, true
+	}
+	return sqlite3.Error{}, false
 }
 
 // Open 打开 SQLite 数据库并启用 WAL 模式

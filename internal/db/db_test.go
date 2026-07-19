@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -40,6 +41,55 @@ func TestRetrySQLiteBusySnapshotHonorsContextCancellation(t *testing.T) {
 		attempts++
 		cancel()
 		return sqlite3.Error{Code: sqlite3.ErrBusy, ExtendedCode: sqlite3.ErrBusySnapshot}
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestRetrySQLiteBusyRetriesBusyAndLocked(t *testing.T) {
+	cases := map[string]sqlite3.Error{
+		"普通 Busy":       {Code: sqlite3.ErrBusy},
+		"普通 Locked":     {Code: sqlite3.ErrLocked},
+		"Busy 扩展码":      {ExtendedCode: sqlite3.ErrBusyRecovery},
+		"Busy Snapshot": {ExtendedCode: sqlite3.ErrBusySnapshot},
+		"Locked 扩展码":    {ExtendedCode: sqlite3.ErrLockedSharedCache},
+	}
+	for name, sqliteErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			attempts := 0
+			err := RetrySQLiteBusy(context.Background(), func() error {
+				attempts++
+				if attempts < 3 {
+					return sqliteErr
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 3, attempts)
+		})
+	}
+}
+
+func TestRetrySQLiteBusyRetriesWrappedError(t *testing.T) {
+	attempts := 0
+	err := RetrySQLiteBusy(context.Background(), func() error {
+		attempts++
+		if attempts < 2 {
+			return fmt.Errorf("事务写入失败: %w", sqlite3.Error{Code: sqlite3.ErrLocked})
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+}
+
+func TestRetrySQLiteBusyHonorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	err := RetrySQLiteBusy(ctx, func() error {
+		attempts++
+		cancel()
+		return sqlite3.Error{Code: sqlite3.ErrBusy}
 	})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 1, attempts)

@@ -160,7 +160,7 @@ func (s *Service) Enqueue(ctx context.Context, input EnqueueInput) (*models.Task
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var task *models.Task
-	err := dbutil.RetrySQLiteBusySnapshot(ctx, func() error {
+	err := dbutil.RetrySQLiteBusy(ctx, func() error {
 		task = nil
 		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var enqueueErr error

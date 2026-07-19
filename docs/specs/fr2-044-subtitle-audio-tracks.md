@@ -1,6 +1,6 @@
 # 功能规格：字幕与多音轨
 
-> 状态：已交付@v0.24.0　·　关联 PRD：FR2-044　·　阶段：P3 `0.24.x`
+> 状态：候选发布@v0.24.0-rc.1　·　关联 PRD：FR2-044　·　阶段：P3 `0.24.x`
 
 ## 1. 背景与目标
 
@@ -132,7 +132,7 @@
 - player-core 门禁：build、lint、全量测试与覆盖率全部通过；音轨事务只在后端确认后收敛 `selected/effective`，并保留原 `effective_track_id=null` 的回滚语义。
 - 前端全量门禁：lint、typecheck、build 通过；Vitest 139 个文件、1033 个测试全部通过；V8 覆盖率为 statements 81.59%、branches 81.87%、functions 71.31%、lines 81.59%。测试运行仍有既有 React `act(...)`、jsdom `scrollTo/navigation` 与未匹配 MSW 请求的 stderr 痕迹，但进程与覆盖率门均成功。
 - 真服务 E2E：`pnpm exec playwright test e2e/fr2-044-subtitle-audio-tracks.spec.ts` 在 Chromium headless 通过 1/1；同一用例追加 `--headed` 在 Windows Chromium headed 通过 1/1。用例覆盖双音轨 `reload`、单音轨 `unsupported`、冻结的 202/task/profile/url 契约、按 task 查询 HLS 状态、切片可读、HLS 请求头、播放位置/暂停/速率/字幕恢复。
-- Windows 安装态 PWA 的真实听辨与用户确认已于 2026-07-17 完成；FR2-044 满足 P3 发布门并标记为 `已交付@v0.24.0`。
+- Windows 安装态 PWA 的真实听辨与用户确认已于 2026-07-17 完成；FR2-044 满足 P3 发布门并标记为 `候选发布@v0.24.0-rc.1`。
 
 ## 7. 风险 / 待定
 

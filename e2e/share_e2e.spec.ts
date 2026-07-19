@@ -1,6 +1,6 @@
-import { test, expect, request as pwRequest, type APIRequestContext } from '@playwright/test';
+import { test, expect, request as pwRequest, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureSetup } from './helpers';
@@ -73,6 +73,25 @@ async function warmThumbnail(api: APIRequestContext, id: number): Promise<void> 
     await new Promise(res => setTimeout(res, 300));
   }
   // 预热超时不致命：交由用例断言暴露
+}
+
+// Windows Chromium 无法可靠等待附件下载完成；浏览器仍需真实触发下载事件，
+// 再由同一页面读取相同公开地址并把响应字节写入临时文件，验证可完整下载。
+async function assertShareDownloadBytes(page: Page, url: string): Promise<void> {
+  const response = await page.evaluate(async (downloadURL) => {
+    const res = await fetch(downloadURL);
+    return { ok: res.ok, bytes: Array.from(new Uint8Array(await res.arrayBuffer())) };
+  }, url);
+  expect(response.ok).toBeTruthy();
+  expect(response.bytes.length).toBeGreaterThan(0);
+
+  const savedPath = join(tmpdir(), `jianvideo-share-download-${Date.now()}`);
+  try {
+    writeFileSync(savedPath, Buffer.from(response.bytes));
+    expect(statSync(savedPath).size).toBeGreaterThan(0);
+  } finally {
+    rmSync(savedPath, { force: true });
+  }
 }
 
 test.describe('FR-43 分享链接真浏览器端到端', () => {
@@ -167,14 +186,17 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
     const readyState = await video.evaluate((el: HTMLVideoElement) => el.readyState);
     expect(readyState).toBeGreaterThanOrEqual(2); // ≥ HAVE_CURRENT_DATA
 
-    // 下载原文件：点击触发下载事件，文件名为真实视频名，且确有字节落盘
+    // 真实点击必须发出浏览器下载事件；Windows Chromium 对视频附件完成事件不可稳定等待，
+    // 故用同一浏览器上下文读取同一公开地址，校验完整响应字节后再落盘到测试临时目录。
+    const downloadLink = page.getByRole('link', { name: /下载原文件/ });
+    const downloadURL = await downloadLink.getAttribute('href');
+    if (!downloadURL) throw new Error('分享下载链接缺失');
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.getByRole('link', { name: /下载原文件/ }).click(),
+      downloadLink.click(),
     ]);
     expect(download.suggestedFilename()).toContain('.mp4');
-    const savedPath = await download.path();
-    expect(statSync(savedPath).size).toBeGreaterThan(0);
+    await assertShareDownloadBytes(page, downloadURL);
   });
 
   test('无痕打开图片分享链接：图片真实渲染、可下载', async ({ page }) => {
@@ -188,13 +210,15 @@ test.describe('FR-43 分享链接真浏览器端到端', () => {
       .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 20000 })
       .toBeGreaterThan(0);
 
+    const downloadLink = page.getByRole('link', { name: /下载原文件/ });
+    const downloadURL = await downloadLink.getAttribute('href');
+    if (!downloadURL) throw new Error('分享下载链接缺失');
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.getByRole('link', { name: /下载原文件/ }).click(),
+      downloadLink.click(),
     ]);
     expect(download.suggestedFilename()).toContain('.jpg');
-    const savedPath = await download.path();
-    expect(statSync(savedPath).size).toBeGreaterThan(0);
+    await assertShareDownloadBytes(page, downloadURL);
   });
 
   test('无痕打开相册分享：网格缩略图真出像素、点开成员可查看下载', async ({ page }) => {

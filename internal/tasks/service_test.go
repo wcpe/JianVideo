@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -148,6 +149,63 @@ func TestConcurrentEnqueueSameIdempotencyKeyCreatesOneUnfinishedTask(t *testing.
 	}
 	if got := countTasks(t, db, "idempotency_key = ?", input.IdempotencyKey); got != 1 {
 		t.Fatalf("并发同幂等键只应产生一条未完成任务: %d", got)
+	}
+}
+
+func TestEnqueueRetriesOrdinarySQLiteWriteLocks(t *testing.T) {
+	cases := map[string]sqlite3.Error{
+		"Busy":   {Code: sqlite3.ErrBusy},
+		"Locked": {Code: sqlite3.ErrLocked},
+	}
+	for name, sqliteErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			testEnqueueRetriesOrdinarySQLiteWriteLock(t, sqliteErr)
+		})
+	}
+}
+
+func testEnqueueRetriesOrdinarySQLiteWriteLock(t *testing.T, sqliteErr sqlite3.Error) {
+	svc, db := newTaskTestService(t)
+	const (
+		callbackName     = "test:task-enqueue-write-lock"
+		conflictAttempts = 2
+	)
+	var attempts atomic.Int32
+	var injected atomic.Int32
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "tasks" {
+			return
+		}
+		attempts.Add(1)
+		if injected.Load() < conflictAttempts {
+			injected.Add(1)
+			if err := tx.AddError(sqliteErr); !errors.Is(err, sqliteErr) {
+				t.Errorf("注入 SQLite 写锁失败: %v", err)
+			}
+		}
+	}); err != nil {
+		t.Fatalf("注册 SQLite 写锁回调失败: %v", err)
+	}
+
+	input := EnqueueInput{
+		Scope: models.TaskScopeSpace, SpaceID: models.DefaultSpaceID, Type: "thumbnail.generate",
+		IdempotencyKey: "thumb:write-lock:42", ResourceType: "media", ResourceID: "42",
+	}
+	task, err := svc.Enqueue(context.Background(), input)
+	if removeErr := db.Callback().Create().Remove(callbackName); removeErr != nil {
+		t.Fatalf("移除 SQLite 写锁回调失败: %v", removeErr)
+	}
+	if err != nil {
+		t.Fatalf("普通 SQLite 写锁后入队应自动重试: %v", err)
+	}
+	if task == nil || task.ID == 0 {
+		t.Fatalf("重试后应返回已创建任务: %+v", task)
+	}
+	if injected.Load() != conflictAttempts || attempts.Load() != conflictAttempts+1 {
+		t.Fatalf("普通 SQLite 写锁应重试至成功: injected=%d attempts=%d", injected.Load(), attempts.Load())
+	}
+	if got := countTasks(t, db, "idempotency_key = ?", input.IdempotencyKey); got != 1 {
+		t.Fatalf("重试后幂等键只应创建一条任务: %d", got)
 	}
 }
 
