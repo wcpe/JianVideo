@@ -355,7 +355,13 @@ describe('VideoPlayer 六档定位（FR2-034）', () => {
         />
       </MantineProvider>,
     );
-    await waitFor(() => expect(video.getAttribute('src')).toBe('/exact.mp4'));
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe('/exact.mp4');
+      expect(screen.getByTestId('video-player-root')).toHaveAttribute(
+        'data-frame-presentation',
+        'approximate',
+      );
+    });
     expect(screen.getByText('近似逐帧')).toBeInTheDocument();
     act(() => {
       frameCallback?.(performance.now(), { mediaTime: 0 } as VideoFrameCallbackMetadata);
