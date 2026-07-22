@@ -1,12 +1,19 @@
 import { useState, useCallback } from 'react';
 import { notifications } from '@mantine/notifications';
 import { listAlbums, addAlbumItem } from '@/api/albums';
-import { getTags, addMediaTag } from '@/api/library';
+import {
+  getTags,
+  addMediaTag,
+  getLibraryPaths,
+  batchTranscodeMediaFiles,
+  batchMoveMediaFiles,
+} from '@/api/library';
+import { listPresets } from '@/api/transcode';
 import { useAuthStore } from '@/stores/auth';
 import { extractErrorMessage } from '@/utils/error';
-import type { Album, Tag } from '@/types';
+import type { Album, LibraryPath, Tag, TranscodePreset } from '@/types';
 
-/** 批量操作的触发与弹窗状态（FR-91）。三类动作均以选中集为对象（无选中由调用方退化为右键项）。 */
+/** 批量操作的触发与弹窗状态（FR-91 + FR2-053）。 */
 export interface BatchActions {
   /** 打开「加入相册」弹窗，对给定 id 集生效 */
   openAddToAlbum: (ids: number[]) => void;
@@ -14,6 +21,10 @@ export interface BatchActions {
   openAddTag: (ids: number[]) => void;
   /** 触发批量打包下载（直接下载，无弹窗） */
   download: (ids: number[]) => void;
+  /** 打开「批量转码」弹窗（FR2-053） */
+  openTranscode: (ids: number[]) => void;
+  /** 打开「批量移动」弹窗（FR2-053 索引层） */
+  openMove: (ids: number[]) => void;
   /** 弹窗渲染所需的内部状态与回调，交给 BatchActionsModals */
   modalState: BatchModalState;
 }
@@ -30,6 +41,18 @@ export interface BatchModalState {
   loadingTags: boolean;
   confirmTag: (tag: { tag_id?: number; name?: string }) => Promise<void>;
   closeTag: () => void;
+  // FR2-053 转码
+  transcodeOpened: boolean;
+  presets: TranscodePreset[];
+  loadingPresets: boolean;
+  confirmTranscode: (presetID: number) => Promise<void>;
+  closeTranscode: () => void;
+  // FR2-053 移动
+  moveOpened: boolean;
+  libraries: LibraryPath[];
+  loadingLibraries: boolean;
+  confirmMove: (libraryID: number) => Promise<void>;
+  closeMove: () => void;
 }
 
 /** 逐项调用单项端点，统计成功/失败计数；幂等去重由后端单项端点保证。 */
@@ -51,9 +74,8 @@ async function runEach(
 }
 
 /**
- * 批量操作编排（FR-91）：封装加相册 / 打标签弹窗与逐项端点调用、打包下载触发与 toast 计数。
- * 加相册、打标签为纯前端循环复用 FR-40/FR-41 单项端点（零新后端端点）；
- * 打包下载经 fetch 带 Bearer token 拉取后端 zip 流，blob 触发浏览器附件下载（不用 axios，规避其整体超时）。
+ * 批量操作编排（FR-91 + FR2-053）：
+ * 加相册/打标签循环单项端点；打包下载 zip；转码/移动走批量 API。
  */
 export function useBatchActions(): BatchActions {
   const [albumOpened, setAlbumOpened] = useState(false);
@@ -65,6 +87,16 @@ export function useBatchActions(): BatchActions {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
   const [tagTargets, setTagTargets] = useState<number[]>([]);
+
+  const [transcodeOpened, setTranscodeOpened] = useState(false);
+  const [presets, setPresets] = useState<TranscodePreset[]>([]);
+  const [loadingPresets, setLoadingPresets] = useState(false);
+  const [transcodeTargets, setTranscodeTargets] = useState<number[]>([]);
+
+  const [moveOpened, setMoveOpened] = useState(false);
+  const [libraries, setLibraries] = useState<LibraryPath[]>([]);
+  const [loadingLibraries, setLoadingLibraries] = useState(false);
+  const [moveTargets, setMoveTargets] = useState<number[]>([]);
 
   const openAddToAlbum = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -150,10 +182,77 @@ export function useBatchActions(): BatchActions {
     }
   }, []);
 
+  const openTranscode = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    setTranscodeTargets(ids);
+    setTranscodeOpened(true);
+    setLoadingPresets(true);
+    try {
+      setPresets(await listPresets());
+    } catch (err) {
+      notifications.show({ color: 'red', message: extractErrorMessage(err, '加载转码预设失败') });
+    } finally {
+      setLoadingPresets(false);
+    }
+  }, []);
+
+  const confirmTranscode = useCallback(
+    async (presetID: number) => {
+      setTranscodeOpened(false);
+      try {
+        const result = await batchTranscodeMediaFiles(transcodeTargets, presetID);
+        const parts = [`已入队 ${result.queued} 项`];
+        if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 项`);
+        if (result.failed > 0) parts.push(`失败 ${result.failed} 项`);
+        notifications.show({
+          color: result.failed > 0 ? 'yellow' : 'green',
+          message: parts.join('，'),
+        });
+      } catch (err) {
+        notifications.show({ color: 'red', message: extractErrorMessage(err, '批量转码失败') });
+      }
+    },
+    [transcodeTargets],
+  );
+
+  const openMove = useCallback(async (ids: number[]) => {
+    if (ids.length === 0) return;
+    setMoveTargets(ids);
+    setMoveOpened(true);
+    setLoadingLibraries(true);
+    try {
+      setLibraries(await getLibraryPaths());
+    } catch (err) {
+      notifications.show({ color: 'red', message: extractErrorMessage(err, '加载媒体库失败') });
+    } finally {
+      setLoadingLibraries(false);
+    }
+  }, []);
+
+  const confirmMove = useCallback(
+    async (libraryID: number) => {
+      setMoveOpened(false);
+      try {
+        const result = await batchMoveMediaFiles(moveTargets, libraryID);
+        const parts = [`已移动 ${result.moved} 项`];
+        if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 项`);
+        notifications.show({
+          color: 'green',
+          message: `${parts.join('，')}（仅改库归属，不搬磁盘文件）`,
+        });
+      } catch (err) {
+        notifications.show({ color: 'red', message: extractErrorMessage(err, '批量移动失败') });
+      }
+    },
+    [moveTargets],
+  );
+
   return {
     openAddToAlbum,
     openAddTag,
     download,
+    openTranscode,
+    openMove,
     modalState: {
       albumOpened,
       albums,
@@ -165,6 +264,16 @@ export function useBatchActions(): BatchActions {
       loadingTags,
       confirmTag,
       closeTag: () => setTagOpened(false),
+      transcodeOpened,
+      presets,
+      loadingPresets,
+      confirmTranscode,
+      closeTranscode: () => setTranscodeOpened(false),
+      moveOpened,
+      libraries,
+      loadingLibraries,
+      confirmMove,
+      closeMove: () => setMoveOpened(false),
     },
   };
 }

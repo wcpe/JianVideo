@@ -223,13 +223,14 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
     expect(navbar.getAllByText('管理').length).toBeGreaterThan(0);
   });
 
-  it('展开态：14 个导航项全部仍在桌面 navbar 中渲染（库管理重命名为「库管理」避免与组标题歧义）', () => {
+  it('展开态：16 个导航项全部仍在桌面 navbar 中渲染（含 FR2-009 媒体网格）', () => {
     renderLayout();
 
     const navbar = within(getNavbar());
     const labels = [
       '概览',
       '时间轴',
+      '媒体网格',
       '目录',
       '相册',
       '地图',
@@ -241,6 +242,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       '重复项',
       '转码',
       '任务',
+      '缓存',
       '系统',
     ];
     labels.forEach((label) => {
@@ -294,10 +296,11 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
     expect(within(navbar).queryByText('浏览')).toBeNull();
     expect(within(navbar).queryByText('洞察')).toBeNull();
     expect(within(navbar).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
-    // 14 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达）
+    // 16 个图标态导航链接仍在桌面 navbar 中（按 path href 校验可达；含 FR2-009 媒体网格）
     const paths = [
       '/',
       '/timeline',
+      '/media-grid',
       '/browse',
       '/albums',
       '/map',
@@ -309,6 +312,7 @@ describe('AppLayout 左侧导航分组（FR-83 / FR-130 重构）', () => {
       '/duplicates',
       '/transcode',
       '/tasks',
+      '/storage-cache',
       '/system',
     ];
     paths.forEach((p) => {
@@ -831,8 +835,8 @@ describe('AppLayout 导航交互完善（FR-115）', () => {
     renderLayoutAt('/browse');
 
     const navbar = getNavbar();
-    // 15 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；新增概览（FR-117）、监控（FR-119）、任务（FR2-037）、缓存（FR2-048）
-    expect(navbar.querySelectorAll('.nav-link').length).toBe(15);
+    // 16 个导航项均挂 nav-link 类（hover 浅底 + 过渡由 index.css 的 .nav-link 承接）；含媒体网格（FR2-009）、缓存（FR2-048）
+    expect(navbar.querySelectorAll('.nav-link').length).toBe(16);
     // 激活项的外层 <a data-active> 内含 nav-link；hover 浅底由 `a:not([data-active]) .nav-link:hover` 排除激活项
     expect(navbar.querySelectorAll('a[data-active="true"] .nav-link').length).toBe(1);
   });

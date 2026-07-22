@@ -44,6 +44,14 @@ type MediaFilter struct {
 	// FR-136 EXIF 专项关键词（多词 AND，全参数化）
 	CameraTerms []string // camera: token，仅约束 camera 列
 	LensTerms   []string // lens: token，仅约束 lens 列
+
+	// FR2-046 时长/分辨率筛选（秒与像素；0 表示不约束）
+	DurationMin float64 // 时长下界（含）
+	DurationMax float64 // 时长上界（含）
+	WidthMin    int     // 宽度下界（含）
+	WidthMax    int     // 宽度上界（含）
+	HeightMin   int     // 高度下界（含）
+	HeightMax   int     // 高度上界（含）
 }
 
 // searchableColumns 是裸词关键词的可搜列集合（FR-136/FR-137）。

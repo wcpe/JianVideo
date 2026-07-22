@@ -927,14 +927,17 @@ export class PlaybackCore {
     command: PlaybackCommandContext,
   ): Promise<PlaybackCommandResult> {
     const actual = this.readBackendSnapshot() ?? this.snapshot;
-    this.blockedPlaybackIntent =
-      actual.state === "playing" ? "playing" : this.blockedPlaybackIntent;
-    const pauseError =
-      actual.state === "playing"
-        ? await this.invokeFeatureBackendOperation(command, () =>
-            this.backend.pause(command),
-          )
-        : null;
+    // 核心已确认播放意图时也要强制 pause：后端快照可能短暂滞后。
+    const shouldPause =
+      this.snapshot.state === "playing" || actual.state === "playing";
+    this.blockedPlaybackIntent = shouldPause
+      ? "playing"
+      : this.blockedPlaybackIntent;
+    const pauseError = shouldPause
+      ? await this.invokeFeatureBackendOperation(command, () =>
+          this.backend.pause(command),
+        )
+      : null;
     const stopError = await this.invokeFeatureOperation(() =>
       this.stopLoading(command),
     );

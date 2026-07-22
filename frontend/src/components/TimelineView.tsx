@@ -106,10 +106,12 @@ interface TimelineViewProps {
   onSelectionChange?: (ids: number[]) => void;
   onBatchDelete?: (ids: number[]) => void;
   onDeleteOne?: (file: MediaFile) => void;
-  // 批量操作（FR-91）：以 id 集为对象（无选中退化为右键项），均可选
+  // 批量操作（FR-91 / FR2-053）：以 id 集为对象（无选中退化为右键项），均可选
   onBatchAddToAlbum?: (ids: number[]) => void;
   onBatchAddTag?: (ids: number[]) => void;
   onBatchDownload?: (ids: number[]) => void;
+  onBatchTranscode?: (ids: number[]) => void;
+  onBatchMove?: (ids: number[]) => void;
 }
 
 /** 分组头行预估高度（用于虚拟化初始测量，会被实际测量覆盖） */
@@ -348,6 +350,8 @@ function TimelineViewInner(
     onBatchAddToAlbum,
     onBatchAddTag,
     onBatchDownload,
+    onBatchTranscode,
+    onBatchMove,
   }: TimelineViewProps,
   ref: React.Ref<TimelineViewHandle>,
 ) {
@@ -385,7 +389,9 @@ function TimelineViewInner(
     onDeleteOne ||
     onBatchAddToAlbum ||
     onBatchAddTag ||
-    onBatchDownload
+    onBatchDownload ||
+    onBatchTranscode ||
+    onBatchMove
   );
   // 全部已加载项按分组渲染顺序展平为有序 id 列表——Ctrl+A / Shift 区间均以此为范围。
   const flatIds = useMemo(() => groups.flatMap((g) => g.files.map((f) => f.id)), [groups]);
@@ -650,6 +656,8 @@ function TimelineViewInner(
           onAddToAlbum={onBatchAddToAlbum ? () => runBarBatch(onBatchAddToAlbum) : undefined}
           onAddTag={onBatchAddTag ? () => runBarBatch(onBatchAddTag) : undefined}
           onDownload={onBatchDownload ? () => runBarBatch(onBatchDownload) : undefined}
+          onTranscode={onBatchTranscode ? () => runBarBatch(onBatchTranscode) : undefined}
+          onMove={onBatchMove ? () => runBarBatch(onBatchMove) : undefined}
         />
       )}
 
@@ -676,6 +684,8 @@ function TimelineViewInner(
           onAddToAlbum={onBatchAddToAlbum ? (id) => runBatch(id, onBatchAddToAlbum) : undefined}
           onAddTag={onBatchAddTag ? (id) => runBatch(id, onBatchAddTag) : undefined}
           onDownload={onBatchDownload ? (id) => runBatch(id, onBatchDownload) : undefined}
+          onTranscode={onBatchTranscode ? (id) => runBatch(id, onBatchTranscode) : undefined}
+          onMove={onBatchMove ? (id) => runBatch(id, onBatchMove) : undefined}
         />
       )}
     </>

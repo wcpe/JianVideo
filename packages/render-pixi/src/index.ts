@@ -1,39 +1,28 @@
-export interface VisibleWindow {
-  readonly start: number;
-  readonly end: number;
-}
+export {
+  resolveVisibleWindow,
+  resolveGridWindow,
+  createRenderMetricsSnapshot,
+} from "./window-metrics";
+export type {
+  VisibleWindow,
+  GridWindowInput,
+  GridWindow,
+  RenderMetricsInput,
+  RenderMetricsSnapshot,
+} from "./window-metrics";
 
-export interface GridWindowInput {
-  readonly total: number;
-  readonly columns: number;
-  readonly itemHeight: number;
-  readonly scrollTop: number;
-  readonly viewportHeight: number;
-  readonly overscanRows: number;
-}
-
-export interface GridWindow extends VisibleWindow {
-  readonly firstVisible: number;
-  readonly visibleCount: number;
-}
-
-export interface TextureEntry {
-  readonly key: string;
-  readonly width: number;
-  readonly height: number;
-  readonly destroy: () => void;
-}
-
-export interface TexturePoolOptions {
-  readonly maxTextures: number;
-  readonly maxBytes: number;
-}
-
-export interface TexturePoolStats {
-  readonly keys: readonly string[];
-  readonly textureCount: number;
-  readonly textureMemoryBytes: number;
-}
+export {
+  TexturePool,
+  estimateTextureMemoryBytes,
+  shouldRequestHlsPreview,
+  createDefaultMediaTexturePool,
+} from "./texture-pool";
+export type {
+  TextureEntry,
+  TexturePoolOptions,
+  TexturePoolStats,
+  PreviewState,
+} from "./texture-pool";
 
 export interface PixiPreviewCellInput {
   readonly cellHeight: number;
@@ -64,63 +53,6 @@ export interface PixiGridPreviewHandle {
   readonly pixiVersion: string;
   readonly rendererType: string;
   readonly destroy: () => void;
-}
-
-export interface PreviewState {
-  readonly hovered: boolean;
-  readonly selected: boolean;
-}
-
-export interface RenderMetricsInput {
-  readonly hlsRequests: number;
-  readonly thumbnailRequests: number;
-  readonly textureStats: TexturePoolStats;
-  readonly window: VisibleWindow;
-}
-
-export interface RenderMetricsSnapshot {
-  readonly hlsRequests: number;
-  readonly pixiObjectCount: number;
-  readonly textureCount: number;
-  readonly textureMemoryBytes: number;
-  readonly thumbnailRequests: number;
-  readonly visibleItems: number;
-}
-
-export function resolveVisibleWindow(
-  total: number,
-  firstVisible: number,
-  visibleCount: number,
-  overscan: number,
-): VisibleWindow {
-  const start = Math.max(0, firstVisible - overscan);
-  const end = Math.min(total, firstVisible + visibleCount + overscan);
-  return { start, end };
-}
-
-export function estimateTextureMemoryBytes(
-  textureCount: number,
-  width: number,
-  height: number,
-): number {
-  return textureCount * width * height * 4;
-}
-
-export function resolveGridWindow(input: GridWindowInput): GridWindow {
-  const total = Math.max(0, input.total);
-  const columns = Math.max(1, input.columns);
-  const itemHeight = Math.max(1, input.itemHeight);
-  const firstRow = Math.max(0, Math.floor(input.scrollTop / itemHeight));
-  const visibleRows = Math.max(1, Math.ceil(input.viewportHeight / itemHeight));
-  const overscanRows = Math.max(0, input.overscanRows);
-  const firstVisible = Math.min(total, firstRow * columns);
-  const visibleCount = Math.min(total - firstVisible, visibleRows * columns);
-  const start = Math.max(0, (firstRow - overscanRows) * columns);
-  const end = Math.min(
-    total,
-    (firstRow + visibleRows + overscanRows) * columns,
-  );
-  return { start, end, firstVisible, visibleCount };
 }
 
 export function createPixiPreviewCells(
@@ -188,80 +120,27 @@ export async function mountPixiGridPreview(
   };
 }
 
-export class TexturePool {
-  readonly #entries = new Map<string, TextureEntry>();
-  readonly #options: TexturePoolOptions;
-  #textureMemoryBytes = 0;
-
-  constructor(options: TexturePoolOptions) {
-    this.#options = options;
-  }
-
-  get(key: string): TextureEntry | undefined {
-    const entry = this.#entries.get(key);
-    if (entry === undefined) {
-      return undefined;
-    }
-    this.#entries.delete(key);
-    this.#entries.set(key, entry);
-    return entry;
-  }
-
-  put(entry: TextureEntry): void {
-    const existing = this.#entries.get(entry.key);
-    if (existing !== undefined) {
-      this.#textureMemoryBytes -= textureEntryBytes(existing);
-      existing.destroy();
-      this.#entries.delete(entry.key);
-    }
-    this.#entries.set(entry.key, entry);
-    this.#textureMemoryBytes += textureEntryBytes(entry);
-    this.#evictUntilWithinBudget();
-  }
-
-  stats(): TexturePoolStats {
-    return {
-      keys: [...this.#entries.keys()],
-      textureCount: this.#entries.size,
-      textureMemoryBytes: this.#textureMemoryBytes,
-    };
-  }
-
-  #evictUntilWithinBudget(): void {
-    while (
-      this.#entries.size > this.#options.maxTextures ||
-      this.#textureMemoryBytes > this.#options.maxBytes
-    ) {
-      const oldest = this.#entries.entries().next().value;
-      if (oldest === undefined) {
-        return;
-      }
-      const [key, entry] = oldest;
-      this.#entries.delete(key);
-      this.#textureMemoryBytes -= textureEntryBytes(entry);
-      entry.destroy();
-    }
-  }
-}
-
-export function shouldRequestHlsPreview(state: PreviewState): boolean {
-  return state.hovered || state.selected;
-}
-
-export function createRenderMetricsSnapshot(
-  input: RenderMetricsInput,
-): RenderMetricsSnapshot {
-  const visibleItems = Math.max(0, input.window.end - input.window.start);
-  return {
-    hlsRequests: input.hlsRequests,
-    pixiObjectCount: visibleItems,
-    textureCount: input.textureStats.textureCount,
-    textureMemoryBytes: input.textureStats.textureMemoryBytes,
-    thumbnailRequests: input.thumbnailRequests,
-    visibleItems,
-  };
-}
-
-function textureEntryBytes(entry: TextureEntry): number {
-  return estimateTextureMemoryBytes(1, entry.width, entry.height);
-}
+// 生产级媒体网格（FR2-009）
+export {
+  DEFAULT_MEDIA_GRID_LAYOUT,
+  buildMediaGridFrame,
+  collectThumbnailRequests,
+  hitTestMediaGrid,
+  mediaTextureKey,
+  resolveGridContentHeight,
+  resolveMediaGridWindow,
+  snapshotMediaGridMetrics,
+} from "./media-grid";
+export type {
+  MediaGridCellRect,
+  MediaGridFrame,
+  MediaGridItem,
+  MediaGridLayout,
+  MediaGridSelection,
+  MediaGridViewport,
+} from "./media-grid";
+export { mountMediaGridSession } from "./media-grid-session";
+export type {
+  MediaGridSessionHandle,
+  MediaGridSessionOptions,
+} from "./media-grid-session";

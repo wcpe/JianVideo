@@ -693,6 +693,83 @@ func (s *Service) BatchDeleteMediaFilesInSpace(spaceID string, ids []int64) (int
 	return affected, nil
 }
 
+// BatchReassignLibraryResult 描述索引层批量改库结果（FR2-053）。
+type BatchReassignLibraryResult struct {
+	Moved   int64 // 实际更新条数
+	Skipped int64 // 不存在、已软删、已在目标库或目标库非法而跳过
+}
+
+// ErrBatchTargetLibraryNotFound 批量改库时目标媒体库不存在或不属于当前 Space。
+var ErrBatchTargetLibraryNotFound = errors.New("目标媒体库不存在")
+
+// BatchReassignLibraryInSpace 仅更新 media_files.library_id（索引层移动，不搬磁盘文件，FR2-053）。
+// 跳过不存在/已软删/已在目标库的 id；目标库必须同 Space。写审计 media.library_reassigned。
+func (s *Service) BatchReassignLibraryInSpace(spaceID string, ids []int64, targetLibraryID int64) (BatchReassignLibraryResult, error) {
+	var out BatchReassignLibraryResult
+	if len(ids) == 0 || targetLibraryID <= 0 {
+		return out, nil
+	}
+	spaceID = normalizeSpaceID(spaceID)
+	if _, err := s.GetLibraryPathByIDInSpace(spaceID, targetLibraryID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return out, ErrBatchTargetLibraryNotFound
+		}
+		return out, err
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var before []models.MediaFile
+		if err := tx.Where("space_id = ? AND id IN ? AND deleted_at IS NULL", spaceID, ids).
+			Order("id ASC").
+			Find(&before).Error; err != nil {
+			return err
+		}
+		out.Skipped = int64(len(ids) - len(before))
+		if len(before) == 0 {
+			return nil
+		}
+		validIDs := make([]int64, 0, len(before))
+		for i := range before {
+			if before[i].LibraryID == targetLibraryID {
+				out.Skipped++
+				continue
+			}
+			validIDs = append(validIDs, before[i].ID)
+		}
+		if len(validIDs) == 0 {
+			return nil
+		}
+		result := tx.Model(&models.MediaFile{}).
+			Where("space_id = ? AND id IN ?", spaceID, validIDs).
+			Update("library_id", targetLibraryID)
+		if result.Error != nil {
+			return result.Error
+		}
+		out.Moved = result.RowsAffected
+		for i := range before {
+			if before[i].LibraryID == targetLibraryID {
+				continue
+			}
+			if err := s.recordAuditTx(tx, audit.EventInput{
+				Scope:        audit.ScopeSpace,
+				SpaceID:      spaceID,
+				ActorType:    audit.ActorSystem,
+				Action:       "media.library_reassigned",
+				ResourceType: "media",
+				ResourceID:   fmt.Sprintf("%d", before[i].ID),
+				Before:       mediaAuditPayload(&before[i]),
+				After:        map[string]any{"library_id": targetLibraryID},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return BatchReassignLibraryResult{}, err
+	}
+	return out, nil
+}
+
 // GetMediaFilesByIDs 批量获取媒体文件（FR-91 批量打包下载）。
 // 单次 IN 查询取回，排除已软删项（与 GetMediaFileByID 的访问隔离一致），避免 N+1。
 // 不存在 / 已软删的 id 自然不在结果中；空列表为 no-op 返回空切片。

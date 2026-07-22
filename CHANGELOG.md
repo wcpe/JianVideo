@@ -8,9 +8,26 @@
 
 ### 变更
 
-- **FR2-014 门控式 RC/GA 发布切片**：`dev` 改为只生成短期 Actions 实验工件，公开 RC/GA 必须在 `main` 的固定提交上通过全仓四项质量门、Linux/Windows 原生构建、校验和与 Release 资产回下载复验后，才由最终 publish job 创建 tag 并公开；禁止人工预先 push 或占位 `v*` tag。RC 序号必须严格递增，RC/GA 公开发布串行执行，GA 必须显式指定同基线最高、已公开且资产校验通过的 `final_rc_tag`，并在打标签前再次复检；其后只允许 `VERSION`、CHANGELOG 与正式文档收口。分支名校验、失败清理归属与本地 checksums 信任根均按失败关闭处理。
-- **自更新候选频道归真**：原“测试版”频道收口为“候选版 RC”，只选择合法公开的 `X.Y.Z-rc.N` Release；历史滚动 `dev` Release 与 `dev` Actions 实验工件不再作为更新目标。Release 列表按每页 100 条顺序分页，超过 10 个满页时拒绝使用不完整结果，避免合法 RC 被固定前 20 条挤出。
-- **发布治理文档同步**：新增 ADR-0064 与 FR2-014 发布门规格，取代 ADR-0032/0042；同步 `dev`/`main` 分支职责、P8 RC `0.29.x` 版本线、自动发布现状与 FR-128 历史衔接。FR2-014 仅标记为开发中，不把整个运维与质量门能力误报为完成。
+### 修复
+
+## 0.25.0-rc.1（2026-07-22，候选发布）
+
+### 变更
+
+- **P4 高密度媒体浏览器主路径（`0.25.x`）**：交付搜索筛选、元数据详情、批量转码/索引移动、剧集连播、Pixi 网格、图片编辑导出与视频粗剪导出。
+- **FR2-014 发布入口简化为推送 tag**：推送 `vX.Y.Z-rc.N` / `vX.Y.Z` 后，CI 在固定 SHA 上跑四项质量门与双平台构建，再为**已有 tag** 创建 draft Release、回下载校验并公开；工作流不再创建 tag，也不再依赖 GitHub App / Ruleset / production 环境审批。
+- **自更新候选频道归真**：原“测试版”频道收口为“候选版 RC”，只选择合法公开的 `X.Y.Z-rc.N` Release；历史滚动 `dev` Release 与 `dev` Actions 实验工件不再作为更新目标。
+- **FR2-046 搜索筛选增强**：媒体列表支持 `duration_*` / `width_*` / `height_*` 筛选与 `duration`/`resolution` 排序；裸词搜索可命中同 Space 推断片名；时间轴/浏览页增加最短时长与最小分辨率控件。
+- **FR2-032 详情元数据收口**：详情面板分区展示标签、离线影视推断与嵌入元数据；加载失败中文提示不阻断预览；点击标签可回写列表筛选。
+- **FR2-053 批量转码与索引层移动**：新增 `batch-transcode` / `batch-move` API；前端批量条/右键/浏览工具栏可入队转码或改库归属（不搬磁盘文件）；删除/打标签/加相册/zip 行为保持。
+- **FR2-047 播放列表与剧集连播**：新增 `GET /api/library/media/:id/next-episode` 与 `GET /api/albums/:id/neighbor`；播放页支持自动连播开关（localStorage）、合集上一首/下一首；合集页可顺序播放并带 `albumId` 上下文。
+- **FR2-009 Pixi 高密度媒体浏览器**：`packages/render-pixi` 扩展生产网格会话（窗口化、纹理池、缩略图限流、hover 预览判定）；前端新增 `/media-grid` 媒体网格页接真实分页 API；附 `media-ui-target-1m` 窗口化 Benchmark 报告（`.tmp/`）。
+- **FR2-038 图片编辑导出**：`POST /api/library/media/:id/image-export` 入队 `media.image.export`；ImageMagick 调色导出到 `exports/`，不改原文件；详情面板编辑器预览 + 重置 + 导出；产物 `GET /api/library/exports/:task_id/download`。
+- **FR2-039 视频粗剪导出**：`POST /api/library/media/:id/clip-export` 入队 `media.video.clip`；ffmpeg 优先 stream copy、失败重编码；播放页/详情入口；原文件不变。
+
+### 修复
+
+- 修复省流量阻断与后端快照短暂滞后的播放状态竞态：核心仍保有播放意图时强制暂停底层播放器并停止加载，解除阻断后恢复播放。
 
 ## 0.24.0-rc.1（2026-07-19，候选发布）
 

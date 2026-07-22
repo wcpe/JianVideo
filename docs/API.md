@@ -264,14 +264,16 @@
 - **请求头**：`X-JianVideo-Space-Id` 可选；缺省为 `space-default`
 - **查询参数**：
   - `library_id`：按媒体库过滤（可选）
-  - `sort`：排序方式，`time_desc`（默认，按入库时间降序）/ `time_asc` / `name` / `media_time`（按媒体时间降序，缺失回退入库时间，FR-31）/ `media_time_asc`（按媒体时间升序）
+  - `sort`：排序方式，`time_desc`（默认，按入库时间降序）/ `time_asc` / `name` / `media_time`（按媒体时间降序，缺失回退入库时间，FR-31）/ `media_time_asc`（按媒体时间升序）/ `duration` / `duration_asc` / `resolution` / `resolution_asc`（FR2-046；后四者走 offset 分页，不支持游标）
   - `page`：页码
   - `page_size`：每页条数
   - `cursor`：游标分页 token（可选）；用于时间倒序列表，旧 `page/page_size` 仍可用
-  - `search`：搜索（可选）。走 everything 式表达式解析（FR-35）：裸词→文件名包含（多词 AND）；`ext:jpg` 或 `ext:jpg,png`→按扩展名；`type:image`/`type:video`→按类型；`size:>10mb`/`size:<=2gb`/`size:>=500kb`（单位 b/kb/mb/gb/tb）→按大小。无法识别的 `key:val` 退化为文件名关键词。纯文本与旧行为一致（向后兼容）。
+  - `search`：搜索（可选）。走 everything 式表达式解析（FR-35）：裸词→文件名/显示名/相机/镜头/备注 **或同 Space 推断片名**（多词 AND，FR2-046）；`ext:jpg` 或 `ext:jpg,png`→按扩展名；`type:image`/`type:video`→按类型；`size:>10mb`/`size:<=2gb`/`size:>=500kb`（单位 b/kb/mb/gb/tb）→按大小。无法识别的 `key:val` 退化为裸词。纯文本与旧行为一致（向后兼容）。
   - `favorite`：传 `true`/`1` 时仅返回已收藏媒体（可选，FR-41）
   - `tag_id`：传标签 ID 时仅返回打了该标签的媒体（可选，FR-41）
   - 结构化筛选（可选，FR-35，显式参数优先于 `search` 表达式同名约束）：`type`（`image`/`video`）、`size_min`/`size_max`（字节）、`time_from`/`time_to`（媒体时间范围，`RFC3339` 或 `YYYY-MM-DD`，按 `COALESCE(media_time, added_at)` 比较）、`path`（目录前缀）。以上全部走参数化查询，无 SQL 注入面。
+  - `duration_min` / `duration_max`：时长秒数下/上界（含，>0 生效，FR2-046）
+  - `width_min` / `width_max` / `height_min` / `height_max`：分辨率像素下/上界（含，>0 生效，FR2-046）
   - `has_gps`：传 `true` 时仅返回带 GPS 坐标（`gps_lat != 0 OR gps_lon != 0`）的媒体（可选，FR-39 照片地图）。
   - `inference`：传 `inferred` 时返回自动推断与人工纠正的并集，传 `auto` 时仅返回自动推断媒体，传 `manual` 时仅返回人工纠正媒体，传 `missing` 时仅返回尚无推断记录的媒体（可选，FR2-031）。
 - **响应**（200）：
@@ -638,6 +640,20 @@
 - **说明**：仅修改库内影视推断信息，不改磁盘文件名。人工纠正写 `media.inference.updated` 审计事件，并优先于后续自动推断和 backfill。
 - **错误**：`400` 请求体无效或 `kind` 非法，`404` 媒体记录不存在，`500` 保存失败
 
+### 查询下一集（FR2-047）
+
+- **方法 / 路径**：`GET /api/library/media/:id/next-episode`
+- **响应**（200）：
+  ```json
+  {
+    "media": { "...": "MediaFile 或 null" },
+    "current": { "...": "MediaInference 或 null" },
+    "next": { "...": "下一集 MediaInference 或 null" }
+  }
+  ```
+- **说明**：在当前 Space 内按推断 `title` + `season`/`episode` 定位下一集：优先同季更大 `episode`，否则下一季最小 `episode`。跳过已软删媒体；无推断、标题为空、无下一集时 `media` 为 `null`。不跨 Space。
+- **错误**：`400` ID 无效，`404` 媒体不存在，`500` 查询失败
+
 - **方法 / 路径**：`POST /api/library/inference/backfill`
 - **请求**：
   ```json
@@ -675,6 +691,63 @@
 - **响应**（200）：`{"deleted": N}`，N 为实际软删条数。
 - **说明**：批量软删——在单事务内筛出所有 `deleted_at IS NULL` 的有效 ID 后置 `deleted_at = now`，并逐项写 `media.deleted` 审计事件；复用单条软删语义（不动磁盘源文件），软删项一并进回收站。跳过不存在 / 已软删的 ID（不计入 `deleted`、不报错）；空 `ids` 为 no-op 返回 `{"deleted": 0}`。
 - **错误**：`400` 请求体无效，`500` 批量删除失败
+
+### 图片编辑导出（FR2-038）
+
+- **方法 / 路径**：`POST /api/library/media/:id/image-export`
+- **请求体**：
+  ```json
+  {
+    "exposure": 0,
+    "contrast": 0,
+    "saturation": 0,
+    "temperature": 0,
+    "format": "jpeg"
+  }
+  ```
+  参数范围均为 `[-100, 100]`；`format` 白名单：`jpeg`/`jpg`/`png`/`webp`。
+- **响应**（202）：`{"status":"queued","task_id":"123"}`。
+- **说明**：不修改原文件。入队任务类型 `media.image.export`；worker 使用 ImageMagick 生成产物到 `exports/{space}/{media_id}/{task_id}.{ext}`；任务 `checkpoint` 含下载元数据。幂等键含 Space/Media/参数指纹。
+- **错误**：`400` 参数非法 / SMB 路径，`404` 媒体不存在，`503` 任务中心未启用
+
+### 视频片段粗剪导出（FR2-039）
+
+- **方法 / 路径**：`POST /api/library/media/:id/clip-export`
+- **请求体**：
+  ```json
+  {
+    "start_sec": 0,
+    "end_sec": 30,
+    "format": "mp4"
+  }
+  ```
+  要求 `0 <= start < end`；默认最大片段 2 小时；`format` 白名单：`mp4`/`mkv`/`mov`。
+- **响应**（202）：`{"status":"queued","task_id":"124"}`。
+- **说明**：不修改原文件。入队任务类型 `media.video.clip`；优先 ffmpeg stream copy，失败回退 H.264/AAC 重编码；产物路径同导出目录约定。
+- **错误**：`400` 起止非法 / 超时长 / 格式不支持，`404` 媒体不存在，`503` 任务中心未启用
+
+### 导出产物下载（FR2-038 / FR2-039）
+
+- **方法 / 路径**：`GET /api/library/exports/:task_id/download`
+- **响应**（200）：附件流。
+- **说明**：仅成功完成的 `media.image.export` / `media.video.clip` 任务可下载；需归属当前 Space。
+- **错误**：`404` 任务/产物不存在，`409` 任务未完成，`503` 任务中心未启用
+
+### 批量转码（FR2-053）
+
+- **方法 / 路径**：`POST /api/library/media/batch-transcode`
+- **请求体**：`{"ids":[101,102,...],"preset_id":1}`；`ids` 最多 100 项，`preset_id` 必填且为正。
+- **响应**（200）：`{"queued":N,"skipped":M,"failed":K,"task_ids":[...]}`。
+- **说明**：对当前 Space 内选中媒体入队转码（复用 HLS preview / 预生成队列）。图片格式与不存在/已软删项计入 `skipped`；入队失败计入 `failed`。未启用预设或转码服务时返回 `503`。
+- **错误**：`400` 请求体无效 / 超限 / `preset_id` 非法，`404` 预设不存在，`503` 服务未启用
+
+### 批量移动到媒体库（FR2-053，索引层）
+
+- **方法 / 路径**：`POST /api/library/media/batch-move`
+- **请求体**：`{"ids":[101,102,...],"target_library_id":2}`；`ids` 最多 100 项，`target_library_id` 必填且为正。
+- **响应**（200）：`{"moved":N,"skipped":M}`。
+- **说明**：**仅更新** `media_files.library_id`，**不搬移磁盘原文件**。目标库必须同 Space；不存在/已软删/已在目标库的 id 计入 `skipped`。写审计 `media.library_reassigned`。
+- **错误**：`400` 请求体无效 / 超限，`404` 目标库不存在，`500` 更新失败
 
 ### 批量打包下载（FR-91）
 
@@ -1190,6 +1263,16 @@
   {"items": [ { "id": 1, "library_id": 1, "file_name": "a.mp4", "file_path": "D:/A/a.mp4" } ]}
   ```
 - **说明**：返回相册内的媒体成员（`MediaFile` 列表），按加入顺序排列；成员可跨多个媒体库目录。
+
+### 查询合集邻项（FR2-047）
+
+- **方法 / 路径**：`GET /api/albums/:id/neighbor?media_id=&dir=next|prev`
+- **查询参数**：
+  - `media_id`（必填）：当前媒体 ID
+  - `dir`（可选，默认 `next`）：`next` 下一首，`prev` 上一首
+- **响应**（200）：`{"media": MediaFile | null}`，越界时 `media` 为 `null`
+- **说明**：按相册成员加入顺序定位相邻媒体；当前媒体不在合集时返回 `404`。
+- **错误**：`400` 相册 ID / `media_id` / `dir` 非法，`404` 相册不存在或媒体不在合集，`500` 查询失败
 
 ### 加入相册成员
 

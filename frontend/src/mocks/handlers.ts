@@ -1102,6 +1102,36 @@ export const handlers = [
     return HttpResponse.json({ inference: mediaInferences.get(id) ?? null });
   }),
 
+  // 剧集下一集（FR2-047）
+  http.get('*/api/library/media/:id/next-episode', async ({ params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
+    }
+    const current = mediaInferences.get(id) ?? null;
+    if (!current || !current.title || current.episode <= 0) {
+      return HttpResponse.json({ media: null, current, next: null });
+    }
+    const candidates = [...mediaInferences.values()].filter(
+      (inf) =>
+        inf.title === current.title &&
+        inf.media_id !== id &&
+        inf.episode > 0 &&
+        mediaFiles.some((m) => m.id === inf.media_id),
+    );
+    const sameSeason = candidates
+      .filter((inf) => inf.season === current.season && inf.episode > current.episode)
+      .sort((a, b) => a.episode - b.episode);
+    const nextSeason = candidates
+      .filter((inf) => inf.season > current.season)
+      .sort((a, b) => a.season - b.season || a.episode - b.episode);
+    const next = sameSeason[0] ?? nextSeason[0] ?? null;
+    const media = next ? (mediaFiles.find((m) => m.id === next.media_id) ?? null) : null;
+    return HttpResponse.json({ media, current, next });
+  }),
+
   http.put('*/api/library/media/:id/inference', async ({ request, params }) => {
     await delay(100);
     const id = Number(params.id);
@@ -2156,6 +2186,47 @@ export const handlers = [
     const mediaId = Number(params.mediaId);
     albumItems = albumItems.filter((it) => !(it.album_id === id && it.media_id === mediaId));
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // 合集顺序邻项（FR2-047）
+  http.get('*/api/albums/:id/neighbor', async ({ params, request }) => {
+    await delay(80);
+    const albumID = Number(params.id);
+    const url = new URL(request.url);
+    const mediaID = Number(url.searchParams.get('media_id'));
+    const dir = url.searchParams.get('dir') || 'next';
+    if (!albums.some((a) => a.id === albumID)) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: '相册或媒体不在合集中' },
+        { status: 404 },
+      );
+    }
+    if (!Number.isInteger(mediaID) || mediaID <= 0) {
+      return HttpResponse.json(
+        { code: 'INVALID_MEDIA_ID', message: 'media_id 必填且为正' },
+        { status: 400 },
+      );
+    }
+    if (dir !== 'next' && dir !== 'prev' && dir !== '') {
+      return HttpResponse.json(
+        { code: 'INVALID_DIR', message: 'dir 仅支持 next 或 prev' },
+        { status: 400 },
+      );
+    }
+    const ids = albumItems.filter((it) => it.album_id === albumID).map((it) => it.media_id);
+    const idx = ids.indexOf(mediaID);
+    if (idx < 0) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: '相册或媒体不在合集中' },
+        { status: 404 },
+      );
+    }
+    const nextIdx = dir === 'prev' ? idx - 1 : idx + 1;
+    if (nextIdx < 0 || nextIdx >= ids.length) {
+      return HttpResponse.json({ media: null });
+    }
+    const media = mediaFiles.find((m) => m.id === ids[nextIdx]) ?? null;
+    return HttpResponse.json({ media });
   }),
 
   // ─── 那年今日（FR-72）──────────────────────────────────

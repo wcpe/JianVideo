@@ -1,4 +1,4 @@
-// 发布工作流静态契约：锁定触发面、门禁顺序、固定 SHA 与最小写权限。
+// 发布工作流静态契约：锁定 tag 触发、门禁顺序、固定 SHA 与最小写权限。
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -29,25 +29,6 @@ const assertPinnedActions = (content) => {
   }
 }
 
-const runCommands = (content) => {
-  const lines = content.split('\n')
-  const commands = []
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(/^(\s*)run:\s*(.*)$/)
-    if (!match) continue
-    const indentation = match[1].length
-    const command = [match[2]]
-    while (index + 1 < lines.length) {
-      const next = lines[index + 1]
-      if (next.trim() && next.match(/^\s*/)[0].length <= indentation) break
-      command.push(next)
-      index += 1
-    }
-    commands.push(command.join('\n'))
-  }
-  return commands
-}
-
 test('ci 直接覆盖 main，dev 由实验工作流复用，且工作区门运行发布契约', () => {
   assert.match(workflows.ci, /workflow_call:/)
   assert.match(workflows.ci, /push:[\s\S]*branches: \[main\]/)
@@ -71,18 +52,18 @@ test('实验构建只由 dev push 触发且没有发布权限', () => {
   assert.match(workflows.experimental, /needs: \[prepare, quality\]/)
 })
 
-test('RC 与 GA 仅手动运行，安全读取分支名并显式拒绝非 main', () => {
+test('RC 与 GA 由推送 tag 触发，并复用质量门与构建', () => {
+  assert.match(workflows.rc, /push:[\s\S]*tags:[\s\S]*'v\*-rc\.\*'/)
+  assert.doesNotMatch(workflows.rc, /workflow_dispatch:/)
+  assert.match(workflows.release, /push:[\s\S]*tags:[\s\S]*'v\*'/)
+  assert.doesNotMatch(workflows.release, /workflow_dispatch:/)
+  assert.match(workflows.release, /!contains\(github\.ref_name, '-rc\.'\)/)
   for (const content of [workflows.rc, workflows.release]) {
-    assert.match(content, /workflow_dispatch:/)
-    assert.doesNotMatch(content, /^  push:/m)
-    assert.match(content, /env:\n\s+REF_NAME: \$\{\{ github\.ref_name \}\}/)
-    assert.match(content, /run: test "\$REF_NAME" = "main"/)
-    for (const command of runCommands(content)) {
-      assert.doesNotMatch(command, /\$\{\{\s*github\.ref_name\s*\}\}/)
-    }
     assert.match(content, /uses: \.\/\.github\/workflows\/ci\.yml/)
     assert.match(content, /uses: \.\/\.github\/workflows\/build\.yml/)
     assert.match(content, /needs: \[prepare, quality, build\]/)
+    assert.match(content, /env:\n\s+REF_NAME: \$\{\{ github\.ref_name \}\}/)
+    assert.match(content, /\[ "\$REF_NAME" = "v\$version" \]/)
   }
 })
 
@@ -94,11 +75,14 @@ test('RC 与 GA 发布说明严格取自自身版本段且禁止兜底', () => {
   assert.doesNotMatch(workflows.release, /暂无|fallback/i)
 })
 
-test('RC 固定预发布，GA 固定稳定发布并绑定生产环境', () => {
-  assert.match(workflows.rc, /publish-release\.sh publish[\s\S]* rc release-notes\.md/)
+test('RC 固定预发布，GA 固定稳定发布，均不绑定 production 环境', () => {
+  assert.match(workflows.rc, /publish-release\.sh publish-from-tag[\s\S]* rc release-notes\.md/)
   assert.doesNotMatch(workflows.rc, /environment: production/)
-  assert.match(workflows.release, /environment: production/)
-  assert.match(workflows.release, /publish-release\.sh publish[\s\S]* ga release-notes\.md/)
+  assert.doesNotMatch(workflows.release, /environment: production/)
+  assert.match(workflows.release, /publish-release\.sh publish-from-tag[\s\S]* ga release-notes\.md/)
+  assert.match(publishScript, /publish_from_tag/)
+  assert.match(publishScript, /preflight-rc-release/)
+  assert.match(publishScript, /preflight-release/)
   assert.match(publishScript, /rc\)[\s\S]*make_latest=false/)
   assert.match(publishScript, /ga\)[\s\S]*make_latest=true/)
 })
@@ -139,11 +123,11 @@ test('Node 工具链支持仓库锁定的 pnpm 版本', () => {
 
 test('RC 与 GA 在质量和构建前完成目标引用预检', () => {
   const rcPrepareEnd = workflows.rc.indexOf('\n  quality:')
-  const rcPreflight = workflows.rc.indexOf('publish-release.sh preflight-rc')
+  const rcPreflight = workflows.rc.indexOf('publish-release.sh preflight-rc-release')
   assert.ok(rcPreflight > 0 && rcPreflight < rcPrepareEnd)
 
   const gaPrepareEnd = workflows.release.indexOf('\n  quality:')
-  const gaPreflight = workflows.release.indexOf('publish-release.sh preflight ')
+  const gaPreflight = workflows.release.indexOf('publish-release.sh preflight-release')
   assert.ok(gaPreflight > 0 && gaPreflight < gaPrepareEnd)
 
   for (const content of [workflows.rc, workflows.release]) {
@@ -151,14 +135,15 @@ test('RC 与 GA 在质量和构建前完成目标引用预检', () => {
   }
 })
 
-test('GA 在 prepare 阶段预检最终 RC，并在打标签前复检', () => {
-  const qualityStart = workflows.release.indexOf('\n  quality:')
-  const publishJob = workflows.release.indexOf('\n  publish:')
-  const publishCommand = workflows.release.indexOf('publish-release.sh publish', publishJob)
-  const verifies = [...workflows.release.matchAll(/publish-release\.sh verify-final-rc/g)]
-  assert.equal(verifies.length, 2)
-  assert.ok(verifies[0].index > 0 && verifies[0].index < qualityStart)
-  assert.ok(verifies[1].index > publishJob && verifies[1].index < publishCommand)
+test('推送 tag 发布不创建新 tag，只公开已有 tag 的 Release', () => {
+  assert.match(publishScript, /publish_from_tag\(/)
+  assert.match(publishScript, /require_tag_points_to/)
+  assert.doesNotMatch(
+    workflows.rc.slice(workflows.rc.indexOf('\n  publish:')),
+    /create_tag|git tag/,
+  )
+  assert.match(workflows.rc, /publish-from-tag/)
+  assert.match(workflows.release, /publish-from-tag/)
 })
 
 test('RC 与 GA 共用公开发布串行锁', () => {

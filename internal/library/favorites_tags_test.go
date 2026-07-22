@@ -22,6 +22,7 @@ func newTagTestService(t *testing.T) (*Service, *gorm.DB) {
 		&models.MediaExtension{},
 		&models.Tag{},
 		&models.TagMapping{},
+		&models.MediaInference{},
 	); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}

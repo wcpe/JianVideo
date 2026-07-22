@@ -48,6 +48,18 @@ async function realRemoveAlbumItem(albumID: number, mediaID: number): Promise<vo
   await client.delete(`/api/albums/${albumID}/items/${mediaID}`);
 }
 
+/** 合集顺序邻项（FR2-047）：dir=next|prev */
+async function realGetAlbumNeighbor(
+  albumID: number,
+  mediaID: number,
+  dir: 'next' | 'prev' = 'next',
+): Promise<MediaFile | null> {
+  const res = await client.get<{ media: MediaFile | null }>(`/api/albums/${albumID}/neighbor`, {
+    params: { media_id: mediaID, dir },
+  });
+  return res.data.media;
+}
+
 // ─── Mock API 实现 ──────────────────────────────────
 
 import { mockMediaFiles } from '@/mocks/data';
@@ -120,6 +132,22 @@ async function mockRemoveAlbumItem(albumID: number, mediaID: number): Promise<vo
   if (idx !== -1) mockAlbumItems.splice(idx, 1);
 }
 
+async function mockGetAlbumNeighbor(
+  albumID: number,
+  mediaID: number,
+  dir: 'next' | 'prev' = 'next',
+): Promise<MediaFile | null> {
+  await mockDelay(80);
+  const ids = mockAlbumItems
+    .filter((it) => it.album_id === albumID)
+    .map((it) => it.media_id);
+  const idx = ids.indexOf(mediaID);
+  if (idx < 0) throw new Error('相册或媒体不在合集中');
+  const nextIdx = dir === 'prev' ? idx - 1 : idx + 1;
+  if (nextIdx < 0 || nextIdx >= ids.length) return null;
+  return mockMediaFiles.find((m) => m.id === ids[nextIdx]) ?? null;
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function listAlbums() {
@@ -139,4 +167,13 @@ export function addAlbumItem(albumID: number, mediaID: number) {
 }
 export function removeAlbumItem(albumID: number, mediaID: number) {
   return useMock ? mockRemoveAlbumItem(albumID, mediaID) : realRemoveAlbumItem(albumID, mediaID);
+}
+export function getAlbumNeighbor(
+  albumID: number,
+  mediaID: number,
+  dir: 'next' | 'prev' = 'next',
+) {
+  return useMock
+    ? mockGetAlbumNeighbor(albumID, mediaID, dir)
+    : realGetAlbumNeighbor(albumID, mediaID, dir);
 }

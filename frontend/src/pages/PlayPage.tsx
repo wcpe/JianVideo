@@ -18,7 +18,7 @@ import {
   type MediaChapter,
   type WatchState,
 } from '../../../packages/media-client/src/index';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
   Text,
@@ -34,6 +34,8 @@ import {
   TextInput,
   NumberInput,
   Stack,
+  Switch,
+  ActionIcon,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -49,18 +51,23 @@ import {
   IconMaximize,
   IconMinimize,
   IconInfoCircle,
+  IconPlayerTrackPrev,
+  IconPlayerTrackNext,
 } from '@tabler/icons-react';
 import VideoPlayer from '@/components/VideoPlayer';
 import NameEditModal from '@/components/NameEditModal';
 import ShareDialog from '@/components/ShareDialog';
 import ExternalPlayerDialog from '@/components/ExternalPlayerDialog';
 import PregenDialog from '@/components/PregenDialog';
+import ClipExportPanel from '@/components/ClipExportPanel';
 import { parseTimelinePreviewVtt } from '@/utils/timeline-preview';
 import { mediaDisplayName } from '@/utils/media';
 import { mediaStreamUrl } from '@/utils/media-url';
 import { probeClientCapabilities } from '@/utils/codec-capability';
+import { readAutoplayNext, writeAutoplayNext } from '@/utils/autoplay-preference';
 import { useCinemaMode } from '@/hooks/cinema-context';
 import * as libApi from '@/api/library';
+import * as albumApi from '@/api/albums';
 import * as playApi from '@/api/play';
 import { getTask } from '@/api/tasks';
 import * as subtitleApi from '@/api/subtitle';
@@ -192,12 +199,27 @@ async function loadTimelinePreview(
 export default function PlayPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // 合集顺序播放上下文（FR2-047）：?albumId= 进入时维护上一首/下一首
+  const albumId = useMemo(() => {
+    const raw = searchParams.get('albumId');
+    if (!raw) return null;
+    const n = parseInt(raw, 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }, [searchParams]);
   // 影院模式（FR-85）：临时收起左导航扩大视频区，播放页本地态（不污染全站持久态）
   const { cinema, setCinema } = useCinemaMode();
   const [media, setMedia] = useState<MediaFile | null>(null);
   const [watchState, setWatchState] = useState<WatchState | null | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 自动连播偏好（FR2-047）：默认开启，localStorage 持久
+  const [autoplayNext, setAutoplayNext] = useState(() => readAutoplayNext());
+  const autoplayNextRef = useRef(autoplayNext);
+  autoplayNextRef.current = autoplayNext;
+  const albumIdRef = useRef(albumId);
+  albumIdRef.current = albumId;
+  const navigatingNextRef = useRef(false);
 
   const [trackManifest, setTrackManifest] = useState<TrackResponse | null | undefined>();
 
@@ -231,6 +253,8 @@ export default function PlayPage() {
   const [extPlayerOpened, setExtPlayerOpened] = useState(false);
   // 加入预生成队列弹窗开关（FR-77）
   const [pregenOpened, setPregenOpened] = useState(false);
+  // 片段粗剪导出（FR2-039）
+  const [clipExportOpened, setClipExportOpened] = useState(false);
   const [abrEnqueueing, setABREnqueueing] = useState(false);
   // 媒体信息抽屉开关（FR-103）：信息移出文档流、收进右侧抽屉，经「更多」菜单「详情」打开
   const [infoOpened, setInfoOpened] = useState(false);
@@ -801,6 +825,92 @@ export default function PlayPage() {
     }
   };
 
+  /** 带合集上下文导航到目标媒体（FR2-047）。 */
+  const navigateToMedia = useCallback(
+    (targetId: number) => {
+      const qs = albumId ? `?albumId=${albumId}` : '';
+      navigate(`/play/${targetId}${qs}`, { replace: false });
+    },
+    [albumId, navigate],
+  );
+
+  /** 合集上一首/下一首手动切换。 */
+  const jumpAlbumNeighbor = useCallback(
+    async (dir: 'next' | 'prev') => {
+      if (!albumId || !media) return;
+      try {
+        const neighbor = await albumApi.getAlbumNeighbor(albumId, media.id, dir);
+        if (!neighbor) {
+          notifications.show({
+            title: dir === 'next' ? '已是最后一首' : '已是第一首',
+            message: '当前合集没有更多媒体',
+            color: 'gray',
+            autoClose: 2500,
+          });
+          return;
+        }
+        navigateToMedia(neighbor.id);
+      } catch (err) {
+        notifications.show({
+          title: '切换失败',
+          message: err instanceof Error ? err.message : '请稍后重试',
+          color: 'red',
+          autoClose: 3000,
+        });
+      }
+    },
+    [albumId, media, navigateToMedia],
+  );
+
+  /** 播放结束：合集优先，否则剧集下一集（FR2-047）。关闭连播时不跳转。 */
+  const handlePlaybackEnded = useCallback(() => {
+    if (!media || navigatingNextRef.current) return;
+    if (!autoplayNextRef.current) return;
+    navigatingNextRef.current = true;
+    const currentAlbumId = albumIdRef.current;
+    const mediaId = media.id;
+    void (async () => {
+      try {
+        if (currentAlbumId) {
+          const neighbor = await albumApi.getAlbumNeighbor(currentAlbumId, mediaId, 'next');
+          if (neighbor) {
+            navigateToMedia(neighbor.id);
+            return;
+          }
+          notifications.show({
+            title: '合集播放完毕',
+            message: '已到合集最后一首',
+            color: 'gray',
+            autoClose: 3000,
+          });
+          return;
+        }
+        const result = await libApi.getNextEpisode(mediaId);
+        if (result.media) {
+          navigateToMedia(result.media.id);
+          return;
+        }
+        if (result.current && result.current.episode > 0) {
+          notifications.show({
+            title: '本集播放完毕',
+            message: '没有下一集了',
+            color: 'gray',
+            autoClose: 3000,
+          });
+        }
+      } catch {
+        /* 连播失败静默，不打断当前页 */
+      } finally {
+        navigatingNextRef.current = false;
+      }
+    })();
+  }, [media, navigateToMedia]);
+
+  const toggleAutoplayNext = useCallback((enabled: boolean) => {
+    setAutoplayNext(enabled);
+    writeAutoplayNext(enabled);
+  }, []);
+
   if (loading) {
     return <Skeleton height={400} radius="md" />;
   }
@@ -857,6 +967,35 @@ export default function PlayPage() {
           >
             {cinema ? '退出影院' : '影院模式'}
           </Button>
+          {/* 自动连播开关（FR2-047）：合集与剧集共用偏好 */}
+          <Switch
+            size="sm"
+            label="自动连播"
+            checked={autoplayNext}
+            onChange={(e) => toggleAutoplayNext(e.currentTarget.checked)}
+            styles={{ label: { whiteSpace: 'nowrap' } }}
+          />
+          {/* 合集上一首/下一首（FR2-047） */}
+          {albumId && (
+            <Group gap={4} wrap="nowrap">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="上一首"
+                onClick={() => void jumpAlbumNeighbor('prev')}
+              >
+                <IconPlayerTrackPrev size={16} />
+              </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="下一首"
+                onClick={() => void jumpAlbumNeighbor('next')}
+              >
+                <IconPlayerTrackNext size={16} />
+              </ActionIcon>
+            </Group>
+          )}
           {/* 「更多」菜单（FR-85 操作收纳）：收纳改名/下载/分享/外部播放器/加入预生成等次要操作 */}
           <Menu position="bottom-start">
             <Menu.Target>
@@ -930,6 +1069,13 @@ export default function PlayPage() {
               >
                 加入预生成
               </Menu.Item>
+              {/* 片段粗剪导出（FR2-039）：不改原文件，走任务队列 */}
+              <Menu.Item
+                leftSection={<IconDownload size={14} />}
+                onClick={() => setClipExportOpened(true)}
+              >
+                片段粗剪导出
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         </Group>
@@ -977,6 +1123,7 @@ export default function PlayPage() {
               isABR={playerIsABR}
               streamType={playerIsABR ? 'mpegts' : playerStreamType}
               onPlaybackError={handlePlaybackError}
+              onEnded={handlePlaybackEnded}
             />
           )}
       </Box>
@@ -1140,6 +1287,14 @@ export default function PlayPage() {
         opened={pregenOpened}
         onClose={() => setPregenOpened(false)}
         mediaID={media.id}
+      />
+
+      {/* 片段粗剪导出（FR2-039） */}
+      <ClipExportPanel
+        opened={clipExportOpened}
+        mediaId={media.id}
+        duration={media.duration || 0}
+        onClose={() => setClipExportOpened(false)}
       />
     </Box>
   );

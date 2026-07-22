@@ -8,6 +8,8 @@ import {
   IconPhotoPlus,
   IconTag,
   IconDownload,
+  IconMovie,
+  IconFolderShare,
 } from '@tabler/icons-react';
 
 /** 右键菜单的打开位置（视口坐标）与关联的右键项 id；null 表示关闭 */
@@ -28,10 +30,12 @@ interface MediaContextMenuProps {
   onSelectAll: () => void;
   onInvert: () => void;
   onToggleCheckboxMode: () => void;
-  // 批量操作（FR-91）：父组件提供任一回调时显示对应菜单项，操作对象为选中集（无选中则退化为右键项）
+  // 批量操作（FR-91 / FR2-053）：父组件提供任一回调时显示对应菜单项
   onAddToAlbum?: (targetId: number) => void;
   onAddTag?: (targetId: number) => void;
   onDownload?: (targetId: number) => void;
+  onTranscode?: (targetId: number) => void;
+  onMove?: (targetId: number) => void;
 }
 
 /**
@@ -50,12 +54,14 @@ export default function MediaContextMenu({
   onAddToAlbum,
   onAddTag,
   onDownload,
+  onTranscode,
+  onMove,
 }: MediaContextMenuProps) {
   const opened = state !== null;
   // 未选中任何项时各操作退化为对右键项；有选中时按选中集批量操作
   const suffix = selectedCount > 0 ? `选中（${selectedCount}）` : '';
   const deleteLabel = selectedCount > 0 ? `删除选中（${selectedCount}）` : '删除';
-  const hasBatchActions = !!(onAddToAlbum || onAddTag || onDownload);
+  const hasBatchActions = !!(onAddToAlbum || onAddTag || onDownload || onTranscode || onMove);
 
   return (
     <Menu
@@ -118,6 +124,26 @@ export default function MediaContextMenu({
                 }}
               >
                 {`打包下载${suffix}`}
+              </Menu.Item>
+            )}
+            {onTranscode && (
+              <Menu.Item
+                leftSection={<IconMovie size={14} />}
+                onClick={() => {
+                  if (state) onTranscode(state.targetId);
+                }}
+              >
+                {`批量转码${suffix}`}
+              </Menu.Item>
+            )}
+            {onMove && (
+              <Menu.Item
+                leftSection={<IconFolderShare size={14} />}
+                onClick={() => {
+                  if (state) onMove(state.targetId);
+                }}
+              >
+                {`移动到库${suffix}`}
               </Menu.Item>
             )}
           </>

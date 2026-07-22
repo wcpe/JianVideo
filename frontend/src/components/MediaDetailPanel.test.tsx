@@ -9,6 +9,8 @@ import type { MediaFile } from '@/types';
 
 const mockNavigate = vi.fn();
 const mockGetMediaMetadata = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockGetMediaTags = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockGetMediaInference = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 const mockGetMediaCovers = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ cover: null, candidates: [] }),
 );
@@ -22,6 +24,8 @@ vi.mock('@/api/library', async (importOriginal) => {
   return {
     ...actual,
     getMediaMetadata: mockGetMediaMetadata,
+    getMediaTags: mockGetMediaTags,
+    getMediaInference: mockGetMediaInference,
     getMediaCovers: mockGetMediaCovers,
     generateMediaCovers: mockGenerateMediaCovers,
     selectMediaCover: mockSelectMediaCover,
@@ -81,6 +85,8 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetMediaMetadata.mockResolvedValue([]);
+    mockGetMediaTags.mockResolvedValue([]);
+    mockGetMediaInference.mockResolvedValue(null);
     mockGetMediaCovers.mockResolvedValue({ cover: null, candidates: [] });
     mockGenerateMediaCovers.mockResolvedValue({ status: 'pending', task_id: 1 });
     mockGetTask.mockResolvedValue({ status: 'succeeded', error: null });
@@ -507,5 +513,64 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('展示标签与推断信息，点击标签触发筛选回调（FR2-032）', async () => {
+    const user = userEvent.setup();
+    mockGetMediaTags.mockResolvedValue([{ id: 9, name: '假期' }]);
+    mockGetMediaInference.mockResolvedValue({
+      id: 1,
+      media_id: 7,
+      space_id: 'space-default',
+      kind: 'series',
+      title: '绝命毒师',
+      year: 2008,
+      season: 1,
+      episode: 2,
+      episode_title: '',
+      confidence: 0.9,
+      source: 'offline_rule',
+      rule_version: 'fr2-031-v1',
+      manual: false,
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+    });
+    const onFilterByTag = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <MediaDetailPanel
+            files={[mediaFile({ id: 7, file_name: 'S01E02.mkv', format: 'mkv' })]}
+            initialIndex={0}
+            onClose={onClose}
+            customImageExtensions={{}}
+            onFilterByTag={onFilterByTag}
+          />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('绝命毒师')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('影视推断信息')).toHaveTextContent('S01E02');
+    const tagBtn = await within(dialog).findByRole('button', { name: '按标签筛选：假期' });
+    await user.click(tagBtn);
+    expect(onFilterByTag).toHaveBeenCalledWith(expect.objectContaining({ id: 9, name: '假期' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('元数据加载失败时中文提示且不崩溃（FR2-032）', async () => {
+    mockGetMediaMetadata.mockRejectedValue(new Error('network'));
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('加载元数据失败');
+    expect(within(dialog).getByText('文件信息')).toBeInTheDocument();
+  });
+
+  it('无标签/无推断时展示空态（FR2-032）', async () => {
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('尚未打标签')).toBeInTheDocument();
+    expect(within(dialog).getByText('暂无本地推断片名')).toBeInTheDocument();
   });
 });

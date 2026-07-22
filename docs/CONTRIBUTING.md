@@ -88,16 +88,16 @@
 - **`hotfix/*`**：从出问题的发布 tag 切分支做最小修复，修复必须回流 `dev`，再按 RC/GA 或稳定补丁流程提升到 `main`。
 - **回滚**优先 `git revert`，不重写已 push 历史（`sdd-rollback-change` 技能）。
 
-版本号唯一来源是根 `VERSION` 文件，构建把版本号注入到编译产物中。**禁止人工预先 push `v*` tag，也禁止创建占位 tag**；RC/GA tag 只能在全部门禁通过后由发布工作流的最终 publish job 创建。仓库托管侧应通过 `v*` tag Ruleset 阻止普通用户创建、改写或删除发布 tag，仅放行指定发布自动化身份。
+版本号唯一来源是根 `VERSION` 文件，构建把版本号注入到编译产物中。**发布入口是推送 `v*` tag**：推 `vX.Y.Z-rc.N` 触发 RC 工作流，推 `vX.Y.Z` 触发 GA 工作流。工作流在固定 SHA 上跑完质量门与双平台构建后，创建 draft Release、回下载校验资产并公开；**不再由工作流创建 tag**，也不使用 GitHub App 或 Ruleset bypass。
 
 ### 8.1 RC/GA 发布流程
 
-1. 在 `main` 准备 RC 元数据：`VERSION=X.Y.Z-rc.N`，CHANGELOG 有对应非空版本段。
-2. 从 `main` 手动运行无输入 RC 工作流；工作流固定 SHA，依次通过版本/CHANGELOG 校验、四项质量门、Linux/Windows 原生构建与校验。
-3. 最终 publish job 才创建 RC tag 与 draft Release；上传并回下载校验资产后，公开为候选版、非 latest。
-4. RC 发现代码问题时回 `dev` 修复，重新提升并递增 `rc.N`；不得覆盖既有 RC。
-5. final RC 通过后，只允许收口 `VERSION`、CHANGELOG 与正式文档；工作流、脚本、依赖或业务代码再变化都必须重发 RC。随后从 `main` 运行 GA 工作流并填写 `final_rc_tag`。
-6. GA 校验 final RC 为同基线祖先、已公开候选 Release 且资产元数据完整，再重跑四项质量门和双平台构建；全部通过后创建稳定 tag/draft，回下载校验成功才公开为 latest。
+1. 在可发布提交上准备 RC 元数据：`VERSION=X.Y.Z-rc.N`，CHANGELOG 有对应非空版本段。
+2. 在该提交打并推送 tag `vX.Y.Z-rc.N`；`rc.yml` 自动校验 VERSION 与 tag 一致、Release 不存在、RC 序号为同基线最高，再跑四项质量门与 Linux/Windows 构建。
+3. 质量与构建通过后，publish job 为**已有** RC tag 创建 draft Release，上传并回下载校验资产后公开为候选版、非 latest。
+4. RC 发现代码问题时回 `dev` 修复，提升后递增 `rc.N` 再推新 tag；不得覆盖既有 RC tag。
+5. final RC 验收通过后，收口 `VERSION=X.Y.Z`、CHANGELOG 稳定版段与正式文档，在同一代码基线上打并推送 `vX.Y.Z`。
+6. `release.yml` 对稳定 tag 重跑四项质量门与双平台构建；通过后为该 tag 创建并公开 latest 正式 Release。
 
 ### 8.2 v2 版本线规则
 
@@ -156,7 +156,7 @@ P0 规格冻结后进入 v2 稳态迭代。**每个工作项的标准循环**：
 3. **按技能走**：读相关 PRD / ARCHITECTURE / ADR → 测试先行 → 实现（守不变量、简单优先）→ 过验证门 → `doc-sync` 同步文档。
 4. **发 PR**：填防漂移自检模板 → 评审 → 合入 `dev`。
 5. **dev 自动出实验工件**（Actions artifact，不建 tag/Release），供集成试用。
-6. **攒够一批 → 从 dev 受控提升到 main 并走门控 RC/GA**：先准备 VERSION/CHANGELOG，再由发布工作流过门后自动创建 tag；禁止人工先推 tag。
+6. **攒够一批 → 准备 VERSION/CHANGELOG 后推 `v*` tag 走门控 RC/GA**：推 `vX.Y.Z-rc.N` / `vX.Y.Z` 后 CI 自动过门、构建并公开 Release；工作流不创建 tag。
 7. **生产事故** → `sdd-hotfix` 旁路：从发布 tag 切分支最小修 → 出补丁版 → 回流 `main`。
 
 → 回到 1。
@@ -189,8 +189,8 @@ P0 规格冻结后进入 v2 稳态迭代。**每个工作项的标准循环**：
 | **rollback 回滚** | FR2 状态回退 · 取代相关 ADR · `CHANGELOG` +1（移除） | 阶段线 |
 | **依赖升级** | 锁文件 · 有感知影响才记 `CHANGELOG` · 全测试绿 | PRD · 阶段线 · ADR |
 | **架构决策** | **ADR +1 条（或取代旧的，编号 = 现有最大 +1）** · 更新 `ARCHITECTURE` | 阶段线（除非顺带开新阶段） |
-| **发布 RC** | `VERSION` 改为 `X.Y.Z-rc.N` · CHANGELOG 建对应版本段 · 从 `main` 运行 RC 门 · 门禁通过后由工作流创建 tag/候选 Release | 阶段线 · 人工预推 tag |
-| **发布 GA** | `VERSION` 改为 `X.Y.Z` · CHANGELOG 建稳定版段 · 指定 `final_rc_tag` 运行 GA 门 · 交付的 FR2 按真实范围翻状态 | 阶段线 · RC 后业务代码变化 · 人工预推 tag |
+| **发布 RC** | `VERSION` 改为 `X.Y.Z-rc.N` · CHANGELOG 建对应版本段 · 推送 tag `vX.Y.Z-rc.N` · CI 过门后公开候选 Release | 阶段线 · 覆盖已有 tag |
+| **发布 GA** | `VERSION` 改为 `X.Y.Z` · CHANGELOG 建稳定版段 · 推送 tag `vX.Y.Z` · CI 过门后公开 latest · 交付的 FR2 按真实范围翻状态 | 阶段线 · 覆盖已有 tag |
 | **发实验工件** | push `dev` 后先过四门，再构建保留 7 天的 Actions artifact（版本按最近稳定 tag 生成 `<base>-dev.N.g<sha>`） | `VERSION` · `CHANGELOG` · tag · Release · 阶段线 |
 | **进入下一阶段** | 更新 `docs/ROADMAP.md` 进入 / 退出条件、PRD 阶段状态，并把 `VERSION` 切到下一条 minor 版本线 | P0.5 这类内部冻结门除外，它仍归属当前 minor 版本线 |
 

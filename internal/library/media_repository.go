@@ -160,7 +160,7 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		query = query.Where("library_id = ?", filter.LibraryID)
 	}
 	if filter.Search != "" {
-		query = applyMultiColumnLike(query, searchableColumns, filter.Search)
+		query = r.applyTermMatch(query, filter.SpaceID, filter.Search)
 	}
 	if filter.Favorite != nil {
 		query = query.Where("favorite = ?", *filter.Favorite)
@@ -210,7 +210,8 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		if term == "" {
 			continue
 		}
-		query = applyMultiColumnLike(query, searchableColumns, term)
+		// FR2-046：裸词同时命中文件字段与推断片名
+		query = r.applyTermMatch(query, filter.SpaceID, term)
 	}
 	for _, term := range filter.CameraTerms {
 		if term == "" {
@@ -224,7 +225,45 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		}
 		query = query.Where("lens LIKE ?", "%"+escapeLike(term)+"%")
 	}
+	// FR2-046：时长与分辨率
+	if filter.DurationMin > 0 {
+		query = query.Where("duration >= ?", filter.DurationMin)
+	}
+	if filter.DurationMax > 0 {
+		query = query.Where("duration <= ?", filter.DurationMax)
+	}
+	if filter.WidthMin > 0 {
+		query = query.Where("width >= ?", filter.WidthMin)
+	}
+	if filter.WidthMax > 0 {
+		query = query.Where("width <= ?", filter.WidthMax)
+	}
+	if filter.HeightMin > 0 {
+		query = query.Where("height >= ?", filter.HeightMin)
+	}
+	if filter.HeightMax > 0 {
+		query = query.Where("height <= ?", filter.HeightMax)
+	}
 	return query
+}
+
+// applyTermMatch 将单个关键词约束为：可搜列任一命中，或同 Space 推断标题命中（FR2-046）。
+func (r *gormMediaRepository) applyTermMatch(query *gorm.DB, spaceID, term string) *gorm.DB {
+	pattern := "%" + escapeLike(term) + "%"
+	clauses := make([]string, 0, len(searchableColumns)+1)
+	args := make([]any, 0, len(searchableColumns)+1)
+	for _, col := range searchableColumns {
+		clauses = append(clauses, col+" LIKE ?")
+		args = append(args, pattern)
+	}
+	if r.db.Migrator().HasTable(&models.MediaInference{}) {
+		inferred := r.db.Model(&models.MediaInference{}).
+			Select("media_id").
+			Where("space_id = ? AND title LIKE ?", normalizeSpaceID(spaceID), pattern)
+		clauses = append(clauses, "id IN (?)")
+		args = append(args, inferred)
+	}
+	return query.Where(strings.Join(clauses, " OR "), args...)
 }
 
 func (r *gormMediaRepository) applyInferenceFilter(query *gorm.DB, filter MediaFilter) *gorm.DB {
@@ -286,6 +325,15 @@ func applyMediaOrder(query *gorm.DB, sortKey string) *gorm.DB {
 		return query.Order("COALESCE(media_time, added_at) DESC, id DESC")
 	case "media_time_asc":
 		return query.Order("COALESCE(media_time, added_at) ASC, id ASC")
+	case "duration":
+		return query.Order("duration DESC, id DESC")
+	case "duration_asc":
+		return query.Order("duration ASC, id ASC")
+	case "resolution":
+		// 以高度为主键近似清晰度档位，同高再比宽度
+		return query.Order("height DESC, width DESC, id DESC")
+	case "resolution_asc":
+		return query.Order("height ASC, width ASC, id ASC")
 	default:
 		return query.Order("added_at DESC, id DESC")
 	}

@@ -14,6 +14,8 @@ import LibraryManagerPage from './pages/LibraryManagerPage';
 import OverviewPage from './pages/OverviewPage';
 import TimelinePage from './pages/TimelinePage';
 import BrowsePage from './pages/BrowsePage';
+// Pixi 高密度媒体网格（FR2-009）：懒加载，避免主包拉入 pixi.js
+const MediaBrowserPage = lazy(() => import('./pages/MediaBrowserPage'));
 import AlbumsPage from './pages/AlbumsPage';
 import RecyclePage from './pages/RecyclePage';
 import InspectPage from './pages/InspectPage';
@@ -101,6 +103,24 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <TimelinePage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/media-grid"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <Suspense
+                    fallback={
+                      <Center h={200}>
+                        <Loader size="sm" />
+                      </Center>
+                    }
+                  >
+                    <MediaBrowserPage />
+                  </Suspense>
                 </AppLayout>
               </ProtectedRoute>
             }

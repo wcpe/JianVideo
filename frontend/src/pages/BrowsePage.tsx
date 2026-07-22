@@ -26,6 +26,8 @@ import {
   IconPhotoPlus,
   IconTag,
   IconTrash,
+  IconMovie,
+  IconFolderShare,
 } from '@tabler/icons-react';
 import { useLibraryPaths } from '@/hooks/useLibraryPaths';
 import { useDirectoryBrowse, BROWSE_ROOT, type BrowseSort } from '@/hooks/useDirectoryBrowse';
@@ -70,6 +72,9 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
   const [search, setSearch] = useState(() => tab.search);
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>(() => tab.mediaType);
   const [sizeMin, setSizeMin] = useState(() => tab.sizeMin);
+  // FR2-046：时长 / 分辨率筛选（不入标签快照，避免改持久化 schema）
+  const [durationMin, setDurationMin] = useState(0);
+  const [heightMin, setHeightMin] = useState(0);
   const [timeFrom, setTimeFrom] = useState(() => tab.timeFrom);
   const [timeTo, setTimeTo] = useState(() => tab.timeTo);
   // 详情面板选中下标（FR-34）
@@ -95,7 +100,15 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const filterActive = !!(search.trim() || mediaType || sizeMin || timeFrom || timeTo);
+  const filterActive = !!(
+    search.trim() ||
+    mediaType ||
+    sizeMin ||
+    durationMin ||
+    heightMin ||
+    timeFrom ||
+    timeTo
+  );
   const atRoot = browse.currentPath === BROWSE_ROOT;
 
   // 清除全部筛选（FR-98）：无结果态「清除筛选」CTA 调用
@@ -104,6 +117,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
     setSearch('');
     setMediaType('');
     setSizeMin(0);
+    setDurationMin(0);
+    setHeightMin(0);
     setTimeFrom('');
     setTimeTo('');
   }, []);
@@ -170,6 +185,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
         search: search.trim() || undefined,
         type: mediaType || undefined,
         size_min: sizeMin || undefined,
+        duration_min: durationMin || undefined,
+        height_min: heightMin || undefined,
         time_from: timeFrom || undefined,
         time_to: timeTo || undefined,
         page_size: 100,
@@ -186,7 +203,18 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
     return () => {
       active = false;
     };
-  }, [filterActive, search, mediaType, sizeMin, timeFrom, timeTo, atRoot, browse.currentPath]);
+  }, [
+    filterActive,
+    search,
+    mediaType,
+    sizeMin,
+    durationMin,
+    heightMin,
+    timeFrom,
+    timeTo,
+    atRoot,
+    browse.currentPath,
+  ]);
 
   // 详情面板与浏览器用同一套排序，保证双击下标一致。
   // DirectoryBrowser 内部对 files 再跑一遍 sortFiles，此处以同一函数排序使详情面板下标与列表完全对齐
@@ -217,6 +245,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
           search: search.trim() || undefined,
           type: mediaType || undefined,
           size_min: sizeMin || undefined,
+          duration_min: durationMin || undefined,
+          height_min: heightMin || undefined,
           time_from: timeFrom || undefined,
           time_to: timeTo || undefined,
           page_size: 100,
@@ -226,7 +256,18 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
     } else {
       browse.reload();
     }
-  }, [filterActive, atRoot, browse, search, mediaType, sizeMin, timeFrom, timeTo]);
+  }, [
+    filterActive,
+    atRoot,
+    browse,
+    search,
+    mediaType,
+    sizeMin,
+    durationMin,
+    heightMin,
+    timeFrom,
+    timeTo,
+  ]);
 
   // 执行批量软删（FR-69）：确认后调端点，成功刷新 + 清空选择
   const confirmDelete = useCallback(async () => {
@@ -278,6 +319,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
       onBatchAddToAlbum={batch.openAddToAlbum}
       onBatchAddTag={batch.openAddTag}
       onBatchDownload={batch.download}
+      onBatchTranscode={batch.openTranscode}
+      onBatchMove={batch.openMove}
     />
   ) : (
     // 浏览模式：真实路径树（后端已按 sort 排序）
@@ -299,6 +342,8 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
       onBatchAddToAlbum={batch.openAddToAlbum}
       onBatchAddTag={batch.openAddTag}
       onBatchDownload={batch.download}
+      onBatchTranscode={batch.openTranscode}
+      onBatchMove={batch.openMove}
     />
   );
 
@@ -369,6 +414,28 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
             onClick={() => batch.openAddTag(selectedIds)}
           >
             <IconTag size={18} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="批量转码">
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="批量转码"
+            disabled={!hasSelection}
+            onClick={() => batch.openTranscode(selectedIds)}
+          >
+            <IconMovie size={18} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="移动到媒体库">
+          <ActionIcon
+            variant="default"
+            size="lg"
+            aria-label="移动到媒体库"
+            disabled={!hasSelection}
+            onClick={() => batch.openMove(selectedIds)}
+          >
+            <IconFolderShare size={18} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label="删除选中">
@@ -450,6 +517,10 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
             onMediaTypeChange={setMediaType}
             sizeMin={sizeMin}
             onSizeMinChange={setSizeMin}
+            durationMin={durationMin}
+            onDurationMinChange={setDurationMin}
+            heightMin={heightMin}
+            onHeightMinChange={setHeightMin}
             timeFrom={timeFrom}
             onTimeFromChange={setTimeFrom}
             timeTo={timeTo}
@@ -481,6 +552,10 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
           onMediaTypeChange={setMediaType}
           sizeMin={sizeMin}
           onSizeMinChange={setSizeMin}
+          durationMin={durationMin}
+          onDurationMinChange={setDurationMin}
+          heightMin={heightMin}
+          onHeightMinChange={setHeightMin}
           timeFrom={timeFrom}
           onTimeFromChange={setTimeFrom}
           timeTo={timeTo}
@@ -548,6 +623,12 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
         initialIndex={detailIndex}
         onClose={() => setDetailIndex(null)}
         customImageExtensions={exts}
+        onFilterByTag={(tag) => {
+          // 浏览页无独立 tag 筛选态：用 search 表达式 tag 名兜底触发结果列表
+          setSearchInput(tag.name);
+          setSearch(tag.name);
+          setDetailIndex(null);
+        }}
       />
 
       {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}

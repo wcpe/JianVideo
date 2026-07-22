@@ -66,7 +66,12 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		lib.DELETE("/media/:id/bookmarks/:bookmark_id", h.DeleteMediaBookmark)
 		lib.GET("/media/:id/inference", h.GetMediaInference)
 		lib.PUT("/media/:id/inference", h.UpdateMediaInference)
+		// 剧集下一集（FR2-047）：同 Space 同 title 按季/集定位
+		lib.GET("/media/:id/next-episode", h.GetNextEpisode)
 		lib.GET("/media/:id/raw", h.GetRawImage)
+		lib.POST("/media/:id/image-export", h.ImageExportMedia)
+		lib.POST("/media/:id/clip-export", h.ClipExportMedia)
+		lib.GET("/exports/:task_id/download", h.DownloadExportArtifact)
 		lib.GET("/media/:id/download", h.DownloadMediaFile)
 		lib.PUT("/media/:id/rename", h.RenameMediaFile)
 		lib.PUT("/media/:id/move", h.MoveMediaFile)
@@ -77,6 +82,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		// 批量软删（FR-69）：单事务对多个 media_id 复用软删，进回收站
 		lib.POST("/media/batch-delete", h.BatchDeleteMediaFiles)
+		// 批量转码 / 索引层移动（FR2-053）
+		lib.POST("/media/batch-transcode", h.BatchTranscodeMediaFiles)
+		lib.POST("/media/batch-move", h.BatchMoveMediaFiles)
 		lib.POST("/inference/backfill", h.BackfillMediaInferences)
 		lib.POST("/metadata/backfill", h.BackfillMediaMetadata)
 
@@ -159,6 +167,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		albums.GET("/:id/items", h.ListAlbumItems)
 		albums.POST("/:id/items", h.AddAlbumItem)
 		albums.DELETE("/:id/items/:mediaId", h.RemoveAlbumItem)
+		// 合集顺序邻项（FR2-047）：上一首/下一首
+		albums.GET("/:id/neighbor", h.GetAlbumNeighbor)
 	}
 
 	// 分享链接管理（FR-43，鉴权后）：创建 / 列出 / 撤销分享。

@@ -156,6 +156,72 @@ describe('AlbumsPage', () => {
     });
   });
 
+  it('顺序播放带 albumId 进入播放页（FR2-047）', async () => {
+    server.use(
+      http.get('*/api/albums', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 7,
+              name: '播放列表',
+              description: '',
+              cover_media_id: 0,
+              created_at: '2025-01-01T00:00:00Z',
+              updated_at: '2025-01-01T00:00:00Z',
+              item_count: 2,
+            },
+          ],
+        }),
+      ),
+      http.get('*/api/albums/7/items', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 11,
+              library_id: 1,
+              file_path: 'D:\\A\\a.jpg',
+              file_name: 'a.jpg',
+              file_size: 10,
+              format: 'jpg',
+              video_codec: '',
+              audio_codec: '',
+              duration: 0,
+              width: 100,
+              height: 100,
+              bitrate: 0,
+              subtitle_tracks: '',
+              added_at: '2025-01-01T00:00:00Z',
+              modified_at: '2025-01-01T00:00:00Z',
+            },
+            {
+              id: 12,
+              library_id: 1,
+              file_path: 'D:\\A\\b.mp4',
+              file_name: 'b.mp4',
+              file_size: 100,
+              format: 'mp4',
+              video_codec: 'h264',
+              audio_codec: 'aac',
+              duration: 30,
+              width: 1280,
+              height: 720,
+              bitrate: 1000,
+              subtitle_tracks: '',
+              added_at: '2025-01-01T00:00:00Z',
+              modified_at: '2025-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('播放列表'));
+    await user.click(await screen.findByRole('button', { name: '顺序播放' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/play/12?albumId=7');
+  });
+
   it('在相册内移出媒体成员', async () => {
     let removeCalled: { albumId?: string; mediaId?: string } | null = null;
     server.use(

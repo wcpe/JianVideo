@@ -30,30 +30,28 @@ ADR-0032 建立了 GitHub Actions 原生构建、GitHub Releases 分发和二进
 - 实验产物只作为保留 7 天的 GitHub Actions 工件，名称包含 `experimental`、平台与短 SHA；不创建 tag、不创建 GitHub Release，也不进入任何自更新频道。
 - 实验工作流权限保持 `contents: read`，不能写仓库引用或发布对象。
 
-### 3. RC 由无输入门控工作流发布
+### 3. RC 由推送 RC tag 触发
 
-- `.github/workflows/rc.yml` 仅由无输入 `workflow_dispatch` 触发，且必须从 `refs/heads/main` 运行；从其他分支触发立即失败。
-- `VERSION` 必须严格匹配 `X.Y.Z-rc.N`，其中 `N >= 1`；tag 为 `v${VERSION}`。工作流通过 GitHub matching-refs API 读取同基线现有 RC tag：没有既有 RC 时只能从 `rc.1` 起步，否则必须严格等于 `max(N)+1`；prepare 与最终 publish 均复检，禁止依赖本地可能过期的 tag 列表或覆盖既有候选版。
+- `.github/workflows/rc.yml` 由推送 `v*-rc.*` tag 触发；固定 `source_sha=github.sha`。
+- `VERSION` 必须严格匹配 `X.Y.Z-rc.N`（`N >= 1`），且等于推送 tag 去掉 `v` 前缀。
+- 同名 Release 不得已存在；该 RC tag 必须已是同基线最高现有 RC。
 - RC 与 GA 共享仓库级 `release-publication` 并发组，所有公开发布串行执行且不取消进行中的发布。
-- 工作流固定 `source_sha=github.sha`，验证 `VERSION` 与 `CHANGELOG.md` 对应 RC 版本段非空，复用 `ci.yml` 的四项质量门，并让 `build.yml` 对同一固定 SHA 完成 Linux/Windows 构建与校验。
-- 只有上述门禁全部通过，最终 publish job 才创建指向 `source_sha` 的轻量 tag 与带每次运行唯一隐藏 ownership marker 的 draft Release。
-- 上传资产后必须从 Release 回下载严格三项资产；下载的 `checksums.txt` 必须与本地 `prepare_payload` 生成的文件完全一致，再以本地校验和验证两个二进制。成功后才移除 marker，并以 `prerelease=true`、`make_latest=false` 公开 RC Release。
+- 验证 CHANGELOG 对应 RC 版本段非空后，复用 `ci.yml` 四项质量门与 `build.yml` 双平台构建。
+- publish 使用 `publish-from-tag`：**不创建 tag**，只创建带 ownership marker 的 draft Release；上传后回下载校验，成功才以 `prerelease=true`、`make_latest=false` 公开。
 
-### 4. GA 只能提升最后一个已验证 RC
+### 4. GA 由推送稳定 tag 触发
 
-- `.github/workflows/release.yml` 只接受 `workflow_dispatch`，唯一必填输入为 `final_rc_tag`，且只能从 `refs/heads/main` 运行；不再响应人工预推的版本 tag。
-- `VERSION` 必须是严格稳定版 `X.Y.Z`；`final_rc_tag` 必须匹配同基线 `vX.Y.Z-rc.N`，其提交必须是当前 GA 固定 SHA 的祖先。
-- `final_rc_tag..GA` 只允许正式发布元数据差异：`VERSION`、`CHANGELOG.md`、`README.md`、`docs/**` 与范围纪律文档 `.claude/rules/scope-discipline.md`。工作流、发布脚本、依赖、构建配置、业务代码或其他文件有差异时一律拒绝 GA。
-- 被指定的 final RC 必须是同基线最高现有 RC；其 API tag ref 必须以 commit 类型指向本地 tag commit，该 commit 的 `VERSION` 必须与 tag 一致。对应 Release 必须已经公开、`draft=false`、`prerelease=true`，资产集合严格为 Linux 二进制、Windows 二进制与 `checksums.txt`；GA 会回下载并验证 RC 自身校验和，但不搬运 RC 资产，也不把 RC 与 GA 重建二进制逐字节比较。
-- final RC 在 prepare 阶段执行 fail-fast 预检，并在 publish job 创建 GA tag 前再次完整复检。
-- GA 重新复用四项质量门，并对当前固定 SHA 重新构建 Linux/Windows 产物与校验和；不能直接搬运 RC 资产。
-- 门禁通过后，publish job 才创建 `vX.Y.Z` tag 与 draft Release；资产上传和回下载校验通过后，才公开为 `prerelease=false`、latest 的稳定 Release。
+- `.github/workflows/release.yml` 由推送 `v*` tag 触发，并排除包含 `-rc.` 的 ref。
+- `VERSION` 必须是严格稳定版 `X.Y.Z`，且等于推送 tag 去掉 `v` 前缀；同名 Release 不得已存在。
+- CHANGELOG 必须存在目标稳定版的非空版本段。
+- 在当前固定 SHA 上重新执行四项质量门和 Linux/Windows 构建；不能直接搬运 RC 资产。
+- publish 使用 `publish-from-tag`；回下载校验通过后公开为 `prerelease=false`、latest。
 
-### 5. 禁止人工预先推 tag
+### 5. tag 由发布者推送，工作流只公开 Release
 
-- 人工不得预先 push RC/GA tag，也不得创建占位 tag；tag 是门控发布成功后的结果。
-- 仓库可预配置匹配 `v*` 的 tag Ruleset，但 Ruleset 只是权限策略，不是实际 Git 引用。普通用户不得创建、改写或删除 `v*` tag，仅放行指定发布自动化身份。
-- 发布阶段失败时，工作流只能清理“由本次运行创建、仍指向本次固定 SHA”的 draft Release 与 tag；不得删除既有或他人创建的发布引用。
+- 发布入口是人工推送 `v*` tag；工作流不创建、不改写、失败时也不删除 tag。
+- 不使用 GitHub App 身份、`v*` Ruleset bypass 或 production 环境审批作为发布前置。
+- 发布阶段失败时，工作流只能清理“由本次运行创建、仍带归属标记”的 draft Release；不得删除既有或他人创建的发布引用。
 
 ### 6. 保留的构建、发布说明与分发决策
 
@@ -71,23 +69,22 @@ ADR-0032 建立了 GitHub Actions 原生构建、GitHub Releases 分发和二进
 ## 理由
 
 - 把 dev 实验工件与公开 RC 分离，避免未经候选验收的集成产物进入自更新渠道。
-- 先验证、后创建 tag，使 tag/Release 成为门禁通过的证明，避免“引用已公开但构建失败”的半发布状态。
-- GA 必须与最后一个 RC 保持同一代码基线且只允许元数据收口，能够证明用户验收过的就是最终发布代码。
+- 以推送 tag 作为唯一发布入口，流程简单可操作；工作流仍强制四门与双平台构建后才公开 Release，避免未验证资产进入分发渠道。
+- tag 已存在但质量门失败时，只留下未公开 draft/无 Release，不自动删除 tag；修复后递增 `rc.N` 或修正元数据后重推新 tag。
 - RC/GA 都从固定 SHA 重新构建并回下载校验，避免可变分支、错用工件或上传损坏造成供应链漂移。
-- 保留原生 runner、单二进制、SHA-256、CHANGELOG 真源与自更新回滚，延续已经验证过的交付形态，只替换不安全的发布触发和频道语义。
+- 保留原生 runner、单二进制、SHA-256、CHANGELOG 真源与自更新回滚，延续已经验证过的交付形态。
 
 ## 后果
 
-- 正面：`dev` 可持续集成而不污染公开频道；RC/GA 有可审计的统一门禁；GA 与最终 RC 的代码身份可证明；失败发布不会留下未经验证的公开版本。
-- 约束：发布必须先把正确的 `VERSION` 与 CHANGELOG 版本段合入 `main`；RC 修复必须递增 `rc.N`；GA 必须显式指定已公开的 final RC，并且其后只能做允许列表内的发布元数据收口。
-- 约束：仓库管理员需要配置 `main` 分支保护、`v*` tag Ruleset、发布环境权限与指定自动化身份；这些 GitHub 托管侧设置不能只靠仓库 YAML 自证。
+- 正面：`dev` 可持续集成而不污染公开频道；RC/GA 有统一质量门与可审计的 draft→公开路径；失败不会留下未经验证的公开 Release。
+- 约束：发布前必须保证 `VERSION`、CHANGELOG 与即将推送的 tag 一致；RC 修复必须递增 `rc.N`，不得覆盖既有 tag。
+- 约束：推错 tag 会直接触发流水线；不设 GitHub App / Ruleset / production 审批作为额外托管门禁。
 - 兼容：历史 `dev` Release 与旧格式版本可保留查询，但不再更新，也不再作为候选版频道目标。
-- 真机验收：首次 RC 与 GA 必须在 GitHub 上核验四门复用、固定 SHA、tag/draft 创建时点、资产回下载校验、RC 非 latest、GA latest、失败清理和自更新频道选择。
+- 真机验收：首次 RC 与 GA 必须在 GitHub 上核验四门复用、固定 SHA、draft 公开时点、资产回下载校验、RC 非 latest、GA latest 与失败清理。
 
 ## 备选方案
 
-- **继续 push tag 触发发布**：tag 在门禁前已存在，失败后形成半发布状态，落选。
+- **工作流过门后才创建 tag（旧方案）**：可避免半发布 tag，但依赖 `workflow_dispatch`、可选 App 身份与 Ruleset，运维成本高，落选。
 - **让 main 每次 push 自动发布预览**：把集成提交直接暴露给自更新用户，无法表达 RC 信任等级，落选。
-- **GA 直接复用 RC 二进制资产**：可减少构建时间，但无法证明 GA 元数据提交下的构建可重复，也绕过最终门禁，落选。
-- **GA 允许 RC 后继续混入修复代码**：用户验收的 RC 与 GA 不再同一代码身份；任何代码修复都应发布新的 `rc.N`，故落选。
-- **人工先建占位 tag，再由工作流补资产**：仍会暴露无产物或未验证引用，且清理归属不清，落选。
+- **GA 直接复用 RC 二进制资产**：可减少构建时间，但无法证明 GA 提交下的构建可重复，也绕过最终门禁，落选。
+- **引入 GitHub App + tag Ruleset 托管门禁**：增加 Secrets/Ruleset/环境审批复杂度，与“推 tag 即发”目标冲突，落选。

@@ -209,6 +209,13 @@ export interface MediaListParams {
   has_gps?: boolean;
   // FR2-031 本地影视信息筛选
   inference?: 'inferred' | 'auto' | 'manual' | 'missing';
+  // FR2-046 时长（秒）与分辨率（像素）
+  duration_min?: number;
+  duration_max?: number;
+  width_min?: number;
+  width_max?: number;
+  height_min?: number;
+  height_max?: number;
 }
 
 async function realGetMediaFiles(params: MediaListParams = {}): Promise<MediaListResponse> {
@@ -366,6 +373,23 @@ async function realGetMediaInference(
   return res.data.inference;
 }
 
+/** 剧集下一集查询结果（FR2-047） */
+export interface NextEpisodeResult {
+  media: MediaFile | null;
+  current: MediaInference | null;
+  next: MediaInference | null;
+}
+
+async function realGetNextEpisode(
+  id: number,
+  signal?: AbortSignal,
+): Promise<NextEpisodeResult> {
+  const res = await client.get<NextEpisodeResult>(`/api/library/media/${id}/next-episode`, {
+    signal,
+  });
+  return res.data;
+}
+
 async function realUpdateMediaInference(
   id: number,
   input: MediaInferenceInput,
@@ -395,6 +419,44 @@ async function realDeleteMediaFile(id: number): Promise<void> {
 async function realBatchDeleteMediaFiles(ids: number[]): Promise<number> {
   const res = await client.post<{ deleted: number }>('/api/library/media/batch-delete', { ids });
   return res.data.deleted;
+}
+
+/** 批量转码结果（FR2-053） */
+export interface BatchTranscodeResult {
+  queued: number;
+  skipped: number;
+  failed: number;
+  task_ids: number[];
+}
+
+/** 批量索引层移动结果（FR2-053） */
+export interface BatchMoveResult {
+  moved: number;
+  skipped: number;
+}
+
+// 批量转码（FR2-053）：仅对视频入队，图片计入 skipped。
+async function realBatchTranscodeMediaFiles(
+  ids: number[],
+  presetID: number,
+): Promise<BatchTranscodeResult> {
+  const res = await client.post<BatchTranscodeResult>('/api/library/media/batch-transcode', {
+    ids,
+    preset_id: presetID,
+  });
+  return res.data;
+}
+
+// 批量索引层移动（FR2-053）：只改 library_id，不搬磁盘文件。
+async function realBatchMoveMediaFiles(
+  ids: number[],
+  targetLibraryID: number,
+): Promise<BatchMoveResult> {
+  const res = await client.post<BatchMoveResult>('/api/library/media/batch-move', {
+    ids,
+    target_library_id: targetLibraryID,
+  });
+  return res.data;
 }
 
 // ─── 感知哈希去重（FR-70）────────────────────────────
@@ -864,6 +926,26 @@ async function mockGetMediaInference(id: number): Promise<MediaInference | null>
   return mockInferences.get(id) ?? null;
 }
 
+async function mockGetNextEpisode(id: number): Promise<NextEpisodeResult> {
+  await mockDelay(80);
+  const current = mockInferences.get(id) ?? null;
+  if (!current || !current.title || current.episode <= 0) {
+    return { media: null, current, next: null };
+  }
+  const candidates = [...mockInferences.values()].filter(
+    (inf) => inf.title === current.title && inf.media_id !== id && inf.episode > 0,
+  );
+  const sameSeason = candidates
+    .filter((inf) => inf.season === current.season && inf.episode > current.episode)
+    .sort((a, b) => a.episode - b.episode);
+  const nextSeason = candidates
+    .filter((inf) => inf.season > current.season)
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const next = sameSeason[0] ?? nextSeason[0] ?? null;
+  const media = next ? (mockMediaFiles.find((m) => m.id === next.media_id) ?? null) : null;
+  return { media, current, next };
+}
+
 async function mockUpdateMediaInference(
   id: number,
   input: MediaInferenceInput,
@@ -915,6 +997,56 @@ async function mockBatchDeleteMediaFiles(ids: number[]): Promise<number> {
     }
   }
   return deleted;
+}
+
+// 批量转码 mock（FR2-053）：视频计入 queued，图片 skipped。
+async function mockBatchTranscodeMediaFiles(
+  ids: number[],
+  _presetID: number,
+): Promise<BatchTranscodeResult> {
+  await mockDelay(100);
+  let queued = 0;
+  let skipped = 0;
+  const task_ids: number[] = [];
+  for (const id of ids) {
+    const m = mockMediaFiles.find((x) => x.id === id && !mockDeletedIds.has(x.id));
+    if (!m) {
+      skipped++;
+      continue;
+    }
+    const fmt = (m.format || '').toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic'].includes(fmt)) {
+      skipped++;
+      continue;
+    }
+    queued++;
+    task_ids.push(nextMockTaskId++);
+  }
+  return { queued, skipped, failed: 0, task_ids };
+}
+
+// 批量移动 mock（FR2-053）：仅改 library_id。
+async function mockBatchMoveMediaFiles(
+  ids: number[],
+  targetLibraryID: number,
+): Promise<BatchMoveResult> {
+  await mockDelay(100);
+  let moved = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const m = mockMediaFiles.find((x) => x.id === id && !mockDeletedIds.has(x.id));
+    if (!m) {
+      skipped++;
+      continue;
+    }
+    if (m.library_id === targetLibraryID) {
+      skipped++;
+      continue;
+    }
+    m.library_id = targetLibraryID;
+    moved++;
+  }
+  return { moved, skipped };
 }
 
 // ─── 感知哈希去重 mock（FR-70）──────────────────────
@@ -1302,6 +1434,9 @@ export function selectMediaCover(id: number, candidateID: number) {
 export function getMediaInference(id: number, signal?: AbortSignal) {
   return useMock ? mockGetMediaInference(id) : realGetMediaInference(id, signal);
 }
+export function getNextEpisode(id: number, signal?: AbortSignal) {
+  return useMock ? mockGetNextEpisode(id) : realGetNextEpisode(id, signal);
+}
 export function updateMediaInference(id: number, input: MediaInferenceInput) {
   return useMock ? mockUpdateMediaInference(id, input) : realUpdateMediaInference(id, input);
 }
@@ -1315,6 +1450,85 @@ export function deleteMediaFile(id: number) {
 export function batchDeleteMediaFiles(ids: number[]) {
   return useMock ? mockBatchDeleteMediaFiles(ids) : realBatchDeleteMediaFiles(ids);
 }
+// 批量转码 / 索引层移动（FR2-053）
+export function batchTranscodeMediaFiles(ids: number[], presetID: number) {
+  return useMock
+    ? mockBatchTranscodeMediaFiles(ids, presetID)
+    : realBatchTranscodeMediaFiles(ids, presetID);
+}
+export function batchMoveMediaFiles(ids: number[], targetLibraryID: number) {
+  return useMock
+    ? mockBatchMoveMediaFiles(ids, targetLibraryID)
+    : realBatchMoveMediaFiles(ids, targetLibraryID);
+}
+
+/** 图片编辑导出入队结果（FR2-038） */
+export interface ImageExportAccepted {
+  status: string;
+  task_id: string;
+}
+
+/** 视频粗剪导出入队结果（FR2-039） */
+export interface ClipExportAccepted {
+  status: string;
+  task_id: string;
+}
+
+/** 图片编辑参数（FR2-038） */
+export interface ImageExportParams {
+  exposure?: number;
+  contrast?: number;
+  saturation?: number;
+  temperature?: number;
+  format: 'jpeg' | 'jpg' | 'png' | 'webp';
+}
+
+/** 视频粗剪参数（FR2-039） */
+export interface ClipExportParams {
+  start_sec: number;
+  end_sec: number;
+  format: 'mp4' | 'mkv' | 'mov';
+}
+
+async function realEnqueueImageExport(
+  id: number,
+  params: ImageExportParams,
+): Promise<ImageExportAccepted> {
+  const res = await client.post<ImageExportAccepted>(
+    `/api/library/media/${id}/image-export`,
+    params,
+  );
+  return res.data;
+}
+
+async function realEnqueueClipExport(
+  id: number,
+  params: ClipExportParams,
+): Promise<ClipExportAccepted> {
+  const res = await client.post<ClipExportAccepted>(
+    `/api/library/media/${id}/clip-export`,
+    params,
+  );
+  return res.data;
+}
+
+export function enqueueImageExport(id: number, params: ImageExportParams) {
+  return useMock
+    ? Promise.resolve({ status: 'queued', task_id: 'mock-image-export' })
+    : realEnqueueImageExport(id, params);
+}
+
+export function enqueueClipExport(id: number, params: ClipExportParams) {
+  return useMock
+    ? Promise.resolve({ status: 'queued', task_id: 'mock-clip-export' })
+    : realEnqueueClipExport(id, params);
+}
+
+/** 导出产物下载 URL（FR2-038/039） */
+export function exportDownloadUrl(taskId: string | number) {
+  return `/api/library/exports/${taskId}/download`;
+}
+
 // 感知哈希去重（FR-70）
 export function scanDuplicates() {
   return useMock ? mockScanDuplicates() : realScanDuplicates();

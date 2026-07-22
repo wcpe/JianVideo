@@ -1,5 +1,13 @@
 import { Paper, Group, Text, Button, ActionIcon, Tooltip } from '@mantine/core';
-import { IconTrash, IconPhotoPlus, IconTag, IconDownload, IconX } from '@tabler/icons-react';
+import {
+  IconTrash,
+  IconPhotoPlus,
+  IconTag,
+  IconDownload,
+  IconX,
+  IconMovie,
+  IconFolderShare,
+} from '@tabler/icons-react';
 
 interface SelectionBatchBarProps {
   // 当前选中数量，0 时不渲染
@@ -8,10 +16,12 @@ interface SelectionBatchBarProps {
   onClear?: () => void;
   // 批量删除（必有）
   onDelete?: () => void;
-  // 批量操作（FR-91）：提供才渲染对应按钮
+  // 批量操作（FR-91 / FR2-053）：提供才渲染对应按钮
   onAddToAlbum?: () => void;
   onAddTag?: () => void;
   onDownload?: () => void;
+  onTranscode?: () => void;
+  onMove?: () => void;
 }
 
 /**
@@ -26,6 +36,8 @@ export default function SelectionBatchBar({
   onAddToAlbum,
   onAddTag,
   onDownload,
+  onTranscode,
+  onMove,
 }: SelectionBatchBarProps) {
   if (count <= 0) return null;
 
@@ -88,6 +100,28 @@ export default function SelectionBatchBar({
             onClick={onDownload}
           >
             打包下载
+          </Button>
+        )}
+        {onTranscode && (
+          <Button
+            size="xs"
+            variant="light"
+            color="purple"
+            leftSection={<IconMovie size={14} />}
+            onClick={onTranscode}
+          >
+            转码
+          </Button>
+        )}
+        {onMove && (
+          <Button
+            size="xs"
+            variant="light"
+            color="purple"
+            leftSection={<IconFolderShare size={14} />}
+            onClick={onMove}
+          >
+            移动
           </Button>
         )}
         <Button

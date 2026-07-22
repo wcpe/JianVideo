@@ -42,12 +42,15 @@ import {
   IconClock,
   IconAdjustments,
   IconPhoto,
+  IconMovie,
 } from '@tabler/icons-react';
 // FR-102：懒加载 VideoPlayer，仅在灯箱内实际查看视频时才加载其 mpegts.js 等重内核，
 // 避免图片预览场景白白拉入大体积播放内核。
 const VideoPlayer = lazy(() => import('@/components/VideoPlayer'));
 import ShareDialog from '@/components/ShareDialog';
 import BatchActionsModals from '@/components/BatchActionsModals';
+import ImageEditorPanel from '@/components/ImageEditorPanel';
+import ClipExportPanel from '@/components/ClipExportPanel';
 import { useBatchActions } from '@/hooks/useBatchActions';
 import { isImageFile, mediaDisplayName } from '@/utils/media';
 import { mediaRawUrl, mediaStreamUrl } from '@/utils/media-url';
@@ -61,15 +64,19 @@ import {
 import {
   generateMediaCovers,
   getMediaCovers,
+  getMediaInference,
   getMediaMetadata,
+  getMediaTags,
   selectMediaCover,
 } from '@/api/library';
 import { getTask } from '@/api/tasks';
 import type {
   MediaCoversResponse,
   MediaFile,
+  MediaInference,
   MediaMetadata,
   NormalizedEmbeddedMetadata,
+  Tag,
 } from '@/types';
 
 interface MediaDetailPanelProps {
@@ -80,6 +87,8 @@ interface MediaDetailPanelProps {
   customImageExtensions: Record<number, string[]>;
   /** 切换收藏（FR-106）：父层负责调接口并刷新列表，未传则不显收藏按钮 */
   onToggleFavorite?: (f: MediaFile) => void;
+  /** 按标签筛选（FR2-032）：点击标签 chip 时回调，父页设置 tag_id */
+  onFilterByTag?: (tag: Tag) => void;
 }
 
 const ZOOM_MIN = 1;
@@ -213,58 +222,203 @@ function streamLabel(stream: { codec_name?: string; language?: string; title?: s
   return [stream.codec_name, stream.language, stream.title].filter(Boolean).join(' · ');
 }
 
-function EmbeddedMetadataInfo({ items }: { items: MediaMetadata[] }) {
-  if (items.length === 0) return null;
-  const item = items[0];
-  const metadata = parseNormalizedMetadata(item);
-  if (!metadata) return null;
-  const video = metadata.video_streams?.[0];
-  const color = video?.color;
-  const videoValue = video
-    ? [
-        video.codec_name,
-        video.width && video.height ? `${video.width}×${video.height}` : '',
-        video.frame_rate,
-        color?.space,
-        color?.transfer,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    : '';
+function EmbeddedMetadataInfo({
+  items,
+  error,
+  loading,
+}: {
+  items: MediaMetadata[];
+  error: string | null;
+  loading: boolean;
+}) {
   return (
     <>
       <Divider my={4} label="文件自带元数据" labelPosition="left" />
-      <Box component="dl" style={{ margin: 0 }}>
-        <DetailRow
-          label="解析来源"
-          value={`${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`}
-        />
-        <DetailRow label="容器" value={metadata.container?.format_name} />
-        <DetailRow label="视频流" value={videoValue} />
-        <DetailRow
-          label="音频流"
-          value={metadata.audio_streams?.map(streamLabel).filter(Boolean).join('；')}
-        />
-        <DetailRow
-          label="字幕流"
-          value={metadata.subtitle_streams?.map(streamLabel).filter(Boolean).join('；')}
-        />
-        <DetailRow label="内嵌标题" value={metadata.tags?.title} />
-        <DetailRow
-          label="IPTC"
-          value={
-            metadata.image?.iptc
-              ? Object.values(metadata.image.iptc).filter(Boolean).join('；')
-              : ''
+      {loading && (
+        <Text size="xs" c="dimmed">
+          加载元数据中…
+        </Text>
+      )}
+      {!loading && error && (
+        <Text size="xs" c="red" role="alert">
+          {error}
+        </Text>
+      )}
+      {!loading && !error && items.length === 0 && (
+        <Text size="xs" c="dimmed">
+          暂无解析到的嵌入元数据
+        </Text>
+      )}
+      {!loading &&
+        !error &&
+        items.map((item) => {
+          const metadata = parseNormalizedMetadata(item);
+          if (!metadata) {
+            return (
+              <Text key={item.id} size="xs" c="dimmed">
+                元数据记录无法解析（来源 {item.source}）
+              </Text>
+            );
           }
-        />
-        <DetailRow
-          label="XMP"
-          value={
-            metadata.image?.xmp ? Object.values(metadata.image.xmp).filter(Boolean).join('；') : ''
-          }
-        />
-      </Box>
+          const video = metadata.video_streams?.[0];
+          const color = video?.color;
+          const videoValue = video
+            ? [
+                video.codec_name,
+                video.width && video.height ? `${video.width}×${video.height}` : '',
+                video.frame_rate,
+                color?.space,
+                color?.transfer,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : '';
+          return (
+            <Box key={item.id} component="dl" style={{ margin: 0 }} mb="xs">
+              <DetailRow
+                label="解析来源"
+                value={`${item.source} · ${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`}
+              />
+              <DetailRow label="解析时间" value={item.parsed_at ? formatTime(item.parsed_at) : ''} />
+              <DetailRow label="容器" value={metadata.container?.format_name} />
+              <DetailRow label="视频流" value={videoValue} />
+              <DetailRow
+                label="音频流"
+                value={metadata.audio_streams?.map(streamLabel).filter(Boolean).join('；')}
+              />
+              <DetailRow
+                label="字幕流"
+                value={metadata.subtitle_streams?.map(streamLabel).filter(Boolean).join('；')}
+              />
+              <DetailRow label="内嵌标题" value={metadata.tags?.title} />
+              <DetailRow
+                label="IPTC"
+                value={
+                  metadata.image?.iptc
+                    ? Object.values(metadata.image.iptc).filter(Boolean).join('；')
+                    : ''
+                }
+              />
+              <DetailRow
+                label="XMP"
+                value={
+                  metadata.image?.xmp
+                    ? Object.values(metadata.image.xmp).filter(Boolean).join('；')
+                    : ''
+                }
+              />
+            </Box>
+          );
+        })}
+    </>
+  );
+}
+
+/** 标签列表与按标签筛选入口（FR2-032） */
+function MediaTagsSection({
+  tags,
+  loading,
+  error,
+  onFilterByTag,
+}: {
+  tags: Tag[];
+  loading: boolean;
+  error: string | null;
+  onFilterByTag?: (tag: Tag) => void;
+}) {
+  return (
+    <>
+      <Divider my={4} label="标签" labelPosition="left" />
+      {loading && (
+        <Text size="xs" c="dimmed">
+          加载标签中…
+        </Text>
+      )}
+      {!loading && error && (
+        <Text size="xs" c="red" role="alert">
+          {error}
+        </Text>
+      )}
+      {!loading && !error && tags.length === 0 && (
+        <Text size="xs" c="dimmed">
+          尚未打标签
+        </Text>
+      )}
+      {!loading && !error && tags.length > 0 && (
+        <Group gap={6} wrap="wrap" aria-label="媒体标签">
+          {tags.map((tag) =>
+            onFilterByTag ? (
+              <Badge
+                key={tag.id}
+                component="button"
+                type="button"
+                variant="light"
+                style={{ cursor: 'pointer' }}
+                onClick={() => onFilterByTag(tag)}
+                aria-label={`按标签筛选：${tag.name}`}
+              >
+                {tag.name}
+              </Badge>
+            ) : (
+              <Badge key={tag.id} variant="light">
+                {tag.name}
+              </Badge>
+            ),
+          )}
+        </Group>
+      )}
+    </>
+  );
+}
+
+/** 离线影视推断展示（FR2-032） */
+function InferenceSection({
+  inference,
+  loading,
+  error,
+}: {
+  inference: MediaInference | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <>
+      <Divider my={4} label="影视信息" labelPosition="left" />
+      {loading && (
+        <Text size="xs" c="dimmed">
+          加载推断信息中…
+        </Text>
+      )}
+      {!loading && error && (
+        <Text size="xs" c="red" role="alert">
+          {error}
+        </Text>
+      )}
+      {!loading && !error && !inference && (
+        <Text size="xs" c="dimmed">
+          暂无本地推断片名
+        </Text>
+      )}
+      {!loading && !error && inference && (
+        <Box component="dl" style={{ margin: 0 }} aria-label="影视推断信息">
+          <DetailRow label="片名" value={inference.title} />
+          <DetailRow label="类型" value={inference.kind} />
+          <DetailRow label="年份" value={inference.year > 0 ? String(inference.year) : ''} />
+          <DetailRow
+            label="季/集"
+            value={
+              inference.season > 0 || inference.episode > 0
+                ? `S${String(inference.season).padStart(2, '0')}E${String(inference.episode).padStart(2, '0')}`
+                : ''
+            }
+          />
+          <DetailRow label="集标题" value={inference.episode_title} />
+          <DetailRow
+            label="来源"
+            value={`${inference.manual ? '人工纠正' : '自动推断'} · ${inference.source}`}
+          />
+        </Box>
+      )}
     </>
   );
 }
@@ -279,12 +433,17 @@ export default function MediaDetailPanel({
   onClose,
   customImageExtensions,
   onToggleFavorite,
+  onFilterByTag,
 }: MediaDetailPanelProps) {
   const navigate = useNavigate();
   // 打标签复用 FR-91 批量编排（单 id 列表即可）：零新后端端点
   const batch = useBatchActions();
   // 分享弹窗开合（FR-106）：复用既有 ShareDialog（resourceType='media'）
   const [shareOpened, setShareOpened] = useState(false);
+  // 图片编辑导出（FR2-038）
+  const [imageEditorOpened, setImageEditorOpened] = useState(false);
+  // 视频粗剪导出（FR2-039）
+  const [clipExportOpened, setClipExportOpened] = useState(false);
   // 信息栏折叠（FR-106）：折叠后右侧详情收起、左侧预览吃满，纯图沉浸
   const [infoCollapsed, setInfoCollapsed] = useState(false);
 
@@ -297,6 +456,14 @@ export default function MediaDetailPanel({
   // 旋转角度（FR-105）：0/90/180/270，左右各 90°
   const [rotation, setRotation] = useState(0);
   const [embeddedMetadata, setEmbeddedMetadata] = useState<MediaMetadata[]>([]);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [mediaTags, setMediaTags] = useState<Tag[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [tagsError, setTagsError] = useState<string | null>(null);
+  const [inference, setInference] = useState<MediaInference | null>(null);
+  const [inferenceLoading, setInferenceLoading] = useState(false);
+  const [inferenceError, setInferenceError] = useState<string | null>(null);
   const [covers, setCovers] = useState<MediaCoversResponse>({ cover: null, candidates: [] });
   const [coverGenerating, setCoverGenerating] = useState(false);
   // 幻灯片自动轮播开关（FR-105）
@@ -406,19 +573,88 @@ export default function MediaDetailPanel({
   }, [opened, idx, total, files, customImageExtensions]);
 
   const file = opened && files[idx] ? files[idx] : null;
+  // FR2-032：按当前媒体加载嵌入元数据 / 标签 / 推断，失败只提示不阻断预览
   useEffect(() => {
     let active = true;
     setEmbeddedMetadata([]);
+    setMetadataError(null);
+    setMetadataLoading(false);
     if (!file)
       return () => {
         active = false;
       };
+    setMetadataLoading(true);
     void getMediaMetadata(file.id)
       .then((items) => {
-        if (active) setEmbeddedMetadata(items);
+        if (!active) return;
+        setEmbeddedMetadata(items);
+        setMetadataError(null);
       })
       .catch(() => {
-        if (active) setEmbeddedMetadata([]);
+        if (!active) return;
+        setEmbeddedMetadata([]);
+        setMetadataError('加载元数据失败');
+      })
+      .finally(() => {
+        if (active) setMetadataLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [file]);
+
+  useEffect(() => {
+    let active = true;
+    setMediaTags([]);
+    setTagsError(null);
+    setTagsLoading(false);
+    if (!file)
+      return () => {
+        active = false;
+      };
+    setTagsLoading(true);
+    void getMediaTags(file.id)
+      .then((items) => {
+        if (!active) return;
+        setMediaTags(items);
+        setTagsError(null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMediaTags([]);
+        setTagsError('加载标签失败');
+      })
+      .finally(() => {
+        if (active) setTagsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [file]);
+
+  useEffect(() => {
+    let active = true;
+    setInference(null);
+    setInferenceError(null);
+    setInferenceLoading(false);
+    if (!file)
+      return () => {
+        active = false;
+      };
+    setInferenceLoading(true);
+    void getMediaInference(file.id)
+      .then((result) => {
+        if (!active) return;
+        setInference(result);
+        setInferenceError(null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setInference(null);
+        setInferenceError('加载影视信息失败');
+      })
+      .finally(() => {
+        if (active) setInferenceLoading(false);
       });
     return () => {
       active = false;
@@ -607,7 +843,29 @@ export default function MediaDetailPanel({
                     {slideshow ? <IconPlayerPause size={18} /> : <IconPlayerPlay size={18} />}
                   </ActionIcon>
                 </Tooltip>
+                {/* 图片编辑导出（FR2-038） */}
+                <Tooltip label="编辑导出">
+                  <ActionIcon
+                    variant="subtle"
+                    onClick={() => setImageEditorOpened(true)}
+                    aria-label="图片编辑导出"
+                  >
+                    <IconAdjustments size={18} />
+                  </ActionIcon>
+                </Tooltip>
               </>
+            )}
+            {/* 视频粗剪导出（FR2-039） */}
+            {!isImage && (
+              <Tooltip label="片段粗剪导出">
+                <ActionIcon
+                  variant="subtle"
+                  onClick={() => setClipExportOpened(true)}
+                  aria-label="片段粗剪导出"
+                >
+                  <IconMovie size={18} />
+                </ActionIcon>
+              </Tooltip>
             )}
             {/* 工具栏（FR-106）：收藏 / 打标签 / 分享，与网格操作一致，复用既有能力 */}
             {onToggleFavorite && (
@@ -900,7 +1158,29 @@ export default function MediaDetailPanel({
                 </SimpleGrid>
               )}
 
-              <EmbeddedMetadataInfo items={embeddedMetadata} />
+              <MediaTagsSection
+                tags={mediaTags}
+                loading={tagsLoading}
+                error={tagsError}
+                onFilterByTag={
+                  onFilterByTag
+                    ? (tag) => {
+                        onFilterByTag(tag);
+                        onClose();
+                      }
+                    : undefined
+                }
+              />
+              <InferenceSection
+                inference={inference}
+                loading={inferenceLoading}
+                error={inferenceError}
+              />
+              <EmbeddedMetadataInfo
+                items={embeddedMetadata}
+                error={metadataError}
+                loading={metadataLoading}
+              />
 
               <Divider my="sm" />
               <Button
@@ -928,6 +1208,23 @@ export default function MediaDetailPanel({
       />
       {/* 打标签弹窗（FR-106）：复用 FR-91 批量编排 */}
       <BatchActionsModals state={batch.modalState} />
+      {/* 图片编辑导出（FR2-038） */}
+      {isImage && (
+        <ImageEditorPanel
+          opened={imageEditorOpened}
+          mediaId={file.id}
+          onClose={() => setImageEditorOpened(false)}
+        />
+      )}
+      {/* 视频粗剪导出（FR2-039） */}
+      {!isImage && (
+        <ClipExportPanel
+          opened={clipExportOpened}
+          mediaId={file.id}
+          duration={file.duration || 0}
+          onClose={() => setClipExportOpened(false)}
+        />
+      )}
     </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Stack,
   Title,
@@ -24,6 +25,7 @@ import {
   IconShare,
   IconPhotoOff,
   IconAlertTriangle,
+  IconPlayerPlay,
 } from '@tabler/icons-react';
 import ShareDialog from '@/components/ShareDialog';
 import PageHeader from '@/components/PageHeader';
@@ -33,7 +35,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import EmptyState from '@/components/EmptyState';
 import MediaThumbnail from '@/components/MediaThumbnail';
 import { notifyError } from '@/utils/notify';
-import { mediaDisplayName } from '@/utils/media';
+import { isImageFile, mediaDisplayName } from '@/utils/media';
 import type { Album, MediaFile } from '@/types';
 
 const initCreate = { opened: false, name: '', description: '', loading: false };
@@ -338,8 +340,9 @@ export default function AlbumsPage() {
   );
 }
 
-/** 相册详情：展示成员、加入/移出媒体 */
+/** 相册详情：展示成员、加入/移出媒体，支持合集顺序播放（FR2-047） */
 function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
+  const navigate = useNavigate();
   const [items, setItems] = useState<MediaFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [pickerOpened, setPickerOpened] = useState(false);
@@ -376,6 +379,21 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
     await loadItems();
   }, [loadItems]);
 
+  /** 从合集打开播放页并带 albumId 上下文（图片跳过，找下一视频）。 */
+  const playFromAlbum = useCallback(
+    (start: MediaFile) => {
+      const ordered = items;
+      const startIdx = ordered.findIndex((m) => m.id === start.id);
+      const candidates =
+        startIdx >= 0 ? ordered.slice(startIdx).concat(ordered.slice(0, startIdx)) : ordered;
+      const target = candidates.find((m) => !isImageFile(m)) ?? start;
+      navigate(`/play/${target.id}?albumId=${album.id}`);
+    },
+    [album.id, items, navigate],
+  );
+
+  const firstVideo = items.find((m) => !isImageFile(m));
+
   return (
     <Stack gap="md">
       <Group justify="space-between">
@@ -385,13 +403,25 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
           </ActionIcon>
           <Title order={2}>{album.name}</Title>
         </Group>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          color="purple"
-          onClick={() => setPickerOpened(true)}
-        >
-          加入媒体
-        </Button>
+        <Group gap="sm">
+          {firstVideo && (
+            <Button
+              leftSection={<IconPlayerPlay size={16} />}
+              variant="light"
+              color="purple"
+              onClick={() => playFromAlbum(firstVideo)}
+            >
+              顺序播放
+            </Button>
+          )}
+          <Button
+            leftSection={<IconPlus size={16} />}
+            color="purple"
+            onClick={() => setPickerOpened(true)}
+          >
+            加入媒体
+          </Button>
+        </Group>
       </Group>
       {album.description && <Text c="dimmed">{album.description}</Text>}
 
@@ -424,11 +454,21 @@ function AlbumDetail({ album, onBack }: { album: Album; onBack: () => void }) {
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} spacing="md">
           {items.map((media) => (
             <Card key={media.id} withBorder padding="xs" radius="md" className="mantine-Card-root">
-              <Card.Section>
+              <Card.Section
+                style={{ cursor: 'pointer' }}
+                onClick={() => playFromAlbum(media)}
+                aria-label={`播放 ${mediaDisplayName(media)}`}
+              >
                 <MediaThumbnail mediaID={media.id} fileName={media.file_name} />
               </Card.Section>
               <Group justify="space-between" mt="xs" wrap="nowrap">
-                <Text size="sm" truncate title={mediaDisplayName(media)}>
+                <Text
+                  size="sm"
+                  truncate
+                  title={mediaDisplayName(media)}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => playFromAlbum(media)}
+                >
                   {mediaDisplayName(media)}
                 </Text>
                 <Button

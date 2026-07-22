@@ -230,6 +230,25 @@ func parseMediaFilter(c *gin.Context, libraryID int64, sort, search string) libr
 	case library.InferenceStatusInferred, library.InferenceStatusAuto, library.InferenceStatusManual, library.InferenceStatusMissing:
 		filter.InferenceStatus = c.Query("inference")
 	}
+	// FR2-046：时长（秒）与分辨率（像素）
+	if v, err := strconv.ParseFloat(c.Query("duration_min"), 64); err == nil && v > 0 {
+		filter.DurationMin = v
+	}
+	if v, err := strconv.ParseFloat(c.Query("duration_max"), 64); err == nil && v > 0 {
+		filter.DurationMax = v
+	}
+	if v, err := strconv.Atoi(c.Query("width_min")); err == nil && v > 0 {
+		filter.WidthMin = v
+	}
+	if v, err := strconv.Atoi(c.Query("width_max")); err == nil && v > 0 {
+		filter.WidthMax = v
+	}
+	if v, err := strconv.Atoi(c.Query("height_min")); err == nil && v > 0 {
+		filter.HeightMin = v
+	}
+	if v, err := strconv.Atoi(c.Query("height_max")); err == nil && v > 0 {
+		filter.HeightMax = v
+	}
 	return filter
 }
 

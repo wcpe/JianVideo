@@ -16,10 +16,21 @@ vi.mock('@/api/albums', () => ({
 const getTagsMock = vi.fn();
 const createTagMock = vi.fn();
 const addMediaTagMock = vi.fn();
+const getLibraryPathsMock = vi.fn();
+const batchTranscodeMock = vi.fn();
+const batchMoveMock = vi.fn();
 vi.mock('@/api/library', () => ({
   getTags: () => getTagsMock(),
   createTag: (...a: unknown[]) => createTagMock(...a),
   addMediaTag: (...a: unknown[]) => addMediaTagMock(...a),
+  getLibraryPaths: () => getLibraryPathsMock(),
+  batchTranscodeMediaFiles: (...a: unknown[]) => batchTranscodeMock(...a),
+  batchMoveMediaFiles: (...a: unknown[]) => batchMoveMock(...a),
+}));
+
+const listPresetsMock = vi.fn();
+vi.mock('@/api/transcode', () => ({
+  listPresets: () => listPresetsMock(),
 }));
 
 import { useBatchActions } from './useBatchActions';
@@ -30,6 +41,10 @@ beforeEach(() => {
   addAlbumItemMock.mockReset();
   getTagsMock.mockReset();
   addMediaTagMock.mockReset();
+  getLibraryPathsMock.mockReset();
+  batchTranscodeMock.mockReset();
+  batchMoveMock.mockReset();
+  listPresetsMock.mockReset();
 });
 
 describe('useBatchActions（FR-91）', () => {
@@ -117,5 +132,46 @@ describe('useBatchActions（FR-91）', () => {
       expect.objectContaining({ color: 'red', message: '选中文件总大小超过上限' }),
     );
     vi.unstubAllGlobals();
+  });
+
+  it('批量转码：确认后调 batchTranscode 并 toast 入队/跳过计数（FR2-053）', async () => {
+    listPresetsMock.mockResolvedValue([{ id: 3, name: '1080p', codec: 'h264' }]);
+    batchTranscodeMock.mockResolvedValue({ queued: 2, skipped: 1, failed: 0, task_ids: [10, 11] });
+    const { result } = renderHook(() => useBatchActions());
+
+    await act(async () => {
+      await result.current.openTranscode([1, 2, 3]);
+    });
+    await waitFor(() => expect(result.current.modalState.presets).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.modalState.confirmTranscode(3);
+    });
+    expect(batchTranscodeMock).toHaveBeenCalledWith([1, 2, 3], 3);
+    expect(showMock).toHaveBeenCalledWith(
+      expect.objectContaining({ color: 'green', message: '已入队 2 项，跳过 1 项' }),
+    );
+  });
+
+  it('批量移动：确认后调 batchMove 并 toast（FR2-053）', async () => {
+    getLibraryPathsMock.mockResolvedValue([{ id: 9, path: 'D:/lib', label: '片库' }]);
+    batchMoveMock.mockResolvedValue({ moved: 2, skipped: 0 });
+    const { result } = renderHook(() => useBatchActions());
+
+    await act(async () => {
+      await result.current.openMove([1, 2]);
+    });
+    await waitFor(() => expect(result.current.modalState.libraries).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.modalState.confirmMove(9);
+    });
+    expect(batchMoveMock).toHaveBeenCalledWith([1, 2], 9);
+    expect(showMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        color: 'green',
+        message: expect.stringContaining('已移动 2 项'),
+      }),
+    );
   });
 });

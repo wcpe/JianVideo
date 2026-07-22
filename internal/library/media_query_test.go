@@ -254,6 +254,133 @@ func TestListMediaFilesFiltered_HasGPS(t *testing.T) {
 	}
 }
 
+// TestListMediaFilesFiltered_FR2046DurationResolution 时长与分辨率筛选（FR2-046）。
+func TestListMediaFilesFiltered_FR2046DurationResolution(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	shortClip, err := svc.CreateMediaFile(1, "D:/movies/短片.mp4", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature, err := svc.CreateMediaFile(1, "D:/movies/长片.mp4", 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdStill, err := svc.CreateMediaFile(1, "D:/pics/海报.jpg", 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", shortClip.ID).
+		Updates(map[string]any{"duration": 90.0, "width": 1280, "height": 720}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", feature.ID).
+		Updates(map[string]any{"duration": 7200.0, "width": 1920, "height": 1080}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", hdStill.ID).
+		Updates(map[string]any{"duration": 0.0, "width": 3840, "height": 2160}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	count := func(f MediaFilter) int {
+		items, total, err := svc.ListMediaFilesFiltered(f, 1, 100)
+		if err != nil {
+			t.Fatalf("查询失败: %v", err)
+		}
+		if int64(len(items)) != total {
+			t.Fatalf("items 与 total 不一致: %d vs %d", len(items), total)
+		}
+		return len(items)
+	}
+	if n := count(MediaFilter{DurationMin: 600}); n != 1 {
+		t.Errorf("duration>=600 期望 1, 实际 %d", n)
+	}
+	if n := count(MediaFilter{DurationMax: 120}); n != 2 {
+		// 短片 90s + 图片 0s
+		t.Errorf("duration<=120 期望 2, 实际 %d", n)
+	}
+	if n := count(MediaFilter{HeightMin: 1080}); n != 2 {
+		t.Errorf("height>=1080 期望 2, 实际 %d", n)
+	}
+	if n := count(MediaFilter{WidthMin: 3000, HeightMin: 2000}); n != 1 {
+		t.Errorf("4K 下界期望 1, 实际 %d", n)
+	}
+	if n := count(MediaFilter{DurationMin: 60, HeightMin: 1000}); n != 1 {
+		t.Errorf("时长+分辨率组合期望 1, 实际 %d", n)
+	}
+}
+
+// TestListMediaFilesFiltered_FR2046InferenceTitle 裸词可命中推断片名（FR2-046）。
+func TestListMediaFilesFiltered_FR2046InferenceTitle(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	hit, err := svc.CreateMediaFile(1, "D:/movies/S01E01.mkv", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateMediaFile(1, "D:/movies/other.mkv", 1024); err != nil {
+		t.Fatal(err)
+	}
+	// CreateMediaFile 可能已写入空推断行；覆盖 title 即可（唯一键 media_id）
+	if err := gdb.Where(models.MediaInference{MediaID: hit.ID}).
+		Assign(models.MediaInference{
+			SpaceID: models.DefaultSpaceID,
+			Kind:    "series",
+			Title:   "绝命毒师",
+			Season:  1,
+			Episode: 1,
+			Source:  "offline_rule",
+		}).
+		FirstOrCreate(&models.MediaInference{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&models.MediaInference{}).
+		Where("media_id = ?", hit.ID).
+		Update("title", "绝命毒师").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := svc.ListMediaFilesFiltered(MediaFilter{Terms: []string{"绝命"}}, 1, 100)
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != hit.ID {
+		t.Fatalf("推断标题搜索期望仅命中 %d, total=%d items=%v", hit.ID, total, items)
+	}
+	items, total, err = svc.ListMediaFilesFiltered(MediaFilter{Search: "绝命"}, 1, 100)
+	if err != nil {
+		t.Fatalf("Search 查询失败: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != hit.ID {
+		t.Fatalf("Search 推断标题期望仅命中 %d, total=%d", hit.ID, total)
+	}
+}
+
+// TestApplyMediaOrder_FR2046DurationResolution 时长与分辨率排序（FR2-046）。
+func TestApplyMediaOrder_FR2046DurationResolution(t *testing.T) {
+	svc, gdb := newTagTestService(t)
+	a, _ := svc.CreateMediaFile(1, "D:/a.mp4", 1)
+	b, _ := svc.CreateMediaFile(1, "D:/b.mp4", 1)
+	c, _ := svc.CreateMediaFile(1, "D:/c.mp4", 1)
+	_ = gdb.Model(&models.MediaFile{}).Where("id = ?", a.ID).Updates(map[string]any{"duration": 10.0, "width": 640, "height": 360})
+	_ = gdb.Model(&models.MediaFile{}).Where("id = ?", b.ID).Updates(map[string]any{"duration": 100.0, "width": 1920, "height": 1080})
+	_ = gdb.Model(&models.MediaFile{}).Where("id = ?", c.ID).Updates(map[string]any{"duration": 50.0, "width": 1280, "height": 720})
+
+	items, _, err := svc.ListMediaFilesFiltered(MediaFilter{Sort: "duration"}, 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) < 3 || items[0].ID != b.ID {
+		t.Fatalf("duration 降序期望最长片在前, 实际 %#v", items)
+	}
+	items, _, err = svc.ListMediaFilesFiltered(MediaFilter{Sort: "resolution"}, 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) < 3 || items[0].ID != b.ID {
+		t.Fatalf("resolution 降序期望 1080p 在前, 实际 %#v", items)
+	}
+}
+
 // TestBuiltInImageExtensionList 返回内置图片扩展名（含常见与 RAW），有序。
 func TestBuiltInImageExtensionList(t *testing.T) {
 	list := builtInImageExtensionList()

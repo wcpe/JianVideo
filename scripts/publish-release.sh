@@ -88,10 +88,31 @@ preflight_release() {
   require_absent "tag" "$api_base/git/ref/tags/$tag"
 }
 
+# 推送 tag 触发发布：tag 已存在，仅要求同名 Release 不存在。
+preflight_existing_release() {
+  local tag="$1"
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo "错误：预检 tag 格式无效。" >&2; return 1; }
+  require_absent "Release" "$api_base/releases/tags/$tag"
+}
+
 preflight_rc() {
   local tag="$1"
   require_next_rc "$tag" || return 1
   preflight_release "$tag"
+}
+
+# 推送 RC tag 后的预检：Release 不存在，且该 tag 必须已是同基线最高 RC。
+preflight_rc_release() {
+  local tag="$1"
+  require_highest_rc "$tag" || return 1
+  preflight_existing_release "$tag"
+}
+
+require_tag_points_to() {
+  local tag="$1" target_sha="$2" status
+  status="$(api_status "$api_base/git/ref/tags/$tag")"
+  [ "$status" = "200" ] || { echo "错误：找不到已推送的 tag：$tag，HTTP $status。" >&2; return 1; }
+  reference_matches_commit "$target_sha" || { echo "错误：tag $tag 未指向源码提交 $target_sha。" >&2; return 1; }
 }
 
 validate_assets() {
@@ -451,14 +472,63 @@ publish_release() {
   echo "Release $tag 已安全公开。"
 }
 
+# 推送 tag 触发：不创建 tag，只创建 draft Release、回下载校验后公开。
+publish_from_tag() {
+  local dist="$1" tag="$2" target_sha="$3" channel="$4" notes="$5"
+  local prerelease make_latest payload redownload ownership_marker response release_id upload_url
+  payload="${RUNNER_TEMP:-/tmp}/jianvideo-release-payload-$$"
+  redownload="${RUNNER_TEMP:-/tmp}/jianvideo-release-redownload-$$"
+  prerelease=false
+  case "$channel" in
+    rc) [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]] || { echo "错误：RC tag 格式无效。" >&2; return 1; }; prerelease=true; make_latest=false ;;
+    ga) [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "错误：GA tag 格式无效。" >&2; return 1; }; make_latest=true ;;
+    *) echo "错误：发布频道必须是 rc 或 ga。" >&2; return 1 ;;
+  esac
+  [ -s "$notes" ] || { echo "错误：发布说明文件不存在或内容为空。" >&2; return 1; }
+  validate_assets "$dist"
+  prepare_payload "$dist" "$payload"
+  require_tag_points_to "$tag" "$target_sha" || { rm -rf "$payload"; return 1; }
+  if [ "$channel" = "rc" ]; then
+    preflight_rc_release "$tag" || { rm -rf "$payload"; return 1; }
+  else
+    preflight_existing_release "$tag" || { rm -rf "$payload"; return 1; }
+  fi
+  ownership_marker="<!-- jianvideo-release-owner:$(python -c 'import secrets; print(secrets.token_hex(32))') -->"
+  cleanup_tag="$tag"
+  cleanup_target_sha="$target_sha"
+  cleanup_payload="$payload"
+  cleanup_redownload="$redownload"
+  cleanup_marker="$ownership_marker"
+  # tag 由人工推送，失败时只清理本次 draft Release，不删除 tag。
+  cleanup_tag_created=0
+  trap cleanup_publish EXIT
+  response="$(create_draft_release "$tag" "$target_sha" "$prerelease" "$make_latest" "$notes" "$ownership_marker")"
+  release_id="$(python -c 'import json,sys; value=json.load(sys.stdin).get("id"); valid=isinstance(value, int) and not isinstance(value, bool) and value > 0; sys.exit(1) if not valid else print(value)' <<< "$response")"
+  upload_url="$(python -c 'import json,sys; value=json.load(sys.stdin).get("upload_url", "").split("{")[0]; sys.exit(1) if not value else print(value)' <<< "$response")"
+  upload_release_assets "$payload" "$upload_url"
+  verify_uploaded_assets "$release_id" "$payload" "$redownload"
+  publish_draft_release "$release_id" "$tag" "$prerelease" "$make_latest" "$notes"
+  trap - EXIT
+  rm -rf "$payload" "$redownload"
+  echo "Release $tag 已安全公开。"
+}
+
 case "${1:-}" in
   preflight)
     [ "$#" -eq 2 ] || { echo "用法：publish-release.sh preflight <tag>" >&2; exit 2; }
     preflight_release "$2"
     ;;
+  preflight-release)
+    [ "$#" -eq 2 ] || { echo "用法：publish-release.sh preflight-release <tag>" >&2; exit 2; }
+    preflight_existing_release "$2"
+    ;;
   preflight-rc)
     [ "$#" -eq 2 ] || { echo "用法：publish-release.sh preflight-rc <rc-tag>" >&2; exit 2; }
     preflight_rc "$2"
+    ;;
+  preflight-rc-release)
+    [ "$#" -eq 2 ] || { echo "用法：publish-release.sh preflight-rc-release <rc-tag>" >&2; exit 2; }
+    preflight_rc_release "$2"
     ;;
   verify-final-rc)
     [ "$#" -eq 4 ] || { echo "用法：publish-release.sh verify-final-rc <rc-tag> <ga-version> <ga-sha>" >&2; exit 2; }
@@ -467,6 +537,10 @@ case "${1:-}" in
   publish)
     [ "$#" -eq 6 ] || { echo "用法：publish-release.sh publish <产物目录> <tag> <source-sha> <rc|ga> <说明文件>" >&2; exit 2; }
     publish_release "$2" "$3" "$4" "$5" "$6"
+    ;;
+  publish-from-tag)
+    [ "$#" -eq 6 ] || { echo "用法：publish-release.sh publish-from-tag <产物目录> <tag> <source-sha> <rc|ga> <说明文件>" >&2; exit 2; }
+    publish_from_tag "$2" "$3" "$4" "$5" "$6"
     ;;
   *)
     echo "错误：未知命令。" >&2

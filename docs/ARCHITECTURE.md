@@ -143,7 +143,7 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 
 | 包 / 应用 | 当前职责 |
 |---|---|
-| `packages/render-pixi` | 提供百万素材窗口化计算、网格 overscan、纹理池 LRU、HLS 预览触发判定、Pixi 指标快照与真实 `pixi.js` 预览挂载 API；React 侧只持有挂载点与控制态。 |
+| `packages/render-pixi` | 提供百万素材窗口化计算、网格 overscan、纹理池 LRU、HLS 预览触发判定、Pixi 指标快照、`mountMediaGridSession` 生产网格会话（FR2-009）与真实 `pixi.js` 预览挂载 API；React 侧只持有挂载点与控制态。生产入口为 `frontend` 的 `/media-grid`。 |
 | `packages/mock` | 提供 `media-index-1m` / `media-index-5m` / `media-index-10m` 的确定性 seed 数据源与窗口查询；按位置即时生成记录，窗口查询只保留返回窗口对象。 |
 | `packages/benchmark` | 提供 FR2-003 前端阈值判定、后端查询阈值判定、Go/SQLite 真实索引查询 harness 与 Markdown summary 输出；报告产物写入 `.tmp/benchmark/fr2-063/`，不入库。 |
 | `apps/mock-studio` | 暴露 FR2-063 Benchmark 工作台入口、真实 PixiJS/WebGL 预览画布、Canvas 非空 E2E 验证与 HLS 预览请求计数，消费 mock 场景、render-pixi 与 benchmark 能力；headless WebGL 不可用时才退回 Canvas fallback 并在 `.tmp` 报告标注。 |
@@ -922,7 +922,7 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 - **PWA**：经 `vite-plugin-pwa` 产出 `manifest.webmanifest` + Service Worker，支持「添加到主屏」与离线应用壳；Service Worker 仅预缓存壳静态资源，`/api`/媒体流运行时走网络（见 [ADR-0028](adr/0028-mobile-pwa.md)）。
 - **打包**：根目录 `Makefile` 一键完成「构建前端 → 编译单二进制（注入版本）→ 组装发布包（含随包 ffmpeg）」。
 - **跨平台**：因 SQLite 用 mattn/go-sqlite3（CGO），采用各平台原生构建（在对应 OS 上 make），不做交叉编译（见 ADR-0027）。
-- **门控发布（FR2-014 切片）**：`dev` push 只由 `experimental.yml` 在固定 SHA 上复用 `ci.yml` 四门与 `build.yml`，生成保留 7 天的 Linux/Windows Actions 实验工件；版本按最近稳定 tag 与其后提交距离生成 `<base>-dev.N.g<shortsha>`，不创建 tag/Release、不进入自更新。`main` push 只运行质量门。公开 RC 由无输入 `rc.yml` 从 `main` 读取 `VERSION=X.Y.Z-rc.N`，并要求序号严格等于同基线现有最大 RC 加一；GA 由 `release.yml` 接受唯一必填 `final_rc_tag`。RC/GA 均固定源 SHA、复用四门与原生双平台构建，且只在门禁通过后由最终 publish job 创建 tag + 带唯一归属标记的 draft Release。资产上传后以本地 `checksums.txt` 为信任根回下载复验，成功才移除标记并公开；RC 为 prerelease/非 latest，GA 要求 final RC 是同基线最高 RC、tag/commit/VERSION 一致、为当前提交祖先、已公开且资产校验通过，并限制其后仅有版本、CHANGELOG 与正式文档差异，最终公开为 stable/latest。RC/GA 共享仓库级 `release-publication` 并发组以串行化公开发布；GA 在 prepare 阶段 fail-fast 预检 final RC，并在 publish job 创建 GA tag 前再次完整复检。禁止人工预先 push `v*` tag；不引 Docker、不交叉编译（见 [ADR-0064](adr/0064-gated-rc-ga-release.md)）。
+- **门控发布（FR2-014 切片）**：`dev` push 只由 `experimental.yml` 在固定 SHA 上复用 `ci.yml` 四门与 `build.yml`，生成保留 7 天的 Linux/Windows Actions 实验工件；版本按最近稳定 tag 与其后提交距离生成 `<base>-dev.N.g<shortsha>`，不创建 tag/Release、不进入自更新。`main` push 只运行质量门。公开 RC/GA 由推送 tag 触发：`vX.Y.Z-rc.N` → `rc.yml`，稳定 `vX.Y.Z` → `release.yml`。工作流固定源 SHA、要求 `VERSION` 与 tag 一致且 CHANGELOG 有对应非空段，复用四门与原生双平台构建；publish 使用 `publish-from-tag`，**不创建 tag**，只创建带归属标记的 draft Release，回下载校验后公开（RC 为 prerelease/非 latest，GA 为 stable/latest）。RC/GA 共享 `release-publication` 并发组。不使用 GitHub App / Ruleset bypass / production 环境审批；不引 Docker、不交叉编译（见 [ADR-0064](adr/0064-gated-rc-ga-release.md)）。
 
 ## 7. 关键裁决与不做项
 
@@ -935,7 +935,7 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 | 原生 SMB 支持 | 避免用户手动挂载 NAS 共享 | [0005](adr/0005-native-smb-support.md) |
 | FFmpeg filter_complex split 单进程多输出 | 确保多码率 GOP 对齐，减少资源开销 | [0026](adr/0026-abr-adaptive-bitrate.md) |
 | 移动端 PWA（仅缓存应用壳） | 可添加到主屏 + 离线壳，媒体流不离线缓存 | [0028](adr/0028-mobile-pwa.md) |
-| 发布工程：dev 实验工件 + 门控 RC/GA + GitHub Releases 分发 + 二进制自更新 | 固定 SHA 过质量门和双平台回验后才创建 tag；RC/GA 分级、自更新不消费实验工件；不引 Docker、不交叉编译 | [0064](adr/0064-gated-rc-ga-release.md) |
+| 发布工程：dev 实验工件 + 推 tag 门控 RC/GA + GitHub Releases 分发 + 二进制自更新 | 推 `v*` tag 后固定 SHA 过质量门和双平台回验，再为已有 tag 公开 Release；自更新不消费实验工件；不引 Docker、不交叉编译 | [0064](adr/0064-gated-rc-ga-release.md) |
 
 **不做项**：
 - 不做多用户/权限管理（单用户模式）

@@ -78,9 +78,11 @@ export default function TimelinePage() {
   const [tagId, setTagId] = useState(0);
   // 媒体库（图库）筛选（FR-144）：0 表示全部图库不过滤，>0 仅含该库媒体
   const [libraryId, setLibraryId] = useState(0);
-  // 结构化筛选（FR-36）：类型 / 最小大小 / 拍摄时间范围
+  // 结构化筛选（FR-36 + FR2-046）：类型 / 最小大小 / 时长 / 分辨率 / 拍摄时间范围
   const [mediaType, setMediaType] = useState<'' | 'image' | 'video'>('');
   const [sizeMin, setSizeMin] = useState(0);
+  const [durationMin, setDurationMin] = useState(0);
+  const [heightMin, setHeightMin] = useState(0);
   // 本地影视信息筛选（FR2-031）：全局查看自动、人工或尚未推断的媒体
   const [inferenceStatus, setInferenceStatus] = useState<
     '' | 'inferred' | 'auto' | 'manual' | 'missing'
@@ -110,6 +112,8 @@ export default function TimelinePage() {
     libraryId,
     mediaType,
     sizeMin,
+    durationMin,
+    heightMin,
     timeFrom,
     timeTo,
     inference: inferenceStatus,
@@ -152,6 +156,8 @@ export default function TimelinePage() {
         libraryId ||
         mediaType ||
         sizeMin ||
+        durationMin ||
+        heightMin ||
         inferenceStatus ||
         timeFrom ||
         timeTo
@@ -163,6 +169,8 @@ export default function TimelinePage() {
       libraryId,
       mediaType,
       sizeMin,
+      durationMin,
+      heightMin,
       inferenceStatus,
       timeFrom,
       timeTo,
@@ -177,6 +185,8 @@ export default function TimelinePage() {
     setLibraryId(0);
     setMediaType('');
     setSizeMin(0);
+    setDurationMin(0);
+    setHeightMin(0);
     setInferenceStatus('');
     setTimeFrom('');
     setTimeTo('');
@@ -271,6 +281,10 @@ export default function TimelinePage() {
             onMediaTypeChange={setMediaType}
             sizeMin={sizeMin}
             onSizeMinChange={setSizeMin}
+            durationMin={durationMin}
+            onDurationMinChange={setDurationMin}
+            heightMin={heightMin}
+            onHeightMinChange={setHeightMin}
             timeFrom={timeFrom}
             onTimeFromChange={setTimeFrom}
             timeTo={timeTo}
@@ -451,6 +465,8 @@ export default function TimelinePage() {
           onBatchAddToAlbum={batch.openAddToAlbum}
           onBatchAddTag={batch.openAddTag}
           onBatchDownload={batch.download}
+          onBatchTranscode={batch.openTranscode}
+          onBatchMove={batch.openMove}
         />
       </PullToRefresh>
 
@@ -462,6 +478,10 @@ export default function TimelinePage() {
         onClose={() => setDetailIndex(null)}
         customImageExtensions={exts}
         onToggleFavorite={handleToggleFavorite}
+        onFilterByTag={(tag) => {
+          setTagId(tag.id);
+          setDetailIndex(null);
+        }}
       />
 
       {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}

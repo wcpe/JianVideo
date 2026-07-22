@@ -165,7 +165,7 @@ func registerABRAssets(ctx context.Context, cache *storage.Service, media *model
 	return nil
 }
 
-func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service) {
+func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Service, libSvc *library.Service, dataDir string) {
 	if err := workers.Register(library.TaskTypeFileHashBackfill, tasksvc.DefaultConcurrency(library.TaskTypeFileHashBackfill), func(ctx context.Context, task models.Task) error {
 		return libSvc.HandleContentHashBackfillTask(ctx, taskSvc, task)
 	}); err != nil {
@@ -176,6 +176,10 @@ func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Servi
 	}
 	if err := library.RegisterMetadataWorkers(workers, taskSvc, libSvc); err != nil {
 		log.Fatalf("[ERROR] 注册文件元数据 worker 失败: %v", err)
+	}
+	exportRunner := library.NewExportTaskRunner(dataDir, libSvc, taskSvc)
+	if err := exportRunner.RegisterExportWorkers(workers); err != nil {
+		log.Fatalf("[ERROR] 注册导出任务 worker 失败: %v", err)
 	}
 }
 
@@ -412,6 +416,7 @@ func run() int {
 	// 初始化缩略图存储目录（与数据库、HLS 同处数据目录下）
 	dataDir := filepath.Dir(cfg.DBPath)
 	library.InitThumbnailDir(dataDir)
+	library.InitExportDir(dataDir)
 
 	// magick 路径注入与 HEIC/RAW 转换缓存目录初始化（FR-37，见 ADR）：
 	// 解析顺序与 ffmpeg 一致：环境变量 → 同目录捆绑版 → PATH。
@@ -468,7 +473,7 @@ func run() int {
 		log.Printf("[WARN] 通用任务队列重启恢复失败: %v", err)
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
-	registerTaskWorkers(taskWorkers, taskSvc, libSvc)
+	registerTaskWorkers(taskWorkers, taskSvc, libSvc, dataDir)
 	libSvc.WithScanChangeHook(libSvc.MetadataScanChangeHook(taskSvc, taskWorkers.Wake))
 	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {

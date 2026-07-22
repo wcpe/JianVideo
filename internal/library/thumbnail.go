@@ -197,6 +197,19 @@ func GetFFmpegPath() string {
 	return thumbnailFFmpegPath
 }
 
+// IsFFmpegAvailable 判断当前配置的 ffmpeg 是否可执行（FR2-039 视频粗剪导出复用）。
+func IsFFmpegAvailable() bool {
+	path := GetFFmpegPath()
+	if path == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
+}
+
 // SupportedThumbnailSizes 返回受支持的缩略图尺寸副本。
 func SupportedThumbnailSizes() []int {
 	return []int{160, 320, 640}

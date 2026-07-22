@@ -15,6 +15,9 @@ interface UseInfiniteMediaOptions {
   sizeMin?: number;
   timeFrom?: string;
   timeTo?: string;
+  // FR2-046：最短时长（秒）/ 最小高度（像素）
+  durationMin?: number;
+  heightMin?: number;
   // 本地影视信息状态筛选（FR2-031）
   inference?: 'inferred' | 'auto' | 'manual' | 'missing' | '';
   // 初始搜索关键词（FR-132）：用于承接页眉全局搜索经 URL ?search= 传入，
@@ -38,6 +41,8 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
     sizeMin = 0,
     timeFrom = '',
     timeTo = '',
+    durationMin = 0,
+    heightMin = 0,
     inference = '',
     initialSearch = '',
   } = options;
@@ -87,6 +92,8 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
           size_min: sizeMin || undefined,
           time_from: timeFrom || undefined,
           time_to: timeTo || undefined,
+          duration_min: durationMin || undefined,
+          height_min: heightMin || undefined,
           inference: inference || undefined,
         });
         setTotal(res.total);
@@ -104,7 +111,20 @@ export function useInfiniteMedia(options: UseInfiniteMediaOptions = {}) {
         fetchingRef.current = false;
       }
     },
-    [pageSize, sort, favorite, tagId, libraryId, mediaType, sizeMin, timeFrom, timeTo, inference],
+    [
+      pageSize,
+      sort,
+      favorite,
+      tagId,
+      libraryId,
+      mediaType,
+      sizeMin,
+      timeFrom,
+      timeTo,
+      durationMin,
+      heightMin,
+      inference,
+    ],
   );
 
   // 搜索防抖 400ms

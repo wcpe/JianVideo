@@ -61,10 +61,12 @@ interface DirectoryBrowserProps {
   onSelectionChange?: (ids: number[]) => void;
   onBatchDelete?: (ids: number[]) => void;
   onDeleteOne?: (file: MediaFile) => void;
-  // 批量操作（FR-91）：以 id 集为对象（无选中退化为右键项），均可选
+  // 批量操作（FR-91 / FR2-053）：以 id 集为对象（无选中退化为右键项），均可选
   onBatchAddToAlbum?: (ids: number[]) => void;
   onBatchAddTag?: (ids: number[]) => void;
   onBatchDownload?: (ids: number[]) => void;
+  onBatchTranscode?: (ids: number[]) => void;
+  onBatchMove?: (ids: number[]) => void;
   // 隐藏内置 sticky 批量条（FR-121）：资源管理器工具栏已承载批量动作时传 true 避免双批量 UI。
   hideSelectionBar?: boolean;
 }
@@ -101,6 +103,8 @@ export default function DirectoryBrowser({
   onBatchAddToAlbum,
   onBatchAddTag,
   onBatchDownload,
+  onBatchTranscode,
+  onBatchMove,
   hideSelectionBar = false,
 }: DirectoryBrowserProps) {
   const sortedDirs = useMemo(
@@ -120,7 +124,9 @@ export default function DirectoryBrowser({
     onDeleteOne ||
     onBatchAddToAlbum ||
     onBatchAddTag ||
-    onBatchDownload
+    onBatchDownload ||
+    onBatchTranscode ||
+    onBatchMove
   );
 
   // 选中集变化上抛父组件（升序，便于稳定断言/消费）
@@ -555,6 +561,8 @@ export default function DirectoryBrowser({
           onAddToAlbum={onBatchAddToAlbum ? () => runBarBatch(onBatchAddToAlbum) : undefined}
           onAddTag={onBatchAddTag ? () => runBarBatch(onBatchAddTag) : undefined}
           onDownload={onBatchDownload ? () => runBarBatch(onBatchDownload) : undefined}
+          onTranscode={onBatchTranscode ? () => runBarBatch(onBatchTranscode) : undefined}
+          onMove={onBatchMove ? () => runBarBatch(onBatchMove) : undefined}
         />
       )}
 
@@ -581,6 +589,8 @@ export default function DirectoryBrowser({
           onAddToAlbum={onBatchAddToAlbum ? (id) => runBatch(id, onBatchAddToAlbum) : undefined}
           onAddTag={onBatchAddTag ? (id) => runBatch(id, onBatchAddTag) : undefined}
           onDownload={onBatchDownload ? (id) => runBatch(id, onBatchDownload) : undefined}
+          onTranscode={onBatchTranscode ? (id) => runBatch(id, onBatchTranscode) : undefined}
+          onMove={onBatchMove ? (id) => runBatch(id, onBatchMove) : undefined}
         />
       )}
     </>

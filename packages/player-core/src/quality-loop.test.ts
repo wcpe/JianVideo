@@ -405,6 +405,35 @@ describe("PlaybackCore 清晰度与省流量", () => {
     expect(core.getSnapshot().currentTime).toBe(12);
   });
 
+  it("核心仍在播放且后端快照暂时滞后时仍强制暂停并恢复播放意图", async () => {
+    const { backend, core, loadControl } = await createLoadedCore({
+      qualities: [QUALITY_1080, QUALITY_720],
+      state: "playing",
+    });
+    backend.setSnapshot({ ...backend.getSnapshot(), state: "paused" });
+    backend.calls.length = 0;
+    loadControl.calls.length = 0;
+
+    await core.setDataSaver(true);
+
+    expect(core.getQualityState()).toMatchObject({
+      dataSaver: true,
+      dataSaverBlocked: true,
+    });
+    expect(backend.calls).toEqual([
+      expect.objectContaining({ method: "pause" }),
+    ]);
+    expect(loadControl.calls).toEqual([
+      expect.objectContaining({ type: "stop" }),
+    ]);
+    expect(core.getSnapshot().state).toBe("paused");
+
+    await core.setDataSaver(false);
+
+    expect(loadControl.calls.at(-1)?.type).toBe("start");
+    expect(backend.calls.at(-1)?.method).toBe("play");
+  });
+
   it("省流量切换新源时空清单不阻断，后续兼容档位解除已确认阻断", async () => {
     const { backend, core, quality } = await createLoadedCore();
     await core.setDataSaver(true);

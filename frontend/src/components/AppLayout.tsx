@@ -46,6 +46,7 @@ import {
   IconUpload,
   IconListCheck,
   IconDatabaseOff,
+  IconLayoutGrid,
 } from '@tabler/icons-react';
 import { useAuthStore } from '@/stores/auth';
 import { useNavCollapsed } from '@/hooks/useNavCollapsed';
@@ -161,6 +162,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/', label: '概览', icon: IconLayoutDashboard },
     // 时间轴迁至 /timeline（FR-117）：浏览媒体入口，仍用时钟图标
     { path: '/timeline', label: '时间轴', icon: IconClock },
+    // Pixi 高密度媒体网格（FR2-009）
+    { path: '/media-grid', label: '媒体网格', icon: IconLayoutGrid },
     { path: '/browse', label: '目录', icon: IconFolderOpen },
     { path: '/albums', label: '相册', icon: IconPhoto },
     { path: '/map', label: '地图', icon: IconMapPin },
@@ -191,7 +194,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const navGroups = [
     {
       title: '浏览',
-      items: ['/', '/timeline', '/browse', '/albums', '/map'].map(navItemByPath),
+      items: ['/', '/timeline', '/media-grid', '/browse', '/albums', '/map'].map(navItemByPath),
     },
     {
       // 洞察组（FR-130）：统计（自浏览移入）+ 监控（自系统移入）

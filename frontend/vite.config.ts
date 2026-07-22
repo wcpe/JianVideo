@@ -28,6 +28,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // FR2-009：开发/测试直连源码，避免依赖未重建的 dist
+      '@jianvideo/render-pixi': path.resolve(__dirname, '../packages/render-pixi/src/index.ts'),
     },
   },
   optimizeDeps: {
