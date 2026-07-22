@@ -1,0 +1,11 @@
+# oapi-codegen 配置：据仓库根 api/openapi.yaml 生成 Go 类型 + Gin ServerInterface。
+# 由 `task gen`（工作目录 apps/server）调用；产物 api.gen.go 不得手改。
+# 独立包 openapi，避免与现有 internal/api 路由实现冲突（FR2-071）。
+package: openapi
+output: internal/openapi/api.gen.go
+generate:
+  models: true
+  gin-server: true
+  embedded-spec: false
+output-options:
+  skip-prune: false

@@ -1,6 +1,8 @@
 # 接口契约：轻量级单用户视频媒体服务器
 
-> 对外接口的单一真源。始终原地更新到当前契约。
+> 对外接口的人类可读契约。**机器可读真源**为仓库根 [`api/openapi.yaml`](../api/openapi.yaml)（FR2-071）；本文件补充完整历史端点说明，分期迁入 OpenAPI。
+>
+> 校验：`make openapi-check`（或 `node scripts/openapi-check.mjs`）。契约变更后：`cd apps/server && task gen` 重生成，`task gen:check` 防漂移。生成物：`apps/server/internal/openapi/api.gen.go`（不得手改）。
 
 ## 1. 通用约定
 
@@ -34,9 +36,12 @@
 
 ## 3. 端点 / 方法
 
-### v2 mock 先行 API client 契约（FR2-006）
+### v2 媒体 / 任务契约（FR2-006 / FR2-071）
 
-本节描述 `packages/media-client` 与 `packages/mock` 当前对齐的 mock 先行契约，仅用于多端 client / wiki / mock 测试。请求携带 `X-JianVideo-Space-Id: <space_id>` 表示当前 Space，client 同时支持 `Authorization: Bearer <token>` 承接既有单用户 JWT，并支持可配置 timeout / retry。
+本节描述 `packages/media-client`、`packages/mock` 与 Go 运行时对齐的 v2 契约表面。机器可读真源见 [`api/openapi.yaml`](../api/openapi.yaml)。
+
+- **客户端 / mock**：请求携带 `X-JianVideo-Space-Id` 表示当前 Space；client 支持 `Authorization: Bearer <token>` 与可配置 timeout / retry。
+- **Go 运行时（FR2-071）**：`apps/server` 已单挂同路径薄适配（`api.ListMediaV2` / `GetMediaV2` / `GetTaskV2`），响应为契约形态，委托 `library` / `tasks`；**不**调用 `openapi.RegisterHandlers` 全量挂载。历史 `/api/library/*` 与 `/api/tasks` 仍并存。
 
 - **方法 / 路径**：`GET /api/v2/media?page=1&page_size=20`
 - **响应**（200）：
@@ -59,7 +64,7 @@
   ```
 
 - **方法 / 路径**：`GET /api/v2/media/:id`
-- **响应**（200）：单个媒体对象，字段同列表项；若媒体不属于当前 Space，返回 `404 MEDIA_NOT_FOUND`。
+- **响应**（200）：单个媒体对象，字段同列表项；若媒体不属于当前 Space 或不存在，返回 `404` + `Error`（`code`/`message`）。
 
 - **方法 / 路径**：`GET /api/v2/tasks/:id`
 - **响应**（200）：
@@ -76,7 +81,7 @@
     "updated_at": "2026-07-01T10:00:02Z"
   }
   ```
-- **说明**：`status` 对齐 ADR-0055，取 `pending` / `running` / `succeeded` / `failed` / `canceled`；client 兼容 mock 或旧队列返回的 `completed` / `error`，分别映射为 `succeeded` / `failed`。
+- **说明**：`status` 对齐 ADR-0055，取 `pending` / `running` / `succeeded` / `failed` / `canceled`；client 兼容 mock 或旧队列返回的 `completed` / `error`，分别映射为 `succeeded` / `failed`。任务服务未注入时 Go 返回 `503 TASKS_UNAVAILABLE`。
 
 ### 登录
 

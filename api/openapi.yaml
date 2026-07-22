@@ -1,0 +1,350 @@
+# JianVideo API 契约 —— 设计优先真源（FR2-071，对齐-C）。
+# 变更后：
+#   1) node scripts/openapi-check.mjs / make openapi-check  — 结构门禁
+#   2) cd apps/server && task gen                          — 重生成 internal/openapi/api.gen.go
+#   3) task gen:check                                      — 防漂移（生成物不得手改）
+# 首切只覆盖探活、认证与 v2 mock 先行路径；其余历史端点仍以 docs/API.md 为准，分期迁入。
+openapi: 3.0.3
+info:
+  title: JianVideo API
+  version: 0.25.0
+  description: |
+    自托管视频媒体服务器 HTTP API。
+    本文件为契约演进真源；首切覆盖 `/health`、`/api/auth/*` 与 FR2-006 的 `/api/v2/*` mock 先行路径。
+    完整历史端点清单见 docs/API.md，将分期迁入本契约。
+  license:
+    name: MIT
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+tags:
+  - name: health
+    description: 编排探活（免登）
+  - name: auth
+    description: 登录、初始化与会话
+  - name: media-v2
+    description: v2 媒体列表/详情（mock 先行 / 多端 client）
+  - name: tasks-v2
+    description: v2 任务详情（mock 先行 / 多端 client）
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: 存活探针
+      description: 公开、无需 JWT；Docker/编排 healthcheck 使用（FR2-072）。
+      security: []
+      responses:
+        "200":
+          description: 进程可响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: 用户名 + 口令登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功（并下发 HttpOnly Cookie auth_token）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: 登出当前会话
+      security: []
+      responses:
+        "200":
+          description: 已注销（清空 Cookie）
+  /api/auth/setup-status:
+    get:
+      operationId: getSetupStatus
+      tags: [auth]
+      summary: 是否需要首次初始化
+      security: []
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+  /api/auth/setup:
+    post:
+      operationId: setup
+      tags: [auth]
+      summary: 首次初始化（仅系统无用户时可用）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 首个账户已创建并自动登录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: 系统已初始化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v2/media:
+    get:
+      operationId: listMediaV2
+      tags: [media-v2]
+      summary: 分页列出当前 Space 媒体（v2）
+      parameters:
+        - $ref: "#/components/parameters/SpaceIdHeader"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: 媒体分页
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v2/media/{id}:
+    get:
+      operationId: getMediaV2
+      tags: [media-v2]
+      summary: 媒体详情（v2）
+      parameters:
+        - $ref: "#/components/parameters/SpaceIdHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 媒体 ID
+      responses:
+        "200":
+          description: 媒体对象
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v2/tasks/{id}:
+    get:
+      operationId: getTaskV2
+      tags: [tasks-v2]
+      summary: 任务详情（v2）
+      parameters:
+        - $ref: "#/components/parameters/SpaceIdHeader"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 任务 ID
+      responses:
+        "200":
+          description: 任务对象
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Authorization Bearer；与 Cookie 二选一
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: auth_token
+      description: HttpOnly Cookie 会话令牌
+  parameters:
+    SpaceIdHeader:
+      name: X-JianVideo-Space-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        default: space-default
+      description: 当前 Space；缺省为 space-default（FR2-007）
+    PageParam:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSizeParam:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: INVALID_INPUT
+        message:
+          type: string
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    LoginResponse:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+    SetupStatus:
+      type: object
+      required: [needs_setup]
+      properties:
+        needs_setup:
+          type: boolean
+    MediaItem:
+      type: object
+      required: [id, space_id, title, kind, duration_seconds, created_at]
+      properties:
+        id:
+          type: string
+        space_id:
+          type: string
+        title:
+          type: string
+        kind:
+          type: string
+          enum: [video, image]
+        duration_seconds:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+    MediaPage:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaItem"
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+    TaskItem:
+      type: object
+      required: [id, space_id, type, status, priority, progress, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        space_id:
+          type: string
+          nullable: true
+        type:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, canceled]
+          description: ADR-0055；client 兼容 completed→succeeded、error→failed
+        priority:
+          type: integer
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 未认证或令牌无效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: 禁止访问（如 Space owner 校验失败）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

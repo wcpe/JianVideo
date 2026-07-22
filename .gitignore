@@ -52,13 +52,21 @@ Thumbs.db
 # 环境与密钥（不入库）
 .env
 .env.local
+deploy/.env
 /.narrafork/
 
 # Playwright 端到端测试产物（不入库）
 /test-results/
 /playwright-report/
 
-# 从仓库根运行 go run . 产生的运行时产物（不入库）
+# 从仓库根运行 go run . 产生的运行时产物（不入库；FR2-065 起默认应在 data/ 下）
 /thumbnails/
 /hls/
 /image_cache/
+/covers/
+/metadata_temp/
+/timeline_previews/
+/exports/
+
+# 默认数据目录（FR2-065）
+/data/

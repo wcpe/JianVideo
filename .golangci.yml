@@ -1,6 +1,6 @@
 # Go 静态检查门禁配置（golangci-lint v2）。
 # 落地 .claude/rules/static-analysis.md 既定 Go 工具链，由 `make lint` 与 CI 调用（见 FR-122 / ADR-0047）。
-# 注意：分析 main 包依赖 `//go:embed frontend/dist`，需先构建前端（CI 在 lint 前构建前端）。
+# 注意：分析 main 包依赖 `//go:embed web/dist`（FR2-067，由 apps/web 构建后同步到 apps/server/web/dist），需先构建前端。
 version: "2"
 
 run:
@@ -25,7 +25,8 @@ linters:
   exclusions:
     # 前端依赖目录非本仓 Go 源码（不入库的第三方生成代码），不纳入静态检查
     paths:
-      - frontend/node_modules
+      - apps/web/node_modules
+      - apps/server/web
     rules:
       # 测试辅助代码会刻意构造不完整 Cookie、临时文件权限和固定参数；安全门禁聚焦生产路径
       - path: _test\.go

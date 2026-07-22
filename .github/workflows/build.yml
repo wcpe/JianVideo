@@ -51,17 +51,17 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version-file: apps/server/go.mod
       - name: 安装 Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - name: 构建内嵌前端
         run: |
-          npm --prefix frontend install --no-audit --no-fund
-          npm --prefix frontend run build
+          npm --prefix apps/web install --no-audit --no-fund
+          npm --prefix apps/web run build
       - name: 编译单二进制
         shell: bash
         env:
@@ -71,7 +71,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           out="jianvideo-${{ matrix.goos }}-amd64${{ matrix.ext }}"
-          go build -trimpath -ldflags "-s -w -X main.version=${RELEASE_VERSION}" -o "dist/$out" .
+          go build -C apps/server -trimpath -ldflags "-s -w -X main.version=${RELEASE_VERSION}" -o "$(pwd)/dist/$out" .
           (cd dist && sha256sum "$out" > "jianvideo-${{ matrix.goos }}-amd64.sha256")
       - name: 上传固定源码构建工件
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

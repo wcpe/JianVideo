@@ -69,6 +69,18 @@
 - [`fr2-058-pip-background-mobile-gestures.md`](fr2-058-pip-background-mobile-gestures.md)：画中画、后台音频与移动手势。
 - [`fr2-060-chapters-bookmarks.md`](fr2-060-chapters-bookmarks.md)：章节与书签。
 
+## 架构对齐（参考 JianArtifact，与产品 P0–P7 正交）
+
+- [`fr2-064-arch-alignment-blueprint.md`](fr2-064-arch-alignment-blueprint.md)：对齐蓝图索引与依赖序（FR2-064）。
+- [`fr2-065-root-hygiene.md`](fr2-065-root-hygiene.md)：根目录 allowlist 与卫生门、默认 `data/`（FR2-065，对齐-A）。
+- [`fr2-066-apps-web-migration.md`](fr2-066-apps-web-migration.md)：`frontend/` → `apps/web`（FR2-066）。
+- [`fr2-067-apps-server-migration.md`](fr2-067-apps-server-migration.md)：业务 Go → `apps/server`（FR2-067）。
+- [`fr2-068-toolchain-entrypoint.md`](fr2-068-toolchain-entrypoint.md)：Makefile + Taskfile 入口（FR2-068）。
+- [`fr2-069-post-migration-docs.md`](fr2-069-post-migration-docs.md)：迁移后真貌文档（FR2-069）。
+- [`fr2-070-backend-layering-repository.md`](fr2-070-backend-layering-repository.md)：repository 分层、保留 GORM（FR2-070，对齐-B）。
+- [`fr2-071-openapi-contract.md`](fr2-071-openapi-contract.md)：OpenAPI 契约闭环（FR2-071，对齐-C）。
+- [`fr2-072-deploy-skeleton.md`](fr2-072-deploy-skeleton.md)：`deploy/` 骨架（FR2-072，对齐-D）。
+
 ## 怎么用
 
 1. 复制 `_template.md` 到 `docs/specs/<feature>.md`。

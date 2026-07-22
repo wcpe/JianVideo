@@ -21,7 +21,7 @@
 | `SERVER_PORT` | 服务端口 | `8080` |
 | `JWT_SECRET` | JWT 签名密钥（未设置时自动生成随机值） | 随机生成 |
 | `JWT_EXPIRES_IN` | JWT 过期时间 | `72h` |
-| `DB_PATH` | 数据库文件路径 | `jianvideo.db` |
+| `DB_PATH` | 数据库文件路径（HLS/缩略图等与库同父目录） | `data/jianvideo.db`（FR2-065；旧布局可设 `DB_PATH=jianvideo.db`） |
 | `FFMPEG_PATH` | FFmpeg 可执行文件路径 | 从 PATH 查找 |
 | `FFPROBE_PATH` | ffprobe 可执行文件路径 | 从 PATH 查找 |
 | `SMB_MASTER_PASSWORD` | SMB 凭据加密主密码 | `default-master-password`（不推荐生产使用） |
@@ -41,6 +41,27 @@ curl -X POST http://localhost:8080/api/smb/credentials \
   -d '{"host":"192.168.1.100","username":"user","password":"pass","share":"ShareName","domain":"WORKGROUP"}'
 ```
 
+### 根目录与数据目录（FR2-065）
+
+- 默认数据根为 `data/`（库文件 `data/jianvideo.db`，hls/thumbnails 等与之同级）。
+- 仓库根禁止堆放运行期垃圾；开发机可用 `pnpm quality:root` 或 `node scripts/root-hygiene.mjs` 自检。
+- 若根目录仍有历史 `jianvideo.db` / `hls/` 等，请迁入 `data/` 或设置 `DB_PATH` 指向旧路径后再清根，否则本地 `quality:root` 会失败（CI 干净检出不受影响）。
+
+### 开发与构建入口（FR2-068）
+
+| 命令 | 作用 |
+|---|---|
+| `pnpm install` / `make install` | 安装前端 workspace 依赖 |
+| `make frontend` | 构建 `apps/web` 并同步到 `apps/server/web/dist`（go:embed） |
+| `make build` | 前端 + 后端单二进制 → `dist/jianvideo` |
+| `cd apps/server && task --list` | 后端 Task 任务列表（lint/test/build/…） |
+| `cd apps/server && task build` | 仅编译后端（需已有 `web/dist`） |
+| `make quality` / `cd apps/server && task quality` | Go 静态检查 + 测试 + 覆盖率 |
+| `make check` / `pnpm quality` | 全仓质量门（root + workspace + frontend + go + e2e + release） |
+| `go run -C apps/server .` | 本地跑服务（开发期；数据目录见 `DB_PATH`） |
+
+前置：安装 [go-task](https://taskfile.dev)（`go install github.com/go-task/task/v3/cmd/task@latest`）、Go（CGO 工具链）、Node/pnpm。
+
 ### 启动
 
 ```bash
@@ -56,7 +77,25 @@ curl -X POST http://localhost:8080/api/smb/credentials \
 
 ### 健康检查
 
-启动后访问 `http://localhost:8080/api/config`，返回 JSON 即表示服务正常。
+- **编排探活（FR2-072）**：`GET http://localhost:8080/health`，公开、无需 JWT，返回 `{"status":"ok"}` 即进程可响应。
+- 业务就绪仍依赖库迁移与配置；容器 `docker compose` 默认用上述 `/health` 做 healthcheck。
+
+### Docker Compose 部署（FR2-072）
+
+骨架在仓库 `deploy/`（多阶段 Dockerfile：前端 → CGO 编译 → Debian + FFmpeg；命名卷挂 `/data`）。
+
+```bash
+cp deploy/.env.example deploy/.env   # 生产至少填 JWT_SECRET
+docker compose -f deploy/docker-compose.yml up -d --build
+curl -fsS http://127.0.0.1:8080/health
+```
+
+说明：
+
+- **CGO=1** 保留（`mattn/go-sqlite3`），不做全量 CGO=0 镜像。
+- 运行镜像含系统 `ffmpeg`/`ffprobe`；可用 `FFMPEG_PATH` / `FFPROBE_PATH` 覆盖。
+- 数据卷 `jianvideo-data` → 容器内 `/data`，默认 `DB_PATH=/data/jianvideo.db`。
+- 详表与取舍见 `deploy/README.md`。
 
 ## 2. 升级
 

@@ -1,0 +1,132 @@
+# Go 后端任务编排（go-task/task）。顶层 Makefile 委托到此。
+# 参考：https://taskfile.dev
+# 注意：本项目 SQLite 使用 mattn/go-sqlite3，构建必须 CGO_ENABLED=1。
+version: "3"
+
+vars:
+  BIN: jianvideo
+  PKG: ./...
+  # 仓库根相对本 Taskfile（apps/server）
+  REPO_ROOT: ../..
+  VERSION:
+    sh: cat {{.REPO_ROOT}}/VERSION 2>/dev/null || echo dev
+  # 输出到仓库根 dist/，与历史 make build 一致
+  OUT_DIR: "{{.REPO_ROOT}}/dist"
+  EXE: '{{if eq OS "windows"}}.exe{{end}}'
+  LDFLAGS: "-s -w -X main.version={{.VERSION}}"
+
+tasks:
+  default:
+    desc: 显示可用任务
+    cmds:
+      - task --list
+
+  vet:
+    desc: go vet
+    cmds:
+      - go vet {{.PKG}}
+
+  lint:
+    desc: 静态检查（go vet + golangci-lint；分析 main 需 web/dist，请先根目录 make frontend）
+    cmds:
+      - go vet {{.PKG}}
+      - golangci-lint run {{.PKG}}
+
+  vuln:
+    desc: 依赖漏洞扫描
+    cmds:
+      - govulncheck {{.PKG}}
+
+  test:
+    desc: 单元 / 包测试
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -count=1 {{.PKG}}
+
+  coverage:
+    desc: 覆盖率门禁（委托仓库根 scripts/go-coverage-gate.mjs）
+    dir: "{{.REPO_ROOT}}"
+    cmds:
+      - node scripts/go-coverage-gate.mjs
+
+  build:
+    desc: 编译单二进制到仓库根 dist/（需已有 web/dist embed；CGO=1）
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.OUT_DIR}}/{{.BIN}}{{.EXE}} .
+      - echo "已生成 {{.OUT_DIR}}/{{.BIN}}{{.EXE}}"
+
+  build:hwaccel:
+    desc: 同 build，额外 -tags ffmpeg（需本机 libav 开发库）
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - go build -tags ffmpeg -trimpath -ldflags "{{.LDFLAGS}}" -o {{.OUT_DIR}}/{{.BIN}}{{.EXE}} .
+      - echo "已生成（含 libav 硬件检测）{{.OUT_DIR}}/{{.BIN}}{{.EXE}}"
+
+  openapi:check:
+    desc: OpenAPI 契约结构门禁（FR2-071，仓库根 api/openapi.yaml）
+    dir: "{{.REPO_ROOT}}"
+    cmds:
+      - node --test scripts/openapi-check.test.mjs
+      - node scripts/openapi-check.mjs
+
+  gen:
+    desc: 从 api/openapi.yaml 生成 Go ServerInterface（oapi-codegen@v2.8.0，go run 不入 go.mod）
+    vars:
+      OAPI_VERSION: v2.8.0
+    cmds:
+      - go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@{{.OAPI_VERSION}} -config internal/openapi/cfg.yaml ../../api/openapi.yaml
+      - echo "已生成 internal/openapi/api.gen.go"
+
+  gen:check:
+    desc: 防漂移——用临时 config 重生成并与 api.gen.go 比对（FR2-071；-o 在有 config 时无效）
+    vars:
+      OAPI_VERSION: v2.8.0
+      TMP_DIR: "{{.REPO_ROOT}}/.tmp"
+      GEN_TMP: "{{.REPO_ROOT}}/.tmp/openapi-api.gen.go"
+      CFG_TMP: "{{.REPO_ROOT}}/.tmp/openapi-cfg.yaml"
+    cmds:
+      - mkdir -p "{{.TMP_DIR}}"
+      # config 内 output 为相对 apps/server 的路径；-o 会被忽略，故写临时 config
+      - |
+        printf '%s\n' \
+          'package: openapi' \
+          'output: {{.GEN_TMP}}' \
+          'generate:' \
+          '  models: true' \
+          '  gin-server: true' \
+          '  embedded-spec: false' \
+          'output-options:' \
+          '  skip-prune: false' \
+          > "{{.CFG_TMP}}"
+      - go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@{{.OAPI_VERSION}} -config "{{.CFG_TMP}}" ../../api/openapi.yaml
+      - |
+        if ! cmp -s internal/openapi/api.gen.go "{{.GEN_TMP}}"; then
+          echo "[gen:check] api.gen.go 与契约漂移：请运行 task gen 后提交"
+          diff -u internal/openapi/api.gen.go "{{.GEN_TMP}}" || true
+          exit 1
+        fi
+      - echo "[gen:check] 生成物与契约一致"
+
+  quality:
+    desc: vet + lint + test + coverage
+    cmds:
+      - task: vet
+      - task: lint
+      - task: test
+      - task: coverage
+
+  clean:
+    desc: 清理 server 本地 bin（不删仓库根 dist）
+    cmds:
+      - cmd: rm -rf bin
+        platforms: [linux, darwin]
+        ignore_error: true
+      - cmd: if exist bin rmdir /s /q bin
+        platforms: [windows]
+        ignore_error: true

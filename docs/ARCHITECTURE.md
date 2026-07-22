@@ -17,46 +17,52 @@
 
 ## 2. 模块与依赖
 
+运行时装配在 `apps/server`（`main.go` + `internal/*`）；浏览器消费 `apps/web` 构建产物（经 `//go:embed all:web/dist` 内嵌）。
+
 ```
-┌─────────────────────────────────────────────────┐
-│                    main.go                       │
-│  ┌───────────┐  ┌──────────┐  ┌──────────────┐ │
-│  │  Web 服务  │  │ 媒体库   │  │  转码管理器   │ │
-│  │ (HTTP API) │  │ 管理器   │  │              │ │
-│  └─────┬─────┘  └────┬─────┘  └──────┬───────┘ │
-│        │             │               │          │
-│  ┌─────┴─────┐  ┌────┴─────┐  ┌─────┴───────┐ │
-│  │ 认证中间件 │  │ 文件监听  │  │ FFmpeg 进程  │ │
-│  │           │  │ (fsnotify)│  │  池化管理    │ │
-│  └───────────┘  └──────────┘  └─────────────┘ │
-│        │             │               │          │
-│  ┌─────┴─────────────┴───────────────┴───────┐ │
-│  │              SQLite (WAL) 元数据库          │ │
-│  └───────────────────────────────────────────┘ │
-│        │             │                          │
-│  ┌─────┴─────┐  ┌────┴─────┐                   │
-│  │ go:embed  │  │ SMB 客户端│                   │
-│  │ 前端静态资源│  │ (cifs)   │                   │
-│  └───────────┘  └──────────┘                   │
-└─────────────────────────────────────────────────┘
+┌──────────────────────── apps/server ────────────────────────┐
+│  main.go（装配） + //go:embed all:web/dist                  │
+│  ┌───────────┐  ┌──────────┐  ┌──────────────┐             │
+│  │  Web 服务  │  │ 媒体库   │  │  转码管理器   │             │
+│  │ (HTTP API) │  │ 管理器   │  │              │             │
+│  └─────┬─────┘  └────┬─────┘  └──────┬───────┘             │
+│        │             │               │                      │
+│  ┌─────┴─────┐  ┌────┴─────┐  ┌─────┴───────┐             │
+│  │ 认证中间件 │  │ 文件监听  │  │ FFmpeg 进程  │             │
+│  │           │  │ (fsnotify)│  │  池化管理    │             │
+│  └───────────┘  └──────────┘  └─────────────┘             │
+│        │             │               │                      │
+│  ┌─────┴─────────────┴───────────────┴───────┐             │
+│  │              SQLite (WAL) 元数据库          │             │
+│  └───────────────────────────────────────────┘             │
+│        │             │                                      │
+│  ┌─────┴─────┐  ┌────┴─────┐                               │
+│  │ go:embed  │  │ SMB 客户端│                               │
+│  │ web/dist  │  │ (cifs)   │                               │
+│  └───────────┘  └──────────┘                               │
+└─────────────────────────────────────────────────────────────┘
+         ▲ build sync
+┌────────┴──────── apps/web ────────┐
+│  Vite + React 生产主端 dist        │
+└───────────────────────────────────┘
 ```
 
-**模块职责**：
+**模块职责**（均位于 `apps/server/internal/*`，包路径仍为 `github.com/wcpe/JianVideo/internal/...`）：
 
 | 模块 | 职责 | 依赖方向 |
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
-| `api` | API 路由注册、请求处理器（轻量委托） | → `library`, `playback`, `subtitle` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、内嵌章节解析与书签 revision CAS（FR2-060）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031） | → `db` |
+| `api` | API 路由注册、请求处理器（轻量委托 service；生产路径不直连业务表 GORM，见 FR2-070） | → `library`, `playback`, `subtitle`, `settings`, `tasks` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、内嵌章节解析与书签 revision CAS（FR2-060）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031）、媒体健康巡检（FR-73）；Media/LibraryPath/mediaTypeRule/Space/chapter/bookmark/metadata/tag/album/cover/view/watch/inference/health 及 summary/next_episode/dedup/file_hash/recycle 等经 repository；**library 生产路径无 `s.db`**；`DBProvider` + `ListSpacesNeedingInferenceBackfill` 供设置事务同事务查询（FR2-070） | → `db` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `subtitle` | 统一字幕/音轨聚合、稳定轨道 ID、上传持久化与删除、受限根读取、按请求 WebVTT 转换和来源能力表达（FR2-044） | → `db`, `audit`, `transcoder` |
 | `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、底层字幕格式转换与转码预设存储 | → `tasks`, `storage`, `db` |
-| `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；承载 `transcode.hls.preview` | → `db`, `audit` |
+| `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；`Tx`/`AsTx` + `EnqueueTx(ctx, Tx, …)` 供同事务跨域入队（FR2-070）；承载 `transcode.hls.preview` | → `db`, `audit` |
 | `storage` | 可重建缓存资产登记、Space/profile/task 路径边界、盘点与异步安全清理；普通 HLS 按 profile、音轨重载按 task 目录登记 | → `tasks`, `db`, `audit` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
 | `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
-| `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
+| `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；`Repository`/`TxRepository` 隔离 GORM（FR2-070）；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
 | `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交 | → `db` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
 | `migration` | 版本化 SQLite schema 迁移、settings blocker/warning 预检、Runner 单步事务原子性、dry-run 计划、迁移前一致性备份、旧任务幂等映射、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models`, `settings` |
@@ -65,75 +71,56 @@
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
 | `dblog` | 可运行时切级别的 GORM 日志器（FR-110，`SetEnabled` 原子开关：默认安静、开启 Info 级） | 仅依赖 gorm logger |
 
-**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `subtitle` / `transcoder` → `db`，严格单向，禁止反向。`subtitle` 仅向下复用 `transcoder` 的无状态格式转换与工具路径，不允许 `transcoder` 反向依赖字幕聚合服务；`config` 和 `auth` 为横切关注点。
+**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `subtitle` / `transcoder` / `settings` / `tasks` → `db`，严格单向，禁止反向。业务数据访问经各域 repository（GORM 实现，ADR-0058 / FR2-070），禁止 `api` 生产代码对业务表直连拼查询；任务入队对外用 `tasks.Tx`（`settings.TxRepository` 可直传，domain 用 `AsTx`）。`subtitle` 仅向下复用 `transcoder` 的无状态格式转换与工具路径，不允许 `transcoder` 反向依赖字幕聚合服务；`config` 和 `auth` 为横切关注点。
 
 ### 2.1 代码目录结构
 
-> 当前 v0.20 单体真貌。apps/packages 目标结构见 [ADR-0054](adr/0054-apps-workspace-toolchain-quality-gates.md) 与 [`docs/specs/fr2-002-workspace-toolchain-quality.md`](specs/fr2-002-workspace-toolchain-quality.md)，代码迁移完成后再回写本节。
+> FR2-066/067 后：生产前端在 `apps/web`，业务 Go 在 `apps/server`；根目录仅工程文件 + `go.work`。模块路径仍为 `github.com/wcpe/JianVideo`（未改 import 前缀）。
 
-P0.5 工作区基线已落地首批前端应用与共享包：`apps/wiki` 是独立 Vite React UI 博物馆，不依赖真实后端；它只从 `packages/ui`、`packages/theme`、`packages/mock` 与 `packages/render-pixi` 读取 UI 描述、主题、mock 场景和 PixiJS 指标入口。`packages/ui` 暴露首批 UI 预览描述与 snippet，`packages/theme` 暴露 wiki 可切换主题 / 密度配置，`packages/mock` 暴露可 seed 重建的 mock 场景。`apps/web` 不得直接依赖 `apps/wiki`，未来主端只通过 `packages/*` 共享能力。
+P0.5 工作区基线已落地前端应用与共享包：`apps/wiki` 是独立 Vite React UI 博物馆；`apps/web` 为生产主端；`apps/mock-studio` 为 Mock/Benchmark 工作台。`apps/web` 不得直接依赖 `apps/wiki`，主端只通过 `packages/*` 共享能力。
 
 ```text
 jianvideo/
-├── main.go                    程序入口：装配各模块、启动 HTTP 服务
+├── go.work                    Go 工作区（use ./apps/server）
 ├── VERSION                    版本号唯一真源
-├── go.mod / go.sum            Go 依赖清单
-├── Makefile                   构建 / 测试脚本入口
-├── config/
-│   └── config.go              配置加载（环境变量优先）
-├── internal/                  后端业务模块（禁被仓库外导入）
-│   ├── api/                   API 路由注册与请求处理器（轻量委托）
-│   ├── audit/                 审计事件真源、脱敏与查询
-│   ├── auth/                  单用户登录 / 会话（JWT + bcrypt）
-│   ├── config/               运行期配置辅助
-│   ├── db/                    SQLite 初始化与 GORM CRUD
-│   │   └── models/            GORM 数据模型
-│   ├── dblog/                 可运行时切级别的 GORM 日志器
-│   ├── library/              媒体库、扫描队列、缩略图、EXIF / 时间提取
-│   ├── migration/            版本化 schema 迁移、备份、dry-run 与校验
-│   ├── metrics/              指标采样与持久化
-│   ├── netproxy/             出站 HTTP 全局可热更代理
-│   ├── playback/             播放进度、Range 请求、会话
-│   ├── player/               HLS 切片写入与 m3u8 管理
-│   ├── settings/             运行期键值设置真源
-│   ├── share/                分享链接 token 生命周期
-│   ├── smb/                  SMB(CIFS) 客户端
-│   ├── storage/              可重建缓存资产登记、盘点、统计与安全清理
-│   ├── subtitle/             统一字幕/音轨、上传持久化、受限读取与按请求转换
-│   ├── transcoder/          FFmpeg 转码、多码率、硬件加速、底层字幕转换、预生成队列
-│   ├── update/              自更新
-│   ├── watcher/             文件系统事件监听（fsnotify）
-│   └── web/                 HTTP 服务、静态资源服务、认证中间件
-├── frontend/                  React + TypeScript + Vite 前端
-│   ├── src/
-│   │   ├── api/               后端 API 客户端
-│   │   ├── components/        UI 组件
-│   │   ├── pages/             页面
-│   │   ├── hooks/             React hooks
-│   │   ├── stores/            前端状态
-│   │   ├── mocks/             MSW mock
-│   │   ├── utils/ types/ data/ assets/   工具 / 类型 / 静态数据 / 资源
-│   │   ├── theme.ts           主题
-│   │   └── *.test.ts          前端单元测试
-│   ├── public/               公共静态资源
-│   └── dist/                 构建产物（`go:embed` 内嵌后即运行时真源）
-├── e2e/                       端到端测试（Go 后端流程 + Playwright 浏览器）
-├── scripts/                   构建 / 版本 / changelog 脚本
+├── Makefile                   顶层入口（FR2-068：委托 apps/server Taskfile + pnpm）
+├── package.json / pnpm-* / turbo.json
+├── apps/
+│   ├── server/                Go 一体化服务端（FR2-067）
+│   │   ├── main.go            程序入口；//go:embed all:web/dist
+│   │   ├── go.mod / go.sum
+│   │   ├── Taskfile.yml       后端任务（lint/test/build/quality，CGO=1）
+│   │   ├── config/            启动配置（环境变量优先）
+│   │   ├── internal/          业务模块（api/library/transcoder/web/…）
+│   │   ├── e2e/               Go 流程级 e2e（package e2e）
+│   │   └── web/dist/          前端构建同步目录（embed 源，由 apps/web build 写入）
+│   ├── web/                   生产主端（FR2-066）
+│   │   ├── src/               页面、组件、API 客户端
+│   │   └── dist/              Vite 产物；build 后 sync → apps/server/web/dist
+│   ├── wiki/                  UI 博物馆
+│   └── mock-studio/           Mock / Benchmark 工作台
+├── packages/                  ui / theme / mock / media-client / render-pixi / …
+├── e2e/                       Playwright 浏览器 e2e
+├── scripts/                   质量门 / 版本 / changelog / root-hygiene / openapi-check
+├── api/                       HTTP 契约真源（FR2-071：openapi.yaml）
+├── deploy/                    Docker 部署骨架（FR2-072：Dockerfile + compose + .env.example）
 ├── docs/                      PRD / ROADMAP / ARCHITECTURE / ADR / specs / API
 └── 运行期生成（可重建、不入库）
-    ├── jianvideo.db           SQLite 元数据库（WAL）
-    ├── hls/                   HLS 切片输出
-    ├── thumbnails/            缩略图缓存
-    ├── image_cache/           图片缓存
-    ├── covers/                封面缓存
-    └── metadata_temp/         元数据临时缓存
+    └── data/                  默认数据根（`DB_PATH` 默认 `data/jianvideo.db`，FR2-065）
+        ├── jianvideo.db
+        ├── hls/ / thumbnails/ / …
+        └── …
+
+根目录卫生：见 [`docs/specs/fr2-065-root-hygiene.md`](specs/fr2-065-root-hygiene.md)；根目录不得再有业务 `*.go` / `internal/` / `frontend/`。
+Docker 部署：见 [`deploy/README.md`](../deploy/README.md) 与 [`docs/OPERATIONS.md`](OPERATIONS.md)（CGO=1 + 镜像内 FFmpeg；探活 `GET /health`）。
+HTTP 契约：机器可读真源 [`api/openapi.yaml`](../api/openapi.yaml)；生成物 `apps/server/internal/openapi/api.gen.go`（`task gen` / `task gen:check`）；人类补充 [`docs/API.md`](API.md)；门禁 `make openapi-check`（结构 + media-client/mock `/api/v2` 路径对齐，无 TS codegen）。运行时：`/health` + auth 契约类型 + `/api/v2/media|tasks` 薄适配单挂（不 `RegisterHandlers`）。
 ```
 
 ### 2.2 v2 API client 与 mock 先行基础（FR2-006）
 
 `packages/media-client` 是 ADR-0054 目标工作区中的多端数据访问层，当前已落地 mock 先行切片：统一 `createApiClient` 请求入口、可配置 timeout/retry、`ApiError` 错误规范化、`X-JianVideo-Space-Id` Space 上下文头、Bearer 鉴权头、媒体分页 / 详情查询、任务详情查询、任务轮询间隔和 TanStack Query key 工厂。任务状态按 ADR-0055 使用 `pending` / `running` / `succeeded` / `failed` / `canceled`，并兼容旧状态 `completed`→`succeeded`、`error`→`failed`。
 
-`packages/mock` 暴露纯 TypeScript `createMockFetch` 与 `handleMockApiRequest`，作为后续 MSW browser worker / 测试 server 的同源 handler 基础。当前 mock 覆盖 `/api/v2/media`、`/api/v2/media/:id`、`/api/v2/tasks/:id`，并按 `X-JianVideo-Space-Id` 过滤媒体与任务。该切片不接真实后端、不改 Go 单体运行时；真实后端接入仍归属 P2。
+`packages/mock` 暴露纯 TypeScript `createMockFetch` 与 `handleMockApiRequest`，作为后续 MSW browser worker / 测试 server 的同源 handler 基础。当前 mock 覆盖 `/api/v2/media`、`/api/v2/media/:id`、`/api/v2/tasks/:id`，并按 `X-JianVideo-Space-Id` 过滤媒体与任务。Go 侧已有同路径薄适配（`api.ListMediaV2` / `GetMediaV2` / `GetTaskV2`，契约响应形态，委托 library/tasks）；历史 `/api/library/*` 与 `/api/tasks` 仍并存。
 
 端能力检测由 `media-client` 的纯函数输出 `platform`（Web/Desktop/Mobile/TV/车机）、`pointer`、`touch` 与 `network`，`packages/theme` 只消费该结果决定密度，不重复探测平台。`apps/wiki` 通过独立 client demo 展示媒体列表、详情、分页、任务轮询与 Space 切换。
 
@@ -143,7 +130,7 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 
 | 包 / 应用 | 当前职责 |
 |---|---|
-| `packages/render-pixi` | 提供百万素材窗口化计算、网格 overscan、纹理池 LRU、HLS 预览触发判定、Pixi 指标快照、`mountMediaGridSession` 生产网格会话（FR2-009）与真实 `pixi.js` 预览挂载 API；React 侧只持有挂载点与控制态。生产入口为 `frontend` 的 `/media-grid`。 |
+| `packages/render-pixi` | 提供百万素材窗口化计算、网格 overscan、纹理池 LRU、HLS 预览触发判定、Pixi 指标快照、`mountMediaGridSession` 生产网格会话（FR2-009）与真实 `pixi.js` 预览挂载 API；React 侧只持有挂载点与控制态。生产入口为 `apps/web` 的 `/media-grid`。 |
 | `packages/mock` | 提供 `media-index-1m` / `media-index-5m` / `media-index-10m` 的确定性 seed 数据源与窗口查询；按位置即时生成记录，窗口查询只保留返回窗口对象。 |
 | `packages/benchmark` | 提供 FR2-003 前端阈值判定、后端查询阈值判定、Go/SQLite 真实索引查询 harness 与 Markdown summary 输出；报告产物写入 `.tmp/benchmark/fr2-063/`，不入库。 |
 | `apps/mock-studio` | 暴露 FR2-063 Benchmark 工作台入口、真实 PixiJS/WebGL 预览画布、Canvas 非空 E2E 验证与 HLS 预览请求计数，消费 mock 场景、render-pixi 与 benchmark 能力；headless WebGL 不可用时才退回 Canvas fallback 并在 `.tmp` 报告标注。 |

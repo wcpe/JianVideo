@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: {
     // 每次清理并重建 E2E 专用数据根，再构建前端并启动真实服务，避免残留状态污染门禁。
     command:
-      'node -e "const fs=require(\'fs\');fs.rmSync(\'.tmp/e2e-run\',{recursive:true,force:true});fs.mkdirSync(\'.tmp/e2e-run\',{recursive:true})" && npm --prefix frontend run build && go run .',
+      'node -e "const fs=require(\'fs\');fs.rmSync(\'.tmp/e2e-run\',{recursive:true,force:true});fs.mkdirSync(\'.tmp/e2e-run\',{recursive:true})" && npm --prefix apps/web run build && go run -C apps/server .',
     url: 'http://localhost:8080/health',
     // E2E 始终拉起独立实例：用 .tmp 下的隔离库，避免污染开发库 jianvideo.db
     reuseExistingServer: false,

@@ -56,24 +56,25 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version-file: apps/server/go.mod
       - name: 安装 Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - name: 安装媒体测试工具
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: 构建内嵌前端
         run: |
           corepack enable
-          npm --prefix frontend install --no-audit --no-fund
-          npm --prefix frontend run build
+          npm --prefix apps/web install --no-audit --no-fund
+          npm --prefix apps/web run build
       - name: 安装 Go 质量工具
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.4.0
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          go install github.com/go-task/task/v3/cmd/task@v3.40.1
       - name: 运行 Go 质量门
         run: pnpm quality:go
 
@@ -90,13 +91,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - name: 安装前端依赖
         run: |
           corepack enable
-          npm --prefix frontend install --no-audit --no-fund
+          npm --prefix apps/web install --no-audit --no-fund
       - name: 审计前端生产依赖
-        run: npm --prefix frontend audit --omit=dev --audit-level=high
+        run: npm --prefix apps/web audit --omit=dev --audit-level=high
       - name: 运行前端质量门
         run: pnpm quality:frontend
 
@@ -111,7 +112,7 @@ jobs:
       - name: 安装 Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version-file: apps/server/go.mod
       - name: 安装媒体测试工具
         run: |
           sudo apt-get update
@@ -123,12 +124,12 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: apps/web/package-lock.json
       - name: 安装测试依赖
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-          npm --prefix frontend install --no-audit --no-fund
+          npm --prefix apps/web install --no-audit --no-fund
       - name: 安装 Playwright 浏览器
         run: pnpm exec playwright install --with-deps chromium
       - name: 运行端到端质量门

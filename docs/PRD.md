@@ -169,6 +169,17 @@ JianVideo v2 从“轻量单用户家庭媒体库”升级为“自托管优先�
 | FR2-061 | 文件级/哈希去重：非 AI 的重复文件检测与处理 | P2 | 已交付@v0.23.0 |
 | FR2-062 | 安全基线：HTTPS/反代指引、登录防爆破、会话与设备管理 | P5 | 计划 |
 | FR2-063 | PixiJS 高密度渲染原型与前后端 Benchmark harness：100 万素材 PixiJS 网格/时间轴原型、纹理池、前端渲染 Benchmark、后端 100 万/500 万/1000 万 mock 索引数据生成与查询 Benchmark、HLS 预览样例 | P1 | 已交付@v0.22.0 |
+| FR2-064 | 参考 JianArtifact 的架构对齐蓝图：登记根目录卫生与 apps 物理迁移、后端分层硬化、OpenAPI 契约、deploy 骨架的分期 FR 与依赖序；澄清 FR2-002「工作区冻结」≠ 根单体/`frontend/` 已迁完 | 文档 | 已交付 |
+| FR2-065 | 根目录允许清单与卫生门：根目录禁止业务 Go 与运行期垃圾（db/hls/cache/coverage 等）；仅保留约定工程文件；提供可检测门禁 | 对齐-A | 已交付 |
+| FR2-066 | 生产主端 `frontend/` 迁入 `apps/web`：packages 边界收口、构建与质量门路径更新、embed 源切换预案，限期移除或 shim 旧路径 | 对齐-A | 已交付 |
+| FR2-067 | 全部业务 Go 迁入 `apps/server`：`main.go`+`internal/*`+根验收测离开仓库根；`go.work`；单二进制 embed `apps/web`；兼容合同（数据/配置/REST/单二进制/历史库）不破 | 对齐-A | 已交付 |
+| FR2-068 | 工具链入口对齐：`apps/server` Taskfile + 根 Makefile 委托 turbo/task（install/dev/build/check），质量门路径与 Artifact 式入口一致 | 对齐-A | 已交付 |
+| FR2-069 | 迁移后真貌文档同步：ARCHITECTURE、architecture-invariants、README 与代码目录一致，删除过期单体叙述 | 对齐-A | 已交付 |
+| FR2-070 | 后端分层硬化（保留 GORM）：api 禁直连 db，落地 ADR-0058 repository 接口；不引入 sqlx、不改对外 API 语义 | 对齐-B | 已交付@library生产路径无s.db（首切+Tx+DBProvider+各域repo至recycle_cleanup；settings/tasks/library 分层落地；其它包可按同模式续抽） |
+| FR2-071 | API 契约优先：`api/openapi.yaml` 真源 + oapi-codegen + client/mock 防漂移；可先核心/v2 路径分期覆盖 | 对齐-C | 已交付@首切（Go gen + client 路径防漂移 + health/auth/v2 运行时桥接；TS 生成式 client 与全量 ServerInterface 挂路由后续） |
+| FR2-072 | `deploy/` 骨架：多阶段 Dockerfile + compose + `.env.example`，与 FR2-020 衔接、语义贴合 JianVideo | 对齐-D | 已交付@骨架 |
+
+> 架构对齐分期（对齐-A→D）与产品 P0–P7 正交：A 完成前不把「目录已迁完」写入 ARCHITECTURE 真貌。依赖序：065→066→067→(068∥069)→(070∥071∥072)。默认不做：GORM→sqlx、全量 CGO=0、照搬制品域、默认换 Mantine 全套。过程计划见仓库外 `.tmp/brainstorm-arch-jianartifact-2026-07-22.md`（不入库）。
 
 ## 6. 版本线与分期
 

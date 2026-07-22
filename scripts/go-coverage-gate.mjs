@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { minimumForPackage } from "./go-coverage-policy.mjs";
 
 const defaultMinimum = Number(process.env.GO_COVERAGE_MIN ?? "60");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const serverDir = path.join(repoRoot, "apps", "server");
 
 const goEnv = { ...process.env, GIN_MODE: "release" };
 const listed = spawnSync("go", ["list", "./..."], {
   encoding: "utf8",
   env: goEnv,
+  cwd: serverDir,
 });
 
 if (listed.status !== 0) {
@@ -24,12 +29,23 @@ if (listed.status !== 0) {
 const packages = listed.stdout
   .split(/\r?\n/)
   .map((line) => line.trim())
-  .filter((pkg) => pkg && !pkg.includes("/frontend/node_modules/"));
+  .filter(
+    (pkg) =>
+      pkg &&
+      !pkg.includes("/frontend/node_modules/") &&
+      !pkg.includes("/apps/web/node_modules/") &&
+      !pkg.includes("/web/node_modules/"),
+  );
 
-const result = spawnSync("go", ["test", "-cover", "-p", "1", "-parallel", "1", ...packages], {
-  encoding: "utf8",
-  env: goEnv,
-});
+const result = spawnSync(
+  "go",
+  ["test", "-cover", "-p", "1", "-parallel", "1", ...packages],
+  {
+    encoding: "utf8",
+    env: goEnv,
+    cwd: serverDir,
+  },
+);
 
 if (result.stdout) {
   process.stdout.write(result.stdout);

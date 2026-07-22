@@ -1,0 +1,4 @@
+# 大体积构建产物不入库；保留 dist/index.html 占位供 go:embed
+dist/**
+!dist/
+!dist/index.html
