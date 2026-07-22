@@ -380,10 +380,7 @@ export interface NextEpisodeResult {
   next: MediaInference | null;
 }
 
-async function realGetNextEpisode(
-  id: number,
-  signal?: AbortSignal,
-): Promise<NextEpisodeResult> {
+async function realGetNextEpisode(id: number, signal?: AbortSignal): Promise<NextEpisodeResult> {
   const res = await client.get<NextEpisodeResult>(`/api/library/media/${id}/next-episode`, {
     signal,
   });
@@ -1505,10 +1502,7 @@ async function realEnqueueClipExport(
   id: number,
   params: ClipExportParams,
 ): Promise<ClipExportAccepted> {
-  const res = await client.post<ClipExportAccepted>(
-    `/api/library/media/${id}/clip-export`,
-    params,
-  );
+  const res = await client.post<ClipExportAccepted>(`/api/library/media/${id}/clip-export`, params);
   return res.data;
 }
 

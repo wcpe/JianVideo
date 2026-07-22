@@ -14,11 +14,16 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    /* 保留 file: 包符号链接路径，使 render-pixi 内对 pixi.js 的解析落在 frontend/node_modules */
+    "preserveSymlinks": true,
 
     /* Path alias */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      /* 强制 file: 包内对 pixi 的解析落到前端依赖树，避免 Go/独立前端门找不到模块 */
+      "pixi.js": ["./node_modules/pixi.js"],
+      "pixi.js/*": ["./node_modules/pixi.js/*"]
     },
     "ignoreDeprecations": "6.0",
 

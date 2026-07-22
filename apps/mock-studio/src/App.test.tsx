@@ -90,13 +90,17 @@ describe("mock studio app", () => {
   });
 
   it("Pixi 初始化失败时回退到 Canvas", async () => {
+    // getContext 重载含 webgpu→GPUCanvasContext；经 unknown 再断言为完整重载签名。
     const context = {
       fillRect: vi.fn(),
       fillStyle: "",
     } as unknown as CanvasRenderingContext2D;
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, "getContext")
-      .mockReturnValue(context);
+      .mockImplementation(
+        (() =>
+          context) as unknown as typeof HTMLCanvasElement.prototype.getContext,
+      );
     renderPixiMock.mountPixiGridPreview.mockRejectedValue(
       new Error("webgl unavailable"),
     );

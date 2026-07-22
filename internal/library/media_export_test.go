@@ -56,12 +56,12 @@ func TestSanitizeImageFormat(t *testing.T) {
 		wantOK   bool
 		wantNorm string
 	}{
-		"jpeg": {"jpeg", true, "jpeg"},
-		"jpg":  {"jpg", true, "jpg"},
-		"png":  {"png", true, "png"},
-		"webp": {"webp", true, "webp"},
+		"jpeg":       {"jpeg", true, "jpeg"},
+		"jpg":        {"jpg", true, "jpg"},
+		"png":        {"png", true, "png"},
+		"webp":       {"webp", true, "webp"},
 		"image/jpeg": {"image/jpeg", true, "jpeg"},
-		"gif":  {"gif", false, ""},
+		"gif":        {"gif", false, ""},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

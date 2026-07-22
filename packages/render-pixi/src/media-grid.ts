@@ -64,7 +64,7 @@ export const DEFAULT_MEDIA_GRID_LAYOUT: MediaGridLayout = {
 
 /** 纹理 key：media_id + tier，便于缓存分层。 */
 export function mediaTextureKey(mediaId: number, tier = "thumb"): string {
-  return `${mediaId}:${tier}`;
+  return `${String(mediaId)}:${tier}`;
 }
 
 /** 计算网格内容总高度（像素）。 */
@@ -185,5 +185,3 @@ export function snapshotMediaGridMetrics(input: {
     hlsRequests: input.hlsRequests,
   });
 }
-
-

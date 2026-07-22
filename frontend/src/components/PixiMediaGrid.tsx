@@ -31,10 +31,7 @@ function toGridItems(files: readonly MediaFile[]): MediaGridItem[] {
   }));
 }
 
-async function loadThumbnail(
-  url: string,
-  signal: AbortSignal,
-): Promise<CanvasImageSource | null> {
+async function loadThumbnail(url: string, signal: AbortSignal): Promise<CanvasImageSource | null> {
   try {
     const res = await fetch(url, { signal, credentials: 'same-origin' });
     if (!res.ok) return null;
@@ -108,11 +105,11 @@ export default function PixiMediaGrid({
       height,
       layout,
       loadThumbnail,
-      onSelect: (id, additive) => onSelectRef.current(id, additive),
-      onOpen: (id) => onOpenRef.current(id),
+      onSelect: (id: number, additive: boolean) => onSelectRef.current(id, additive),
+      onOpen: (id: number) => onOpenRef.current(id),
       onNeedMore: () => onNeedMoreRef.current?.(),
     })
-      .then((session) => {
+      .then((session: MediaGridSessionHandle) => {
         if (cancelled) {
           session.destroy();
           return;

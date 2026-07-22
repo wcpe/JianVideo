@@ -279,7 +279,10 @@ function EmbeddedMetadataInfo({
                 label="解析来源"
                 value={`${item.source} · ${item.tool}${item.tool_version ? ` ${item.tool_version}` : ''}${item.stale ? '（待刷新）' : ''}`}
               />
-              <DetailRow label="解析时间" value={item.parsed_at ? formatTime(item.parsed_at) : ''} />
+              <DetailRow
+                label="解析时间"
+                value={item.parsed_at ? formatTime(item.parsed_at) : ''}
+              />
               <DetailRow label="容器" value={metadata.container?.format_name} />
               <DetailRow label="视频流" value={videoValue} />
               <DetailRow

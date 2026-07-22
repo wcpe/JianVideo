@@ -50,10 +50,7 @@ describe('ImageEditorPanel FR2-038', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: '导出' }));
     await waitFor(() => {
-      expect(enqueueMock).toHaveBeenCalledWith(
-        42,
-        expect.objectContaining({ format: 'jpeg' }),
-      );
+      expect(enqueueMock).toHaveBeenCalledWith(42, expect.objectContaining({ format: 'jpeg' }));
     });
   });
 

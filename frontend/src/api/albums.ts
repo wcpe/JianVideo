@@ -138,9 +138,7 @@ async function mockGetAlbumNeighbor(
   dir: 'next' | 'prev' = 'next',
 ): Promise<MediaFile | null> {
   await mockDelay(80);
-  const ids = mockAlbumItems
-    .filter((it) => it.album_id === albumID)
-    .map((it) => it.media_id);
+  const ids = mockAlbumItems.filter((it) => it.album_id === albumID).map((it) => it.media_id);
   const idx = ids.indexOf(mediaID);
   if (idx < 0) throw new Error('相册或媒体不在合集中');
   const nextIdx = dir === 'prev' ? idx - 1 : idx + 1;
@@ -168,11 +166,7 @@ export function addAlbumItem(albumID: number, mediaID: number) {
 export function removeAlbumItem(albumID: number, mediaID: number) {
   return useMock ? mockRemoveAlbumItem(albumID, mediaID) : realRemoveAlbumItem(albumID, mediaID);
 }
-export function getAlbumNeighbor(
-  albumID: number,
-  mediaID: number,
-  dir: 'next' | 'prev' = 'next',
-) {
+export function getAlbumNeighbor(albumID: number, mediaID: number, dir: 'next' | 'prev' = 'next') {
   return useMock
     ? mockGetAlbumNeighbor(albumID, mediaID, dir)
     : realGetAlbumNeighbor(albumID, mediaID, dir);

@@ -50,8 +50,6 @@ export interface MediaGridSessionHandle {
   destroy(): void;
 }
 
-type PixiModule = typeof import("pixi.js");
-
 /**
  * 挂载生产级媒体网格热区（FR2-009）。
  * React 只持 host 与控制态；滚动/纹理更新不经 React 重渲染。
@@ -59,15 +57,8 @@ type PixiModule = typeof import("pixi.js");
 export async function mountMediaGridSession(
   options: MediaGridSessionOptions,
 ): Promise<MediaGridSessionHandle> {
-  const pixi: PixiModule = await import("pixi.js");
-  const {
-    Application,
-    Container,
-    Graphics,
-    Sprite,
-    Texture,
-    VERSION,
-  } = pixi;
+  const { Application, Container, Graphics, Sprite, Texture, VERSION } =
+    await import("pixi.js");
 
   let layout: MediaGridLayout = {
     ...DEFAULT_MEDIA_GRID_LAYOUT,
@@ -142,7 +133,11 @@ export async function mountMediaGridSession(
 
   function releaseNode(node: CellNode): void {
     node.sprite.texture = Texture.EMPTY;
-    node.container.removeAllListeners();
+    // pixi v8 事件 mixin 在部分解析路径下不在 Container 静态类型上暴露
+    const target = node.container as unknown as {
+      removeAllListeners: () => void;
+    };
+    target.removeAllListeners();
     root.removeChild(node.container);
     nodePool.push(node);
   }
@@ -206,8 +201,20 @@ export async function mountMediaGridSession(
       }
 
       const mediaId = cell.id;
-      node.container.removeAllListeners();
-      node.container.on("pointerover", () => {
+      // 事件 API 通过运行期 mixin 挂载；用窄断言绑定 pointer 事件
+      const interactive = node.container as unknown as {
+        removeAllListeners: () => void;
+        on: (
+          event: string,
+          fn: (e?: {
+            shiftKey?: boolean;
+            ctrlKey?: boolean;
+            metaKey?: boolean;
+          }) => void,
+        ) => void;
+      };
+      interactive.removeAllListeners();
+      interactive.on("pointerover", () => {
         selection = { ...selection, hoveredId: mediaId };
         options.onHoverChange?.(mediaId);
         if (
@@ -221,15 +228,19 @@ export async function mountMediaGridSession(
         }
         scheduleRender();
       });
-      node.container.on("pointerout", () => {
+      interactive.on("pointerout", () => {
         if (selection.hoveredId === mediaId) {
           selection = { ...selection, hoveredId: null };
           options.onHoverChange?.(null);
           scheduleRender();
         }
       });
-      node.container.on("pointertap", (event: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => {
-        const additive = !!(event.shiftKey || event.ctrlKey || event.metaKey);
+      interactive.on("pointertap", (event) => {
+        const additive = !!(
+          event?.shiftKey ||
+          event?.ctrlKey ||
+          event?.metaKey
+        );
         options.onSelect?.(mediaId, additive);
       });
     }
@@ -290,7 +301,8 @@ export async function mountMediaGridSession(
       requestVisibleThumbnails(frame);
       // 接近底部时通知壳层加载更多
       const nearBottom =
-        viewport.scrollTop + viewport.height >= frame.contentHeight - viewport.height;
+        viewport.scrollTop + viewport.height >=
+        frame.contentHeight - viewport.height;
       if (nearBottom && items.length < total) {
         options.onNeedMore?.();
       }
@@ -302,7 +314,10 @@ export async function mountMediaGridSession(
     event.preventDefault();
     const frame = currentFrame();
     const maxScroll = Math.max(0, frame.contentHeight - viewport.height);
-    const next = Math.min(maxScroll, Math.max(0, viewport.scrollTop + event.deltaY));
+    const next = Math.min(
+      maxScroll,
+      Math.max(0, viewport.scrollTop + event.deltaY),
+    );
     if (next === viewport.scrollTop) return;
     viewport = { ...viewport, scrollTop: next };
     scheduleRender();
@@ -339,7 +354,9 @@ export async function mountMediaGridSession(
       selection = {
         selectedIds: partial.selectedIds ?? selection.selectedIds,
         hoveredId:
-          partial.hoveredId !== undefined ? partial.hoveredId : selection.hoveredId,
+          partial.hoveredId !== undefined
+            ? partial.hoveredId
+            : selection.hoveredId,
       };
       scheduleRender();
     },

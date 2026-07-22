@@ -10,6 +10,57 @@
 
 ### 修复
 
+## 0.25.0-rc.8（2026-07-22，候选发布）
+
+### 修复
+
+- 补齐导出/连播相关 Go 源码 gofmt，消除 golangci-lint gofmt 阻断。
+- 媒体导出对 magick/ffmpeg 调用补充 G204 说明；重命名超时预算常量以符合 revive。
+- 修复 next episode 方向变量 ineffassign；删除未使用的 `applyMultiColumnLike`。
+
+## 0.25.0-rc.7（2026-07-22，候选发布）
+
+### 修复
+
+- `golang.org/x/text` 升级至 v0.39.0，消除 GO-2026-5970（govulncheck 阻断）。
+- `render-pixi` 覆盖率排除依赖 WebGL/DOM 的会话层，单元门只约束纯逻辑模块。
+
+## 0.25.0-rc.6（2026-07-22，候选发布）
+
+### 修复
+
+- Vite 为 `pixi.js` 增加绝对路径 alias，修复内嵌前端生产构建无法从 render-pixi 源码解析依赖。
+- 补齐 `packages/render-pixi/src/media-grid.ts` Prettier 格式。
+
+## 0.25.0-rc.5（2026-07-22，候选发布）
+
+### 修复
+
+- 前端 tsconfig 增加 `pixi.js` paths 映射，修复独立/Go 内嵌前端 typecheck 无法解析 file: 包依赖。
+- 补齐 mock-studio 与 render-pixi 的 Prettier 格式，通过工作区 format:check。
+
+## 0.25.0-rc.4（2026-07-22，候选发布）
+
+### 修复
+
+- 修复 render-pixi 网格会话对 pixi v8 事件 mixin 的类型断言，恢复工作区与前端 typecheck。
+- 修复 mock-studio `getContext` mock 的重载签名断言与 ESLint 不安全 any 告警。
+- 前端 tsconfig 开启 `preserveSymlinks`，保证 file: 包内对 `pixi.js` 的模块解析。
+
+## 0.25.0-rc.3（2026-07-22，候选发布）
+
+### 修复
+
+- 修复前端 Prettier 格式与 `pixi.js` 直接依赖，避免独立前端质量门在 typecheck/format 失败。
+- 修复 mock-studio `getContext` mock 与 WebGPU 重载冲突，恢复工作区 build。
+
+## 0.25.0-rc.2（2026-07-22，候选发布）
+
+### 修复
+
+- 修复 `@jianvideo/render-pixi` 导出指向源码入口，使独立前端 typecheck 可解析网格会话类型。
+- 修复 render-pixi lint：排除 benchmark 脚本、去除 `import()` 类型注解、模板字符串数字插值转字符串。
+
 ## 0.25.0-rc.1（2026-07-22，候选发布）
 
 ### 变更

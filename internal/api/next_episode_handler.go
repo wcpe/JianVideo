@@ -50,7 +50,7 @@ func (h *Handler) GetAlbumNeighbor(c *gin.Context) {
 		return
 	}
 	dir := c.DefaultQuery("dir", "next")
-	direction := 1
+	var direction int
 	switch dir {
 	case "next", "":
 		direction = 1

@@ -30,7 +30,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       // FR2-009：开发/测试直连源码，避免依赖未重建的 dist
       '@jianvideo/render-pixi': path.resolve(__dirname, '../packages/render-pixi/src/index.ts'),
+      // file: 包源码位于 monorepo 外层；打包时把 pixi 钉到前端依赖树
+      'pixi.js': path.resolve(__dirname, 'node_modules/pixi.js'),
     },
+    // 与 tsconfig preserveSymlinks 对齐，避免符号链接导致解析漂移
+    preserveSymlinks: true,
   },
   optimizeDeps: {
     include: [
