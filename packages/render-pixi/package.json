@@ -5,14 +5,14 @@
   "version": "0.0.0",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "coverage": "vitest run --coverage",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern scripts/**",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

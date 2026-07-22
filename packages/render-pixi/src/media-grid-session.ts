@@ -50,8 +50,6 @@ export interface MediaGridSessionHandle {
   destroy(): void;
 }
 
-type PixiModule = typeof import("pixi.js");
-
 /**
  * 挂载生产级媒体网格热区（FR2-009）。
  * React 只持 host 与控制态；滚动/纹理更新不经 React 重渲染。
@@ -59,7 +57,6 @@ type PixiModule = typeof import("pixi.js");
 export async function mountMediaGridSession(
   options: MediaGridSessionOptions,
 ): Promise<MediaGridSessionHandle> {
-  const pixi: PixiModule = await import("pixi.js");
   const {
     Application,
     Container,
@@ -67,7 +64,7 @@ export async function mountMediaGridSession(
     Sprite,
     Texture,
     VERSION,
-  } = pixi;
+  } = await import("pixi.js");
 
   let layout: MediaGridLayout = {
     ...DEFAULT_MEDIA_GRID_LAYOUT,

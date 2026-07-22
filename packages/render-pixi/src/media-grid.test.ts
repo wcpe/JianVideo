@@ -14,8 +14,8 @@ import type { MediaGridItem } from "./media-grid";
 function items(n: number): MediaGridItem[] {
   return Array.from({ length: n }, (_, i) => ({
     id: i + 1,
-    title: `m${i + 1}`,
-    thumbnailUrl: `/t/${i + 1}`,
+    title: `m${String(i + 1)}`,
+    thumbnailUrl: `/t/${String(i + 1)}`,
     isVideo: true,
   }));
 }
