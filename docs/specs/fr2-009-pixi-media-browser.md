@@ -1,6 +1,6 @@
 # 功能规格：PixiJS 高密度媒体浏览器
 
-> 状态：候选发布@v0.25.0-rc.6　·　关联 PRD：FR2-009　·　阶段：P4 `0.25.x`　·　前置：[fr2-003](fr2-003-performance-budget.md)、[fr2-063](fr2-063-pixijs-prototype-benchmark.md)、[ADR-0053](../adr/0053-video-ai-pixijs-space-baseline.md)
+> 状态：已交付@v0.25.0　·　关联 PRD：FR2-009　·　阶段：P4 `0.25.x`　·　前置：[fr2-003](fr2-003-performance-budget.md)、[fr2-063](fr2-063-pixijs-prototype-benchmark.md)、[ADR-0053](../adr/0053-video-ai-pixijs-space-baseline.md)
 
 ## 1. 背景与目标
 

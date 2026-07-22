@@ -1,6 +1,6 @@
 # 功能规格：元数据与标签前端展示
 
-> 状态：候选发布@v0.25.0-rc.6　·　关联 PRD：FR2-032　·　阶段：P4 `0.25.x`　·　前置：[fr2-030](fr2-030-embedded-metadata.md)、[fr2-031](fr2-031-offline-title-inference.md)
+> 状态：已交付@v0.25.0　·　关联 PRD：FR2-032　·　阶段：P4 `0.25.x`　·　前置：[fr2-030](fr2-030-embedded-metadata.md)、[fr2-031](fr2-031-offline-title-inference.md)
 
 ## 1. 背景与目标
 
