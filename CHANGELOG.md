@@ -10,6 +10,14 @@
 
 ### 修复
 
+## 0.25.0-rc.4（2026-07-22，候选发布）
+
+### 修复
+
+- 修复 render-pixi 网格会话对 pixi v8 事件 mixin 的类型断言，恢复工作区与前端 typecheck。
+- 修复 mock-studio `getContext` mock 的重载签名断言与 ESLint 不安全 any 告警。
+- 前端 tsconfig 开启 `preserveSymlinks`，保证 file: 包内对 `pixi.js` 的模块解析。
+
 ## 0.25.0-rc.3（2026-07-22，候选发布）
 
 ### 修复

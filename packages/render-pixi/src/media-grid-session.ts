@@ -139,7 +139,11 @@ export async function mountMediaGridSession(
 
   function releaseNode(node: CellNode): void {
     node.sprite.texture = Texture.EMPTY;
-    node.container.removeAllListeners();
+    // pixi v8 事件 mixin 在部分解析路径下不在 Container 静态类型上暴露
+    const target = node.container as unknown as {
+      removeAllListeners: () => void;
+    };
+    target.removeAllListeners();
     root.removeChild(node.container);
     nodePool.push(node);
   }
@@ -203,8 +207,13 @@ export async function mountMediaGridSession(
       }
 
       const mediaId = cell.id;
-      node.container.removeAllListeners();
-      node.container.on("pointerover", () => {
+      // 事件 API 通过运行期 mixin 挂载；用窄断言绑定 pointer 事件
+      const interactive = node.container as unknown as {
+        removeAllListeners: () => void;
+        on: (event: string, fn: (e?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void) => void;
+      };
+      interactive.removeAllListeners();
+      interactive.on("pointerover", () => {
         selection = { ...selection, hoveredId: mediaId };
         options.onHoverChange?.(mediaId);
         if (
@@ -218,15 +227,15 @@ export async function mountMediaGridSession(
         }
         scheduleRender();
       });
-      node.container.on("pointerout", () => {
+      interactive.on("pointerout", () => {
         if (selection.hoveredId === mediaId) {
           selection = { ...selection, hoveredId: null };
           options.onHoverChange?.(null);
           scheduleRender();
         }
       });
-      node.container.on("pointertap", (event: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => {
-        const additive = !!(event.shiftKey || event.ctrlKey || event.metaKey);
+      interactive.on("pointertap", (event) => {
+        const additive = !!(event?.shiftKey || event?.ctrlKey || event?.metaKey);
         options.onSelect?.(mediaId, additive);
       });
     }

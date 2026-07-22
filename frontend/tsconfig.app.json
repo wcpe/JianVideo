@@ -14,11 +14,14 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    /* 保留 file: 包符号链接路径，使 render-pixi 内对 pixi.js 的解析落在 frontend/node_modules */
+    "preserveSymlinks": true,
 
     /* Path alias */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@jianvideo/render-pixi": ["../packages/render-pixi/src/index.ts"]
     },
     "ignoreDeprecations": "6.0",
 
