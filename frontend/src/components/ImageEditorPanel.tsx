@@ -1,15 +1,5 @@
 import { useMemo, useState } from 'react';
-import {
-  Button,
-  Group,
-  Modal,
-  Select,
-  Slider,
-  Stack,
-  Text,
-  Box,
-  Image,
-} from '@mantine/core';
+import { Button, Group, Modal, Select, Slider, Stack, Text, Box, Image } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { enqueueImageExport, exportDownloadUrl } from '@/api/library';
 import { getTask } from '@/api/tasks';
@@ -95,13 +85,7 @@ export default function ImageEditorPanel({ opened, mediaId, onClose }: ImageEdit
     <Modal opened={opened} onClose={onClose} title="图片编辑导出" size="lg" centered>
       <Stack gap="md">
         <Box style={{ maxHeight: 320, overflow: 'hidden', textAlign: 'center' }}>
-          <Image
-            src={mediaRawUrl(mediaId)}
-            alt="预览"
-            fit="contain"
-            h={300}
-            style={filterStyle}
-          />
+          <Image src={mediaRawUrl(mediaId)} alt="预览" fit="contain" h={300} style={filterStyle} />
         </Box>
         <Text size="xs" c="dimmed">
           预览为浏览器近似效果，最终以服务端导出为准

@@ -8,7 +8,11 @@ import MediaBrowserPage from './MediaBrowserPage';
 
 vi.mock('@/components/PixiMediaGrid', () => ({
   default: (props: { total: number; items: { id: number }[] }) => (
-    <div data-testid="pixi-media-grid-stub" data-total={props.total} data-count={props.items.length} />
+    <div
+      data-testid="pixi-media-grid-stub"
+      data-total={props.total}
+      data-count={props.items.length}
+    />
   ),
 }));
 

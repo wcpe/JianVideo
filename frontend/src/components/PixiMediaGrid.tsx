@@ -31,10 +31,7 @@ function toGridItems(files: readonly MediaFile[]): MediaGridItem[] {
   }));
 }
 
-async function loadThumbnail(
-  url: string,
-  signal: AbortSignal,
-): Promise<CanvasImageSource | null> {
+async function loadThumbnail(url: string, signal: AbortSignal): Promise<CanvasImageSource | null> {
   try {
     const res = await fetch(url, { signal, credentials: 'same-origin' });
     if (!res.ok) return null;

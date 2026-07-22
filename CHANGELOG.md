@@ -10,6 +10,13 @@
 
 ### 修复
 
+## 0.25.0-rc.3（2026-07-22，候选发布）
+
+### 修复
+
+- 修复前端 Prettier 格式与 `pixi.js` 直接依赖，避免独立前端质量门在 typecheck/format 失败。
+- 修复 mock-studio `getContext` mock 与 WebGPU 重载冲突，恢复工作区 build。
+
 ## 0.25.0-rc.2（2026-07-22，候选发布）
 
 ### 修复
