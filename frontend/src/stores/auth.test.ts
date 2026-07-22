@@ -95,6 +95,20 @@ describe('auth store', () => {
     expect(state.loading).toBe(false);
   });
 
+  it('login 失败优先提取 axios 响应体 message', async () => {
+    mockLogin.mockRejectedValue({
+      response: { data: { message: '用户名或密码错误' } },
+      message: 'Request failed with status code 401',
+    });
+
+    await expect(useAuthStore.getState().login('admin', 'wrong')).rejects.toBeTruthy();
+
+    const state = useAuthStore.getState();
+    expect(state.error).toBe('用户名或密码错误');
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.loading).toBe(false);
+  });
+
   it('logout 清除状态', async () => {
     // 先登录
     mockLogin.mockResolvedValue(undefined);

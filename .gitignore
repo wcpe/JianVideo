@@ -11,6 +11,8 @@
 # 依赖与覆盖率
 /vendor/
 coverage.out
+coverage/
+**/coverage/
 
 # Node 构建产物与依赖
 node_modules/

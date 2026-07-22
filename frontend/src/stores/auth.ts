@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as authApi from '@/api/auth';
+import { extractErrorMessage } from '@/utils/error';
 
 const AUTH_KEY = 'jianvideo_auth';
 
@@ -44,7 +45,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem(AUTH_KEY, '1');
       set({ username, isAuthenticated: true, loading: false });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '登录失败';
+      // 优先取后端 message（如「用户名或密码错误」），避免 axios 默认英文状态句
+      const msg = extractErrorMessage(err, '登录失败');
       set({ loading: false, error: msg });
       throw err;
     }
@@ -58,7 +60,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       localStorage.setItem(AUTH_KEY, '1');
       set({ username, isAuthenticated: true, needsSetup: false, loading: false });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '初始化失败';
+      const msg = extractErrorMessage(err, '初始化失败');
       set({ loading: false, error: msg });
       throw err;
     }
