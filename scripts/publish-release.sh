@@ -146,18 +146,52 @@ prepare_payload() {
   )
 }
 
+# 判断 api_output 中的 git ref 是否最终指向 expected_sha。
+# 轻量 tag：object.type=commit 且 sha 直接匹配。
+# 附注 tag：object.type=tag，再请求 /git/tags/{sha} 读取指向的 commit。
 reference_matches_commit() {
-  local expected_sha="$1"
-  EXPECTED_SHA="$expected_sha" API_OUTPUT="$api_output" python - <<'PY'
+  local expected_sha="$1" ref_type ref_sha status
+  ref_type="$(API_OUTPUT="$api_output" python - <<'PY'
 import json
 import os
 
 with open(os.environ["API_OUTPUT"], encoding="utf-8") as source:
     reference = json.load(source)
-obj = reference.get("object", {})
-valid = obj.get("type") == "commit" and obj.get("sha") == os.environ["EXPECTED_SHA"]
+print((reference.get("object") or {}).get("type") or "")
+PY
+)"
+  ref_sha="$(API_OUTPUT="$api_output" python - <<'PY'
+import json
+import os
+
+with open(os.environ["API_OUTPUT"], encoding="utf-8") as source:
+    reference = json.load(source)
+print((reference.get("object") or {}).get("sha") or "")
+PY
+)"
+  case "$ref_type" in
+    commit)
+      [ -n "$ref_sha" ] && [ "$ref_sha" = "$expected_sha" ]
+      ;;
+    tag)
+      [ -n "$ref_sha" ] || return 1
+      status="$(api_status "$api_base/git/tags/$ref_sha")"
+      [ "$status" = "200" ] || return 1
+      EXPECTED_SHA="$expected_sha" API_OUTPUT="$api_output" python - <<'PY'
+import json
+import os
+
+with open(os.environ["API_OUTPUT"], encoding="utf-8") as source:
+    tag_obj = json.load(source)
+target = tag_obj.get("object") or {}
+valid = target.get("type") == "commit" and target.get("sha") == os.environ["EXPECTED_SHA"]
 raise SystemExit(0 if valid else 1)
 PY
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 write_public_rc_asset_rows() {
