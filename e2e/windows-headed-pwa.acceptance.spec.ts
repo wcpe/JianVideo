@@ -34,7 +34,7 @@ const WATCH_FILE = "p3-windows-watch-state.mp4";
 const CHAPTER_FILE = "p3-windows-chapters-bookmarks.mp4";
 const TRACK_FILE = "p3-windows-subtitle-audio.mp4";
 const CHAPTER_SOURCE = resolve(
-  "internal/library/testdata/chapters/embedded-chapters-three.mp4",
+  "apps/server/internal/library/testdata/chapters/embedded-chapters-three.mp4",
 );
 const EXACT_FRAME_RATE = 30;
 const INITIAL_FRAME_STEP_REQUEST_ID = 0;

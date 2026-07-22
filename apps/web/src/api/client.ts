@@ -38,7 +38,12 @@ export const locationPath = {
 /** SPA 软跳登录页：保留 React 状态与 toast，避免 location.href 整页刷新。 */
 function softNavigateToLogin(): void {
   const path = locationPath.get();
-  if (path === '/login' || path.startsWith('/login/') || path === '/setup' || path.startsWith('/setup/')) {
+  if (
+    path === '/login' ||
+    path.startsWith('/login/') ||
+    path === '/setup' ||
+    path.startsWith('/setup/')
+  ) {
     return;
   }
   window.history.pushState({}, '', '/login');

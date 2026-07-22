@@ -8,7 +8,7 @@ test.use({ serviceWorkers: "block" });
 
 const VIDEO_FILE = "fr2-060-chapters-bookmarks.mp4";
 const CHAPTER_FIXTURE = resolve(
-  "internal/library/testdata/chapters/embedded-chapters-three.mp4",
+  "apps/server/internal/library/testdata/chapters/embedded-chapters-three.mp4",
 );
 const ALLOWED_NOTE = "😀".repeat(2_000);
 const OVERSIZED_NOTE = "😀".repeat(2_001);

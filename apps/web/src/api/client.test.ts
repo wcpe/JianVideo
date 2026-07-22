@@ -8,8 +8,7 @@ const handleApiError = vi.fn();
 const extractErrorMessage = vi.fn((_: unknown, fallback: string) => fallback);
 vi.mock('@/utils/error', () => ({
   handleApiError: (...args: unknown[]) => handleApiError(...args),
-  extractErrorMessage: (...args: unknown[]) =>
-    extractErrorMessage(...(args as [unknown, string])),
+  extractErrorMessage: (...args: unknown[]) => extractErrorMessage(...(args as [unknown, string])),
 }));
 
 const clearAuth = vi.fn();
@@ -76,7 +75,9 @@ describe('axios 客户端 401 分流（禁止硬刷登录页）', () => {
       ),
     );
 
-    await expect(client.post('/api/auth/login', { username: 'a', password: 'b' })).rejects.toBeTruthy();
+    await expect(
+      client.post('/api/auth/login', { username: 'a', password: 'b' }),
+    ).rejects.toBeTruthy();
     expect(clearAuth).not.toHaveBeenCalled();
     expect(handleApiError).not.toHaveBeenCalled();
     expect(pushStateSpy).not.toHaveBeenCalled();
