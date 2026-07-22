@@ -12,7 +12,7 @@ import (
 // NextEpisodeResult 下一集定位结果（FR2-047）。
 // Media 为 nil 表示当前无下一集（标题缺失、无推断或已是最后一集）。
 type NextEpisodeResult struct {
-	Media   *models.MediaFile     `json:"media"`
+	Media   *models.MediaFile      `json:"media"`
 	Current *models.MediaInference `json:"current"`
 	Next    *models.MediaInference `json:"next"`
 }

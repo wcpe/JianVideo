@@ -20,18 +20,18 @@ const (
 
 // exportTaskPayload 是任务 payload 的统一结构。
 type exportTaskPayload struct {
-	SpaceID  string          `json:"space_id"`
-	MediaID  int64           `json:"media_id"`
-	Image    *ImageExportParams `json:"image,omitempty"`
-	Clip     *VideoClipParams   `json:"clip,omitempty"`
+	SpaceID string             `json:"space_id"`
+	MediaID int64              `json:"media_id"`
+	Image   *ImageExportParams `json:"image,omitempty"`
+	Clip    *VideoClipParams   `json:"clip,omitempty"`
 }
 
 // ExportTaskResult 是任务完成时回写到 Checkpoint 的结果摘要（轻量，不带产物路径以免过宽）。
 type ExportTaskResult struct {
-	OutputPath  string `json:"output_path,omitempty"`
-	Filename    string `json:"filename,omitempty"`
-	Format      string `json:"format,omitempty"`
-	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	OutputPath  string  `json:"output_path,omitempty"`
+	Filename    string  `json:"filename,omitempty"`
+	Format      string  `json:"format,omitempty"`
+	SizeBytes   int64   `json:"size_bytes,omitempty"`
 	DurationSec float64 `json:"duration_sec,omitempty"`
 }
 

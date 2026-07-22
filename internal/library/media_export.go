@@ -29,7 +29,8 @@ const (
 	defaultClipMaxDurationSec = 2 * 60 * 60
 	// 导出执行超时（图片 60s、视频粗剪按时长估算最长 4h）。
 	imageExportTimeout = 60 * time.Second
-	videoClipTimeoutPerHour = 30 * time.Minute
+	// 每小时媒体时长对应的导出超时预算（30 分钟/小时）。
+	videoClipTimeoutBudget = 30 * time.Minute
 )
 
 var (
@@ -51,11 +52,11 @@ var (
 // ImageExportParams 描述图片编辑参数与导出格式（FR2-038）。
 // 数值范围与前端滑杆对齐；首期固定四项参数。
 type ImageExportParams struct {
-	Exposure  float64 `json:"exposure"`  // 曝光补偿，[-100, 100]
-	Contrast  float64 `json:"contrast"`  // 对比度，[-100, 100]
-	Saturation float64 `json:"saturation"` // 饱和度，[-100, 100]
-	Temp      float64 `json:"temperature"` // 色温，[-100, 100]
-	Format    string  `json:"format"`     // jpeg/png/webp
+	Exposure   float64 `json:"exposure"`    // 曝光补偿，[-100, 100]
+	Contrast   float64 `json:"contrast"`    // 对比度，[-100, 100]
+	Saturation float64 `json:"saturation"`  // 饱和度，[-100, 100]
+	Temp       float64 `json:"temperature"` // 色温，[-100, 100]
+	Format     string  `json:"format"`      // jpeg/png/webp
 }
 
 // ImageExportResult 描述图片导出成功后的产物。
@@ -223,6 +224,7 @@ func ExportImage(ctx context.Context, baseDir, spaceID string, mediaID, taskID i
 
 	runCtx, cancel := context.WithTimeout(ctx, imageExportTimeout)
 	defer cancel()
+	// #nosec G204 -- magick 路径来自受控配置，参数按固定模板构造并直接传递，不经过 shell。
 	cmd := exec.CommandContext(runCtx, GetMagickPath(), args...)
 	if outBytes, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(out) // 失败清理半成品
@@ -303,7 +305,7 @@ func ExportVideoClip(ctx context.Context, baseDir, spaceID string, mediaID, task
 		return nil, fmt.Errorf("创建导出目录失败: %w", err)
 	}
 	clipLen := params.EndSec - params.StartSec
-	timeout := time.Duration(clipLen/3600.0*float64(videoClipTimeoutPerHour)) + 2*time.Minute
+	timeout := time.Duration(clipLen/3600.0*float64(videoClipTimeoutBudget)) + 2*time.Minute
 	if timeout < 2*time.Minute {
 		timeout = 2 * time.Minute
 	}
@@ -322,6 +324,7 @@ func ExportVideoClip(ctx context.Context, baseDir, spaceID string, mediaID, task
 		"-movflags", "+faststart",
 		out,
 	}
+	// #nosec G204 -- ffmpeg 路径来自受控配置，参数按固定模板构造并直接传递，不经过 shell。
 	cmd := exec.CommandContext(runCtx, GetFFmpegPath(), args...)
 	if outBytes, err := cmd.CombinedOutput(); err != nil {
 		// stream copy 失败（关键帧未对齐/容器不兼容等），回退到重编码。
@@ -336,6 +339,7 @@ func ExportVideoClip(ctx context.Context, baseDir, spaceID string, mediaID, task
 			"-movflags", "+faststart",
 			out,
 		}
+		// #nosec G204 -- ffmpeg 路径来自受控配置，参数按固定模板构造并直接传递，不经过 shell。
 		cmd2 := exec.CommandContext(runCtx, GetFFmpegPath(), args2...)
 		if outBytes2, err2 := cmd2.CombinedOutput(); err2 != nil {
 			_ = os.Remove(out)

@@ -177,4 +177,3 @@ func (h *Handler) DownloadExportArtifact(c *gin.Context) {
 	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filename))
 	c.File(result.OutputPath)
 }
-

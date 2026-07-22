@@ -10,6 +10,14 @@
 
 ### 修复
 
+## 0.25.0-rc.8（2026-07-22，候选发布）
+
+### 修复
+
+- 补齐导出/连播相关 Go 源码 gofmt，消除 golangci-lint gofmt 阻断。
+- 媒体导出对 magick/ffmpeg 调用补充 G204 说明；重命名超时预算常量以符合 revive。
+- 修复 next episode 方向变量 ineffassign；删除未使用的 `applyMultiColumnLike`。
+
 ## 0.25.0-rc.7（2026-07-22，候选发布）
 
 ### 修复

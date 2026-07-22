@@ -64,18 +64,6 @@ func escapeLike(s string) string {
 	return strings.ReplaceAll(s, "_", "\\_")
 }
 
-// applyMultiColumnLike 对若干列做「任一列 LIKE %term%」的 OR 组合，整体作为一个 AND 条件追加。
-func applyMultiColumnLike(query *gorm.DB, columns []string, term string) *gorm.DB {
-	pattern := "%" + escapeLike(term) + "%"
-	clauses := make([]string, 0, len(columns))
-	args := make([]any, 0, len(columns))
-	for _, col := range columns {
-		clauses = append(clauses, col+" LIKE ?")
-		args = append(args, pattern)
-	}
-	return query.Where(strings.Join(clauses, " OR "), args...)
-}
-
 // ListMediaFilesFiltered 按筛选条件分页查询媒体文件列表（FR-41）。
 // 在原有 library_id/search/排序之上，新增收藏与标签过滤。
 func (s *Service) ListMediaFilesFiltered(filter MediaFilter, page, pageSize int) ([]models.MediaFile, int64, error) {
