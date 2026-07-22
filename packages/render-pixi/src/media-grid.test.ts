@@ -37,7 +37,13 @@ describe("media-grid (FR2-009)", () => {
     const win = resolveMediaGridWindow(
       1_000_000,
       { width: 800, height: 600, scrollTop: 0 },
-      { ...DEFAULT_MEDIA_GRID_LAYOUT, columns: 6, cellHeight: 100, gap: 0, overscanRows: 1 },
+      {
+        ...DEFAULT_MEDIA_GRID_LAYOUT,
+        columns: 6,
+        cellHeight: 100,
+        gap: 0,
+        overscanRows: 1,
+      },
     );
     // 可视 6 行 * 6 列 = 36，overscan 上下各 1 行 → 最多 8*6=48
     expect(win.start).toBe(0);
@@ -51,7 +57,13 @@ describe("media-grid (FR2-009)", () => {
       total: 100,
       items: list,
       viewport: { width: 700, height: 240, scrollTop: 0 },
-      layout: { columns: 4, cellWidth: 160, cellHeight: 100, gap: 10, overscanRows: 0 },
+      layout: {
+        columns: 4,
+        cellWidth: 160,
+        cellHeight: 100,
+        gap: 10,
+        overscanRows: 0,
+      },
       selection: { selectedIds: new Set([2]), hoveredId: 3 },
     });
     expect(frame.cells.length).toBeGreaterThan(0);
@@ -69,7 +81,13 @@ describe("media-grid (FR2-009)", () => {
       total: 4,
       items: list,
       viewport: { width: 400, height: 200, scrollTop: 0 },
-      layout: { columns: 2, cellWidth: 100, cellHeight: 80, gap: 10, overscanRows: 0 },
+      layout: {
+        columns: 2,
+        cellWidth: 100,
+        cellHeight: 80,
+        gap: 10,
+        overscanRows: 0,
+      },
       selection: { selectedIds: new Set(), hoveredId: null },
     });
     // 第一格 (0,0)-(100,80)

@@ -98,7 +98,8 @@ describe("mock studio app", () => {
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, "getContext")
       .mockImplementation(
-        (() => context) as unknown as typeof HTMLCanvasElement.prototype.getContext,
+        (() =>
+          context) as unknown as typeof HTMLCanvasElement.prototype.getContext,
       );
     renderPixiMock.mountPixiGridPreview.mockRejectedValue(
       new Error("webgl unavailable"),

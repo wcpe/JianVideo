@@ -10,6 +10,13 @@
 
 ### 修复
 
+## 0.25.0-rc.5（2026-07-22，候选发布）
+
+### 修复
+
+- 前端 tsconfig 增加 `pixi.js` paths 映射，修复独立/Go 内嵌前端 typecheck 无法解析 file: 包依赖。
+- 补齐 mock-studio 与 render-pixi 的 Prettier 格式，通过工作区 format:check。
+
 ## 0.25.0-rc.4（2026-07-22，候选发布）
 
 ### 修复

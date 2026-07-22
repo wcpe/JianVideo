@@ -57,14 +57,8 @@ export interface MediaGridSessionHandle {
 export async function mountMediaGridSession(
   options: MediaGridSessionOptions,
 ): Promise<MediaGridSessionHandle> {
-  const {
-    Application,
-    Container,
-    Graphics,
-    Sprite,
-    Texture,
-    VERSION,
-  } = await import("pixi.js");
+  const { Application, Container, Graphics, Sprite, Texture, VERSION } =
+    await import("pixi.js");
 
   let layout: MediaGridLayout = {
     ...DEFAULT_MEDIA_GRID_LAYOUT,
@@ -210,7 +204,14 @@ export async function mountMediaGridSession(
       // 事件 API 通过运行期 mixin 挂载；用窄断言绑定 pointer 事件
       const interactive = node.container as unknown as {
         removeAllListeners: () => void;
-        on: (event: string, fn: (e?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => void) => void;
+        on: (
+          event: string,
+          fn: (e?: {
+            shiftKey?: boolean;
+            ctrlKey?: boolean;
+            metaKey?: boolean;
+          }) => void,
+        ) => void;
       };
       interactive.removeAllListeners();
       interactive.on("pointerover", () => {
@@ -235,7 +236,11 @@ export async function mountMediaGridSession(
         }
       });
       interactive.on("pointertap", (event) => {
-        const additive = !!(event?.shiftKey || event?.ctrlKey || event?.metaKey);
+        const additive = !!(
+          event?.shiftKey ||
+          event?.ctrlKey ||
+          event?.metaKey
+        );
         options.onSelect?.(mediaId, additive);
       });
     }
@@ -296,7 +301,8 @@ export async function mountMediaGridSession(
       requestVisibleThumbnails(frame);
       // 接近底部时通知壳层加载更多
       const nearBottom =
-        viewport.scrollTop + viewport.height >= frame.contentHeight - viewport.height;
+        viewport.scrollTop + viewport.height >=
+        frame.contentHeight - viewport.height;
       if (nearBottom && items.length < total) {
         options.onNeedMore?.();
       }
@@ -308,7 +314,10 @@ export async function mountMediaGridSession(
     event.preventDefault();
     const frame = currentFrame();
     const maxScroll = Math.max(0, frame.contentHeight - viewport.height);
-    const next = Math.min(maxScroll, Math.max(0, viewport.scrollTop + event.deltaY));
+    const next = Math.min(
+      maxScroll,
+      Math.max(0, viewport.scrollTop + event.deltaY),
+    );
     if (next === viewport.scrollTop) return;
     viewport = { ...viewport, scrollTop: next };
     scheduleRender();
@@ -345,7 +354,9 @@ export async function mountMediaGridSession(
       selection = {
         selectedIds: partial.selectedIds ?? selection.selectedIds,
         hoveredId:
-          partial.hoveredId !== undefined ? partial.hoveredId : selection.hoveredId,
+          partial.hoveredId !== undefined
+            ? partial.hoveredId
+            : selection.hoveredId,
       };
       scheduleRender();
     },
