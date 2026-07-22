@@ -8,12 +8,16 @@
 
 ### 变更
 
-- **FR2-065 根目录卫生与默认数据目录**：默认 `DB_PATH` 改为 `data/jianvideo.db`（可用环境变量覆盖以保留旧布局）；新增 `scripts/root-hygiene.mjs` 与 `pnpm quality:root` 门禁，禁止根目录堆放 db/hls/thumbnails 等运行期垃圾。架构对齐 specs 索引见 `docs/specs/README.md`（FR2-064～072）。
+- **FR2-064 架构对齐蓝图**：PRD 登记对齐-A～D（FR2-065～072）与依赖序；specs 索引见 `docs/specs/README.md`。默认不做 GORM→sqlx、全量 CGO=0。
+- **FR2-065 根目录卫生与默认数据目录**：默认 `DB_PATH` 改为 `data/jianvideo.db`（可用环境变量覆盖以保留旧布局）；新增 `scripts/root-hygiene.mjs` 与 `pnpm quality:root` 门禁，禁止根目录堆放 db/hls/thumbnails 等运行期垃圾。
 - 若本机仍使用根目录 `jianvideo.db`，请设置 `DB_PATH=jianvideo.db` 或将库与缓存移入 `data/` 后清理根目录，否则 `quality:root` 会失败。
 - **FR2-066 生产主端迁入 `apps/web`**：源码与构建从 `frontend/` 迁至 `apps/web`（`@jianvideo/web`）；根 `frontend:*` 脚本与 CI/Makefile/Playwright 转发到 `apps/web`。
 - **FR2-067 业务 Go 迁入 `apps/server`**：`main.go` / `internal/*` / `config` / Go e2e 离开仓库根；根 `go.work` 指向 `apps/server`；`//go:embed all:web/dist`，由 `apps/web` 构建同步 embed 目录；根目录无业务 Go；Makefile/CI/`pnpm go:*` 在 `apps/server` 执行。
 - **FR2-068 工具链入口**：新增 `apps/server/Taskfile.yml`（lint/test/build/quality…，CGO=1）；根 Makefile 委托 task，并提供 `install`/`dev`/`check`；`pnpm go:*` 走 task。
 - **FR2-069 迁移后真貌文档**：ARCHITECTURE / architecture-invariants / README 与 `apps/server`+`apps/web` 落点一致，删除根单体与旧 `frontend` 构建说明。
+- **FR2-070 后端分层硬化（保留 GORM）**：api 禁直连业务表；settings / tasks.Tx / library 各域 repository 落地；library 生产路径无 `s.db`（含 media 写路径、summary/dedup/file_hash、media_type_rules、bookmark、watch、recycle_cleanup 等）；不引入 sqlx，不改对外 API 语义。
+- **FR2-071 OpenAPI 契约首切**：`api/openapi.yaml` 真源 + oapi-codegen Go 生成 + `openapi-check`（结构与 client/mock v2 路径防漂移）；`/health`、auth 契约类型与 `/api/v2/media|tasks` 薄适配单挂；TS 生成式 client 与全量 ServerInterface 挂路由后续。
+- **FR2-072 deploy 骨架**：`deploy/` 多阶段 Dockerfile + compose + `.env.example` + README；默认 CGO=1（mattn/go-sqlite3），不宣称全量 CGO=0 镜像。
 
 ### 修复
 
