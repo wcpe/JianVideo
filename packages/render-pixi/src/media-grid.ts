@@ -185,5 +185,3 @@ export function snapshotMediaGridMetrics(input: {
     hlsRequests: input.hlsRequests,
   });
 }
-
-

@@ -10,6 +10,13 @@
 
 ### 修复
 
+## 0.25.0-rc.6（2026-07-22，候选发布）
+
+### 修复
+
+- Vite 为 `pixi.js` 增加绝对路径 alias，修复内嵌前端生产构建无法从 render-pixi 源码解析依赖。
+- 补齐 `packages/render-pixi/src/media-grid.ts` Prettier 格式。
+
 ## 0.25.0-rc.5（2026-07-22，候选发布）
 
 ### 修复
