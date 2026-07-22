@@ -8,23 +8,9 @@
 
 ### 变更
 
-- **FR2-064 架构对齐蓝图**：PRD 登记对齐-A～D（FR2-065～072）与依赖序；specs 索引见 `docs/specs/README.md`。默认不做 GORM→sqlx、全量 CGO=0。
-- **FR2-065 根目录卫生与默认数据目录**：默认 `DB_PATH` 改为 `data/jianvideo.db`（可用环境变量覆盖以保留旧布局）；新增 `scripts/root-hygiene.mjs` 与 `pnpm quality:root` 门禁，禁止根目录堆放 db/hls/thumbnails 等运行期垃圾。
-- 若本机仍使用根目录 `jianvideo.db`，请设置 `DB_PATH=jianvideo.db` 或将库与缓存移入 `data/` 后清理根目录，否则 `quality:root` 会失败。
-- **FR2-066 生产主端迁入 `apps/web`**：源码与构建从 `frontend/` 迁至 `apps/web`（`@jianvideo/web`）；根 `frontend:*` 脚本与 CI/Makefile/Playwright 转发到 `apps/web`。
-- **FR2-067 业务 Go 迁入 `apps/server`**：`main.go` / `internal/*` / `config` / Go e2e 离开仓库根；根 `go.work` 指向 `apps/server`；`//go:embed all:web/dist`，由 `apps/web` 构建同步 embed 目录；根目录无业务 Go；Makefile/CI/`pnpm go:*` 在 `apps/server` 执行。
-- **FR2-068 工具链入口**：新增 `apps/server/Taskfile.yml`（lint/test/build/quality…，CGO=1）；根 Makefile 委托 task，并提供 `install`/`dev`/`check`；`pnpm go:*` 走 task。
-- **FR2-069 迁移后真貌文档**：ARCHITECTURE / architecture-invariants / README 与 `apps/server`+`apps/web` 落点一致，删除根单体与旧 `frontend` 构建说明。
-- **FR2-070 后端分层硬化（保留 GORM）**：api 禁直连业务表；settings / tasks.Tx / library 各域 repository 落地；library 生产路径无 `s.db`（含 media 写路径、summary/dedup/file_hash、media_type_rules、bookmark、watch、recycle_cleanup 等）；不引入 sqlx，不改对外 API 语义。
-- **FR2-071 OpenAPI 契约首切**：`api/openapi.yaml` 真源 + oapi-codegen Go 生成 + `openapi-check`（结构与 client/mock v2 路径防漂移）；`/health`、auth 契约类型与 `/api/v2/media|tasks` 薄适配单挂；TS 生成式 client 与全量 ServerInterface 挂路由后续。
-- **FR2-072 deploy 骨架**：`deploy/` 多阶段 Dockerfile + compose + `.env.example` + README；默认 CGO=1（mattn/go-sqlite3），不宣称全量 CGO=0 镜像。
-
 ### 修复
 
-- 401 响应不再 `location.href` 硬刷登录页：登录/初始化/改密失败展示后端错误文案；会话失效 toast 说明原因并以 SPA 软跳 `/login`。
-- `.gitignore` 忽略各包 `coverage/` 目录，避免 vitest 覆盖率产物进入工作区未跟踪列表。
-
-## 0.25.0（2026-07-22）
+## 0.25.0（2026-07-23）
 
 ### 变更
 
@@ -38,11 +24,24 @@
 - **FR2-009 Pixi 高密度媒体浏览器**：`packages/render-pixi` 扩展生产网格会话（窗口化、纹理池、缩略图限流、hover 预览判定）；前端新增 `/media-grid` 媒体网格页接真实分页 API；附 `media-ui-target-1m` 窗口化 Benchmark 报告（`.tmp/`）。
 - **FR2-038 图片编辑导出**：`POST /api/library/media/:id/image-export` 入队 `media.image.export`；ImageMagick 调色导出到 `exports/`，不改原文件；详情面板编辑器预览 + 重置 + 导出；产物 `GET /api/library/exports/:task_id/download`。
 - **FR2-039 视频粗剪导出**：`POST /api/library/media/:id/clip-export` 入队 `media.video.clip`；ffmpeg 优先 stream copy、失败重编码；播放页/详情入口；原文件不变。
+- **FR2-064 架构对齐蓝图**：PRD 登记对齐-A～D（FR2-065～072）与依赖序；specs 索引见 `docs/specs/README.md`。默认不做 GORM→sqlx、全量 CGO=0。
+- **FR2-065 根目录卫生与默认数据目录**：默认 `DB_PATH` 改为 `data/jianvideo.db`（可用环境变量覆盖以保留旧布局）；新增 `scripts/root-hygiene.mjs` 与 `pnpm quality:root` 门禁，禁止根目录堆放 db/hls/thumbnails 等运行期垃圾。
+- 若本机仍使用根目录 `jianvideo.db`，请设置 `DB_PATH=jianvideo.db` 或将库与缓存移入 `data/` 后清理根目录，否则 `quality:root` 会失败。
+- **FR2-066 生产主端迁入 `apps/web`**：源码与构建从 `frontend/` 迁至 `apps/web`（`@jianvideo/web`）；根 `frontend:*` 脚本与 CI/Makefile/Playwright 转发到 `apps/web`。
+- **FR2-067 业务 Go 迁入 `apps/server`**：`main.go` / `internal/*` / `config` / Go e2e 离开仓库根；根 `go.work` 指向 `apps/server`；`//go:embed all:web/dist`，由 `apps/web` 构建同步 embed 目录；根目录无业务 Go；Makefile/CI/`pnpm go:*` 在 `apps/server` 执行。
+- **FR2-068 工具链入口**：新增 `apps/server/Taskfile.yml`（lint/test/build/quality…，CGO=1）；根 Makefile 委托 task，并提供 `install`/`dev`/`check`；`pnpm go:*` 走 task。
+- **FR2-069 迁移后真貌文档**：ARCHITECTURE / architecture-invariants / README 与 `apps/server`+`apps/web` 落点一致，删除根单体与旧 `frontend` 构建说明。
+- **FR2-070 后端分层硬化（保留 GORM）**：api 禁直连业务表；settings / tasks.Tx / library 各域 repository 落地；library 生产路径无 `s.db`（含 media 写路径、summary/dedup/file_hash、media_type_rules、bookmark、watch、recycle_cleanup 等）；不引入 sqlx，不改对外 API 语义。
+- **FR2-071 OpenAPI 契约首切**：`api/openapi.yaml` 真源 + oapi-codegen Go 生成 + `openapi-check`（结构与 client/mock v2 路径防漂移）；`/health`、auth 契约类型与 `/api/v2/media|tasks` 薄适配单挂；TS 生成式 client 与全量 ServerInterface 挂路由后续。
+- **FR2-072 deploy 骨架**：`deploy/` 多阶段 Dockerfile + compose + `.env.example` + README；默认 CGO=1（mattn/go-sqlite3），不宣称全量 CGO=0 镜像。
 
 ### 修复
 
 - 修复省流量阻断与后端快照短暂滞后的播放状态竞态：核心仍保有播放意图时强制暂停底层播放器并停止加载，解除阻断后恢复播放。
 - 修复候选发布链路中的 pixi 依赖解析、gofmt/gosec/govulncheck 与 `render-pixi` 覆盖率门禁，保证 RC→GA 可复现构建。
+- 401 响应不再 `location.href` 硬刷登录页：登录/初始化/改密失败展示后端错误文案；会话失效 toast 说明原因并以 SPA 软跳 `/login`。
+- `.gitignore` 忽略各包 `coverage/` 目录，避免 vitest 覆盖率产物进入工作区未跟踪列表。
+- 质量门适配 monorepo：`apps/web` 保持 npm-only 排除出 pnpm workspace；e2e 使用仓库根绝对 `DB_PATH`；章节夹具路径改指 `apps/server`；补齐 config 覆盖率与 openapi stub lint。
 
 ## 0.25.0-rc.8（2026-07-22，候选发布）
 

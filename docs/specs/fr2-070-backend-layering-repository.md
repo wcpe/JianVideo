@@ -1,6 +1,6 @@
 # 功能规格：后端分层硬化（保留 GORM）
 
-> 状态：首切 + Tx 抽象 + ListSpaces DBProvider + tags/albums + covers/view + watch + inference + health + media 写路径全切片 + library path/MediaExtension + Space + 扫描对账 + summary + next_episode + dedup + file_hash + media_type_rules + bookmark + watch_state_source + recycle_cleanup repository 已交付；library 生产路径无 `s.db`　·　关联 PRD：FR2-070　·　阶段：对齐-B
+> 状态：已交付@v0.25.0　·　关联 PRD：FR2-070　·　阶段：对齐-B
 
 ## 1. 背景与目标
 
