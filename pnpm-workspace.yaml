@@ -1,5 +1,8 @@
 packages:
-  - apps/*
+  # 生产主端 apps/web 使用 npm + package-lock（含 mpegts 等），不入 pnpm workspace。
+  - 'apps/*'
+  - '!apps/web'
+  - '!apps/server'
   - packages/*
 onlyBuiltDependencies:
   - esbuild
