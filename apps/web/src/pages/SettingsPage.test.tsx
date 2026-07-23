@@ -770,6 +770,74 @@ describe('SettingsPage', () => {
     });
   });
 
+  // FR2-062：会话列表与撤销
+  it('账户安全区展示我的设备会话列表（FR2-062）', async () => {
+    renderPage();
+    expect(await screen.findByText('MockBrowser/1.0', {}, { timeout: 10000 })).toBeVisible();
+    expect(screen.getByText('OtherDevice/2.0')).toBeVisible();
+    expect(screen.getByText('当前')).toBeVisible();
+    expect(screen.getByRole('button', { name: '撤销' })).toBeInTheDocument();
+  });
+
+  it('撤销其它会话后从列表移除（FR2-062）', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    server.use(
+      http.get('*/api/me/sessions', () =>
+        HttpResponse.json({
+          sessions: deleted
+            ? [
+                {
+                  id: 'sess-current',
+                  created_at: '2026-07-23T10:00:00Z',
+                  last_seen_at: '2026-07-23T12:00:00Z',
+                  expires_at: '2026-07-26T10:00:00Z',
+                  user_agent: 'MockBrowser/1.0',
+                  ip_hash: 'aabbccdd',
+                  current: true,
+                },
+              ]
+            : [
+                {
+                  id: 'sess-current',
+                  created_at: '2026-07-23T10:00:00Z',
+                  last_seen_at: '2026-07-23T12:00:00Z',
+                  expires_at: '2026-07-26T10:00:00Z',
+                  user_agent: 'MockBrowser/1.0',
+                  ip_hash: 'aabbccdd',
+                  current: true,
+                },
+                {
+                  id: 'sess-other',
+                  created_at: '2026-07-22T08:00:00Z',
+                  last_seen_at: '2026-07-22T18:00:00Z',
+                  expires_at: '2026-07-25T08:00:00Z',
+                  user_agent: 'OtherDevice/2.0',
+                  ip_hash: '11223344',
+                  current: false,
+                },
+              ],
+        }),
+      ),
+      http.delete('*/api/me/sessions/:id', () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('OtherDevice/2.0', {}, { timeout: 10000 })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '已撤销', color: 'green' }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('OtherDevice/2.0')).not.toBeInTheDocument();
+    });
+  });
+
   // ─── 家长控制（FR2-051）──────────────────────────────
   // Mantine Select 在本环境常以 <input aria-label> 呈现（非稳定 combobox role）；
   // 下拉打开时 listbox 也会关联同一 label，故用 selector:'input' 限定到输入框。

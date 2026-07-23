@@ -54,7 +54,7 @@ import {
   downloadTool,
 } from '@/api/system';
 import { listTasks } from '@/api/tasks';
-import { changePassword } from '@/api/auth';
+import { changePassword, listSessions, revokeSession, type AuthSessionItem } from '@/api/auth';
 import {
   addSpaceMember,
   createSpace,
@@ -185,6 +185,12 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
+
+  // 我的设备/会话（FR2-062）
+  const [sessions, setSessions] = useState<AuthSessionItem[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [revokingSessionID, setRevokingSessionID] = useState<string | null>(null);
 
   // 家长控制（FR2-051）：Space 默认最高可见级 + 成员覆盖；改策略需密码确认
   const [parentalSpace, setParentalSpace] = useState<SpaceSummary | null>(null);
@@ -764,16 +770,75 @@ export default function SettingsPage() {
       setConfirmPassword('');
       notifications.show({
         title: '修改成功',
-        message: '密码已更新',
+        message: '密码已更新；其它设备上的会话已失效',
         color: 'green',
-        autoClose: 2000,
+        autoClose: 3000,
       });
+      // 改密后刷新会话列表（其它会话应已消失）
+      try {
+        setSessions(await listSessions());
+      } catch {
+        /* 忽略刷新失败 */
+      }
     } catch (err) {
       setPwError(extractErrorMessage(err, '修改密码失败'));
     } finally {
       setChangingPassword(false);
     }
   }, [currentPassword, newPassword, confirmPassword]);
+
+  const loadSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    setSessionsError(null);
+    try {
+      setSessions(await listSessions());
+    } catch (err) {
+      setSessionsError(extractErrorMessage(err, '加载会话失败'));
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  const handleRevokeSession = useCallback(
+    async (sessionId: string, isCurrent: boolean) => {
+      setRevokingSessionID(sessionId);
+      try {
+        await revokeSession(sessionId);
+        if (isCurrent) {
+          notifications.show({
+            title: '已退出当前会话',
+            message: '请重新登录',
+            color: 'orange',
+            autoClose: 3000,
+          });
+          // 清本地态，交给路由守卫导向登录
+          useAuthStore.getState().clearAuth();
+          return;
+        }
+        notifications.show({
+          title: '已撤销',
+          message: '该设备会话已失效',
+          color: 'green',
+          autoClose: 2000,
+        });
+        await loadSessions();
+      } catch (err) {
+        notifications.show({
+          title: '撤销失败',
+          message: extractErrorMessage(err, '撤销会话失败'),
+          color: 'red',
+          autoClose: 4000,
+        });
+      } finally {
+        setRevokingSessionID(null);
+      }
+    },
+    [loadSessions],
+  );
 
   // 保存 Space 默认最高可见分级（FR2-051，需密码确认）
   const handleSaveParentalDefault = useCallback(async () => {
@@ -1094,6 +1159,75 @@ export default function SettingsPage() {
                 修改密码
               </Button>
             </Group>
+            <Text size="xs" c="dimmed">
+              修改密码后，其它设备上的登录会话将立即失效（当前设备保留）。
+            </Text>
+
+            <Divider label="我的设备 / 会话" labelPosition="left" />
+            {sessionsLoading ? (
+              <Skeleton height={100} radius="md" />
+            ) : sessionsError ? (
+              <Alert icon={<IconAlertCircle size={16} />} color="orange" title="会话">
+                {sessionsError}
+              </Alert>
+            ) : sessions.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                暂无活跃会话（或会话表尚未迁移）。
+              </Text>
+            ) : (
+              <Table striped highlightOnHover withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>设备</Table.Th>
+                    <Table.Th>最近活跃</Table.Th>
+                    <Table.Th>状态</Table.Th>
+                    <Table.Th w={100}>操作</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {sessions.map((s) => (
+                    <Table.Tr key={s.id} data-testid={`session-row-${s.id}`}>
+                      <Table.Td>
+                        <Text size="sm" lineClamp={2}>
+                          {s.user_agent || '未知设备'}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          IP 指纹 {s.ip_hash || '—'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{s.last_seen_at || '—'}</Text>
+                        <Text size="xs" c="dimmed">
+                          创建于 {s.created_at || '—'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {s.current ? (
+                          <Badge color="green" variant="light">
+                            当前
+                          </Badge>
+                        ) : (
+                          <Badge color="gray" variant="light">
+                            其它
+                          </Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Button
+                          size="xs"
+                          variant={s.current ? 'light' : 'outline'}
+                          color="red"
+                          loading={revokingSessionID === s.id}
+                          onClick={() => void handleRevokeSession(s.id, s.current)}
+                        >
+                          {s.current ? '退出' : '撤销'}
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
           </Stack>
         </Card>
 

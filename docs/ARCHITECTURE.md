@@ -61,7 +61,7 @@
 | `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；`Tx`/`AsTx` + `EnqueueTx(ctx, Tx, …)` 供同事务跨域入队（FR2-070）；承载 `transcode.hls.preview`、`metadata.parse` / `metadata.backfill` / `metadata.writeback`（FR2-033）、导出任务等 | → `db`, `audit` |
 | `storage` | 可重建缓存资产登记、Space/profile/task 路径边界、盘点与异步安全清理；普通 HLS 按 profile、音轨重载按 task 目录登记 | → `tasks`, `db`, `audit` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
-| `auth` | 登录/会话（JWT + bcrypt）、用户创建与 status；Space 成员访问解析（FR2-010）；登录防爆破限流（FR2-062，进程内滑动窗口） | → `db` |
+| `auth` | 登录/会话（JWT + bcrypt + `auth_sessions`/`sid`）、用户创建与 status；Space 成员访问解析（FR2-010）；登录防爆破限流（FR2-062，进程内滑动窗口）；会话列表/撤销与改密撤其它会话 | → `db` |
 | `space` | Space 成员/角色（owner/editor/viewer）、可访问 Space 列表、创建 Space 与成员变更（FR2-010）；有效最高可见分级解析与策略写入（FR2-051） | → `db` |
 | `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；`Repository`/`TxRepository` 隔离 GORM（FR2-070）；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
 | `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交；`GetByID` 供回滚中心定位事件 | → `db` |

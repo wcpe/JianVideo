@@ -12,7 +12,8 @@
 - **FR2-054 回收站保留期首切**：设置键 `recycle_retention_days` / `recycle_auto_cleanup_enabled` / `recycle_auto_cleanup_interval_sec`；有界到期自动清理（缺盘符跳过单条）；`POST .../auto-cleanup/preview|run`；启动调度 tick + 审计 `recycle.auto_cleanup`。
 - **FR2-054 二切（前端保留期 UI）**：设置页回收站分区可编辑保留天数 / 自动清理开关 / 调度周期；回收站页展示策略摘要与按 `deleted_at+retention` 计算的行内到期提示。
 - **FR2-062 安全基线首切**：OPERATIONS HTTPS/反代与生产密钥清单；登录防爆破（用户名+IP 滑动窗口，默认 10/10min→锁 15min，`429 LOGIN_LOCKED`）；失败统一「用户名或密码错误」；审计 `auth.login_failed` / `auth.login_locked`（IP 哈希）。
-- **FR2-062 二切（登录 429 前端）**：`extractErrorCode` / `extractRetryAfterSeconds`；auth store 记录 `errorCode`/`loginRetryAfterSec`；登录页 `LOGIN_LOCKED` 橙色「登录已暂时锁定」Alert + 等待秒数提示（凭据错误仍为红色）；MSW `locked` 用户演示；会话表/撤销 UI 仍待后端。
+- **FR2-062 二切（登录 429 前端）**：`extractErrorCode` / `extractRetryAfterSeconds`；auth store 记录 `errorCode`/`loginRetryAfterSec`；登录页 `LOGIN_LOCKED` 橙色「登录已暂时锁定」Alert + 等待秒数提示（凭据错误仍为红色）；MSW `locked` 用户演示。
+- **FR2-062 二切（会话与设备）**：`auth_sessions` 表 + JWT `sid`；登录/初始化建会话；APIGuard 校验未撤销；`GET/DELETE /api/me/sessions`；改密撤其它会话、登出撤当前；设置页「我的设备/会话」列表与撤销。
 - **FR2-055 分享增强首切**：`shares.allow_download`（默认 true）；创建/公开元信息回显；禁下载时公开 download `404`；公开缩略图仅读已有缓存、不入队生成；审计 `share.created` / `share.revoked`。
 - **FR2-055 二切（前端）**：创建分享弹窗「允许下载原文件」开关透传 `allow_download`；公开页按元信息隐藏下载按钮（缺省兼容为允许）。
 - **FR2-051 家长控制与内容分级首切**：`media_files.content_rating`、`spaces.default_max_rating`、`space_members.max_rating`（迁移 `20260723_0026_...`）；有效等级解析（成员覆盖 > Space 默认）；列表/详情按 max 过滤，越权 id→`404`；`PUT .../content-rating`、`PUT .../parental`、`PUT .../members/:id/max-rating`（改策略需密码确认）；审计 `media.content_rating_updated` / `space.parental_updated` / `space.member_max_rating_updated`。UNRATED/空默认对受限用户可见。

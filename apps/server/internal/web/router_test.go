@@ -577,6 +577,169 @@ func TestHealthCheck(t *testing.T) {
 }
 
 
+// TestSessions_ListAndRevoke 登录签发 sid，列表含当前会话，撤销后旧 JWT 失效（FR2-062）。
+func TestSessions_ListAndRevoke(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gormDB, err := gorm.Open(sqlite.Open("file:sess_list?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := gormDB.DB()
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT DEFAULT 'active', created_at DATETIME)`,
+		`CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id INTEGER NOT NULL, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE auth_sessions (
+			id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL, last_seen_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '', ip_hash TEXT NOT NULL DEFAULT '', revoked_at DATETIME
+		)`,
+	} {
+		if err := gormDB.Exec(stmt).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := auth.NewService(sqlDB, "sess-secret")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{JWTSecret: "sess-secret", JWTExpiresIn: time.Hour, DBPath: ":memory:"}
+	r := gin.New()
+	r.Use(auth.APIGuard(cfg.JWTSecret, svc))
+	r.POST("/api/auth/login", handleLogin(svc, cfg, auth.NewLoginLimiter(), nil))
+	r.GET("/api/me/sessions", handleListSessions(svc))
+	r.DELETE("/api/me/sessions/:id", handleRevokeSession(svc))
+	r.GET("/api/me", handleMe)
+
+	// 登录
+	loginBody := `{"username":"admin","password":"admin"}`
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginW := httptest.NewRecorder()
+	r.ServeHTTP(loginW, loginReq)
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("登录期望 200, 得到 %d %s", loginW.Code, loginW.Body.String())
+	}
+	var token string
+	for _, c := range loginW.Result().Cookies() {
+		if c.Name == "auth_token" {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatal("登录应下发 auth_token Cookie")
+	}
+	claims, err := auth.ParseToken(token, cfg.JWTSecret)
+	if err != nil || claims.SessionID == "" {
+		t.Fatalf("JWT 应含 sid: err=%v claims=%+v", err, claims)
+	}
+
+	// 列表
+	listReq := httptest.NewRequest(http.MethodGet, "/api/me/sessions", nil)
+	listReq.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("列会话期望 200, 得到 %d %s", listW.Code, listW.Body.String())
+	}
+	if !strings.Contains(listW.Body.String(), claims.SessionID) || !strings.Contains(listW.Body.String(), `"current":true`) {
+		t.Fatalf("列表应含当前会话: %s", listW.Body.String())
+	}
+
+	// 撤销
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/me/sessions/"+claims.SessionID, nil)
+	delReq.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+	delW := httptest.NewRecorder()
+	r.ServeHTTP(delW, delReq)
+	if delW.Code != http.StatusNoContent {
+		t.Fatalf("撤销期望 204, 得到 %d %s", delW.Code, delW.Body.String())
+	}
+
+	// 旧 JWT 再访问
+	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
+	meW := httptest.NewRecorder()
+	r.ServeHTTP(meW, meReq)
+	if meW.Code != http.StatusUnauthorized {
+		t.Fatalf("撤销后期望 401, 得到 %d %s", meW.Code, meW.Body.String())
+	}
+	if !strings.Contains(meW.Body.String(), "SESSION_REVOKED") {
+		t.Fatalf("应含 SESSION_REVOKED: %s", meW.Body.String())
+	}
+}
+
+// TestChangePassword_RevokesOtherSessions 改密后其它会话失效（FR2-062）。
+func TestChangePassword_RevokesOtherSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gormDB, err := gorm.Open(sqlite.Open("file:sess_pwd?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := gormDB.DB()
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT DEFAULT 'active', created_at DATETIME)`,
+		`CREATE TABLE auth_sessions (
+			id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL, last_seen_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '', ip_hash TEXT NOT NULL DEFAULT '', revoked_at DATETIME
+		)`,
+	} {
+		if err := gormDB.Exec(stmt).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := auth.NewService(sqlDB, "pwd-secret")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatal(err)
+	}
+	tokA, sidA, err := svc.CreateSessionAndToken(1, "admin", "ua-a", "1.1.1.1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokB, _, err := svc.CreateSessionAndToken(1, "admin", "ua-b", "1.1.1.2", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.Use(auth.APIGuard("pwd-secret", svc))
+	r.POST("/api/me/password", handleChangePassword(svc))
+	r.GET("/api/me", handleMe)
+
+	body := `{"old_password":"admin","new_password":"new-pass-1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/me/password", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "auth_token", Value: tokA})
+	// APIGuard 会设 session_id；CreateSessionAndToken 签发的 JWT 含 sid
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("改密期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+
+	// 会话 B 应失效
+	meB := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meB.AddCookie(&http.Cookie{Name: "auth_token", Value: tokB})
+	wb := httptest.NewRecorder()
+	r.ServeHTTP(wb, meB)
+	if wb.Code != http.StatusUnauthorized {
+		t.Fatalf("其它会话应 401, 得到 %d %s", wb.Code, wb.Body.String())
+	}
+
+	// 当前会话 A 仍有效
+	meA := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meA.AddCookie(&http.Cookie{Name: "auth_token", Value: tokA})
+	wa := httptest.NewRecorder()
+	r.ServeHTTP(wa, meA)
+	if wa.Code != http.StatusOK {
+		t.Fatalf("当前会话应 200, 得到 %d %s", wa.Code, wa.Body.String())
+	}
+	_ = sidA
+}
+
 // TestLogin_LocksAfterFailures 连续错误密码达阈值后 429（FR2-062）。
 func TestLogin_LocksAfterFailures(t *testing.T) {
 	gin.SetMode(gin.TestMode)

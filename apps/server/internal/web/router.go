@@ -131,7 +131,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		authGroup := apiGroup.Group("/auth")
 		{
 			authGroup.POST("/login", handleLogin(svc, cfg, loginLimiter, loginAudit))
-			authGroup.POST("/logout", handleLogout)
+			// 登出：尽力撤销当前 sid（需已鉴权上下文；未登录仅清 Cookie）
+			authGroup.POST("/logout", handleLogout(svc))
 			// 首次初始化（FR-109）：免登查询是否需初始化 + 无用户时创建首个账户并自动登录
 			authGroup.GET("/setup-status", handleSetupStatus(svc))
 			authGroup.POST("/setup", handleSetup(svc, cfg))
@@ -141,6 +142,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 		apiGroup.GET("/me", handleMe)
 		// 修改密码（FR-108）：受 APIGuard 保护（须已登录），从认证上下文取当前用户名
 		apiGroup.POST("/me/password", handleChangePassword(svc))
+		// FR2-062：当前用户会话列表 / 撤销
+		apiGroup.GET("/me/sessions", handleListSessions(svc))
+		apiGroup.DELETE("/me/sessions/:id", handleRevokeSession(svc))
 	}
 
 	return r
@@ -214,7 +218,7 @@ func handleLogin(svc *auth.Service, cfg *config.Config, limiter *auth.LoginLimit
 		}
 
 		limiter.Success(key)
-		token, err := auth.GenerateToken(user.Username, cfg.JWTSecret, cfg.JWTExpiresIn)
+		token, err := issueSessionToken(svc, cfg, user, c)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, openapi.Error{Code: "INTERNAL_ERROR", Message: "生成令牌失败"})
 			return
@@ -224,6 +228,21 @@ func handleLogin(svc *auth.Service, cfg *config.Config, limiter *auth.LoginLimit
 		// 成功体用契约 LoginResponse（FR2-071）；状态码/Cookie 语义不变
 		c.JSON(http.StatusOK, openapi.LoginResponse{Username: user.Username})
 	}
+}
+
+// issueSessionToken 优先建会话并签发含 sid 的 JWT；表未就绪时回退无 sid 令牌。
+func issueSessionToken(svc *auth.Service, cfg *config.Config, user *models.User, c *gin.Context) (string, error) {
+	if svc != nil && svc.SessionTableReady() {
+		token, _, err := svc.CreateSessionAndToken(
+			int64(user.ID),
+			user.Username,
+			c.Request.UserAgent(),
+			c.ClientIP(),
+			cfg.JWTExpiresIn,
+		)
+		return token, err
+	}
+	return auth.GenerateToken(user.Username, cfg.JWTSecret, cfg.JWTExpiresIn)
 }
 
 func recordLoginAudit(c *gin.Context, rec audit.Recorder, action, username, clientIP string, extra map[string]any) {
@@ -248,10 +267,33 @@ func recordLoginAudit(c *gin.Context, rec audit.Recorder, action, username, clie
 	})
 }
 
-func handleLogout(c *gin.Context) {
-	auth.ClearAuthCookie(c)
-	// 历史语义为 204；openapi 声明 200，本波不改状态码以免破坏客户端
-	c.Status(http.StatusNoContent)
+func handleLogout(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 尽力撤销当前会话：从 Cookie 解析 sid（logout 在 /api/auth/ 下，APIGuard 不注入上下文）
+		if svc != nil && svc.SessionTableReady() {
+			if raw := extractTokenFromRequest(c); raw != "" {
+				if claims, err := auth.ParseToken(raw, svc.JWTSecret()); err == nil && claims.SessionID != "" {
+					if user, err := svc.FindUserByUsername(claims.Username); err == nil && user != nil {
+						_ = svc.RevokeSession(claims.SessionID, int64(user.ID))
+					}
+				}
+			}
+		}
+		auth.ClearAuthCookie(c)
+		// 历史语义为 204；openapi 声明 200，本波不改状态码以免破坏客户端
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func extractTokenFromRequest(c *gin.Context) string {
+	if tok, err := c.Cookie("auth_token"); err == nil && tok != "" {
+		return tok
+	}
+	h := c.GetHeader("Authorization")
+	if strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	return ""
 }
 
 // handleSetupStatus 返回是否需要首次初始化（系统无任何用户），免登可查（FR-109）。
@@ -289,7 +331,7 @@ func handleSetup(svc *auth.Service, cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, openapi.Error{Code: "SETUP_FAILED", Message: err.Error()})
 			return
 		}
-		token, err := auth.GenerateToken(user.Username, cfg.JWTSecret, cfg.JWTExpiresIn)
+		token, err := issueSessionToken(svc, cfg, user, c)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, openapi.Error{Code: "INTERNAL_ERROR", Message: "生成令牌失败"})
 			return
@@ -313,6 +355,7 @@ type changePasswordRequest struct {
 
 // handleChangePassword 修改当前登录用户的密码（FR-108）。
 // 受 APIGuard 保护：用户名取自认证上下文；当前密码不符返回 401，成功返回 204。
+// FR2-062：改密成功后撤销其它会话，保留当前 sid。
 func handleChangePassword(svc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username, ok := c.Get("username")
@@ -333,6 +376,91 @@ func handleChangePassword(svc *auth.Service) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "CHANGE_PASSWORD_FAILED", "message": err.Error()})
 			return
+		}
+		// 改密后撤其它会话
+		if svc.SessionTableReady() {
+			userID, _ := c.Get("user_id")
+			sid, _ := c.Get("session_id")
+			uid, _ := userID.(int)
+			keep, _ := sid.(string)
+			if uid > 0 {
+				_ = svc.RevokeOtherSessions(int64(uid), keep)
+			}
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// handleListSessions 列出当前用户有效会话（FR2-062）。
+func handleListSessions(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !svc.SessionTableReady() {
+			c.JSON(http.StatusOK, gin.H{"sessions": []any{}})
+			return
+		}
+		userID, ok := c.Get("user_id")
+		uid, _ := userID.(int)
+		if !ok || uid <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "未认证"})
+			return
+		}
+		list, err := svc.ListSessions(int64(uid))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "列出会话失败"})
+			return
+		}
+		currentSID, _ := c.Get("session_id")
+		cur, _ := currentSID.(string)
+		type sessionDTO struct {
+			ID         string `json:"id"`
+			CreatedAt  string `json:"created_at"`
+			LastSeenAt string `json:"last_seen_at"`
+			ExpiresAt  string `json:"expires_at"`
+			UserAgent  string `json:"user_agent"`
+			IPHash     string `json:"ip_hash"`
+			Current    bool   `json:"current"`
+		}
+		out := make([]sessionDTO, 0, len(list))
+		for _, s := range list {
+			out = append(out, sessionDTO{
+				ID:         s.ID,
+				CreatedAt:  s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+				LastSeenAt: s.LastSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+				ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+				UserAgent:  s.UserAgent,
+				IPHash:     s.IPHash,
+				Current:    s.ID == cur,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"sessions": out})
+	}
+}
+
+// handleRevokeSession 撤销当前用户的指定会话（FR2-062）。
+func handleRevokeSession(svc *auth.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !svc.SessionTableReady() {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "会话不存在"})
+			return
+		}
+		userID, ok := c.Get("user_id")
+		uid, _ := userID.(int)
+		if !ok || uid <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "message": "未认证"})
+			return
+		}
+		sid := strings.TrimSpace(c.Param("id"))
+		if sid == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "会话 id 无效"})
+			return
+		}
+		if err := svc.RevokeSession(sid, int64(uid)); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "会话不存在或已撤销"})
+			return
+		}
+		// 若撤销的是当前会话，清 Cookie
+		if cur, _ := c.Get("session_id"); cur == sid {
+			auth.ClearAuthCookie(c)
 		}
 		c.Status(http.StatusNoContent)
 	}

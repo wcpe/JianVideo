@@ -1,4 +1,4 @@
-// Package auth 提供单用户认证与 JWT 令牌签发、校验能力。
+// Package auth 提供认证与 JWT 令牌签发、校验能力。
 package auth
 
 import (
@@ -8,16 +8,23 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims 自定义 JWT 声明
+// Claims 自定义 JWT 声明。SessionID 对应 auth_sessions.id（FR2-062）；旧令牌可为空以兼容过渡。
 type Claims struct {
-	Username string `json:"username"`
+	Username  string `json:"username"`
+	SessionID string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
-// GenerateToken 生成 JWT 令牌
+// GenerateToken 生成 JWT 令牌（无会话 id，兼容测试与过渡签发）。
 func GenerateToken(username, secret string, expiresIn time.Duration) (string, error) {
+	return GenerateTokenWithSession(username, "", secret, expiresIn)
+}
+
+// GenerateTokenWithSession 生成带会话 id 的 JWT。
+func GenerateTokenWithSession(username, sessionID, secret string, expiresIn time.Duration) (string, error) {
 	claims := Claims{
-		Username: username,
+		Username:  username,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

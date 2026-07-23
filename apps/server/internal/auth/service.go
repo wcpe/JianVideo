@@ -25,6 +25,14 @@ func NewService(d *sql.DB, jwtSecret string) *Service {
 	return &Service{db: d, jwtSecret: jwtSecret}
 }
 
+// JWTSecret 返回签发密钥（登出等路径解析 Cookie 时使用）。
+func (s *Service) JWTSecret() string {
+	if s == nil {
+		return ""
+	}
+	return s.jwtSecret
+}
+
 // NeedsSetup 报告是否需要首次初始化：系统中尚无任何用户时返回 true（FR-109）。
 func (s *Service) NeedsSetup() (bool, error) {
 	exists, err := models.UserExists(s.db)

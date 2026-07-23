@@ -240,6 +240,14 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFR2051ContentRating,
 			Validate:    validateFR2051ContentRating,
 		},
+		{
+			ID:          "20260723_0027_fr2_062_auth_sessions",
+			Description: "FR2-062：auth_sessions 登录会话表（JWT sid 与撤销）",
+			SafeToRetry: true,
+			Estimate:    estimateFR2062AuthSessions,
+			Up:          migrateFR2062AuthSessions,
+			Validate:    validateFR2062AuthSessions,
+		},
 	}
 }
 
@@ -1875,6 +1883,49 @@ func validateFR2051ContentRating(_ context.Context, db *gorm.DB) (Validation, er
 		return Validation{}, fmt.Errorf("space_members 缺少 max_rating")
 	}
 	return Validation{Summary: "FR2-051 内容分级列已就绪"}, nil
+}
+
+func estimateFR2062AuthSessions(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "auth_sessions") {
+		return StepPlan{EstimatedRows: 0}, nil
+	}
+	var n int64
+	if err := db.Table("auth_sessions").Count(&n).Error; err != nil {
+		return StepPlan{}, err
+	}
+	return StepPlan{EstimatedRows: n}, nil
+}
+
+func migrateFR2062AuthSessions(_ context.Context, tx *gorm.DB) error {
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS auth_sessions (
+			id TEXT PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '',
+			ip_hash TEXT NOT NULL DEFAULT '',
+			revoked_at DATETIME
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_last_seen ON auth_sessions(user_id, last_seen_at)`).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active ON auth_sessions(user_id) WHERE revoked_at IS NULL`).Error
+}
+
+func validateFR2062AuthSessions(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "auth_sessions") {
+		return Validation{}, fmt.Errorf("auth_sessions 表不存在")
+	}
+	for _, col := range []string{"id", "user_id", "created_at", "last_seen_at", "expires_at", "user_agent", "ip_hash", "revoked_at"} {
+		if !columnExists(db, "auth_sessions", col) {
+			return Validation{}, fmt.Errorf("auth_sessions 缺少 %s", col)
+		}
+	}
+	return Validation{Summary: "FR2-062 auth_sessions 会话表已就绪"}, nil
 }
 
 func estimateFR2055ShareAllowDownload(_ context.Context, db *gorm.DB) (StepPlan, error) {

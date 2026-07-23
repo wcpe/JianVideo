@@ -35,6 +35,26 @@ async function realChangePassword(oldPassword: string, newPassword: string): Pro
   await client.post('/api/me/password', { old_password: oldPassword, new_password: newPassword });
 }
 
+/** 登录会话（FR2-062） */
+export interface AuthSessionItem {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  user_agent: string;
+  ip_hash: string;
+  current: boolean;
+}
+
+async function realListSessions(): Promise<AuthSessionItem[]> {
+  const res = await client.get<{ sessions: AuthSessionItem[] }>('/api/me/sessions');
+  return res.data.sessions ?? [];
+}
+
+async function realRevokeSession(sessionId: string): Promise<void> {
+  await client.delete(`/api/me/sessions/${encodeURIComponent(sessionId)}`);
+}
+
 // ─── Mock API ────────────────────────────────────────
 
 function mockDelay(ms: number): Promise<void> {
@@ -72,6 +92,37 @@ async function mockChangePassword(oldPassword: string, _newPassword: string): Pr
   if (oldPassword !== 'admin') throw new Error('当前密码错误');
 }
 
+let mockSessions: AuthSessionItem[] = [
+  {
+    id: 'sess-current',
+    created_at: '2026-07-23T10:00:00Z',
+    last_seen_at: '2026-07-23T12:00:00Z',
+    expires_at: '2026-07-26T10:00:00Z',
+    user_agent: 'MockBrowser/1.0',
+    ip_hash: 'aabbccdd',
+    current: true,
+  },
+  {
+    id: 'sess-other',
+    created_at: '2026-07-22T08:00:00Z',
+    last_seen_at: '2026-07-22T18:00:00Z',
+    expires_at: '2026-07-25T08:00:00Z',
+    user_agent: 'OtherDevice/2.0',
+    ip_hash: '11223344',
+    current: false,
+  },
+];
+
+async function mockListSessions(): Promise<AuthSessionItem[]> {
+  await mockDelay(100);
+  return mockSessions.map((s) => ({ ...s }));
+}
+
+async function mockRevokeSession(sessionId: string): Promise<void> {
+  await mockDelay(100);
+  mockSessions = mockSessions.filter((s) => s.id !== sessionId);
+}
+
 // ─── 导出（构建时决定 mock 模式）──────────────────────
 
 export function login(username: string, password: string) {
@@ -93,4 +144,10 @@ export function changePassword(oldPassword: string, newPassword: string) {
   return useMock
     ? mockChangePassword(oldPassword, newPassword)
     : realChangePassword(oldPassword, newPassword);
+}
+export function listSessions() {
+  return useMock ? mockListSessions() : realListSessions();
+}
+export function revokeSession(sessionId: string) {
+  return useMock ? mockRevokeSession(sessionId) : realRevokeSession(sessionId);
 }

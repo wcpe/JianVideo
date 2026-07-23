@@ -15,7 +15,7 @@ const (
 	defaultSpaceID = "space-default"
 )
 
-// Middleware JWT 认证中间件
+// Middleware JWT 认证中间件（不校验会话表；完整鉴权见 APIGuard）。
 func Middleware(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
@@ -37,6 +37,9 @@ func Middleware(jwtSecret string) gin.HandlerFunc {
 		}
 
 		c.Set("username", claims.Username)
+		if claims.SessionID != "" {
+			c.Set("session_id", claims.SessionID)
+		}
 		c.Next()
 	}
 }
@@ -112,9 +115,23 @@ func APIGuard(jwtSecret string, svc ...*Service) gin.HandlerFunc {
 			}
 			// 供 handler 使用，避免非 Space 路由拿不到 user_id（如用户管理）。
 			c.Set("user_id", user.ID)
+
+			// FR2-062：JWT 含 sid 时校验会话未撤销；无 sid 旧令牌兼容放行。
+			if claims.SessionID != "" && authSvc.SessionTableReady() {
+				if err := authSvc.ValidateSession(claims.SessionID, int64(user.ID)); err != nil {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+						"code":    "SESSION_REVOKED",
+						"message": "会话已失效，请重新登录",
+					})
+					return
+				}
+			}
 		}
 
 		c.Set("username", claims.Username)
+		if claims.SessionID != "" {
+			c.Set("session_id", claims.SessionID)
+		}
 		c.Next()
 	}
 }

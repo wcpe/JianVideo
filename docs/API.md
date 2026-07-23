@@ -7,7 +7,7 @@
 ## 1. 通用约定
 
 - **协议**：HTTP/HTTPS RESTful API
-- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/api/auth/setup-status`、`/api/auth/setup`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`；用户 `status=disabled` 时即使 JWT 仍有效也返回 `401`（`code: USER_DISABLED`，FR2-010）
+- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/api/auth/setup-status`、`/api/auth/setup`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`；用户 `status=disabled` 时即使 JWT 仍有效也返回 `401`（`code: USER_DISABLED`，FR2-010）；JWT 含 `sid` 且会话已撤销/不存在时返回 `401`（`code: SESSION_REVOKED`，FR2-062）。无 `sid` 的旧令牌过渡期仍可放行
 - **编码**：请求/响应体使用 JSON（`Content-Type: application/json`），视频流使用 `video/mp2t`
 - **分页**：列表接口支持 `page`（从 1 开始）和 `page_size`（默认 20，最大 100）参数
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
@@ -102,12 +102,41 @@
 - **错误**：
   - `401` `INVALID_CREDENTIALS`：用户名或密码错误（**不区分**用户不存在 / 密码错误 / 已禁用，FR2-062）
   - `429` `LOGIN_LOCKED`：同一用户名（大小写不敏感）+ 客户端 IP 在滑动窗口内失败达阈值（默认 10 次 / 10 分钟 → 锁约 15 分钟）；响应头可含 `Retry-After`（秒）
+- **会话**（FR2-062）：成功时写入 `auth_sessions` 并在 JWT 声明 `sid`；校验受保护 API 时会话须存在且未撤销
 - **审计**：失败可记 `auth.login_failed`；触发锁定记 `auth.login_locked`（`ip_hash` 脱敏，无明文 IP）
 
 ### 登出
 
 - **方法 / 路径**：`POST /api/auth/logout`
-- **响应**（200）：空
+- **说明**：尽力撤销当前 Cookie 对应会话（`auth_sessions`），并清除 `auth_token`
+- **响应**（204）：空
+
+### 我的会话列表（FR2-062）
+
+- **方法 / 路径**：`GET /api/me/sessions`（需登录）
+- **响应**（200）：
+  ```json
+  {
+    "sessions": [
+      {
+        "id": "hex-session-id",
+        "created_at": "2026-07-23T10:00:00Z",
+        "last_seen_at": "2026-07-23T12:00:00Z",
+        "expires_at": "2026-07-26T10:00:00Z",
+        "user_agent": "string",
+        "ip_hash": "脱敏短哈希",
+        "current": true
+      }
+    ]
+  }
+  ```
+- **说明**：仅返回未撤销且未过期的会话；`current` 对应当前 JWT 的 `sid`。无会话表时返回空数组。
+
+### 撤销会话（FR2-062）
+
+- **方法 / 路径**：`DELETE /api/me/sessions/:id`（需登录）
+- **响应**（204）：已撤销；若撤销的是当前会话则同时清除 Cookie
+- **错误**：`404` `NOT_FOUND`：会话不存在、已撤销或不属于当前用户
 
 ### 首次初始化状态（FR-109）
 
@@ -144,6 +173,7 @@
   }
   ```
 - **响应**（204）：密码已更新（立即生效）
+- **会话**（FR2-062）：成功后撤销当前用户**其它**会话（保留当前 `sid`）
 - **错误**：`400` 参数错误；`401` 未登录或当前密码错误
 
 ### 获取媒体库目录列表

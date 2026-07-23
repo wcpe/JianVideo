@@ -189,6 +189,53 @@ func TestAPIGuard_RejectsDisabledUserJWT(t *testing.T) {
 	}
 }
 
+// TestAPIGuard_RejectsRevokedSession 撤销后携带旧 JWT 应 401 SESSION_REVOKED（FR2-062）。
+func TestAPIGuard_RejectsRevokedSession(t *testing.T) {
+	secret := "test-secret"
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL)`,
+		`CREATE TABLE auth_sessions (
+			id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL, last_seen_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '', ip_hash TEXT NOT NULL DEFAULT '', revoked_at DATETIME
+		)`,
+		`INSERT INTO users(id, username, password_hash, status, created_at) VALUES (1, 'alice', 'x', 'active', datetime('now'))`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("schema: %v", err)
+		}
+	}
+	svc := NewService(db, secret)
+	token, sid, err := svc.CreateSessionAndToken(1, "alice", "ua", "127.0.0.1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RevokeSession(sid, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(APIGuard(secret, svc))
+	r.GET("/api/me", func(c *gin.Context) { c.String(http.StatusOK, "me") })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("撤销会话期望 401, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SESSION_REVOKED") {
+		t.Fatalf("响应应含 SESSION_REVOKED: %s", w.Body.String())
+	}
+}
+
 func TestAPIGuard_ExemptsAuthAndHealth(t *testing.T) {
 	r := setupGuardRouter("test-secret")
 

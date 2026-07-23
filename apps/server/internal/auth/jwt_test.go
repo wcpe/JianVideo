@@ -31,6 +31,20 @@ func TestGenerateAndParseToken(t *testing.T) {
 	}
 }
 
+func TestGenerateTokenWithSession_CarriesSID(t *testing.T) {
+	token, err := GenerateTokenWithSession("admin", "sess-abc", "secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := ParseToken(token, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.SessionID != "sess-abc" {
+		t.Fatalf("期望 sid=sess-abc, 得到 %q", claims.SessionID)
+	}
+}
+
 func TestParseToken_InvalidSecret(t *testing.T) {
 	token, err := GenerateToken("admin", "secret-a", time.Hour)
 	if err != nil {

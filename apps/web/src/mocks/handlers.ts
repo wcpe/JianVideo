@@ -785,6 +785,38 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  // FR2-062：会话列表 / 撤销
+  http.get('*/api/me/sessions', async () => {
+    await delay(80);
+    return HttpResponse.json({
+      sessions: [
+        {
+          id: 'sess-current',
+          created_at: '2026-07-23T10:00:00Z',
+          last_seen_at: '2026-07-23T12:00:00Z',
+          expires_at: '2026-07-26T10:00:00Z',
+          user_agent: 'MockBrowser/1.0',
+          ip_hash: 'aabbccdd',
+          current: true,
+        },
+        {
+          id: 'sess-other',
+          created_at: '2026-07-22T08:00:00Z',
+          last_seen_at: '2026-07-22T18:00:00Z',
+          expires_at: '2026-07-25T08:00:00Z',
+          user_agent: 'OtherDevice/2.0',
+          ip_hash: '11223344',
+          current: false,
+        },
+      ],
+    });
+  }),
+
+  http.delete('*/api/me/sessions/:id', async () => {
+    await delay(80);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   // ─── 媒体库目录 ─────────────────────────────────────
 
   http.get('*/api/library/paths', async () => {
