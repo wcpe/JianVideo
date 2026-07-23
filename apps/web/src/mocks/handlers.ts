@@ -35,6 +35,34 @@ let nextPathId = Math.max(...paths.map((p) => p.id)) + 1;
 let nextMediaId = Math.max(...mediaFiles.map((m) => m.id)) + 1;
 let nextExtensionId = 1;
 
+// 用户与 Space 成员内存态（FR2-010 / FR2-051）：便于设置页创建后列表回读
+const managedUsers: { id: number; username: string; status: string; created_at: string }[] = [
+  { id: 1, username: 'admin', status: 'active', created_at: '2026-01-01T00:00:00Z' },
+];
+const managedSpaces: {
+  id: string;
+  name: string;
+  owner_user_id: number;
+  role: string;
+  default_max_rating: string;
+  created_at: string;
+}[] = [
+  {
+    id: 'space-default',
+    name: '默认',
+    owner_user_id: 1,
+    role: 'owner',
+    default_max_rating: '',
+    created_at: '2026-01-01T00:00:00Z',
+  },
+];
+const managedMembers: {
+  space_id: string;
+  user_id: number;
+  role: string;
+  max_rating: string | null;
+}[] = [{ space_id: 'space-default', user_id: 1, role: 'owner', max_rating: null }];
+
 const mediaTypeDefinitions: MediaTypesResponse['types'] = [
   {
     type: 'video',
@@ -104,6 +132,9 @@ function mediaRuleFromExtension(ext: MediaExtension): MediaTypeRule {
 const settingsStore: Record<string, string> = {
   scan_interval: '3600',
   recycle_bin_paths: '{"D":"D:/.recycle"}',
+  recycle_retention_days: '30',
+  recycle_auto_cleanup_enabled: '1',
+  recycle_auto_cleanup_interval_sec: '3600',
   ffmpeg_path: '',
   ffprobe_path: '',
   magick_path: '',
@@ -196,6 +227,39 @@ const settingDefinitions: SettingDefinition[] = [
     layer: 'runtime',
     value_type: 'json',
     default_value: '{}',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: 'recycle_retention_days',
+    label: '回收站保留天数',
+    description: '软删媒体保留天数，超过后可由自动清理处理；0 表示不自动清理。',
+    layer: 'runtime',
+    value_type: 'int',
+    default_value: '30',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: 'recycle_auto_cleanup_enabled',
+    label: '回收站自动清理',
+    description: '是否启用到期自动清理；关闭后仅可手动清理。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '1',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: 'recycle_auto_cleanup_interval_sec',
+    label: '回收站自动清理周期',
+    description: '自动清理调度间隔秒数，0 表示关闭定时（仍可手动触发）。',
+    layer: 'runtime',
+    value_type: 'int',
+    default_value: '3600',
     sensitive: false,
     hot_apply: true,
     consumer: 'library.recycle',
@@ -666,6 +730,13 @@ export const handlers = [
         },
       );
     }
+    // FR2-062：专用账号模拟登录锁定，便于本地演示 429 UI
+    if (body.username === 'locked') {
+      return HttpResponse.json(
+        { code: 'LOGIN_LOCKED', message: '登录尝试过于频繁，请稍后再试' },
+        { status: 429, headers: { 'Retry-After': '900' } },
+      );
+    }
     return HttpResponse.json(
       { code: 'INVALID_CREDENTIALS', message: '用户名或密码错误' },
       { status: 401 },
@@ -895,6 +966,200 @@ export const handlers = [
     return HttpResponse.json(file);
   }),
 
+  // 内容分级（FR2-051）：204 无体
+  http.put('*/api/library/media/:id/content-rating', async ({ request, params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
+    }
+    const body = (await request.json()) as { content_rating?: string };
+    file.content_rating = (body.content_rating ?? '').trim();
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // 用户与 Space 成员（FR2-010）+ 家长策略（FR2-051）
+  http.get('*/api/users', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: [...managedUsers] });
+  }),
+
+  http.post('*/api/users', async ({ request }) => {
+    await delay(100);
+    const body = (await request.json()) as { username?: string; password?: string };
+    const username = (body.username ?? '').trim();
+    const password = body.password ?? '';
+    if (!username || password.length < 6) {
+      return HttpResponse.json(
+        { code: 'CREATE_USER_FAILED', message: '用户名或密码无效' },
+        { status: 400 },
+      );
+    }
+    if (managedUsers.some((u) => u.username === username)) {
+      return HttpResponse.json(
+        { code: 'CREATE_USER_FAILED', message: '用户名已存在' },
+        { status: 400 },
+      );
+    }
+    const u = {
+      id: Math.max(0, ...managedUsers.map((x) => x.id)) + 1,
+      username,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    };
+    managedUsers.push(u);
+    return HttpResponse.json(u, { status: 201 });
+  }),
+
+  http.put('*/api/users/:id/status', async ({ params, request }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const body = (await request.json()) as { status?: string };
+    const status = (body.status ?? '').trim();
+    if (status !== 'active' && status !== 'disabled') {
+      return HttpResponse.json(
+        { code: 'SET_STATUS_FAILED', message: '状态无效' },
+        { status: 400 },
+      );
+    }
+    if (id === 1 && status === 'disabled') {
+      return HttpResponse.json(
+        { code: 'CANNOT_DISABLE_SELF', message: '不能禁用当前登录用户' },
+        { status: 400 },
+      );
+    }
+    const u = managedUsers.find((x) => x.id === id);
+    if (!u) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '用户不存在' }, { status: 404 });
+    }
+    u.status = status;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get('*/api/spaces', async () => {
+    await delay(80);
+    return HttpResponse.json({ items: [...managedSpaces] });
+  }),
+
+  http.post('*/api/spaces', async ({ request }) => {
+    await delay(100);
+    const body = (await request.json()) as { id?: string; name?: string };
+    const id = (body.id ?? '').trim();
+    const name = (body.name ?? '').trim();
+    if (!id || !name) {
+      return HttpResponse.json(
+        { code: 'CREATE_SPACE_FAILED', message: 'id 与 name 必填' },
+        { status: 400 },
+      );
+    }
+    if (managedSpaces.some((s) => s.id === id)) {
+      return HttpResponse.json(
+        { code: 'CREATE_SPACE_FAILED', message: 'Space 已存在' },
+        { status: 400 },
+      );
+    }
+    const sp = {
+      id,
+      name,
+      owner_user_id: 1,
+      role: 'owner',
+      default_max_rating: '',
+      created_at: new Date().toISOString(),
+    };
+    managedSpaces.push(sp);
+    managedMembers.push({ space_id: id, user_id: 1, role: 'owner', max_rating: null });
+    return HttpResponse.json(sp, { status: 201 });
+  }),
+
+  http.get('*/api/spaces/:id/members', async ({ params }) => {
+    await delay(80);
+    const spaceID = String(params.id);
+    return HttpResponse.json({
+      items: managedMembers.filter((m) => m.space_id === spaceID),
+    });
+  }),
+
+  http.post('*/api/spaces/:id/members', async ({ params, request }) => {
+    await delay(100);
+    const spaceID = String(params.id);
+    const body = (await request.json()) as {
+      user_id?: number;
+      username?: string;
+      role?: string;
+    };
+    const role = (body.role ?? '').trim();
+    if (role !== 'editor' && role !== 'viewer') {
+      return HttpResponse.json({ code: 'INVALID_ROLE', message: '角色无效' }, { status: 400 });
+    }
+    let uid = Number(body.user_id) || 0;
+    if (uid <= 0 && body.username) {
+      const u = managedUsers.find((x) => x.username === body.username?.trim());
+      if (!u) {
+        return HttpResponse.json(
+          { code: 'USER_NOT_FOUND', message: '用户不存在' },
+          { status: 400 },
+        );
+      }
+      uid = u.id;
+    }
+    if (uid <= 0) {
+      return HttpResponse.json(
+        { code: 'INVALID_USER', message: '需要 user_id 或 username' },
+        { status: 400 },
+      );
+    }
+    const existing = managedMembers.find((m) => m.space_id === spaceID && m.user_id === uid);
+    if (existing) {
+      existing.role = role;
+    } else {
+      managedMembers.push({ space_id: spaceID, user_id: uid, role, max_rating: null });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete('*/api/spaces/:id/members/:user_id', async ({ params }) => {
+    await delay(80);
+    const spaceID = String(params.id);
+    const userID = Number(params.user_id);
+    const idx = managedMembers.findIndex((m) => m.space_id === spaceID && m.user_id === userID);
+    if (idx < 0) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '成员不存在' }, { status: 404 });
+    }
+    if (managedMembers[idx].role === 'owner') {
+      return HttpResponse.json(
+        { code: 'CANNOT_REMOVE_OWNER', message: '不能移除 Space owner' },
+        { status: 400 },
+      );
+    }
+    managedMembers.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.put('*/api/spaces/:id/parental', async ({ request }) => {
+    await delay(100);
+    const body = (await request.json()) as { password?: string; default_max_rating?: string };
+    if (body.password !== 'admin') {
+      return HttpResponse.json(
+        { code: 'PASSWORD_REQUIRED', message: '密码确认失败' },
+        { status: 401 },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.put('*/api/spaces/:id/members/:user_id/max-rating', async ({ request }) => {
+    await delay(100);
+    const body = (await request.json()) as { password?: string; max_rating?: string };
+    if (body.password !== 'admin') {
+      return HttpResponse.json(
+        { code: 'PASSWORD_REQUIRED', message: '密码确认失败' },
+        { status: 401 },
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.get('*/api/library/tags', async () => {
     await delay(100);
     return HttpResponse.json({ items: [...tags].sort((a, b) => a.name.localeCompare(b.name)) });
@@ -1090,6 +1355,41 @@ export const handlers = [
       return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
     return HttpResponse.json(file);
+  }),
+
+  // 危险写回原文件（FR2-033）
+  http.post('*/api/library/media/:id/metadata/writeback', async ({ request, params }) => {
+    await delay(80);
+    const id = Number(params.id);
+    const file = mediaFiles.find((m) => m.id === id);
+    if (!file) {
+      return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
+    }
+    let confirm = false;
+    try {
+      const body = (await request.json()) as { confirm_writeback?: boolean };
+      confirm = !!body?.confirm_writeback;
+    } catch {
+      confirm = false;
+    }
+    if (!confirm) {
+      return HttpResponse.json(
+        {
+          code: 'CONFIRM_REQUIRED',
+          message: '写回原文件需 confirm_writeback=true，且不可逆；请先确认已备份',
+        },
+        { status: 400 },
+      );
+    }
+    const fmt = (file.format || '').toLowerCase();
+    const videoExts = new Set(['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v']);
+    if (videoExts.has(fmt)) {
+      return HttpResponse.json(
+        { code: 'VIDEO_WRITEBACK_UNSUPPORTED', message: '视频仅支持库内元数据，暂不支持写回原文件' },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json({ status: 'pending', task_id: 'mock-writeback-' + id }, { status: 202 });
   }),
 
   http.get('*/api/library/media/:id/inference', async ({ params }) => {
@@ -1816,6 +2116,64 @@ export const handlers = [
     return HttpResponse.json({ items: pageItems, next_cursor: nextCursor });
   }),
 
+  // ─── 操作可回滚中心（FR2-041）──────────────────────────
+
+  http.get('*/api/rollback/events', async ({ request }) => {
+    await delay(80);
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get('limit') || '50');
+    const systemOnly = url.searchParams.get('scope') === 'system';
+    const rollbackableActions = new Set([
+      'settings.updated',
+      'media.deleted',
+      'media.restored',
+      'media.renamed',
+      'media.moved',
+      'metadata.writeback.succeeded',
+    ]);
+    let items = auditEvents
+      .filter((event) => {
+        if (systemOnly) return event.scope === 'system';
+        // 默认：space 事件 + 可回滚的 settings.updated
+        if (event.scope === 'space') return true;
+        return event.action === 'settings.updated';
+      })
+      .map((event) => {
+        const can = rollbackableActions.has(event.action);
+        return {
+          id: event.id,
+          scope: event.scope,
+          space_id: event.space_id,
+          action: event.action,
+          resource_type: event.resource_type,
+          resource_id: event.resource_id,
+          before_json: event.before_json,
+          after_json: event.after_json,
+          created_at: event.created_at,
+          rollbackable: can,
+          reason_key: can ? '' : 'not_registered',
+        };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+    const pageItems = items.slice(0, limit);
+    return HttpResponse.json({ items: pageItems, next_cursor: null });
+  }),
+
+  http.post('*/api/rollback/apply', async ({ request }) => {
+    await delay(60);
+    const body = (await request.json()) as { event_id?: number; confirm?: boolean };
+    if (!body?.confirm) {
+      return HttpResponse.json(
+        { code: 'CONFIRM_REQUIRED', message: '回滚需 confirm=true' },
+        { status: 400 },
+      );
+    }
+    if (!body.event_id || body.event_id <= 0) {
+      return HttpResponse.json({ code: 'INVALID_BODY', message: '请求体无效' }, { status: 400 });
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   // ─── 运行期设置 ────────────────────────────────────────
 
   http.get('*/api/settings/storage', async () => {
@@ -2442,7 +2800,7 @@ export const handlers = [
 
   // ─── 公开分享（FR-43/FR-78）─────────────────────────────
 
-  // 创建分享：返回新建的 Share 对象（与后端一致，不包裹）
+  // 创建分享：返回新建的 Share 对象（与后端一致，不包裹；FR2-055 含 allow_download）
   http.post('*/api/shares', async ({ request }) => {
     await delay(120);
     const body = (await request.json()) as {
@@ -2451,6 +2809,7 @@ export const handlers = [
       expires_in_hours?: number;
       password?: string;
       max_uses?: number;
+      allow_download?: boolean;
     };
     const now = new Date();
     const expiresInHours = body.expires_in_hours ?? 0;
@@ -2464,6 +2823,7 @@ export const handlers = [
           : null,
       max_uses: body.max_uses ?? 0,
       used_count: 0,
+      allow_download: body.allow_download !== false,
       created_at: now.toISOString(),
     };
     shares.unshift(share);
@@ -2484,7 +2844,7 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  // 分享元信息（FR-43/FR-78）：媒体分享带 media，相册分享带空 items；不存在返回 404
+  // 分享元信息（FR-43/FR-78/FR2-055）：媒体分享带 media，相册分享带空 items；不存在返回 404
   http.get('*/api/share/:token', async ({ params }) => {
     await delay(120);
     const token = String(params.token);
@@ -2495,18 +2855,21 @@ export const handlers = [
         { status: 404 },
       );
     }
+    const allowDownload = share.allow_download !== false;
     if (share.resource_type === 'media') {
       const media = mediaFiles.find((m) => m.id === share.resource_id);
       return HttpResponse.json({
         resource_type: 'media',
         expires_at: share.expires_at,
         media,
+        allow_download: allowDownload,
       });
     }
     return HttpResponse.json({
       resource_type: 'album',
       expires_at: share.expires_at,
       items: [],
+      allow_download: allowDownload,
     });
   }),
 

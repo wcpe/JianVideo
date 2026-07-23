@@ -629,6 +629,10 @@ function BrowseSession({ tab }: { tab: BrowseTab }) {
           setSearch(tag.name);
           setDetailIndex(null);
         }}
+        onContentRatingChange={() => {
+          // 分级变更后刷新当前视图，使列表项与详情态一致（FR2-051）
+          refreshAfterDelete();
+        }}
       />
 
       {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}

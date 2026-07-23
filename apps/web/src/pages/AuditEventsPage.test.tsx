@@ -1,11 +1,17 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { MantineProvider } from '@mantine/core';
 
 import { server } from '@/mocks/beforeAll';
 import AuditEventsPage from './AuditEventsPage';
+
+vi.mock('@mantine/notifications', () => ({
+  notifications: {
+    show: vi.fn(),
+  },
+}));
 
 function renderPage() {
   return render(
@@ -15,7 +21,11 @@ function renderPage() {
   );
 }
 
-describe('AuditEventsPage（FR2-040）', () => {
+describe('AuditEventsPage（FR2-040 / FR2-041）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('加载审计事件列表并展示脱敏详情 JSON', async () => {
     const requests: string[] = [];
     server.use(
@@ -42,6 +52,9 @@ describe('AuditEventsPage（FR2-040）', () => {
           next_cursor: 'cursor-next',
         });
       }),
+      http.get('*/api/rollback/events', () =>
+        HttpResponse.json({ items: [], next_cursor: null }),
+      ),
     );
 
     const user = userEvent.setup();
@@ -93,12 +106,17 @@ describe('AuditEventsPage（FR2-040）', () => {
           next_cursor: 'cursor-next',
         });
       }),
+      http.get('*/api/rollback/events', () =>
+        HttpResponse.json({ items: [], next_cursor: null }),
+      ),
     );
 
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(screen.getByRole('radio', { name: '系统' }));
+    // 审计筛选区的作用域（与回滚列表作用域区分）
+    const auditScope = screen.getByRole('radiogroup', { name: '作用域' });
+    await user.click(within(auditScope).getByRole('radio', { name: '系统' }));
     await user.type(screen.getByLabelText('动作'), 'media.deleted');
     await user.type(screen.getByLabelText('资源类型'), 'media');
     await user.type(screen.getByLabelText('资源 ID'), '42');
@@ -116,5 +134,108 @@ describe('AuditEventsPage（FR2-040）', () => {
     await user.click(screen.getByRole('button', { name: '加载更多' }));
     expect(await screen.findByText('migration.succeeded')).toBeVisible();
     expect(requests.at(-1)?.searchParams.get('cursor')).toBe('cursor-next');
+  });
+
+  it('展示可回滚时间线：可回滚按钮可用，不可回滚禁用并显示原因', async () => {
+    server.use(
+      http.get('*/api/audit/events', () =>
+        HttpResponse.json({ items: [], next_cursor: null }),
+      ),
+      http.get('*/api/rollback/events', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 10,
+              scope: 'space',
+              space_id: 'space-default',
+              action: 'media.deleted',
+              resource_type: 'media',
+              resource_id: '42',
+              before_json: { file_name: 'a.mp4' },
+              after_json: { deleted_at: '2026-07-08T08:00:00Z' },
+              created_at: '2026-07-08T08:00:00Z',
+              rollbackable: true,
+              reason_key: '',
+            },
+            {
+              id: 11,
+              scope: 'space',
+              space_id: 'space-default',
+              action: 'cache.cleaned',
+              resource_type: 'cache',
+              resource_id: 'x',
+              before_json: null,
+              after_json: null,
+              created_at: '2026-07-08T07:00:00Z',
+              rollbackable: false,
+              reason_key: 'not_registered',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('可回滚操作（近 30 天）')).toBeVisible();
+    expect(await screen.findByText('media.deleted')).toBeVisible();
+    expect(screen.getByText('cache.cleaned')).toBeVisible();
+
+    const rollbackButtons = screen.getAllByRole('button', { name: '回滚' });
+    // 可回滚 + 不可回滚各一个
+    expect(rollbackButtons).toHaveLength(2);
+    expect(rollbackButtons[0]).not.toBeDisabled();
+    expect(rollbackButtons[1]).toBeDisabled();
+    // 表头与 Badge 均含「可回滚」；按按钮状态断言即可
+    expect(screen.getAllByText((t) => t === '可回滚').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText((t) => t === '不可回滚')).toBeVisible();
+  });
+
+  it('二次确认后调用 apply 并提示成功', async () => {
+    let appliedBody: { event_id?: number; confirm?: boolean } | null = null;
+    server.use(
+      http.get('*/api/audit/events', () =>
+        HttpResponse.json({ items: [], next_cursor: null }),
+      ),
+      http.get('*/api/rollback/events', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 99,
+              scope: 'space',
+              space_id: 'space-default',
+              action: 'media.deleted',
+              resource_type: 'media',
+              resource_id: '7',
+              before_json: { id: 7 },
+              after_json: { deleted_at: '2026-07-08T08:00:00Z' },
+              created_at: '2026-07-08T08:00:00Z',
+              rollbackable: true,
+              reason_key: '',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+      http.post('*/api/rollback/apply', async ({ request }) => {
+        appliedBody = (await request.json()) as { event_id?: number; confirm?: boolean };
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('media.deleted')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '回滚' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '确认回滚' });
+    expect(within(dialog).getByText(/事件 #99/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: '确认回滚' }));
+
+    await waitFor(() => {
+      expect(appliedBody).toEqual({ event_id: 99, confirm: true });
+    });
   });
 });

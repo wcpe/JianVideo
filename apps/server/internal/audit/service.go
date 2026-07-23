@@ -32,6 +32,8 @@ type Recorder interface {
 	Record(context.Context, EventInput) error
 	RecordTx(context.Context, *gorm.DB, EventInput) error
 	List(context.Context, Query) (Page, error)
+	// GetByID 按主键取事件；不存在返回 gorm.ErrRecordNotFound。
+	GetByID(context.Context, int64) (*models.AuditEvent, error)
 }
 
 // EventInput 表示待写入的审计事件。
@@ -96,6 +98,18 @@ func (s *Service) RecordTx(ctx context.Context, tx *gorm.DB, input EventInput) e
 		return err
 	}
 	return tx.WithContext(ctx).Create(event).Error
+}
+
+// GetByID 按主键取审计事件。
+func (s *Service) GetByID(ctx context.Context, id int64) (*models.AuditEvent, error) {
+	if id <= 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var event models.AuditEvent
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&event).Error; err != nil {
+		return nil, err
+	}
+	return &event, nil
 }
 
 // List 查询审计事件，按 created_at desc, id desc 返回。

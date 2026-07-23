@@ -52,6 +52,10 @@ type MediaFilter struct {
 	WidthMax    int     // 宽度上界（含）
 	HeightMin   int     // 高度下界（含）
 	HeightMax   int     // 高度上界（含）
+
+	// MaxContentRating 调用者最高可见分级（FR2-051）；空表示不限制。
+	// 过滤：content_rating 为空/UNRATED 或 rank(content_rating) <= rank(MaxContentRating)。
+	MaxContentRating string
 }
 
 // searchableColumns 是裸词关键词的可搜列集合（FR-136/FR-137）。

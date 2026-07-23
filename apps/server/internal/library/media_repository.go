@@ -32,6 +32,8 @@ type MediaPageResult struct {
 type MediaQueryRepository interface {
 	ListMediaFiles(filter MediaFilter, page MediaPageRequest) (MediaPageResult, error)
 	GetMediaFileByID(spaceID string, id int64) (*models.MediaFile, error)
+	// GetMediaFileByIDForViewer 按调用者 max 分级过滤（FR2-051）；不可见 → ErrRecordNotFound。
+	GetMediaFileByIDForViewer(spaceID string, id int64, maxContentRating string) (*models.MediaFile, error)
 	GetMediaFileByPath(spaceID, path string) (*models.MediaFile, error)
 	GetMediaFileByLibraryAndPath(spaceID string, libraryID int64, path string) (*models.MediaFile, error)
 	GetMediaFileByLibraryAndPathAnyState(spaceID string, libraryID int64, path string) (*models.MediaFile, error)
@@ -105,6 +107,8 @@ type MediaQueryRepository interface {
 	ListByIDsActive(spaceID string, ids []int64) ([]models.MediaFile, error)
 	// ListDeleted 回收站列表，按 deleted_at 倒序。
 	ListDeleted(spaceID string) ([]models.MediaFile, error)
+	// ListExpiredDeleted 列出 deleted_at 早于 before 的软删项（最旧优先），最多 limit 条（FR2-054）。
+	ListExpiredDeleted(spaceID string, before time.Time, limit int) ([]models.MediaFile, error)
 	// GetDeletedForRestoreTx 事务内取可还原软删媒体（排除清理中 claim 态）。
 	GetDeletedForRestoreTx(tx *gorm.DB, spaceID string, id int64) (*models.MediaFile, error)
 	// ClearDeletedAtTx 事务内 CAS 清空 deleted_at；返回 rowsAffected。
@@ -197,12 +201,34 @@ func (r *gormMediaRepository) ListMediaFiles(filter MediaFilter, page MediaPageR
 }
 
 func (r *gormMediaRepository) GetMediaFileByID(spaceID string, id int64) (*models.MediaFile, error) {
+	return r.GetMediaFileByIDForViewer(spaceID, id, "")
+}
+
+// GetMediaFileByIDForViewer 按调用者 max 分级取媒体；不可见时返回 gorm.ErrRecordNotFound（对外 404）。
+func (r *gormMediaRepository) GetMediaFileByIDForViewer(spaceID string, id int64, maxContentRating string) (*models.MediaFile, error) {
 	var mf models.MediaFile
-	if err := r.db.Where("space_id = ? AND id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), id).
-		First(&mf).Error; err != nil {
+	q := r.db.Where("space_id = ? AND id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), id)
+	if max := strings.TrimSpace(maxContentRating); max != "" {
+		q = q.Where(
+			"(content_rating IS NULL OR content_rating = '' OR UPPER(TRIM(content_rating)) = 'UNRATED' OR UPPER(TRIM(content_rating)) IN ?)",
+			contentRatingSQLAllowList(max),
+		)
+	}
+	if err := q.First(&mf).Error; err != nil {
 		return nil, err
 	}
 	return &mf, nil
+}
+
+// contentRatingSQLAllowList 生成 SQL IN 列表；含 PG-13 时附带历史别名 PG13。
+func contentRatingSQLAllowList(maxRating string) []string {
+	allowed := models.ContentRatingsAtMost(maxRating)
+	for _, r := range allowed {
+		if r == models.ContentRatingPG13 {
+			return append(allowed, "PG13")
+		}
+	}
+	return allowed
 }
 
 func (r *gormMediaRepository) GetMediaFileByPath(spaceID, path string) (*models.MediaFile, error) {
@@ -524,6 +550,16 @@ func (r *gormMediaRepository) ListDeleted(spaceID string) ([]models.MediaFile, e
 	return items, err
 }
 
+func (r *gormMediaRepository) ListExpiredDeleted(spaceID string, before time.Time, limit int) ([]models.MediaFile, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var items []models.MediaFile
+	err := r.db.Where("space_id = ? AND deleted_at IS NOT NULL AND deleted_at < ?", normalizeSpaceID(spaceID), before).
+		Order("deleted_at ASC").Limit(limit).Find(&items).Error
+	return items, err
+}
+
 func (r *gormMediaRepository) GetDeletedForRestoreTx(tx *gorm.DB, spaceID string, id int64) (*models.MediaFile, error) {
 	var before models.MediaFile
 	err := tx.Where("space_id = ? AND id = ? AND deleted_at IS NOT NULL", normalizeSpaceID(spaceID), id).
@@ -610,6 +646,14 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 	query := r.db.Model(&models.MediaFile{}).Where("space_id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(filter.SpaceID))
 	if filter.LibraryID > 0 {
 		query = query.Where("library_id = ?", filter.LibraryID)
+	}
+	// 家长控制（FR2-051）：有 max 时只返回可见分级（UNRATED/空始终可见）。
+	if max := strings.TrimSpace(filter.MaxContentRating); max != "" {
+		// 空串与 UNRATED 始终放行；其余须在 allowed 列表（max=G 时 allowed=[G]）。
+		query = query.Where(
+			"(content_rating IS NULL OR content_rating = '' OR UPPER(TRIM(content_rating)) = 'UNRATED' OR UPPER(TRIM(content_rating)) IN ?)",
+			contentRatingSQLAllowList(max),
+		)
 	}
 	if filter.Search != "" {
 		query = r.applyTermMatch(query, filter.SpaceID, filter.Search)

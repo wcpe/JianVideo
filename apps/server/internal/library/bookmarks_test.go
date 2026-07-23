@@ -180,3 +180,6 @@ func (failingBookmarkAudit) RecordTx(context.Context, *gorm.DB, audit.EventInput
 func (failingBookmarkAudit) List(context.Context, audit.Query) (audit.Page, error) {
 	return audit.Page{}, nil
 }
+func (failingBookmarkAudit) GetByID(context.Context, int64) (*models.AuditEvent, error) {
+	return nil, errors.New("审计失败")
+}

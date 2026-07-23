@@ -88,11 +88,34 @@ func TestChaptersBookmarksMigration媒体物理删除级联清理(t *testing.T) 
 
 func TestDefaultMigrations在0020后追加FR2060(t *testing.T) {
 	migrations := DefaultMigrations()
-	last := migrations[len(migrations)-1]
-	if last.ID != "20260712_0023_fr2_060_media_delete_cascade" {
-		t.Fatalf("FR2-060 级联修复应追加为 0023，实际最后迁移为 %s", last.ID)
+	var found *Migration
+	for i := range migrations {
+		if migrations[i].ID == "20260712_0023_fr2_060_media_delete_cascade" {
+			found = &migrations[i]
+			break
+		}
 	}
-	if last.Estimate == nil || last.Up == nil || last.Validate == nil || !last.SafeToRetry {
-		t.Fatalf("FR2-060 迁移定义不完整: %+v", last)
+	if found == nil {
+		t.Fatal("FR2-060 级联修复迁移 0023 应存在于 DefaultMigrations")
+	}
+	if found.Estimate == nil || found.Up == nil || found.Validate == nil || !found.SafeToRetry {
+		t.Fatalf("FR2-060 迁移定义不完整: %+v", found)
+	}
+}
+
+func TestDefaultMigrations追加FR2010SpaceMembers(t *testing.T) {
+	migrations := DefaultMigrations()
+	var found *Migration
+	for i := range migrations {
+		if migrations[i].ID == "20260723_0024_fr2_010_space_members" {
+			found = &migrations[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("FR2-010 space_members 迁移未登记")
+	}
+	if found.Estimate == nil || found.Up == nil || found.Validate == nil || !found.SafeToRetry {
+		t.Fatalf("FR2-010 迁移定义不完整: %+v", found)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,42 @@ func TestAPIGuard_AllowsAPIWithValidToken(t *testing.T) {
 	}
 }
 
+func TestAPIGuard_RejectsDisabledUserJWT(t *testing.T) {
+	secret := "test-secret"
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL)`,
+		`INSERT INTO users(id, username, password_hash, status, created_at) VALUES (1, 'bob', 'x', 'disabled', datetime('now'))`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("初始化失败: %v", err)
+		}
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(APIGuard(secret, NewService(db, secret)))
+	r.GET("/api/library/media", func(c *gin.Context) { c.String(http.StatusOK, "media") })
+
+	token, err := GenerateToken("bob", secret, time.Hour)
+	if err != nil {
+		t.Fatalf("生成令牌失败: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/library/media", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: token})
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("禁用用户旧 JWT 期望 401, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "USER_DISABLED") {
+		t.Fatalf("响应应含 USER_DISABLED, body=%s", w.Body.String())
+	}
+}
+
 func TestAPIGuard_ExemptsAuthAndHealth(t *testing.T) {
 	r := setupGuardRouter("test-secret")
 
@@ -181,10 +218,15 @@ func setupSpaceOwnerGuardRouter(t *testing.T) (*gin.Engine, string) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	for _, stmt := range []string{
-		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at DATETIME NOT NULL)`,
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL)`,
 		`CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id INTEGER NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)`,
-		`INSERT INTO users(id, username, password_hash, created_at) VALUES (1, 'owner', 'x', datetime('now')), (2, 'other', 'x', datetime('now'))`,
+		`CREATE TABLE space_members (space_id TEXT NOT NULL, user_id INTEGER NOT NULL, role TEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, PRIMARY KEY (space_id, user_id))`,
+		`INSERT INTO users(id, username, password_hash, status, created_at) VALUES (1, 'owner', 'x', 'active', datetime('now')), (2, 'other', 'x', 'active', datetime('now')), (3, 'viewer', 'x', 'active', datetime('now'))`,
 		`INSERT INTO spaces(id, name, owner_user_id, created_at, updated_at) VALUES ('space-default', '默认 Space', 1, datetime('now'), datetime('now')), ('space-other', '其他 Space', 2, datetime('now'), datetime('now'))`,
+		`INSERT INTO space_members(space_id, user_id, role, created_at, updated_at) VALUES
+			('space-default', 1, 'owner', datetime('now'), datetime('now')),
+			('space-default', 3, 'viewer', datetime('now'), datetime('now')),
+			('space-other', 2, 'owner', datetime('now'), datetime('now'))`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("初始化测试数据失败: %v", err)
@@ -192,7 +234,7 @@ func setupSpaceOwnerGuardRouter(t *testing.T) (*gin.Engine, string) {
 	}
 
 	r := gin.New()
-	r.Use(APIGuard(secret), SpaceOwnerGuard(NewService(db, secret)))
+	r.Use(APIGuard(secret, NewService(db, secret)), SpaceOwnerGuard(NewService(db, secret)))
 	for _, route := range []string{
 		"/api/library/media",
 		"/api/library/paths",
@@ -255,6 +297,7 @@ func TestSpaceOwnerGuard_AllowsOwnerReadWriteAndList(t *testing.T) {
 
 func TestSpaceOwnerGuard_DeniesNonOwnerReadWriteAndList(t *testing.T) {
 	r, secret := setupSpaceOwnerGuardRouter(t)
+	// 非成员：读/写均 403
 	for _, tc := range []struct {
 		method string
 		path   string
@@ -272,7 +315,33 @@ func TestSpaceOwnerGuard_DeniesNonOwnerReadWriteAndList(t *testing.T) {
 	} {
 		w := requestWithUserToken(t, r, secret, "other", tc.method, tc.path, "space-default")
 		if w.Code != http.StatusForbidden {
-			t.Fatalf("非 owner %s %s 期望 403, 实际 %d, body: %s", tc.method, tc.path, w.Code, w.Body.String())
+			t.Fatalf("非成员 %s %s 期望 403, 实际 %d, body: %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestSpaceMemberGuard_ViewerReadOnly(t *testing.T) {
+	r, secret := setupSpaceOwnerGuardRouter(t)
+	// viewer 可读
+	for _, path := range []string{"/api/library/media", "/api/play/1/stream", "/api/albums", "/api/shares"} {
+		w := requestWithUserToken(t, r, secret, "viewer", http.MethodGet, path, "space-default")
+		if w.Code != http.StatusOK {
+			t.Fatalf("viewer GET %s 期望 200, 实际 %d body=%s", path, w.Code, w.Body.String())
+		}
+	}
+	// viewer 不可写
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/library/paths"},
+		{http.MethodDelete, "/api/library/media/1"},
+		{http.MethodPost, "/api/shares"},
+		{http.MethodPost, "/api/albums"},
+	} {
+		w := requestWithUserToken(t, r, secret, "viewer", tc.method, tc.path, "space-default")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("viewer %s %s 期望 403, 实际 %d", tc.method, tc.path, w.Code)
 		}
 	}
 }

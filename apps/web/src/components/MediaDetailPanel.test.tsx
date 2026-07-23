@@ -19,6 +19,10 @@ const mockGenerateMediaCovers = vi.hoisted(() =>
 );
 const mockSelectMediaCover = vi.hoisted(() => vi.fn());
 const mockGetTask = vi.hoisted(() => vi.fn());
+const mockEnqueueMetadataWriteback = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ status: 'pending', task_id: 'wb-1' }),
+);
+const mockUpdateMediaContentRating = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/api/library', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/library')>();
   return {
@@ -29,9 +33,16 @@ vi.mock('@/api/library', async (importOriginal) => {
     getMediaCovers: mockGetMediaCovers,
     generateMediaCovers: mockGenerateMediaCovers,
     selectMediaCover: mockSelectMediaCover,
+    enqueueMetadataWriteback: mockEnqueueMetadataWriteback,
+    updateMediaContentRating: mockUpdateMediaContentRating,
   };
 });
+// 封面任务轮询与写回状态依赖 getTask，必须桩掉以免打真实 /api/tasks
 vi.mock('@/api/tasks', () => ({ getTask: mockGetTask }));
+const mockNotificationShow = vi.hoisted(() => vi.fn());
+vi.mock('@mantine/notifications', () => ({
+  notifications: { show: (...args: unknown[]) => mockNotificationShow(...args) },
+}));
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
   return { ...actual, useNavigate: () => mockNavigate };
@@ -572,5 +583,63 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText('尚未打标签')).toBeInTheDocument();
     expect(within(dialog).getByText('暂无本地推断片名')).toBeInTheDocument();
+  });
+
+  it('图片展示写回入口；二次确认后入队（FR2-033）', async () => {
+    const user = userEvent.setup();
+    mockGetTask.mockResolvedValue({ status: 'succeeded', error: null });
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg', format: 'jpg' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    const writebackBtn = await within(dialog).findByRole('button', { name: '写回原文件元数据' });
+    await user.click(writebackBtn);
+
+    const confirmDialog = await screen.findByRole('dialog', { name: '确认写回原文件' });
+    expect(within(confirmDialog).getByText(/不可逆|快照|备份/)).toBeInTheDocument();
+    await user.click(within(confirmDialog).getByRole('button', { name: '确认写回' }));
+
+    expect(mockEnqueueMetadataWriteback).toHaveBeenCalledWith(7, true);
+    expect(await within(dialog).findByText(/写回任务 #wb-1/)).toBeInTheDocument();
+  });
+
+  it('视频不展示写回按钮，仅提示库内元数据（FR2-033）', async () => {
+    renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 120 })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('button', { name: '写回原文件元数据' })).not.toBeInTheDocument();
+    expect(await within(dialog).findByText(/视频仅支持库内元数据/)).toBeInTheDocument();
+  });
+
+  it('展示内容分级 Badge 与下拉（FR2-051）', async () => {
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg', content_rating: 'PG-13' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText(/内容分级 PG-13/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('内容分级')).toBeInTheDocument();
+  });
+
+  it('修改内容分级调用 updateMediaContentRating 并通知父层（FR2-051）', async () => {
+    const user = userEvent.setup();
+    const onContentRatingChange = vi.fn();
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <MediaDetailPanel
+            files={[mediaFile({ id: 7, file_name: '风景.jpg', content_rating: 'G' })]}
+            initialIndex={0}
+            onClose={() => {}}
+            customImageExtensions={{}}
+            onContentRatingChange={onContentRatingChange}
+          />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+    const dialog = await screen.findByRole('dialog');
+    const select = within(dialog).getByLabelText('内容分级');
+    // Mantine Select：点开后选 R
+    await user.click(select);
+    const option = await screen.findByRole('option', { name: /R · 限制级/ });
+    await user.click(option);
+    await vi.waitFor(() => {
+      expect(mockUpdateMediaContentRating).toHaveBeenCalledWith(7, 'R');
+    });
+    expect(onContentRatingChange).toHaveBeenCalledWith(7, 'R');
   });
 });

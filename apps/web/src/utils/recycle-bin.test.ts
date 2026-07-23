@@ -3,6 +3,7 @@ import {
   parseRecycleBinRows,
   validateRecycleBinRows,
   serializeRecycleBinRows,
+  formatRecycleExpiryHint,
 } from './recycle-bin';
 
 describe('parseRecycleBinRows', () => {
@@ -84,5 +85,40 @@ describe('serializeRecycleBinRows', () => {
 
   it('空列表序列化为空对象串', () => {
     expect(serializeRecycleBinRows([])).toBe('{}');
+  });
+});
+
+describe('formatRecycleExpiryHint（FR2-054）', () => {
+  const now = new Date('2026-07-23T12:00:00');
+
+  it('开关关闭时提示仅可手动清理', () => {
+    const hint = formatRecycleExpiryHint('2026-07-01T00:00:00Z', 30, false, now);
+    expect(hint?.kind).toBe('disabled');
+    expect(hint?.text).toMatch(/仅可手动清理/);
+  });
+
+  it('保留天数为 0 时提示仅可手动清理', () => {
+    const hint = formatRecycleExpiryHint('2026-07-01T00:00:00Z', 0, true, now);
+    expect(hint?.kind).toBe('disabled');
+  });
+
+  it('deleted_at 缺失返回 null', () => {
+    expect(formatRecycleExpiryHint(null, 30, true, now)).toBeNull();
+    expect(formatRecycleExpiryHint(undefined, 30, true, now)).toBeNull();
+  });
+
+  it('未到期时展示预计清理日期', () => {
+    // 2026-07-10 + 30 天 = 2026-08-09
+    const hint = formatRecycleExpiryHint('2026-07-10T00:00:00', 30, true, now);
+    expect(hint?.kind).toBe('pending');
+    expect(hint?.text).toMatch(/预计 2026-08-09 自动清理/);
+  });
+
+  it('已到期时展示等待自动清理', () => {
+    // 2026-06-01 + 30 天 = 2026-07-01，相对 now 已过期
+    const hint = formatRecycleExpiryHint('2026-06-01T00:00:00', 30, true, now);
+    expect(hint?.kind).toBe('expired');
+    expect(hint?.text).toMatch(/已到期/);
+    expect(hint?.text).toMatch(/等待自动清理/);
   });
 });

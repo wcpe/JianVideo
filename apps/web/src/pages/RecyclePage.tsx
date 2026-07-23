@@ -1,27 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Stack, Text, Button, Loader, Center } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import type { AxiosError } from 'axios';
 import * as libApi from '@/api/library';
+import {
+  getSettings,
+  parseBooleanSetting,
+  SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED,
+  SETTING_KEY_RECYCLE_RETENTION_DAYS,
+} from '@/api/settings';
 import PageHeader from '@/components/PageHeader';
 import ConfirmModal from '@/components/ConfirmModal';
 import MediaRow from '@/components/MediaRow';
 import EmptyState from '@/components/EmptyState';
+import { formatRecycleExpiryHint } from '@/utils/recycle-bin';
 import type { MediaFile } from '@/types';
 
-/** 回收站页（FR-25/FR-26）：展示被软删的媒体，支持还原，并可按盘符回收站路径清理 */
+/** 回收站页（FR-25/FR-26/FR2-054）：软删列表、还原、手动清理，并展示到期自动清理提示 */
 export default function RecyclePage() {
   const [items, setItems] = useState<MediaFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [restoringID, setRestoringID] = useState<number | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  // 保留策略（FR2-054）：用于列表行到期提示；加载失败时回退默认 30 天 + 开启
+  const [retentionDays, setRetentionDays] = useState(30);
+  const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await libApi.getRecycleMediaFiles());
+      const [media, settings] = await Promise.all([
+        libApi.getRecycleMediaFiles(),
+        getSettings().catch(() => null),
+      ]);
+      setItems(media);
+      if (settings) {
+        const days = Number.parseInt(settings[SETTING_KEY_RECYCLE_RETENTION_DAYS] ?? '30', 10);
+        setRetentionDays(Number.isFinite(days) && days >= 0 ? days : 30);
+        setAutoCleanupEnabled(
+          parseBooleanSetting(settings[SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED], true),
+        );
+      }
     } catch (err) {
       notifications.show({
         title: '加载失败',
@@ -37,6 +58,13 @@ export default function RecyclePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const policyHint = useMemo(() => {
+    if (!autoCleanupEnabled || retentionDays <= 0) {
+      return '当前未启用到期自动清理，仅可手动清理；可在设置页调整保留天数与开关。';
+    }
+    return `当前保留 ${retentionDays} 天，到期后将自动移入盘符回收站目录；可在设置页调整。`;
+  }, [autoCleanupEnabled, retentionDays]);
 
   const handleRestore = useCallback(async (media: MediaFile) => {
     setRestoringID(media.id);
@@ -113,6 +141,9 @@ export default function RecyclePage() {
       <Text size="sm" c="dimmed">
         这里的媒体已从媒体库移除但源文件仍在磁盘，可随时还原；清理会把源文件移动到所在盘符的回收站目录（按删除日期分类）并移除记录。
       </Text>
+      <Text size="sm" c="dimmed">
+        {policyHint}
+      </Text>
 
       {loading && items.length === 0 ? (
         <Center py="xl">
@@ -132,26 +163,34 @@ export default function RecyclePage() {
         />
       ) : (
         <Stack gap="xs">
-          {items.map((media) => (
-            <MediaRow
-              key={media.id}
-              mediaID={media.id}
-              thumbFileName={media.file_name}
-              title={media.file_name}
-              actions={
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  color="purple"
-                  leftSection={<IconArrowBackUp size={14} />}
-                  loading={restoringID === media.id}
-                  onClick={() => handleRestore(media)}
-                >
-                  还原
-                </Button>
-              }
-            />
-          ))}
+          {items.map((media) => {
+            const expiry = formatRecycleExpiryHint(
+              media.deleted_at,
+              retentionDays,
+              autoCleanupEnabled,
+            );
+            return (
+              <MediaRow
+                key={media.id}
+                mediaID={media.id}
+                thumbFileName={media.file_name}
+                title={media.file_name}
+                subtitle={expiry?.text}
+                actions={
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="purple"
+                    leftSection={<IconArrowBackUp size={14} />}
+                    loading={restoringID === media.id}
+                    onClick={() => handleRestore(media)}
+                  >
+                    还原
+                  </Button>
+                }
+              />
+            );
+          })}
         </Stack>
       )}
 

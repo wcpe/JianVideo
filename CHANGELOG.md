@@ -8,6 +8,23 @@
 
 ### 变更
 
+- **FR2-010 Space/用户/成员首切**：`space_members` 角色表（owner/editor/viewer）；Space 资源守卫改为成员校验（读≥viewer、写≥editor）；默认 Space owner 可创建/禁用用户；禁用后拒绝登录且已持 JWT 返回 `401 USER_DISABLED`；Space 列表/创建/成员管理 API；审计事件 `user.*` / `space.*`。
+- **FR2-054 回收站保留期首切**：设置键 `recycle_retention_days` / `recycle_auto_cleanup_enabled` / `recycle_auto_cleanup_interval_sec`；有界到期自动清理（缺盘符跳过单条）；`POST .../auto-cleanup/preview|run`；启动调度 tick + 审计 `recycle.auto_cleanup`。
+- **FR2-054 二切（前端保留期 UI）**：设置页回收站分区可编辑保留天数 / 自动清理开关 / 调度周期；回收站页展示策略摘要与按 `deleted_at+retention` 计算的行内到期提示。
+- **FR2-062 安全基线首切**：OPERATIONS HTTPS/反代与生产密钥清单；登录防爆破（用户名+IP 滑动窗口，默认 10/10min→锁 15min，`429 LOGIN_LOCKED`）；失败统一「用户名或密码错误」；审计 `auth.login_failed` / `auth.login_locked`（IP 哈希）。
+- **FR2-062 二切（登录 429 前端）**：`extractErrorCode` / `extractRetryAfterSeconds`；auth store 记录 `errorCode`/`loginRetryAfterSec`；登录页 `LOGIN_LOCKED` 橙色「登录已暂时锁定」Alert + 等待秒数提示（凭据错误仍为红色）；MSW `locked` 用户演示；会话表/撤销 UI 仍待后端。
+- **FR2-055 分享增强首切**：`shares.allow_download`（默认 true）；创建/公开元信息回显；禁下载时公开 download `404`；公开缩略图仅读已有缓存、不入队生成；审计 `share.created` / `share.revoked`。
+- **FR2-055 二切（前端）**：创建分享弹窗「允许下载原文件」开关透传 `allow_download`；公开页按元信息隐藏下载按钮（缺省兼容为允许）。
+- **FR2-051 家长控制与内容分级首切**：`media_files.content_rating`、`spaces.default_max_rating`、`space_members.max_rating`（迁移 `20260723_0026_...`）；有效等级解析（成员覆盖 > Space 默认）；列表/详情按 max 过滤，越权 id→`404`；`PUT .../content-rating`、`PUT .../parental`、`PUT .../members/:id/max-rating`（改策略需密码确认）；审计 `media.content_rating_updated` / `space.parental_updated` / `space.member_max_rating_updated`。UNRATED/空默认对受限用户可见。
+- **FR2-051 二切（前端）**：详情面板内容分级 Badge + 下拉编辑（`PUT .../content-rating`）；设置页「家长控制」分区配置 Space 默认最高可见级与成员覆盖（改策略需密码确认）。
+- **FR2-010 二切（前端）**：设置页「用户与 Space」分区——列/建用户、启停、列/建 Space、成员添加/改角色/移除；非默认 Space owner 列用户 403 时仅隐藏用户管理。
+- **FR2-033 危险元数据写回首切**：`POST .../metadata/writeback` 强制 `confirm_writeback=true`；写回前快照到 `writeback-snapshots/`；任务 `metadata.writeback`（仅图片有限 EXIF/IPTC 字段，视频拒绝）；worker 写临时文件 + rename，失败保留原文件与快照；审计 `metadata.writeback.started|succeeded|failed`。
+- **FR2-033 二切（前端二次确认）**：详情面板图片入口「写回原文件元数据」+ 风险 Modal（`confirm_writeback=true` 入队）；任务状态轮询提示；视频仅提示「库内元数据」。
+- **FR2-041 操作可回滚中心首切**：`internal/rollback` 的 `ActionReverter` 注册表；可回滚 `settings.updated`（非敏感标量）、`media.deleted`↔还原、`media.restored`↔再软删；`GET /api/rollback/events`（`rollbackable` + 稳定 `reason_key`）与 `POST /api/rollback/apply`（强制 `confirm=true`）；审计 `rollback.applied` / `rollback.failed`。敏感设置、无 before 老事件、未注册 action 明确不可回滚。
+- **FR2-041 二切（写回快照恢复）**：`metadata.writeback.succeeded` reverter 从审计 metadata 的 `snapshot_path` 覆盖回 `file_path`（`library.RestoreFileFromWritebackSnapshot`）；缺路径 `missing_snapshot`、快照丢失 `snapshot_gone`；快照保留不删除。
+- **FR2-041 二切（rename/move）**：`media.renamed`→`RenameMediaFileInSpace` 改回 `before.file_name`；`media.moved`→`MoveMediaFileInSpace` 移回 `before.file_path` 目录；审计脱敏路径（`****`）→`path_redacted` 不可回滚。
+- **FR2-041 二切（UI 时间线）**：审计页「可回滚操作」列表（`GET /api/rollback/events`）；`rollbackable` / 稳定 `reason_key` 中文提示；二次确认 Modal 后 `POST /api/rollback/apply`（`confirm=true`）。
+
 ### 修复
 
 ## 0.25.0（2026-07-23）

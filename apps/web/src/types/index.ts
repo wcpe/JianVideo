@@ -102,6 +102,10 @@ export interface MediaFile {
   view_count?: number;
   /** 最近一次查看（打开）时间（FR-120）：覆盖图片+视频的「打开」，旧数据可能缺省 */
   last_viewed_at?: string | null;
+  /** 软删时间（FR-25/FR2-054）：回收站列表项有值；常规列表通常为 null */
+  deleted_at?: string | null;
+  /** 内容分级（FR2-051）：G / PG / PG-13 / R / UNRATED；空视为未分级，旧数据可能缺省 */
+  content_rating?: string;
 
   /** 媒体时间与 EXIF（FR-31 提取、FR-38 展示），旧数据可能缺省 */
   media_time?: string | null;
@@ -291,7 +295,7 @@ export interface LoginRequest {
 /** 分享资源类型（FR-43） */
 export type ShareResourceType = 'media' | 'album';
 
-/** 分享链接（FR-43；密码/限次扩展见 FR-78） */
+/** 分享链接（FR-43；密码/限次见 FR-78；禁下载见 FR2-055） */
 export interface Share {
   token: string;
   resource_type: ShareResourceType;
@@ -302,6 +306,8 @@ export interface Share {
   max_uses: number;
   /** 已访问次数（FR-78） */
   used_count: number;
+  /** 是否允许公开下载原文件（FR2-055）；默认 true；旧数据可能缺省 */
+  allow_download?: boolean;
   created_at: string;
 }
 
@@ -314,6 +320,8 @@ export interface ShareInfo {
   items?: MediaFile[];
   /** 是否需要访问密码（FR-78）；为 true 且未带正确密码时不含 media/album 内容 */
   requires_password?: boolean;
+  /** 是否允许下载原文件（FR2-055）；false 时公开页隐藏下载；旧数据缺省视为 true */
+  allow_download?: boolean;
 }
 
 /** 扫描模式（FR-27）：增量更新只索引新增文件；全量扫描遍历并对账已删文件 */
@@ -1038,6 +1046,35 @@ export interface AuditEventQuery {
 /** 审计事件 cursor 分页响应 */
 export interface AuditEventPage {
   items: AuditEvent[];
+  next_cursor: string | null;
+}
+
+/** 可回滚事件（FR2-041）：GET /api/rollback/events 列表项 */
+export interface RollbackEvent {
+  id: number;
+  scope: AuditScope;
+  space_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  before_json: AuditJsonValue | null;
+  after_json: AuditJsonValue | null;
+  created_at: string;
+  rollbackable: boolean;
+  reason_key?: string;
+}
+
+/** 可回滚事件查询参数 */
+export interface RollbackEventQuery {
+  scope?: AuditScope;
+  days?: number;
+  cursor?: string;
+  limit?: number;
+}
+
+/** 可回滚事件分页响应 */
+export interface RollbackEventPage {
+  items: RollbackEvent[];
   next_cursor: string | null;
 }
 

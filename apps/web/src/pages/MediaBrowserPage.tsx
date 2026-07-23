@@ -344,6 +344,10 @@ export default function MediaBrowserPage() {
           setTagId(tag.id);
           setDetailIndex(null);
         }}
+        onContentRatingChange={() => {
+          // 分级变更后刷新列表，使列表项与详情态一致（FR2-051）
+          infinite.reload();
+        }}
       />
 
       <BatchActionsModals state={batch.modalState} />

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import * as authApi from '@/api/auth';
-import { extractErrorMessage } from '@/utils/error';
+import { extractErrorCode, extractErrorMessage, extractRetryAfterSeconds } from '@/utils/error';
 
 const AUTH_KEY = 'jianvideo_auth';
 
@@ -9,6 +9,10 @@ interface AuthState {
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
+  /** 业务错误码（如 LOGIN_LOCKED），供登录页区分展示 */
+  errorCode: string | null;
+  /** 登录锁定时建议等待秒数（来自 Retry-After），无则 null */
+  loginRetryAfterSec: number | null;
   /** 是否已完成首次认证初始化（init 执行完毕后置 true） */
   initialized: boolean;
   /** 系统是否需要首次初始化（尚无任何用户，FR-109） */
@@ -34,41 +38,71 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   loading: false,
   error: null,
+  errorCode: null,
+  loginRetryAfterSec: null,
   initialized: false,
   needsSetup: false,
 
   login: async (username, password) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, errorCode: null, loginRetryAfterSec: null });
     try {
       await authApi.login(username, password);
       // 后端使用 cookie 认证，store 中用布尔值标记已认证即可
       localStorage.setItem(AUTH_KEY, '1');
-      set({ username, isAuthenticated: true, loading: false });
+      set({
+        username,
+        isAuthenticated: true,
+        loading: false,
+        error: null,
+        errorCode: null,
+        loginRetryAfterSec: null,
+      });
     } catch (err) {
       // 优先取后端 message（如「用户名或密码错误」），避免 axios 默认英文状态句
       const msg = extractErrorMessage(err, '登录失败');
-      set({ loading: false, error: msg });
+      const code = extractErrorCode(err);
+      const retryAfter = code === 'LOGIN_LOCKED' ? extractRetryAfterSeconds(err) : null;
+      set({ loading: false, error: msg, errorCode: code, loginRetryAfterSec: retryAfter });
       throw err;
     }
   },
 
   setup: async (username, password) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, errorCode: null, loginRetryAfterSec: null });
     try {
       await authApi.setup(username, password);
       // 初始化成功：后端已签发 cookie 自动登录，标记已认证、不再需初始化
       localStorage.setItem(AUTH_KEY, '1');
-      set({ username, isAuthenticated: true, needsSetup: false, loading: false });
+      set({
+        username,
+        isAuthenticated: true,
+        needsSetup: false,
+        loading: false,
+        error: null,
+        errorCode: null,
+        loginRetryAfterSec: null,
+      });
     } catch (err) {
       const msg = extractErrorMessage(err, '初始化失败');
-      set({ loading: false, error: msg });
+      set({
+        loading: false,
+        error: msg,
+        errorCode: extractErrorCode(err),
+        loginRetryAfterSec: null,
+      });
       throw err;
     }
   },
 
   logout: async () => {
     await authApi.logout();
-    set({ username: null, isAuthenticated: false, error: null });
+    set({
+      username: null,
+      isAuthenticated: false,
+      error: null,
+      errorCode: null,
+      loginRetryAfterSec: null,
+    });
     localStorage.removeItem(AUTH_KEY);
   },
 
@@ -104,8 +138,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   clearAuth: () => {
     localStorage.removeItem(AUTH_KEY);
-    set({ username: null, isAuthenticated: false, error: null });
+    set({
+      username: null,
+      isAuthenticated: false,
+      error: null,
+      errorCode: null,
+      loginRetryAfterSec: null,
+    });
   },
 
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, errorCode: null, loginRetryAfterSec: null }),
 }));

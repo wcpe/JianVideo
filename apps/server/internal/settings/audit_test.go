@@ -28,6 +28,10 @@ func (f failingAuditRecorder) List(context.Context, audit.Query) (audit.Page, er
 	return audit.Page{}, nil
 }
 
+func (f failingAuditRecorder) GetByID(context.Context, int64) (*models.AuditEvent, error) {
+	return nil, errors.New("审计写入失败")
+}
+
 func TestSetMany_RecordsAuditEventInSameTransaction(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

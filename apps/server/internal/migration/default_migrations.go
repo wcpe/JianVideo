@@ -216,6 +216,30 @@ func DefaultMigrations() []Migration {
 			Up:          migrateChaptersBookmarksCascade,
 			Validate:    validateChaptersBookmarksCascade,
 		},
+		{
+			ID:          "20260723_0024_fr2_010_space_members",
+			Description: "FR2-010：用户 status 与 space_members 成员角色表并回填 owner",
+			SafeToRetry: true,
+			Estimate:    estimateFR2010SpaceMembers,
+			Up:          migrateFR2010SpaceMembers,
+			Validate:    validateFR2010SpaceMembers,
+		},
+		{
+			ID:          "20260723_0025_fr2_055_share_allow_download",
+			Description: "FR2-055：shares.allow_download 默认允许下载",
+			SafeToRetry: true,
+			Estimate:    estimateFR2055ShareAllowDownload,
+			Up:          migrateFR2055ShareAllowDownload,
+			Validate:    validateFR2055ShareAllowDownload,
+		},
+		{
+			ID:          "20260723_0026_fr2_051_content_rating",
+			Description: "FR2-051：媒体 content_rating 与 Space/成员 max_rating",
+			SafeToRetry: true,
+			Estimate:    estimateFR2051ContentRating,
+			Up:          migrateFR2051ContentRating,
+			Validate:    validateFR2051ContentRating,
+		},
 	}
 }
 
@@ -1792,6 +1816,157 @@ func hasCascadeMediaForeignKey(db *gorm.DB, table string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func estimateFR2010SpaceMembers(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var total int64
+	if tableExists(db, "spaces") {
+		var n int64
+		if err := db.Table("spaces").Count(&n).Error; err != nil {
+			return StepPlan{}, err
+		}
+		total += n
+	}
+	if tableExists(db, "users") {
+		var n int64
+		if err := db.Table("users").Count(&n).Error; err != nil {
+			return StepPlan{}, err
+		}
+		total += n
+	}
+	return StepPlan{EstimatedRows: total}, nil
+}
+
+func estimateFR2051ContentRating(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var n int64
+	if tableExists(db, "media_files") {
+		_ = db.Table("media_files").Count(&n)
+	}
+	return StepPlan{EstimatedRows: n}, nil
+}
+
+func migrateFR2051ContentRating(_ context.Context, tx *gorm.DB) error {
+	if tableExists(tx, "media_files") {
+		if err := addColumnIfMissing(tx, "media_files", "content_rating", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if tableExists(tx, "spaces") {
+		if err := addColumnIfMissing(tx, "spaces", "default_max_rating", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if tableExists(tx, "space_members") {
+		if err := addColumnIfMissing(tx, "space_members", "max_rating", "TEXT"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFR2051ContentRating(_ context.Context, db *gorm.DB) (Validation, error) {
+	if tableExists(db, "media_files") && !columnExists(db, "media_files", "content_rating") {
+		return Validation{}, fmt.Errorf("media_files 缺少 content_rating")
+	}
+	if tableExists(db, "spaces") && !columnExists(db, "spaces", "default_max_rating") {
+		return Validation{}, fmt.Errorf("spaces 缺少 default_max_rating")
+	}
+	if tableExists(db, "space_members") && !columnExists(db, "space_members", "max_rating") {
+		return Validation{}, fmt.Errorf("space_members 缺少 max_rating")
+	}
+	return Validation{Summary: "FR2-051 内容分级列已就绪"}, nil
+}
+
+func estimateFR2055ShareAllowDownload(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "shares") {
+		return StepPlan{EstimatedRows: 0}, nil
+	}
+	var count int64
+	if err := db.Table("shares").Count(&count).Error; err != nil {
+		return StepPlan{}, err
+	}
+	return StepPlan{EstimatedRows: count}, nil
+}
+
+func migrateFR2055ShareAllowDownload(_ context.Context, tx *gorm.DB) error {
+	if !tableExists(tx, "shares") {
+		return nil
+	}
+	if err := addColumnIfMissing(tx, "shares", "allow_download", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	// 历史行：缺省允许下载。
+	return tx.Exec(`UPDATE shares SET allow_download = 1 WHERE allow_download IS NULL`).Error
+}
+
+func validateFR2055ShareAllowDownload(_ context.Context, db *gorm.DB) (Validation, error) {
+	if tableExists(db, "shares") && !columnExists(db, "shares", "allow_download") {
+		return Validation{}, fmt.Errorf("shares 缺少 allow_download 列")
+	}
+	return Validation{Summary: "FR2-055 shares.allow_download 已就绪"}, nil
+}
+
+func migrateFR2010SpaceMembers(_ context.Context, tx *gorm.DB) error {
+	// 用户 status：active / disabled，缺省 active。
+	if tableExists(tx, "users") {
+		if err := addColumnIfMissing(tx, "users", "status", "TEXT NOT NULL DEFAULT 'active'"); err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE users SET status = 'active' WHERE status IS NULL OR status = ''`).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS space_members (
+			space_id TEXT NOT NULL,
+			user_id INTEGER NOT NULL,
+			role TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (space_id, user_id)
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_space_members_user ON space_members(user_id)`).Error; err != nil {
+		return err
+	}
+	// 为每个 Space 的 owner 回填 owner 成员行。
+	if tableExists(tx, "spaces") {
+		if err := tx.Exec(`
+			INSERT OR IGNORE INTO space_members(space_id, user_id, role, created_at, updated_at)
+			SELECT id, owner_user_id, 'owner', datetime('now'), datetime('now')
+			FROM spaces
+			WHERE owner_user_id IS NOT NULL AND owner_user_id > 0
+		`).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFR2010SpaceMembers(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "space_members") {
+		return Validation{}, fmt.Errorf("缺少 space_members 表")
+	}
+	if tableExists(db, "users") && !columnExists(db, "users", "status") {
+		return Validation{}, fmt.Errorf("users 缺少 status 列")
+	}
+	if tableExists(db, "spaces") {
+		var missing int64
+		if err := db.Raw(`
+			SELECT COUNT(*) FROM spaces s
+			WHERE s.owner_user_id > 0 AND NOT EXISTS (
+				SELECT 1 FROM space_members m
+				WHERE m.space_id = s.id AND m.user_id = s.owner_user_id AND m.role = 'owner'
+			)
+		`).Scan(&missing).Error; err != nil {
+			return Validation{}, err
+		}
+		if missing > 0 {
+			return Validation{}, fmt.Errorf("仍有 %d 个 Space 缺少 owner 成员行", missing)
+		}
+	}
+	return Validation{Summary: "FR2-010 space_members 与 users.status 已就绪"}, nil
 }
 
 func addColumnIfMissing(db *gorm.DB, table, column, definition string) error {

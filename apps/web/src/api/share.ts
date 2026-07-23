@@ -34,6 +34,7 @@ async function realCreateShare(
   expiresInHours = 0,
   password = '',
   maxUses = 0,
+  allowDownload = true,
 ): Promise<Share> {
   try {
     const res = await client.post<Share>('/api/shares', {
@@ -42,6 +43,8 @@ async function realCreateShare(
       expires_in_hours: expiresInHours,
       password,
       max_uses: maxUses,
+      // FR2-055：缺省 true；false 时公开 download 404
+      allow_download: allowDownload,
     });
     return res.data;
   } catch (err) {
@@ -83,6 +86,7 @@ async function mockCreateShare(
   expiresInHours = 0,
   _password = '',
   maxUses = 0,
+  allowDownload = true,
 ): Promise<Share> {
   await mockDelay(120);
   const now = new Date();
@@ -94,6 +98,7 @@ async function mockCreateShare(
       expiresInHours > 0 ? new Date(now.getTime() + expiresInHours * 3600_000).toISOString() : null,
     max_uses: maxUses,
     used_count: 0,
+    allow_download: allowDownload,
     created_at: now.toISOString(),
   };
   mockShares.unshift(share);
@@ -115,12 +120,23 @@ async function mockGetShareInfo(token: string, _password = ''): Promise<ShareInf
   await mockDelay(120);
   const share = mockShares.find((s) => s.token === token);
   if (!share) throw new Error('分享不存在或已过期');
+  const allowDownload = share.allow_download !== false;
   if (share.resource_type === 'media') {
     const media = mockMediaFiles.find((m) => m.id === share.resource_id);
-    return { resource_type: 'media', expires_at: share.expires_at, media };
+    return {
+      resource_type: 'media',
+      expires_at: share.expires_at,
+      media,
+      allow_download: allowDownload,
+    };
   }
   // 相册分享 mock：成员列表留空（mock 不维护相册成员细节）
-  return { resource_type: 'album', expires_at: share.expires_at, items: [] };
+  return {
+    resource_type: 'album',
+    expires_at: share.expires_at,
+    items: [],
+    allow_download: allowDownload,
+  };
 }
 
 // ─── 导出（构建时决定 mock 模式）──────────────────────
@@ -131,10 +147,11 @@ export function createShare(
   expiresInHours = 0,
   password = '',
   maxUses = 0,
+  allowDownload = true,
 ) {
   return useMock
-    ? mockCreateShare(resourceType, resourceID, expiresInHours, password, maxUses)
-    : realCreateShare(resourceType, resourceID, expiresInHours, password, maxUses);
+    ? mockCreateShare(resourceType, resourceID, expiresInHours, password, maxUses, allowDownload)
+    : realCreateShare(resourceType, resourceID, expiresInHours, password, maxUses, allowDownload);
 }
 export function listShares() {
   return useMock ? mockListShares() : realListShares();

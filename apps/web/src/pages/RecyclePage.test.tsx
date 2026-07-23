@@ -15,7 +15,7 @@ vi.mock('@mantine/notifications', () => ({
   },
 }));
 
-function makeMedia(id: number, name: string) {
+function makeMedia(id: number, name: string, deletedAt?: string) {
   return {
     id,
     library_id: 1,
@@ -32,6 +32,8 @@ function makeMedia(id: number, name: string) {
     subtitle_tracks: '',
     added_at: '2025-01-01T00:00:00Z',
     modified_at: '2025-01-01T00:00:00Z',
+    // 软删时间（FR2-054）：供到期提示；缺省时行内可不展示具体日期
+    deleted_at: deletedAt ?? '2026-07-01T00:00:00Z',
   };
 }
 
@@ -196,5 +198,55 @@ describe('RecyclePage', () => {
     });
     const msgArg = mockNotificationShow.mock.calls.map((c) => JSON.stringify(c[0])).join(' ');
     expect(msgArg).toMatch(/设置/);
+  });
+
+  // ─── 保留期提示（FR2-054）──────────────────────────────
+
+  it('展示保留策略摘要与行内预计清理日期', async () => {
+    server.use(
+      http.get('*/api/library/recycle', () =>
+        HttpResponse.json({
+          items: [makeMedia(11, '将到期.mkv', '2026-07-10T00:00:00')],
+        }),
+      ),
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            recycle_retention_days: '30',
+            recycle_auto_cleanup_enabled: '1',
+          },
+        }),
+      ),
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/当前保留 30 天/)).toBeVisible();
+    });
+    // 2026-07-10 + 30 天 → 2026-08-09
+    expect(await screen.findByText(/预计 2026-08-09 自动清理/)).toBeVisible();
+  });
+
+  it('自动清理关闭时展示仅可手动清理', async () => {
+    server.use(
+      http.get('*/api/library/recycle', () =>
+        HttpResponse.json({
+          items: [makeMedia(12, '仅手动.mkv')],
+        }),
+      ),
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            recycle_retention_days: '30',
+            recycle_auto_cleanup_enabled: '0',
+          },
+        }),
+      ),
+    );
+    renderPage();
+    // 页顶策略摘要 + 行内副标题均含「仅可手动清理」，分别断言避免多匹配
+    await waitFor(() => {
+      expect(screen.getByText(/未启用到期自动清理/)).toBeVisible();
+    });
+    expect(await screen.findByText('自动清理已关闭，仅可手动清理')).toBeVisible();
   });
 });

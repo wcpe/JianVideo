@@ -152,7 +152,8 @@ func TestRegisterStreamRoute_RejectsMediaOutsideRequestedSpace(t *testing.T) {
 	playbackSvc := playback.NewService()
 	t.Cleanup(playbackSvc.Stop)
 	router := gin.New()
-	router.Use(auth.APIGuard(secret), auth.SpaceOwnerGuard(auth.NewService(sqlDB, secret)))
+	authSvc := auth.NewService(sqlDB, secret)
+	router.Use(auth.APIGuard(secret, authSvc), auth.SpaceOwnerGuard(authSvc))
 	registerStreamRoute(router, library.NewService(gormDB), playbackSvc)
 
 	request := func(username, spaceID string) *httptest.ResponseRecorder {
@@ -572,5 +573,63 @@ func TestHealthCheck(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("期望 200, 得到 %d", w.Code)
+	}
+}
+
+
+// TestLogin_LocksAfterFailures 连续错误密码达阈值后 429（FR2-062）。
+func TestLogin_LocksAfterFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gormDB, err := gorm.Open(sqlite.Open("file:login_lock?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := gormDB.DB()
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := gormDB.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT DEFAULT 'active', created_at DATETIME)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := auth.NewService(sqlDB, "sec")
+	if err := svc.CreateDefaultUser(); err != nil {
+		t.Fatal(err)
+	}
+	limiter := auth.NewLoginLimiter()
+	limiter.MaxFailures = 3
+	limiter.Window = time.Minute
+	limiter.LockDuration = time.Minute
+	cfg := &config.Config{JWTSecret: "sec", JWTExpiresIn: time.Hour}
+	r := gin.New()
+	r.POST("/api/auth/login", handleLogin(svc, cfg, limiter, nil))
+
+	post := func(pass string) *httptest.ResponseRecorder {
+		body := `{"username":"admin","password":"` + pass + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "203.0.113.10:12345"
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	for i := 0; i < 2; i++ {
+		w := post("wrong")
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("第 %d 次错误期望 401, 得到 %d %s", i+1, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "不存在") || strings.Contains(w.Body.String(), "已禁用") {
+			t.Fatalf("失败响应不应暴露用户是否存在: %s", w.Body.String())
+		}
+	}
+	w := post("wrong")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("第 3 次错误期望 429, 得到 %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "LOGIN_LOCKED") {
+		t.Fatalf("429 应含 LOGIN_LOCKED: %s", w.Body.String())
+	}
+	// 锁定期间即使正确密码也 429
+	w = post("admin")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("锁定期间期望 429, 得到 %d", w.Code)
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/wcpe/JianVideo/config"
 	"github.com/wcpe/JianVideo/internal/api"
 	"github.com/wcpe/JianVideo/internal/audit"
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/dblog"
 	"github.com/wcpe/JianVideo/internal/library"
@@ -33,8 +34,10 @@ import (
 	"github.com/wcpe/JianVideo/internal/netproxy"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/rollback"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
+	spacepkg "github.com/wcpe/JianVideo/internal/space"
 	"github.com/wcpe/JianVideo/internal/storage"
 	"github.com/wcpe/JianVideo/internal/subtitle"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
@@ -180,6 +183,10 @@ func registerTaskWorkers(workers *tasksvc.WorkerRegistry, taskSvc *tasksvc.Servi
 	exportRunner := library.NewExportTaskRunner(dataDir, libSvc, taskSvc)
 	if err := exportRunner.RegisterExportWorkers(workers); err != nil {
 		log.Fatalf("[ERROR] 注册导出任务 worker 失败: %v", err)
+	}
+	writebackRunner := library.NewWritebackTaskRunner(dataDir, libSvc, taskSvc)
+	if err := writebackRunner.RegisterWritebackWorker(workers); err != nil {
+		log.Fatalf("[ERROR] 注册元数据写回 worker 失败: %v", err)
 	}
 }
 
@@ -424,6 +431,7 @@ func run() int {
 	dataDir := filepath.Dir(cfg.DBPath)
 	library.InitThumbnailDir(dataDir)
 	library.InitExportDir(dataDir)
+	library.InitWritebackSnapshotDir(dataDir)
 
 	// magick 路径注入与 HEIC/RAW 转换缓存目录初始化（FR-37，见 ADR）：
 	// 解析顺序与 ffmpeg 一致：环境变量 → 同目录捆绑版 → PATH。
@@ -527,6 +535,61 @@ func run() int {
 	)
 	scanScheduler.Start()
 	defer scanScheduler.Stop()
+
+	// 回收站到期自动清理调度（FR2-054）：周期来自 settings；days=0 或开关关时 trigger 空跑。
+	// 复用 ScanScheduler 定时骨架；首切仅清理默认 Space（多 Space 遍历二切）。
+	recycleRetentionScheduler := library.NewScanScheduler(
+		settingsSvc.RecycleAutoCleanupInterval,
+		func() {
+			if !settingsSvc.RecycleAutoCleanupEnabled() {
+				return
+			}
+			days := settingsSvc.RecycleRetentionDays()
+			if days <= 0 {
+				return
+			}
+			raw, err := settingsSvc.Get(settings.KeyRecycleBinPaths)
+			if err != nil {
+				log.Printf("[WARN] 回收站自动清理读取路径配置失败: %v", err)
+				return
+			}
+			drivePaths := map[string]string{}
+			if strings.TrimSpace(raw) != "" {
+				if err := json.Unmarshal([]byte(raw), &drivePaths); err != nil {
+					log.Printf("[WARN] 回收站自动清理路径 JSON 无效: %v", err)
+					return
+				}
+			}
+			before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+			result, err := libSvc.AutoCleanupExpiredInSpace(models.DefaultSpaceID, drivePaths, before, 50)
+			if err != nil {
+				log.Printf("[WARN] 回收站自动清理失败: %v", err)
+				return
+			}
+			if result.Candidate > 0 {
+				log.Printf("[INFO] 回收站自动清理: candidate=%d moved=%d failed=%d skipped=%d",
+					result.Candidate, result.Moved, result.Failed, result.Skipped)
+			}
+			if auditSvc != nil && result.Candidate > 0 {
+				_ = auditSvc.Record(context.Background(), audit.EventInput{
+					Scope:        audit.ScopeSpace,
+					SpaceID:      models.DefaultSpaceID,
+					ActorType:    "system",
+					ActorID:      "recycle.retention.tick",
+					Action:       "recycle.auto_cleanup",
+					ResourceType: "recycle",
+					ResourceID:   models.DefaultSpaceID,
+					After: map[string]any{
+						"candidate": result.Candidate, "moved": result.Moved,
+						"failed": result.Failed, "skipped": result.Skipped,
+						"missing_drives": result.MissingDrives,
+					},
+				})
+			}
+		},
+	)
+	recycleRetentionScheduler.Start()
+	defer recycleRetentionScheduler.Stop()
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，后台预热。
 	capSvc := transcoder.NewCapabilityService(gormDB)
@@ -632,7 +695,13 @@ func run() int {
 	go startTaskWorkers(taskWorkerCtx, taskWorkers)
 	defer stopTaskWorkers()
 
-	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(scanScheduler.Reload).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc)
+	authSvc := auth.NewService(sqlDB, cfg.JWTSecret)
+	spaceSvc := spacepkg.NewService(gormDB)
+	rollbackSvc := rollback.NewService(auditSvc, settingsSvc, libSvc)
+	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(func() {
+		scanScheduler.Reload()
+		recycleRetentionScheduler.Reload()
+	}).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithRollback(rollbackSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc).WithAuth(authSvc).WithSpace(spaceSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

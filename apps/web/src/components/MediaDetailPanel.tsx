@@ -16,7 +16,10 @@ import {
   Badge,
   SimpleGrid,
   UnstyledButton,
+  Alert,
+  Select,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -43,6 +46,8 @@ import {
   IconAdjustments,
   IconPhoto,
   IconMovie,
+  IconAlertCircle,
+  IconFileUpload,
 } from '@tabler/icons-react';
 // FR-102：懒加载 VideoPlayer，仅在灯箱内实际查看视频时才加载其 mpegts.js 等重内核，
 // 避免图片预览场景白白拉入大体积播放内核。
@@ -62,14 +67,22 @@ import {
   formatIso,
 } from '@/utils/format';
 import {
+  enqueueMetadataWriteback,
   generateMediaCovers,
   getMediaCovers,
   getMediaInference,
   getMediaMetadata,
   getMediaTags,
   selectMediaCover,
+  updateMediaContentRating,
 } from '@/api/library';
 import { getTask } from '@/api/tasks';
+import { extractErrorMessage } from '@/utils/error';
+import {
+  CONTENT_RATING_OPTIONS,
+  contentRatingBadgeColor,
+  formatContentRatingLabel,
+} from '@/utils/content-rating';
 import type {
   MediaCoversResponse,
   MediaFile,
@@ -89,6 +102,8 @@ interface MediaDetailPanelProps {
   onToggleFavorite?: (f: MediaFile) => void;
   /** 按标签筛选（FR2-032）：点击标签 chip 时回调，父页设置 tag_id */
   onFilterByTag?: (tag: Tag) => void;
+  /** 内容分级变更后通知父层刷新列表项（FR2-051） */
+  onContentRatingChange?: (mediaID: number, contentRating: string) => void;
 }
 
 const ZOOM_MIN = 1;
@@ -437,16 +452,25 @@ export default function MediaDetailPanel({
   customImageExtensions,
   onToggleFavorite,
   onFilterByTag,
+  onContentRatingChange,
 }: MediaDetailPanelProps) {
   const navigate = useNavigate();
   // 打标签复用 FR-91 批量编排（单 id 列表即可）：零新后端端点
   const batch = useBatchActions();
   // 分享弹窗开合（FR-106）：复用既有 ShareDialog（resourceType='media'）
   const [shareOpened, setShareOpened] = useState(false);
+  // 内容分级本地态（FR2-051）：保存成功后回写并通知父层
+  const [contentRating, setContentRating] = useState('');
+  const [ratingSaving, setRatingSaving] = useState(false);
   // 图片编辑导出（FR2-038）
   const [imageEditorOpened, setImageEditorOpened] = useState(false);
   // 视频粗剪导出（FR2-039）
   const [clipExportOpened, setClipExportOpened] = useState(false);
+  // 危险写回原文件二次确认（FR2-033）
+  const [writebackConfirmOpened, setWritebackConfirmOpened] = useState(false);
+  const [writebackSubmitting, setWritebackSubmitting] = useState(false);
+  const [writebackTaskId, setWritebackTaskId] = useState<string | null>(null);
+  const [writebackStatus, setWritebackStatus] = useState<string | null>(null);
   // 信息栏折叠（FR-106）：折叠后右侧详情收起、左侧预览吃满，纯图沉浸
   const [infoCollapsed, setInfoCollapsed] = useState(false);
 
@@ -576,6 +600,42 @@ export default function MediaDetailPanel({
   }, [opened, idx, total, files, customImageExtensions]);
 
   const file = opened && files[idx] ? files[idx] : null;
+
+  // 切换媒体时同步内容分级本地态（FR2-051）
+  useEffect(() => {
+    setContentRating((file?.content_rating ?? '').trim());
+  }, [file?.id, file?.content_rating]);
+
+  const handleContentRatingChange = useCallback(
+    async (next: string | null) => {
+      if (!file) return;
+      const value = next ?? '';
+      setContentRating(value);
+      setRatingSaving(true);
+      try {
+        await updateMediaContentRating(file.id, value);
+        onContentRatingChange?.(file.id, value);
+        notifications.show({
+          color: 'green',
+          message: `内容分级已更新为「${formatContentRatingLabel(value)}」`,
+          autoClose: 2500,
+        });
+      } catch (err) {
+        // 失败回退到服务端当前值
+        setContentRating((file.content_rating ?? '').trim());
+        notifications.show({
+          color: 'red',
+          title: '更新分级失败',
+          message: extractErrorMessage(err, '更新内容分级失败'),
+          autoClose: 4000,
+        });
+      } finally {
+        setRatingSaving(false);
+      }
+    },
+    [file, onContentRatingChange],
+  );
+
   // FR2-032：按当前媒体加载嵌入元数据 / 标签 / 推断，失败只提示不阻断预览
   useEffect(() => {
     let active = true;
@@ -703,6 +763,64 @@ export default function MediaDetailPanel({
     const selected = await selectMediaCover(file.id, candidateID);
     setCovers((current) => ({ ...current, cover: selected }));
     notifyCoverChanged(file.id);
+  };
+
+  // FR2-033：危险写回二次确认后入队，并轮询任务状态
+  const handleConfirmWriteback = async () => {
+    if (!file) return;
+    setWritebackSubmitting(true);
+    setWritebackStatus(null);
+    try {
+      const accepted = await enqueueMetadataWriteback(file.id, true);
+      setWritebackTaskId(accepted.task_id);
+      setWritebackStatus(accepted.status || 'pending');
+      setWritebackConfirmOpened(false);
+      notifications.show({
+        color: 'blue',
+        title: '写回已入队',
+        message: `任务 #${accepted.task_id} 正在将库内元数据写回原文件`,
+        autoClose: 4000,
+      });
+      // 后台轮询终态
+      void (async () => {
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          try {
+            const task = await getTask(String(accepted.task_id));
+            setWritebackStatus(task.status);
+            if (task.status === 'succeeded') {
+              notifications.show({
+                color: 'green',
+                title: '写回完成',
+                message: '原文件元数据已更新；可在审计页回滚快照',
+                autoClose: 6000,
+              });
+              return;
+            }
+            if (task.status === 'failed' || task.status === 'canceled') {
+              notifications.show({
+                color: 'red',
+                title: '写回失败',
+                message: task.error || '任务失败；原文件与快照应保持完整',
+                autoClose: 8000,
+              });
+              return;
+            }
+          } catch {
+            // 轮询失败忽略，继续下一轮
+          }
+        }
+      })();
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '写回入队失败',
+        message: extractErrorMessage(err, '无法入队写回任务'),
+        autoClose: 6000,
+      });
+    } finally {
+      setWritebackSubmitting(false);
+    }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -1028,6 +1146,28 @@ export default function MediaDetailPanel({
                 {!isImage && <DetailRow label="视频编码" value={file.video_codec} />}
                 {!isImage && <DetailRow label="音频编码" value={file.audio_codec} />}
               </Box>
+              {/* 内容分级（FR2-051）：Badge 展示 + 下拉编辑 */}
+              <Divider my={4} label="内容分级" labelPosition="left" />
+              <Stack gap={6}>
+                <Group gap="xs">
+                  <Badge
+                    color={contentRatingBadgeColor(contentRating)}
+                    variant="light"
+                    aria-label={`内容分级 ${formatContentRatingLabel(contentRating)}`}
+                  >
+                    {formatContentRatingLabel(contentRating)}
+                  </Badge>
+                </Group>
+                <Select
+                  aria-label="内容分级"
+                  data={CONTENT_RATING_OPTIONS}
+                  value={contentRating}
+                  onChange={(v) => void handleContentRatingChange(v)}
+                  disabled={ratingSaving}
+                  allowDeselect={false}
+                  size="xs"
+                />
+              </Stack>
               <Divider my={4} />
               <Box component="dl" style={{ margin: 0 }}>
                 <DetailRow label="加入时间" value={formatTime(file.added_at)} />
@@ -1186,6 +1326,31 @@ export default function MediaDetailPanel({
               />
 
               <Divider my="sm" />
+              {/* 危险写回原文件（FR2-033）：仅图片有写回能力；视频提示仅库内 */}
+              {isImage ? (
+                <Stack gap={6}>
+                  <Button
+                    variant="light"
+                    color="orange"
+                    leftSection={<IconFileUpload size={16} />}
+                    fullWidth
+                    onClick={() => setWritebackConfirmOpened(true)}
+                    loading={writebackSubmitting}
+                  >
+                    写回原文件元数据
+                  </Button>
+                  {writebackTaskId && (
+                    <Text size="xs" c="dimmed">
+                      写回任务 #{writebackTaskId}
+                      {writebackStatus ? ` · ${writebackStatus}` : ''}
+                    </Text>
+                  )}
+                </Stack>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  视频仅支持库内元数据，暂不支持写回原文件。
+                </Text>
+              )}
               <Button
                 component="a"
                 href={`/api/library/media/${file.id}/download`}
@@ -1228,6 +1393,37 @@ export default function MediaDetailPanel({
           onClose={() => setClipExportOpened(false)}
         />
       )}
+      {/* 危险写回二次确认（FR2-033） */}
+      <Modal
+        opened={writebackConfirmOpened}
+        onClose={() => !writebackSubmitting && setWritebackConfirmOpened(false)}
+        title="确认写回原文件"
+        size="md"
+        centered
+        zIndex={400}
+      >
+        <Stack gap="sm">
+          <Alert color="orange" icon={<IconAlertCircle size={16} />}>
+            将把库内元数据（相机/镜头/光圈/快门/ISO/GPS/备注/显示名等有限字段）写入磁盘原文件。
+            操作前会自动生成快照，但写回仍可能不可逆；请确认已备份重要文件。
+          </Alert>
+          <Text size="sm">
+            媒体：{mediaDisplayName(file)}（#{file.id}）
+          </Text>
+          <Group justify="flex-end" gap="xs">
+            <Button
+              variant="default"
+              disabled={writebackSubmitting}
+              onClick={() => setWritebackConfirmOpened(false)}
+            >
+              取消
+            </Button>
+            <Button color="orange" loading={writebackSubmitting} onClick={handleConfirmWriteback}>
+              确认写回
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Modal>
   );
 }

@@ -9,6 +9,7 @@ import {
   CopyButton,
   Stack,
   Text,
+  Switch,
 } from '@mantine/core';
 import { IconShare, IconCopy, IconCheck } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -31,7 +32,7 @@ const EXPIRY_OPTIONS = [
   { value: '720', label: '30 天' },
 ];
 
-/** 创建分享链接弹窗（FR-43；密码/限次见 FR-78）：选有效期/密码/限次 → 生成 → 复制免登链接 */
+/** 创建分享链接弹窗（FR-43；密码/限次见 FR-78；禁下载见 FR2-055） */
 export default function ShareDialog({
   opened,
   onClose,
@@ -42,13 +43,22 @@ export default function ShareDialog({
   const [expiry, setExpiry] = useState('0');
   const [password, setPassword] = useState('');
   const [maxUses, setMaxUses] = useState<number>(0);
+  // 允许下载（FR2-055）：默认 true；关闭后公开 download 端点 404，公开页隐藏下载
+  const [allowDownload, setAllowDownload] = useState(true);
   const [link, setLink] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleCreate() {
     setLoading(true);
     try {
-      const share = await createShare(resourceType, resourceID, Number(expiry), password, maxUses);
+      const share = await createShare(
+        resourceType,
+        resourceID,
+        Number(expiry),
+        password,
+        maxUses,
+        allowDownload,
+      );
       setLink(`${window.location.origin}/s/${share.token}`);
     } catch (err) {
       notifications.show({
@@ -65,6 +75,7 @@ export default function ShareDialog({
     setExpiry('0');
     setPassword('');
     setMaxUses(0);
+    setAllowDownload(true);
     onClose();
   }
 
@@ -93,6 +104,13 @@ export default function ShareDialog({
           onChange={(v) => setMaxUses(typeof v === 'number' ? v : 0)}
           description="0 表示无限次；达到次数后链接失效"
         />
+        <Switch
+          label="允许下载原文件"
+          aria-label="允许下载原文件"
+          description="关闭后访客仅可在线查看，无法通过下载入口获取原文件"
+          checked={allowDownload}
+          onChange={(e) => setAllowDownload(e.currentTarget.checked)}
+        />
         {!link ? (
           <Button onClick={handleCreate} loading={loading} leftSection={<IconShare size={16} />}>
             生成链接
@@ -116,6 +134,11 @@ export default function ShareDialog({
                 )}
               </CopyButton>
             </Group>
+            {!allowDownload && (
+              <Text size="xs" c="dimmed">
+                已禁止下载：公开页不展示下载按钮，下载接口将拒绝访问。
+              </Text>
+            )}
           </>
         )}
       </Stack>

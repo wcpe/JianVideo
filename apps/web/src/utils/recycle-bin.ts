@@ -74,3 +74,45 @@ export function serializeRecycleBinRows(rows: RecycleBinRow[]): string {
   }
   return JSON.stringify(obj);
 }
+
+/** 回收站到期提示（FR2-054）：由 deleted_at + 保留天数计算预计自动清理时间 */
+export type RecycleExpiryHint =
+  | { kind: 'disabled'; text: string }
+  | { kind: 'expired'; text: string; expiresAt: Date }
+  | { kind: 'pending'; text: string; expiresAt: Date };
+
+/**
+ * 计算回收站项的到期提示文案。
+ * - autoCleanupEnabled=false 或 retentionDays<=0：仅手动清理
+ * - deleted_at 无效：返回 null（调用方可不展示副标题）
+ * - 已过期：提示「已到期，等待自动清理」
+ * - 未过期：提示「预计 YYYY-MM-DD 自动清理」
+ */
+export function formatRecycleExpiryHint(
+  deletedAt: string | null | undefined,
+  retentionDays: number,
+  autoCleanupEnabled: boolean,
+  now: Date = new Date(),
+): RecycleExpiryHint | null {
+  if (!autoCleanupEnabled || !Number.isFinite(retentionDays) || retentionDays <= 0) {
+    return { kind: 'disabled', text: '自动清理已关闭，仅可手动清理' };
+  }
+  if (!deletedAt) return null;
+  const deleted = new Date(deletedAt);
+  if (Number.isNaN(deleted.getTime())) return null;
+
+  const expiresAt = new Date(deleted.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+  const dateText = formatLocalDate(expiresAt);
+  if (expiresAt.getTime() <= now.getTime()) {
+    return { kind: 'expired', text: `已到期（${dateText}），等待自动清理`, expiresAt };
+  }
+  return { kind: 'pending', text: `预计 ${dateText} 自动清理`, expiresAt };
+}
+
+/** 本地日期 YYYY-MM-DD（避免 toISOString 时区偏移） */
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}

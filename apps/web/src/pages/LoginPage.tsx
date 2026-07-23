@@ -11,16 +11,24 @@ import {
   Tooltip,
   Group,
 } from '@mantine/core';
-import { IconLock, IconUser, IconAlertCircle } from '@tabler/icons-react';
+import { IconLock, IconUser, IconAlertCircle, IconClock } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth';
 import { notifications } from '@mantine/notifications';
 import BrandLogo from '@/components/BrandLogo';
 
+/** 将锁定秒数格式化为简短中文（FR2-062） */
+function formatRetryAfter(sec: number): string {
+  if (sec < 60) return `约 ${sec} 秒`;
+  const min = Math.ceil(sec / 60);
+  return `约 ${min} 分钟`;
+}
+
 /** 登录页 — Mantine 居中卡片表单 */
 export default function LoginPage() {
-  const { login, loading, error, clearError } = useAuthStore();
+  const { login, loading, error, errorCode, loginRetryAfterSec, clearError } = useAuthStore();
   const navigate = useNavigate();
+  const isLocked = errorCode === 'LOGIN_LOCKED';
 
   const form = useForm({
     initialValues: { username: '', password: '' },
@@ -61,14 +69,20 @@ export default function LoginPage() {
 
           {error && (
             <Alert
-              icon={<IconAlertCircle size={16} />}
-              title="登录失败"
-              color="red"
+              icon={isLocked ? <IconClock size={16} /> : <IconAlertCircle size={16} />}
+              title={isLocked ? '登录已暂时锁定' : '登录失败'}
+              color={isLocked ? 'orange' : 'red'}
               mb="md"
               withCloseButton
               onClose={clearError}
+              data-testid={isLocked ? 'login-locked-alert' : 'login-error-alert'}
             >
               {error}
+              {isLocked && loginRetryAfterSec != null && loginRetryAfterSec > 0 && (
+                <Text size="sm" mt={6}>
+                  请等待 {formatRetryAfter(loginRetryAfterSec)} 后再试
+                </Text>
+              )}
             </Alert>
           )}
 

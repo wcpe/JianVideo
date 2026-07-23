@@ -24,16 +24,19 @@ vi.mock('@mantine/notifications', () => ({
   },
 }));
 
-// mock auth store — 使用可控的 mock 函数
+// mock auth store — 使用可控的 mock 函数与可切换的错误态
 const mockLogin = vi.fn();
 const mockClearError = vi.fn();
+const authStoreState = {
+  login: mockLogin,
+  loading: false,
+  error: null as string | null,
+  errorCode: null as string | null,
+  loginRetryAfterSec: null as number | null,
+  clearError: mockClearError,
+};
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    login: mockLogin,
-    loading: false,
-    error: null,
-    clearError: mockClearError,
-  }),
+  useAuthStore: () => authStoreState,
 }));
 
 // 辅助：渲染包裹在 MantineProvider + MemoryRouter 中的页面
@@ -51,6 +54,10 @@ describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    authStoreState.loading = false;
+    authStoreState.error = null;
+    authStoreState.errorCode = null;
+    authStoreState.loginRetryAfterSec = null;
   });
 
   it('渲染用户名和密码输入框', () => {
@@ -133,6 +140,43 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('wrong', 'wrong');
     });
+  });
+
+  // FR2-062：凭据错误用红色「登录失败」Alert
+  it('凭据错误时展示红色登录失败 Alert', () => {
+    authStoreState.error = '用户名或密码错误';
+    authStoreState.errorCode = 'INVALID_CREDENTIALS';
+    renderLoginPage();
+
+    expect(screen.getByTestId('login-error-alert')).toBeInTheDocument();
+    expect(screen.getByText('登录失败')).toBeInTheDocument();
+    expect(screen.getByText('用户名或密码错误')).toBeInTheDocument();
+    expect(screen.queryByTestId('login-locked-alert')).not.toBeInTheDocument();
+  });
+
+  // FR2-062：429 LOGIN_LOCKED 用橙色锁定 Alert + Retry-After 提示
+  it('LOGIN_LOCKED 时展示橙色锁定 Alert 与等待提示', () => {
+    authStoreState.error = '登录尝试过于频繁，请稍后再试';
+    authStoreState.errorCode = 'LOGIN_LOCKED';
+    authStoreState.loginRetryAfterSec = 900;
+    renderLoginPage();
+
+    expect(screen.getByTestId('login-locked-alert')).toBeInTheDocument();
+    expect(screen.getByText('登录已暂时锁定')).toBeInTheDocument();
+    expect(screen.getByText('登录尝试过于频繁，请稍后再试')).toBeInTheDocument();
+    expect(screen.getByText(/请等待 约 15 分钟 后再试/)).toBeInTheDocument();
+    expect(screen.queryByTestId('login-error-alert')).not.toBeInTheDocument();
+  });
+
+  it('LOGIN_LOCKED 且无 Retry-After 时仅展示锁定标题与后端文案', () => {
+    authStoreState.error = '登录尝试过于频繁，请稍后再试';
+    authStoreState.errorCode = 'LOGIN_LOCKED';
+    authStoreState.loginRetryAfterSec = null;
+    renderLoginPage();
+
+    expect(screen.getByTestId('login-locked-alert')).toBeInTheDocument();
+    expect(screen.getByText('登录已暂时锁定')).toBeInTheDocument();
+    expect(screen.queryByText(/请等待/)).not.toBeInTheDocument();
   });
 
   it('空表单提交时按钮被禁用', async () => {

@@ -20,8 +20,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/internal/audit"
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
+	"github.com/wcpe/JianVideo/internal/rollback"
+	"github.com/wcpe/JianVideo/internal/space"
 	"github.com/wcpe/JianVideo/internal/metrics"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
@@ -96,6 +99,13 @@ type Handler struct {
 
 	// 字幕与音轨服务（FR2-044）：稳定轨道 API、上传、内容与删除。
 	subtitle *subtitle.Service
+
+	// 认证与 Space 成员（FR2-010）：用户管理与角色解析；未注入时相关端点 503。
+	auth  *auth.Service
+	space *space.Service
+
+	// 操作可回滚中心（FR2-041）：未注入时相关端点 503。
+	rollback *rollback.Service
 }
 
 // NewHandler 创建处理器。
@@ -167,6 +177,12 @@ func (h *Handler) WithMetrics(sampler *metrics.Sampler) *Handler {
 // WithAudit 注入审计服务，启用审计查询端点。
 func (h *Handler) WithAudit(rec audit.Recorder) *Handler {
 	h.audit = rec
+	return h
+}
+
+// WithRollback 注入回滚中心（FR2-041）。
+func (h *Handler) WithRollback(svc *rollback.Service) *Handler {
+	h.rollback = svc
 	return h
 }
 
@@ -454,6 +470,8 @@ func (h *Handler) ListMediaFiles(c *gin.Context) {
 	// 收藏/标签筛选（FR-41）：favorite=true、tag_id=N
 	filter := parseMediaFilter(c, libraryID, sort, search)
 	filter.SpaceID = spaceID
+	// 家长控制（FR2-051）：注入调用者有效最高可见分级。
+	filter.MaxContentRating = h.viewerMaxContentRating(c, spaceID)
 	result, err := h.library.ListMediaFilesPage(filter, library.MediaPageRequest{
 		Page:     page,
 		PageSize: pageSize,
@@ -484,12 +502,47 @@ func (h *Handler) GetMediaFile(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	maxR := h.viewerMaxContentRating(c, spaceID)
+	mf, err := h.library.GetMediaFileByIDInSpaceForViewer(spaceID, id, maxR)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, mf)
+}
+
+// viewerMaxContentRating 解析当前用户在 Space 的有效最高可见分级；无 space 服务时不限制。
+// 不写 HTTP 响应，避免列表路径双写。
+func (h *Handler) viewerMaxContentRating(c *gin.Context, spaceID string) string {
+	if h.space == nil || h.auth == nil {
+		return ""
+	}
+	var userID int64
+	if v, ok := c.Get("user_id"); ok {
+		switch id := v.(type) {
+		case int:
+			userID = int64(id)
+		case int64:
+			userID = id
+		}
+	}
+	if userID == 0 {
+		username, _ := c.Get("username")
+		name, _ := username.(string)
+		if strings.TrimSpace(name) == "" {
+			return ""
+		}
+		u, err := h.auth.FindUserByUsername(name)
+		if err != nil || u == nil {
+			return ""
+		}
+		userID = int64(u.ID)
+	}
+	maxR, err := h.space.EffectiveMaxRating(spaceID, userID)
+	if err != nil {
+		return ""
+	}
+	return maxR
 }
 
 // DeleteMediaFile DELETE /api/library/media/:id
@@ -618,6 +671,125 @@ func (h *Handler) RecycleCleanup(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"moved": result.Moved, "failed": result.Failed})
+}
+
+// RecycleAutoCleanupPreview POST /api/library/recycle/auto-cleanup/preview（FR2-054）
+// 预览本 Space 到期自动清理候选，不改数据。
+func (h *Handler) RecycleAutoCleanupPreview(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c)
+	if !ok {
+		return
+	}
+	result, err := h.library.PreviewAutoCleanupInSpace(spaceID, drivePaths, before, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "预览自动清理失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"candidate":      result.Candidate,
+		"skipped":        result.Skipped,
+		"missing_drives": result.MissingDrives,
+		"media_ids":      result.MediaIDs,
+		"before":         before.UTC().Format(time.RFC3339),
+		"limit":          limit,
+	})
+}
+
+// RecycleAutoCleanupRun POST /api/library/recycle/auto-cleanup/run（FR2-054）
+// 执行本 Space 有界到期自动清理；缺盘符跳过单条。
+func (h *Handler) RecycleAutoCleanupRun(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c)
+	if !ok {
+		return
+	}
+	// days=0 或开关关闭：拒绝实跑（preview 仍可看候选）
+	if h.settings != nil {
+		if !h.settings.RecycleAutoCleanupEnabled() || h.settings.RecycleRetentionDays() <= 0 {
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    "AUTO_CLEANUP_DISABLED",
+				"message": "自动清理未启用或保留天数为 0",
+			})
+			return
+		}
+	}
+	result, err := h.library.AutoCleanupExpiredInSpace(spaceID, drivePaths, before, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "自动清理失败"})
+		return
+	}
+	if h.audit != nil {
+		_ = h.audit.Record(c.Request.Context(), audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    "user",
+			ActorID:      actorIDFromContext(c),
+			Action:       "recycle.auto_cleanup",
+			ResourceType: "recycle",
+			ResourceID:   spaceID,
+			After: map[string]any{
+				"candidate":      result.Candidate,
+				"moved":          result.Moved,
+				"failed":         result.Failed,
+				"skipped":        result.Skipped,
+				"missing_drives": result.MissingDrives,
+			},
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"candidate":      result.Candidate,
+		"moved":          result.Moved,
+		"failed":         result.Failed,
+		"skipped":        result.Skipped,
+		"missing_drives": result.MissingDrives,
+		"media_ids":      result.MediaIDs,
+		"before":         before.UTC().Format(time.RFC3339),
+		"limit":          limit,
+	})
+}
+
+// recycleAutoCleanupParams 解析盘符配置、到期阈值与批量上限。
+func (h *Handler) recycleAutoCleanupParams(c *gin.Context) (drivePaths map[string]string, before time.Time, limit int, ok bool) {
+	if h.settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
+		return nil, time.Time{}, 0, false
+	}
+	raw, err := h.settings.Get(settings.KeyRecycleBinPaths)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "读取回收站路径配置失败"})
+		return nil, time.Time{}, 0, false
+	}
+	drivePaths = map[string]string{}
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &drivePaths); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INVALID_RECYCLE_CONFIG", "message": "回收站路径配置不是合法 JSON"})
+			return nil, time.Time{}, 0, false
+		}
+	}
+	days := h.settings.RecycleRetentionDays()
+	if days < 0 {
+		days = 30
+	}
+	// days=0 时 preview 仍返回「无到期阈值」语义：before=零时刻 → 不选中任何项
+	if days == 0 {
+		before = time.Time{}
+	} else {
+		before = time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	}
+	limit = 50
+	if q := strings.TrimSpace(c.Query("limit")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	return drivePaths, before, limit, true
 }
 
 func writeRecycleCleanupError(c *gin.Context, spaceID string, result library.CleanupResult, err error) {
@@ -778,7 +950,9 @@ func (h *Handler) MoveMediaFile(c *gin.Context) {
 }
 
 // WritebackMediaMetadata POST /api/library/media/:id/metadata/writeback
-// 重新提取媒体文件元数据并回写库内记录。
+// FR2-033 危险写回：将库内元数据写回原文件（仅图片）。
+// 请求体：{ "confirm_writeback": true }；缺省或 false → 400 CONFIRM_REQUIRED。
+// 成功：202 入队 metadata.writeback；viewer 由 Space 写守卫拦截（editor+）。
 func (h *Handler) WritebackMediaMetadata(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)
 	if !ok {
@@ -789,16 +963,50 @@ func (h *Handler) WritebackMediaMetadata(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的 ID"})
 		return
 	}
-	mf, err := h.library.WritebackMediaMetadataInSpace(spaceID, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "METADATA_WRITEBACK_FAILED", "message": "元数据回写失败"})
+	if h.tasks == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "TASKS_UNAVAILABLE", "message": "任务中心未启用"})
 		return
 	}
-	c.JSON(http.StatusOK, mf)
+	var req struct {
+		ConfirmWriteback bool `json:"confirm_writeback"`
+	}
+	// 允许空 body：视为未确认。
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		// 非 JSON 也按未确认处理，避免误触发写回。
+		req.ConfirmWriteback = false
+	}
+	baseDir := "data"
+	if strings.TrimSpace(h.dbPath) != "" {
+		baseDir = filepath.Dir(h.dbPath)
+	}
+	task, err := library.EnqueueMetadataWriteback(c.Request.Context(), h.tasks, h.library, baseDir, spaceID, id, req.ConfirmWriteback)
+	if err != nil {
+		switch {
+		case errors.Is(err, library.ErrWritebackConfirmRequired):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    "CONFIRM_REQUIRED",
+				"message": "写回原文件需 confirm_writeback=true，且不可逆；请先确认已备份",
+			})
+		case errors.Is(err, library.ErrWritebackVideoUnsupported):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "VIDEO_WRITEBACK_UNSUPPORTED", "message": err.Error()})
+		case errors.Is(err, library.ErrWritebackSMBUnsupported):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "UNSUPPORTED_PATH", "message": err.Error()})
+		case errors.Is(err, library.ErrWritebackNotImage):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "NOT_IMAGE", "message": err.Error()})
+		case errors.Is(err, library.ErrWritebackNoFields):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "NO_FIELDS", "message": err.Error()})
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "METADATA_WRITEBACK_FAILED", "message": "元数据写回入队失败: " + err.Error()})
+		}
+		return
+	}
+	h.triggerTaskWorkers()
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":  task.Status,
+		"task_id": strconv.FormatInt(task.ID, 10),
+	})
 }
 
 // UpdateDisplayName PUT /api/library/media/:id/display-name

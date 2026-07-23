@@ -149,6 +149,107 @@ func (s *Service) CleanupRecycleInSpace(spaceID string, drivePaths map[string]st
 	return result, nil
 }
 
+// AutoCleanupResult 到期自动清理统计（FR2-054）。
+// 与手动 Cleanup 不同：缺盘符路径时跳过该条并记 Skipped，不整轮拒绝。
+type AutoCleanupResult struct {
+	// Candidate 本轮选中的过期软删项数
+	Candidate int `json:"candidate"`
+	// Moved 成功移动并删库记录的项数
+	Moved int `json:"moved"`
+	// Failed 清理过程失败（如 IO）的项数
+	Failed int `json:"failed"`
+	// Skipped 因缺盘符路径等跳过、仍留在回收站的项数
+	Skipped int `json:"skipped"`
+	// MissingDrives 本轮遇到的缺失盘符（去重）
+	MissingDrives []string `json:"missing_drives,omitempty"`
+	// MediaIDs 本轮候选媒体 id（preview 与 run 对齐用）
+	MediaIDs []int64 `json:"media_ids,omitempty"`
+}
+
+const defaultAutoCleanupBatchLimit = 50
+
+// ListExpiredDeletedMediaInSpace 列出指定 Space 中 deleted_at 早于 before 的软删项（最旧优先）。
+func (s *Service) ListExpiredDeletedMediaInSpace(spaceID string, before time.Time, limit int) ([]models.MediaFile, error) {
+	return s.mediaRepo.ListExpiredDeleted(normalizeSpaceID(spaceID), before, limit)
+}
+
+// PreviewAutoCleanupInSpace 预览本轮将处理的到期项与缺失盘符，不改数据（FR2-054）。
+func (s *Service) PreviewAutoCleanupInSpace(spaceID string, drivePaths map[string]string, before time.Time, limit int) (AutoCleanupResult, error) {
+	if limit <= 0 {
+		limit = defaultAutoCleanupBatchLimit
+	}
+	items, err := s.ListExpiredDeletedMediaInSpace(spaceID, before, limit)
+	if err != nil {
+		return AutoCleanupResult{}, err
+	}
+	normalized := normalizeRecyclePaths(drivePaths)
+	result := AutoCleanupResult{Candidate: len(items), MediaIDs: make([]int64, 0, len(items))}
+	missingSet := map[string]struct{}{}
+	for i := range items {
+		result.MediaIDs = append(result.MediaIDs, items[i].ID)
+		drive := driveOfPath(items[i].FilePath)
+		if drive != "" && normalized[drive] != "" {
+			continue
+		}
+		result.Skipped++
+		if drive == "" {
+			drive = "(无盘符)"
+		}
+		if _, ok := missingSet[drive]; !ok {
+			missingSet[drive] = struct{}{}
+			result.MissingDrives = append(result.MissingDrives, drive)
+		}
+	}
+	// 可清理候选 = 总数 - 将跳过
+	return result, nil
+}
+
+// AutoCleanupExpiredInSpace 有界清理到期软删项（FR2-054）。
+// 缺盘符路径：跳过该条记 Skipped，不整轮 abort；单条 cleanup 错误记 Failed 并继续。
+func (s *Service) AutoCleanupExpiredInSpace(spaceID string, drivePaths map[string]string, before time.Time, limit int) (AutoCleanupResult, error) {
+	recycleCleanupMu.Lock()
+	defer recycleCleanupMu.Unlock()
+
+	if limit <= 0 {
+		limit = defaultAutoCleanupBatchLimit
+	}
+	spaceID = normalizeSpaceID(spaceID)
+	items, err := s.ListExpiredDeletedMediaInSpace(spaceID, before, limit)
+	if err != nil {
+		return AutoCleanupResult{}, err
+	}
+	normalized := normalizeRecyclePaths(drivePaths)
+	result := AutoCleanupResult{Candidate: len(items), MediaIDs: make([]int64, 0, len(items))}
+	missingSet := map[string]struct{}{}
+	for i := range items {
+		result.MediaIDs = append(result.MediaIDs, items[i].ID)
+		drive := driveOfPath(items[i].FilePath)
+		if drive == "" || normalized[drive] == "" {
+			result.Skipped++
+			label := drive
+			if label == "" {
+				label = "(无盘符)"
+			}
+			if _, ok := missingSet[label]; !ok {
+				missingSet[label] = struct{}{}
+				result.MissingDrives = append(result.MissingDrives, label)
+			}
+			continue
+		}
+		completed, itemErr := s.cleanupRecycleItem(spaceID, normalized, items[i])
+		if completed {
+			result.Moved++
+		} else {
+			result.Failed++
+		}
+		if itemErr != nil {
+			// 自动清理：单条失败记日志并继续，不中断整轮。
+			log.Printf("[WARN] 回收站自动清理单条失败: spaceID=%s mediaID=%d err=%v", spaceID, items[i].ID, itemErr)
+		}
+	}
+	return result, nil
+}
+
 func normalizeRecyclePaths(drivePaths map[string]string) map[string]string {
 	normalized := make(map[string]string, len(drivePaths))
 	for drive, path := range drivePaths {

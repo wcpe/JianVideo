@@ -31,6 +31,7 @@ describe('ShareDialog 创建分享链接（FR-43）', () => {
       expires_at: null,
       max_uses: 0,
       used_count: 0,
+      allow_download: true,
       created_at: '2026-06-22T00:00:00Z',
     });
 
@@ -53,6 +54,7 @@ describe('ShareDialog 创建分享链接（FR-43）', () => {
       expires_at: null,
       max_uses: 3,
       used_count: 0,
+      allow_download: true,
       created_at: '2026-06-22T00:00:00Z',
     });
 
@@ -66,7 +68,30 @@ describe('ShareDialog 创建分享链接（FR-43）', () => {
     await user.click(screen.getByRole('button', { name: '生成链接' }));
 
     await waitFor(() => expect(mockCreateShare).toHaveBeenCalledTimes(1));
-    // createShare(resourceType, resourceID, expiresInHours, password, maxUses)
-    expect(mockCreateShare).toHaveBeenCalledWith('media', 7, 0, 'secret', 3);
+    // createShare(resourceType, resourceID, expiresInHours, password, maxUses, allowDownload)
+    expect(mockCreateShare).toHaveBeenCalledWith('media', 7, 0, 'secret', 3, true);
+  });
+
+  it('关闭「允许下载」后透传 allow_download=false（FR2-055）', async () => {
+    mockCreateShare.mockResolvedValue({
+      token: 'tok3',
+      resource_type: 'media',
+      resource_id: 7,
+      expires_at: null,
+      max_uses: 0,
+      used_count: 0,
+      allow_download: false,
+      created_at: '2026-06-22T00:00:00Z',
+    });
+
+    renderDialog();
+    const user = userEvent.setup();
+    // 默认开启；点一次关闭
+    await user.click(screen.getByLabelText('允许下载原文件'));
+    await user.click(screen.getByRole('button', { name: '生成链接' }));
+
+    await waitFor(() => expect(mockCreateShare).toHaveBeenCalledTimes(1));
+    expect(mockCreateShare).toHaveBeenCalledWith('media', 7, 0, '', 0, false);
+    expect(await screen.findByText(/已禁止下载/)).toBeInTheDocument();
   });
 });

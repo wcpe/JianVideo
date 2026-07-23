@@ -29,6 +29,9 @@ import {
   updateSettings,
   SETTING_SENSITIVE_DISPLAY_VALUE,
   SETTING_KEY_RECYCLE_BIN_PATHS,
+  SETTING_KEY_RECYCLE_RETENTION_DAYS,
+  SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED,
+  SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC,
   SETTING_KEY_SCAN_INTERVAL,
   SETTING_KEY_FFMPEG_PATH,
   SETTING_KEY_FFPROBE_PATH,
@@ -52,7 +55,23 @@ import {
 } from '@/api/system';
 import { listTasks } from '@/api/tasks';
 import { changePassword } from '@/api/auth';
+import {
+  addSpaceMember,
+  createSpace,
+  createUser,
+  listSpaceMembers,
+  listSpaces,
+  listUsers,
+  removeSpaceMember,
+  setUserStatus,
+  updateMemberMaxRating,
+  updateSpaceParental,
+  type ManagedUser,
+  type SpaceMember,
+  type SpaceSummary,
+} from '@/api/space';
 import AnchorNav from '@/components/AnchorNav';
+import { useAuthStore } from '@/stores/auth';
 import { extractErrorMessage } from '@/utils/error';
 import {
   parseRecycleBinRows,
@@ -60,6 +79,7 @@ import {
   serializeRecycleBinRows,
   type RecycleBinRow,
 } from '@/utils/recycle-bin';
+import { MAX_RATING_OPTIONS } from '@/utils/content-rating';
 import type {
   EnvVar,
   LibraryPath,
@@ -76,6 +96,8 @@ import type { StorageSettingsInfo } from '@/api/settings';
 const SETTINGS_ANCHORS = [
   { id: 'set-storage', label: '存储与 Space' },
   { id: 'set-account', label: '账户安全' },
+  { id: 'set-users-spaces', label: '用户与 Space' },
+  { id: 'set-parental', label: '家长控制' },
   { id: 'set-scan', label: '扫描' },
   { id: 'set-inference', label: '影视信息' },
   { id: 'set-upload', label: '上传' },
@@ -84,6 +106,12 @@ const SETTINGS_ANCHORS = [
   { id: 'set-recycle', label: '回收站' },
   { id: 'set-diagnostics', label: '诊断' },
   { id: 'set-env', label: '环境变量' },
+];
+
+/** Space 成员角色选项（不可经 API 直接设 owner） */
+const MEMBER_ROLE_OPTIONS = [
+  { value: 'viewer', label: 'viewer · 只读' },
+  { value: 'editor', label: 'editor · 可写' },
 ];
 
 const TOOL_OPTIONS: { value: ToolName; label: string }[] = [
@@ -122,6 +150,10 @@ export default function SettingsPage() {
   const [scanInterval, setScanInterval] = useState('');
   // 回收站路径以结构化「盘符→路径」行列表编辑（FR-87），保存时序列化为 JSON 串
   const [recycleBinRows, setRecycleBinRows] = useState<RecycleBinRow[]>([]);
+  // 回收站保留期与自动清理（FR2-054）
+  const [recycleRetentionDays, setRecycleRetentionDays] = useState('30');
+  const [recycleAutoCleanupEnabled, setRecycleAutoCleanupEnabled] = useState(true);
+  const [recycleAutoCleanupIntervalSec, setRecycleAutoCleanupIntervalSec] = useState('3600');
   const [ffmpegPath, setFfmpegPath] = useState('');
   const [ffprobePath, setFfprobePath] = useState('');
   const [magickPath, setMagickPath] = useState('');
@@ -153,6 +185,40 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
+
+  // 家长控制（FR2-051）：Space 默认最高可见级 + 成员覆盖；改策略需密码确认
+  const [parentalSpace, setParentalSpace] = useState<SpaceSummary | null>(null);
+  const [parentalMembers, setParentalMembers] = useState<SpaceMember[]>([]);
+  const [parentalLoading, setParentalLoading] = useState(true);
+  const [parentalError, setParentalError] = useState<string | null>(null);
+  const [defaultMaxRating, setDefaultMaxRating] = useState('');
+  const [parentalPassword, setParentalPassword] = useState('');
+  const [parentalSaving, setParentalSaving] = useState(false);
+  // 成员 max_rating 草稿：user_id → 字符串（空=继承 Space 默认）
+  const [memberRatingDrafts, setMemberRatingDrafts] = useState<Record<number, string>>({});
+  const [memberSavingID, setMemberSavingID] = useState<number | null>(null);
+
+  // 用户与 Space 管理（FR2-010）：默认 Space owner 管用户；各 Space owner 管成员
+  const authUsername = useAuthStore((s) => s.username);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [managedSpaces, setManagedSpaces] = useState<SpaceSummary[]>([]);
+  const [usersSpacesLoading, setUsersSpacesLoading] = useState(true);
+  const [usersSpacesError, setUsersSpacesError] = useState<string | null>(null);
+  const [usersForbidden, setUsersForbidden] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userStatusBusyID, setUserStatusBusyID] = useState<number | null>(null);
+  const [newSpaceID, setNewSpaceID] = useState('');
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [memberSpaceID, setMemberSpaceID] = useState('');
+  const [memberUsername, setMemberUsername] = useState('');
+  const [memberRole, setMemberRole] = useState('viewer');
+  const [addingMember, setAddingMember] = useState(false);
+  const [memberList, setMemberList] = useState<SpaceMember[]>([]);
+  const [memberListLoading, setMemberListLoading] = useState(false);
+  const [removingMemberKey, setRemovingMemberKey] = useState<string | null>(null);
 
   // 环境变量（FR-56，只读）
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
@@ -200,6 +266,110 @@ export default function SettingsPage() {
     };
   }, []);
 
+  // 挂载时加载家长控制策略（FR2-051）：取可访问 Space 列表首项 + 成员；失败不阻塞其余设置
+  // 不依赖 storageInfo，避免与存储区加载时序竞态导致长期停留在 Skeleton
+  useEffect(() => {
+    let active = true;
+    setParentalLoading(true);
+    setParentalError(null);
+    (async () => {
+      try {
+        const spaces = await listSpaces();
+        if (!active) return;
+        const current = spaces[0] ?? null;
+        setParentalSpace(current);
+        setDefaultMaxRating((current?.default_max_rating ?? '').trim());
+        if (!current) {
+          setParentalMembers([]);
+          setMemberRatingDrafts({});
+          return;
+        }
+        const members = await listSpaceMembers(current.id);
+        if (!active) return;
+        setParentalMembers(members);
+        const drafts: Record<number, string> = {};
+        for (const m of members) {
+          drafts[m.user_id] = (m.max_rating ?? '').trim();
+        }
+        setMemberRatingDrafts(drafts);
+      } catch (err) {
+        if (active) setParentalError(extractErrorMessage(err, '加载家长控制策略失败'));
+      } finally {
+        if (active) setParentalLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 加载用户列表 + 可访问 Space（FR2-010）；用户列表仅默认 Space owner 可调，403 时仅隐藏用户管理
+  const reloadUsersAndSpaces = useCallback(async () => {
+    setUsersSpacesLoading(true);
+    setUsersSpacesError(null);
+    setUsersForbidden(false);
+    try {
+      const spaces = await listSpaces();
+      setManagedSpaces(spaces);
+      if (!memberSpaceID && spaces[0]) {
+        setMemberSpaceID(spaces[0].id);
+      }
+      try {
+        const users = await listUsers();
+        setManagedUsers(users);
+      } catch (err) {
+        // 非默认 Space owner 禁止列用户：不阻塞 Space 管理
+        const status =
+          (err as { status?: number })?.status ??
+          (err as { cause?: { response?: { status?: number } } })?.cause?.response?.status;
+        const msg = extractErrorMessage(err, '加载用户列表失败');
+        if (
+          status === 403 ||
+          /FORBIDDEN|仅默认 Space owner/i.test(msg) ||
+          msg.includes('仅默认')
+        ) {
+          setUsersForbidden(true);
+          setManagedUsers([]);
+        } else {
+          throw err;
+        }
+      }
+    } catch (err) {
+      setUsersSpacesError(extractErrorMessage(err, '加载用户与 Space 失败'));
+    } finally {
+      setUsersSpacesLoading(false);
+    }
+  }, [memberSpaceID]);
+
+  useEffect(() => {
+    void reloadUsersAndSpaces();
+    // 仅挂载时拉取一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 选中 Space 变化时加载其成员列表（FR2-010）
+  useEffect(() => {
+    if (!memberSpaceID) {
+      setMemberList([]);
+      return;
+    }
+    let active = true;
+    setMemberListLoading(true);
+    listSpaceMembers(memberSpaceID)
+      .then((items) => {
+        if (active) setMemberList(items);
+      })
+      .catch(() => {
+        if (active) setMemberList([]);
+      })
+      .finally(() => {
+        if (active) setMemberListLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [memberSpaceID]);
+
   // 挂载时加载现有设置
   useEffect(() => {
     let active = true;
@@ -211,6 +381,13 @@ export default function SettingsPage() {
         setDefinitions(Object.fromEntries(defs.map((def) => [def.key, def])));
         setScanInterval(data[SETTING_KEY_SCAN_INTERVAL] ?? '');
         setRecycleBinRows(parseRecycleBinRows(data[SETTING_KEY_RECYCLE_BIN_PATHS] ?? ''));
+        setRecycleRetentionDays(data[SETTING_KEY_RECYCLE_RETENTION_DAYS] ?? '30');
+        setRecycleAutoCleanupEnabled(
+          parseBooleanSetting(data[SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED], true),
+        );
+        setRecycleAutoCleanupIntervalSec(
+          data[SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC] ?? '3600',
+        );
         setFfmpegPath(data[SETTING_KEY_FFMPEG_PATH] ?? '');
         setFfprobePath(data[SETTING_KEY_FFPROBE_PATH] ?? '');
         setMagickPath(data[SETTING_KEY_MAGICK_PATH] ?? '');
@@ -395,6 +572,9 @@ export default function SettingsPage() {
       const payload: SettingsMap = {
         [SETTING_KEY_SCAN_INTERVAL]: scanInterval,
         [SETTING_KEY_RECYCLE_BIN_PATHS]: serializeRecycleBinRows(recycleBinRows),
+        [SETTING_KEY_RECYCLE_RETENTION_DAYS]: recycleRetentionDays,
+        [SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED]: recycleAutoCleanupEnabled ? '1' : '0',
+        [SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC]: recycleAutoCleanupIntervalSec,
         [SETTING_KEY_FFMPEG_PATH]: ffmpegPath,
         [SETTING_KEY_FFPROBE_PATH]: ffprobePath,
         [SETTING_KEY_MAGICK_PATH]: magickPath,
@@ -413,6 +593,13 @@ export default function SettingsPage() {
       // 以回读结果刷新输入框，确保展示与持久化一致
       setScanInterval(updated[SETTING_KEY_SCAN_INTERVAL] ?? '');
       setRecycleBinRows(parseRecycleBinRows(updated[SETTING_KEY_RECYCLE_BIN_PATHS] ?? ''));
+      setRecycleRetentionDays(updated[SETTING_KEY_RECYCLE_RETENTION_DAYS] ?? '30');
+      setRecycleAutoCleanupEnabled(
+        parseBooleanSetting(updated[SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED], true),
+      );
+      setRecycleAutoCleanupIntervalSec(
+        updated[SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC] ?? '3600',
+      );
       setFfmpegPath(updated[SETTING_KEY_FFMPEG_PATH] ?? '');
       setFfprobePath(updated[SETTING_KEY_FFPROBE_PATH] ?? '');
       setMagickPath(updated[SETTING_KEY_MAGICK_PATH] ?? '');
@@ -447,6 +634,9 @@ export default function SettingsPage() {
   }, [
     scanInterval,
     recycleBinRows,
+    recycleRetentionDays,
+    recycleAutoCleanupEnabled,
+    recycleAutoCleanupIntervalSec,
     ffmpegPath,
     ffprobePath,
     magickPath,
@@ -585,6 +775,211 @@ export default function SettingsPage() {
     }
   }, [currentPassword, newPassword, confirmPassword]);
 
+  // 保存 Space 默认最高可见分级（FR2-051，需密码确认）
+  const handleSaveParentalDefault = useCallback(async () => {
+    if (!parentalSpace) return;
+    if (!parentalPassword.trim()) {
+      notifications.show({
+        color: 'orange',
+        message: '修改家长策略需输入当前账户密码确认',
+        autoClose: 3000,
+      });
+      return;
+    }
+    setParentalSaving(true);
+    try {
+      await updateSpaceParental(parentalSpace.id, parentalPassword, defaultMaxRating);
+      setParentalPassword('');
+      setParentalSpace((prev) =>
+        prev ? { ...prev, default_max_rating: defaultMaxRating } : prev,
+      );
+      notifications.show({
+        color: 'green',
+        title: '已保存',
+        message: 'Space 默认最高可见分级已更新',
+        autoClose: 2500,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '保存失败',
+        message: extractErrorMessage(err, '更新家长控制策略失败'),
+        autoClose: 4000,
+      });
+    } finally {
+      setParentalSaving(false);
+    }
+  }, [parentalSpace, parentalPassword, defaultMaxRating]);
+
+  // 创建用户（FR2-010，默认 Space owner）
+  const handleCreateUser = useCallback(async () => {
+    const name = newUsername.trim();
+    if (!name || newUserPassword.length < 6) {
+      notifications.show({
+        color: 'orange',
+        message: '用户名必填，密码至少 6 位',
+        autoClose: 3000,
+      });
+      return;
+    }
+    setCreatingUser(true);
+    try {
+      await createUser(name, newUserPassword);
+      setNewUsername('');
+      setNewUserPassword('');
+      notifications.show({ color: 'green', title: '已创建', message: `用户「${name}」已创建` });
+      const users = await listUsers();
+      setManagedUsers(users);
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '创建失败',
+        message: extractErrorMessage(err, '创建用户失败'),
+      });
+    } finally {
+      setCreatingUser(false);
+    }
+  }, [newUsername, newUserPassword]);
+
+  // 启用/禁用用户（FR2-010）
+  const handleToggleUserStatus = useCallback(async (u: ManagedUser) => {
+    const next = u.status === 'disabled' ? 'active' : 'disabled';
+    setUserStatusBusyID(u.id);
+    try {
+      await setUserStatus(u.id, next);
+      setManagedUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: next } : x)));
+      notifications.show({
+        color: 'green',
+        message: next === 'disabled' ? `已禁用「${u.username}」` : `已启用「${u.username}」`,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: extractErrorMessage(err, '更新用户状态失败'),
+      });
+    } finally {
+      setUserStatusBusyID(null);
+    }
+  }, []);
+
+  // 创建 Space（FR2-010）
+  const handleCreateSpace = useCallback(async () => {
+    const id = newSpaceID.trim();
+    const name = newSpaceName.trim();
+    if (!id || !name) {
+      notifications.show({ color: 'orange', message: 'Space ID 与名称必填', autoClose: 3000 });
+      return;
+    }
+    setCreatingSpace(true);
+    try {
+      const sp = await createSpace(id, name);
+      setNewSpaceID('');
+      setNewSpaceName('');
+      notifications.show({ color: 'green', title: '已创建', message: `Space「${sp.name}」已创建` });
+      const spaces = await listSpaces();
+      setManagedSpaces(spaces);
+      setMemberSpaceID(sp.id);
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '创建失败',
+        message: extractErrorMessage(err, '创建 Space 失败'),
+      });
+    } finally {
+      setCreatingSpace(false);
+    }
+  }, [newSpaceID, newSpaceName]);
+
+  // 添加/更新成员角色（FR2-010，当前选中 Space 的 owner）
+  const handleAddMember = useCallback(async () => {
+    if (!memberSpaceID) return;
+    const uname = memberUsername.trim();
+    if (!uname) {
+      notifications.show({ color: 'orange', message: '请填写用户名', autoClose: 3000 });
+      return;
+    }
+    setAddingMember(true);
+    try {
+      await addSpaceMember(memberSpaceID, { username: uname, role: memberRole });
+      setMemberUsername('');
+      notifications.show({ color: 'green', message: `已将「${uname}」设为 ${memberRole}` });
+      const items = await listSpaceMembers(memberSpaceID);
+      setMemberList(items);
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        message: extractErrorMessage(err, '添加成员失败'),
+      });
+    } finally {
+      setAddingMember(false);
+    }
+  }, [memberSpaceID, memberUsername, memberRole]);
+
+  // 移除成员（FR2-010）
+  const handleRemoveMember = useCallback(
+    async (userID: number) => {
+      if (!memberSpaceID) return;
+      const key = `${memberSpaceID}:${userID}`;
+      setRemovingMemberKey(key);
+      try {
+        await removeSpaceMember(memberSpaceID, userID);
+        notifications.show({ color: 'green', message: '已移除成员' });
+        const items = await listSpaceMembers(memberSpaceID);
+        setMemberList(items);
+      } catch (err) {
+        notifications.show({
+          color: 'red',
+          message: extractErrorMessage(err, '移除成员失败'),
+        });
+      } finally {
+        setRemovingMemberKey(null);
+      }
+    },
+    [memberSpaceID],
+  );
+
+  // 保存成员最高可见分级（FR2-051，需密码确认）
+  const handleSaveMemberRating = useCallback(
+    async (userID: number) => {
+      if (!parentalSpace) return;
+      if (!parentalPassword.trim()) {
+        notifications.show({
+          color: 'orange',
+          message: '修改成员可见分级需输入当前账户密码确认',
+          autoClose: 3000,
+        });
+        return;
+      }
+      const rating = memberRatingDrafts[userID] ?? '';
+      setMemberSavingID(userID);
+      try {
+        await updateMemberMaxRating(parentalSpace.id, userID, parentalPassword, rating);
+        setParentalPassword('');
+        setParentalMembers((prev) =>
+          prev.map((m) =>
+            m.user_id === userID ? { ...m, max_rating: rating === '' ? null : rating } : m,
+          ),
+        );
+        notifications.show({
+          color: 'green',
+          title: '已保存',
+          message: `成员 #${userID} 可见分级已更新`,
+          autoClose: 2500,
+        });
+      } catch (err) {
+        notifications.show({
+          color: 'red',
+          title: '保存失败',
+          message: extractErrorMessage(err, '更新成员可见分级失败'),
+          autoClose: 4000,
+        });
+      } finally {
+        setMemberSavingID(null);
+      }
+    },
+    [parentalSpace, parentalPassword, memberRatingDrafts],
+  );
+
   return (
     <Group align="flex-start" gap="lg" wrap="nowrap">
       {/* 左侧锚点导航（FR-113）：窄屏隐藏、点击滚动定位到对应分区。
@@ -700,6 +1095,369 @@ export default function SettingsPage() {
               </Button>
             </Group>
           </Stack>
+        </Card>
+
+        {/* 用户与 Space（FR2-010）：默认 Space owner 管用户；各 Space owner 管成员 */}
+        <Title id="set-users-spaces" order={3}>
+          用户与 Space
+        </Title>
+        <Card withBorder padding="md" radius="md">
+          {usersSpacesLoading ? (
+            <Skeleton height={200} radius="md" />
+          ) : usersSpacesError ? (
+            <Alert icon={<IconAlertCircle size={16} />} color="orange" title="用户与 Space">
+              {usersSpacesError}
+            </Alert>
+          ) : (
+            <Stack gap="lg">
+              <Text size="xs" c="dimmed">
+                创建用户限默认 Space owner；创建 Space 后创建者为该 Space owner。成员角色仅
+                editor / viewer（不可经此界面设 owner）。
+              </Text>
+
+              {/* 用户管理：仅默认 Space owner 可见完整表；403 时提示无权限 */}
+              <Divider label="用户" labelPosition="left" />
+              {usersForbidden ? (
+                <Text size="sm" c="dimmed">
+                  当前账号不是默认 Space owner，无法管理用户列表。
+                </Text>
+              ) : (
+                <Stack gap="sm">
+                  <Table striped highlightOnHover withTableBorder>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>ID</Table.Th>
+                        <Table.Th>用户名</Table.Th>
+                        <Table.Th>状态</Table.Th>
+                        <Table.Th>操作</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {managedUsers.map((u) => (
+                        <Table.Tr key={u.id}>
+                          <Table.Td>{u.id}</Table.Td>
+                          <Table.Td>
+                            {u.username}
+                            {authUsername === u.username ? (
+                              <Badge size="xs" ml={6} variant="light">
+                                当前
+                              </Badge>
+                            ) : null}
+                          </Table.Td>
+                          <Table.Td>
+                            <Badge
+                              size="sm"
+                              color={u.status === 'disabled' ? 'red' : 'teal'}
+                              variant="light"
+                            >
+                              {u.status === 'disabled' ? '已禁用' : 'active'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Button
+                              size="xs"
+                              variant="default"
+                              loading={userStatusBusyID === u.id}
+                              disabled={authUsername === u.username}
+                              onClick={() => void handleToggleUserStatus(u)}
+                              aria-label={
+                                u.status === 'disabled'
+                                  ? `启用用户 ${u.username}`
+                                  : `禁用用户 ${u.username}`
+                              }
+                            >
+                              {u.status === 'disabled' ? '启用' : '禁用'}
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                  <Group align="flex-end" gap="sm" wrap="wrap">
+                    <TextInput
+                      label="新用户名"
+                      aria-label="新用户名"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.currentTarget.value)}
+                      style={{ minWidth: 140 }}
+                    />
+                    <TextInput
+                      label="初始密码"
+                      aria-label="新用户初始密码"
+                      type="password"
+                      description="至少 6 位"
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.currentTarget.value)}
+                      style={{ minWidth: 160 }}
+                    />
+                    <Button
+                      leftSection={<IconPlus size={14} />}
+                      loading={creatingUser}
+                      onClick={() => void handleCreateUser()}
+                    >
+                      创建用户
+                    </Button>
+                  </Group>
+                </Stack>
+              )}
+
+              {/* Space 列表与创建 */}
+              <Divider label="Space" labelPosition="left" />
+              <Stack gap="sm">
+                {managedSpaces.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    暂无可用 Space
+                  </Text>
+                ) : (
+                  <Table striped withTableBorder>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>ID</Table.Th>
+                        <Table.Th>名称</Table.Th>
+                        <Table.Th>我的角色</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {managedSpaces.map((sp) => (
+                        <Table.Tr key={sp.id}>
+                          <Table.Td>
+                            <Code>{sp.id}</Code>
+                          </Table.Td>
+                          <Table.Td>{sp.name}</Table.Td>
+                          <Table.Td>
+                            <Badge size="sm" variant="light">
+                              {sp.role || '—'}
+                            </Badge>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                )}
+                <Group align="flex-end" gap="sm" wrap="wrap">
+                  <TextInput
+                    label="Space ID"
+                    aria-label="新 Space ID"
+                    description="字母数字与 . _ -"
+                    value={newSpaceID}
+                    onChange={(e) => setNewSpaceID(e.currentTarget.value)}
+                    style={{ minWidth: 160 }}
+                  />
+                  <TextInput
+                    label="名称"
+                    aria-label="新 Space 名称"
+                    value={newSpaceName}
+                    onChange={(e) => setNewSpaceName(e.currentTarget.value)}
+                    style={{ minWidth: 140 }}
+                  />
+                  <Button
+                    leftSection={<IconPlus size={14} />}
+                    loading={creatingSpace}
+                    onClick={() => void handleCreateSpace()}
+                  >
+                    创建 Space
+                  </Button>
+                </Group>
+              </Stack>
+
+              {/* 成员管理：选 Space → 加成员 / 改角色 / 移除 */}
+              <Divider label="成员" labelPosition="left" />
+              <Stack gap="sm">
+                <Select
+                  label="管理成员的 Space"
+                  aria-label="管理成员的 Space"
+                  data={managedSpaces.map((sp) => ({
+                    value: sp.id,
+                    label: `${sp.name} (${sp.id})`,
+                  }))}
+                  value={memberSpaceID || null}
+                  onChange={(v) => setMemberSpaceID(v ?? '')}
+                  allowDeselect={false}
+                  placeholder={managedSpaces.length === 0 ? '暂无 Space' : '选择 Space'}
+                />
+                {memberListLoading ? (
+                  <Skeleton height={80} radius="md" />
+                ) : memberSpaceID ? (
+                  memberList.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      暂无成员
+                    </Text>
+                  ) : (
+                    <Table striped withTableBorder>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>用户 ID</Table.Th>
+                          <Table.Th>角色</Table.Th>
+                          <Table.Th>操作</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {memberList.map((m) => (
+                          <Table.Tr key={`${m.space_id}-${m.user_id}`}>
+                            <Table.Td>#{m.user_id}</Table.Td>
+                            <Table.Td>
+                              <Badge size="sm" variant="light">
+                                {m.role}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              {m.role === 'owner' ? (
+                                <Text size="xs" c="dimmed">
+                                  owner 不可移除
+                                </Text>
+                              ) : (
+                                <Button
+                                  size="xs"
+                                  color="red"
+                                  variant="light"
+                                  loading={removingMemberKey === `${m.space_id}:${m.user_id}`}
+                                  onClick={() => void handleRemoveMember(m.user_id)}
+                                  aria-label={`移除成员 ${m.user_id}`}
+                                >
+                                  移除
+                                </Button>
+                              )}
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  )
+                ) : null}
+                <Group align="flex-end" gap="sm" wrap="wrap">
+                  <TextInput
+                    label="用户名"
+                    aria-label="添加成员用户名"
+                    value={memberUsername}
+                    onChange={(e) => setMemberUsername(e.currentTarget.value)}
+                    style={{ minWidth: 140 }}
+                  />
+                  <Select
+                    label="角色"
+                    aria-label="添加成员角色"
+                    data={MEMBER_ROLE_OPTIONS}
+                    value={memberRole}
+                    onChange={(v) => setMemberRole(v ?? 'viewer')}
+                    allowDeselect={false}
+                    style={{ minWidth: 160 }}
+                  />
+                  <Button
+                    loading={addingMember}
+                    disabled={!memberSpaceID}
+                    onClick={() => void handleAddMember()}
+                  >
+                    添加/更新成员
+                  </Button>
+                </Group>
+              </Stack>
+            </Stack>
+          )}
+        </Card>
+
+        {/* 家长控制（FR2-051）：Space 默认最高可见级 + 成员覆盖；改策略需密码确认 */}
+        <Title id="set-parental" order={3}>
+          家长控制
+        </Title>
+        <Card withBorder padding="md" radius="md">
+          {parentalLoading ? (
+            <Skeleton height={160} radius="md" />
+          ) : parentalError ? (
+            <Alert icon={<IconAlertCircle size={16} />} color="orange" title="家长控制">
+              {parentalError}
+            </Alert>
+          ) : !parentalSpace ? (
+            <Text size="sm" c="dimmed">
+              暂无可用 Space，无法配置家长控制。
+            </Text>
+          ) : (
+            <Stack gap="md">
+              <Text size="xs" c="dimmed">
+                限制成员在本 Space 可见的最高内容分级。成员覆盖优先于 Space
+                默认；皆为空表示不限制。修改策略需输入当前账户密码确认（家长锁）。
+              </Text>
+              <Group gap="xs">
+                <Text size="sm" c="dimmed">
+                  当前 Space
+                </Text>
+                <Text size="sm" fw={600}>
+                  {parentalSpace.name}
+                </Text>
+                <Code>{parentalSpace.id}</Code>
+                {parentalSpace.role && (
+                  <Badge size="sm" variant="light">
+                    {parentalSpace.role}
+                  </Badge>
+                )}
+              </Group>
+              <Select
+                label="Space 默认最高可见分级"
+                aria-label="Space 默认最高可见分级"
+                description="空=不限制；成员无个人覆盖时生效"
+                data={MAX_RATING_OPTIONS}
+                value={defaultMaxRating}
+                onChange={(v) => setDefaultMaxRating(v ?? '')}
+                allowDeselect={false}
+              />
+              <TextInput
+                label="确认密码（家长锁）"
+                aria-label="家长控制确认密码"
+                type="password"
+                placeholder="修改策略时必填"
+                description="仅本次提交使用，不会保存"
+                value={parentalPassword}
+                onChange={(e) => setParentalPassword(e.currentTarget.value)}
+              />
+              <Button
+                onClick={() => void handleSaveParentalDefault()}
+                loading={parentalSaving}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                保存默认分级
+              </Button>
+              <Divider label="成员可见分级覆盖" labelPosition="left" />
+              {parentalMembers.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  暂无成员
+                </Text>
+              ) : (
+                <Stack gap="sm">
+                  {parentalMembers.map((m) => (
+                    <Group key={m.user_id} gap="sm" align="flex-end" wrap="wrap">
+                      <Box style={{ minWidth: 120 }}>
+                        <Text size="sm" fw={500}>
+                          用户 #{m.user_id}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          角色 {m.role}
+                        </Text>
+                      </Box>
+                      <Select
+                        aria-label={`成员 ${m.user_id} 最高可见分级`}
+                        data={MAX_RATING_OPTIONS}
+                        value={memberRatingDrafts[m.user_id] ?? ''}
+                        onChange={(v) =>
+                          setMemberRatingDrafts((prev) => ({
+                            ...prev,
+                            [m.user_id]: v ?? '',
+                          }))
+                        }
+                        allowDeselect={false}
+                        style={{ flex: 1, minWidth: 180 }}
+                      />
+                      <Button
+                        variant="default"
+                        size="sm"
+                        loading={memberSavingID === m.user_id}
+                        onClick={() => void handleSaveMemberRating(m.user_id)}
+                      >
+                        保存
+                      </Button>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          )}
         </Card>
 
         {loadError && (
@@ -1035,7 +1793,7 @@ export default function SettingsPage() {
               </Stack>
             </Card>
 
-            {/* 回收站分区（FR-87）：结构化「盘符→路径」行列表编辑，序列化为 recycle_bin_paths JSON 串 */}
+            {/* 回收站分区（FR-87 路径 + FR2-054 保留期）：盘符路径与到期自动清理策略 */}
             <Title id="set-recycle" order={3}>
               回收站
             </Title>
@@ -1080,6 +1838,51 @@ export default function SettingsPage() {
                 >
                   添加盘符
                 </Button>
+
+                <Divider my="xs" />
+
+                <Text size="xs" c="dimmed">
+                  保留期与自动清理（FR2-054）：到期后将源文件移入对应盘符回收站目录并移除库内记录；保留天数为
+                  0 或关闭开关时仅可手动清理。
+                </Text>
+                <TextInput
+                  label={settingLabel(SETTING_KEY_RECYCLE_RETENTION_DAYS, '回收站保留天数')}
+                  description={settingDescription(
+                    SETTING_KEY_RECYCLE_RETENTION_DAYS,
+                    '软删媒体保留天数，超过后可由自动清理处理；0 表示不自动清理。',
+                  )}
+                  aria-label="回收站保留天数"
+                  type="number"
+                  min={0}
+                  value={recycleRetentionDays}
+                  onChange={(e) => setRecycleRetentionDays(e.currentTarget.value)}
+                />
+                <Switch
+                  label={settingLabel(SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED, '回收站自动清理')}
+                  aria-label="回收站自动清理"
+                  description={settingDescription(
+                    SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED,
+                    '是否启用到期自动清理；关闭后仅可手动清理。',
+                  )}
+                  checked={recycleAutoCleanupEnabled}
+                  onChange={(e) => setRecycleAutoCleanupEnabled(e.currentTarget.checked)}
+                />
+                <TextInput
+                  label={settingLabel(
+                    SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC,
+                    '回收站自动清理周期（秒）',
+                  )}
+                  description={settingDescription(
+                    SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC,
+                    '自动清理调度间隔秒数，0 表示关闭定时（仍可手动触发）。',
+                  )}
+                  aria-label="回收站自动清理周期（秒）"
+                  type="number"
+                  min={0}
+                  value={recycleAutoCleanupIntervalSec}
+                  onChange={(e) => setRecycleAutoCleanupIntervalSec(e.currentTarget.value)}
+                  disabled={!recycleAutoCleanupEnabled}
+                />
               </Stack>
             </Card>
 

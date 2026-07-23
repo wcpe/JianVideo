@@ -38,6 +38,10 @@ describe('SettingsPage', () => {
     // 回收站路径初始 JSON 回填为结构化行：盘符 D + 路径 D:/.recycle
     expect(screen.getByLabelText('盘符 1')).toHaveValue('D');
     expect(screen.getByLabelText('回收站路径 1')).toHaveValue('D:/.recycle');
+    // 保留期与自动清理默认值（FR2-054）
+    expect(screen.getByLabelText('回收站保留天数')).toHaveValue(30);
+    expect(screen.getByLabelText('回收站自动清理')).toBeChecked();
+    expect(screen.getByLabelText('回收站自动清理周期（秒）')).toHaveValue(3600);
   });
 
   it('已保存敏感代理不回显，保存其他设置时不提交 network_proxy', async () => {
@@ -60,7 +64,8 @@ describe('SettingsPage', () => {
     );
 
     renderPage();
-    const proxyInput = await screen.findByLabelText('网络代理');
+    // 设置主表单在 loading 结束后才渲染；FR2-010 挂载时额外并发请求，默认 1s 偶发不够
+    const proxyInput = await screen.findByLabelText('网络代理', {}, { timeout: 10000 });
     expect(proxyInput).toHaveValue('');
     expect(screen.getByText(/已保存代理已隐藏/)).toBeVisible();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
@@ -162,6 +167,35 @@ describe('SettingsPage', () => {
     });
     expect(putBody).not.toBeNull();
     expect(putBody!.settings.recycle_bin_paths).toBe('{"D":"D:/trash"}');
+  });
+
+  it('回收站保留期与自动清理随保存提交（FR2-054）', async () => {
+    const user = userEvent.setup();
+    let putBody: { settings: Record<string, string> } | null = null;
+    server.use(
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = (await request.json()) as { settings: Record<string, string> };
+        return HttpResponse.json({ settings: putBody.settings });
+      }),
+    );
+    renderPage();
+
+    const daysInput = await screen.findByLabelText('回收站保留天数');
+    fireEvent.change(daysInput, { target: { value: '14' } });
+    const intervalInput = screen.getByLabelText('回收站自动清理周期（秒）');
+    fireEvent.change(intervalInput, { target: { value: '7200' } });
+    await user.click(screen.getByLabelText('回收站自动清理')); // 关闭
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green' }),
+      );
+    });
+    expect(putBody).not.toBeNull();
+    expect(putBody!.settings.recycle_retention_days).toBe('14');
+    expect(putBody!.settings.recycle_auto_cleanup_enabled).toBe('0');
+    expect(putBody!.settings.recycle_auto_cleanup_interval_sec).toBe('7200');
   });
 
   it('回收站编辑器：空盘符行内校验且不提交', async () => {
@@ -734,5 +768,146 @@ describe('SettingsPage', () => {
         expect.objectContaining({ title: '修改成功', color: 'green' }),
       );
     });
+  });
+
+  // ─── 家长控制（FR2-051）──────────────────────────────
+  // Mantine Select 在本环境常以 <input aria-label> 呈现（非稳定 combobox role）；
+  // 下拉打开时 listbox 也会关联同一 label，故用 selector:'input' 限定到输入框。
+
+  async function waitParentalFormReady() {
+    // 表单就绪信号：保存按钮仅在 Space 加载成功后渲染（含 MSW delay）
+    return screen.findByRole('button', { name: '保存默认分级' }, { timeout: 10000 });
+  }
+
+  it('家长控制分区展示 Space 默认分级与成员覆盖', async () => {
+    renderPage();
+    expect(await screen.findByRole('heading', { name: '家长控制' })).toBeVisible();
+    await waitParentalFormReady();
+    expect(
+      screen.getByLabelText('Space 默认最高可见分级', { selector: 'input' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('家长控制确认密码')).toBeInTheDocument();
+    // mock 成员 user #1
+    expect(screen.getByLabelText('成员 1 最高可见分级', { selector: 'input' })).toBeInTheDocument();
+  });
+
+  it('无确认密码时保存默认分级仅提示不请求', async () => {
+    const user = userEvent.setup();
+    let putCalled = false;
+    server.use(
+      http.put('*/api/spaces/:id/parental', () => {
+        putCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+    await waitParentalFormReady();
+    await user.click(screen.getByRole('button', { name: '保存默认分级' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'orange' }),
+      );
+    });
+    expect(putCalled).toBe(false);
+  });
+
+  it('带确认密码保存默认分级成功（FR2-051）', async () => {
+    const user = userEvent.setup();
+    let putBody: { password?: string; default_max_rating?: string } | null = null;
+    server.use(
+      http.put('*/api/spaces/:id/parental', async ({ request }) => {
+        putBody = (await request.json()) as {
+          password?: string;
+          default_max_rating?: string;
+        };
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+    await waitParentalFormReady();
+    const select = screen.getByLabelText('Space 默认最高可见分级', { selector: 'input' });
+    // 选 PG
+    await user.click(select);
+    await user.click(await screen.findByRole('option', { name: /最高 PG$/ }));
+    fireEvent.change(screen.getByLabelText('家长控制确认密码'), { target: { value: 'admin' } });
+    await user.click(screen.getByRole('button', { name: '保存默认分级' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green', title: '已保存' }),
+      );
+    });
+    expect(putBody).not.toBeNull();
+    expect(putBody!.password).toBe('admin');
+    expect(putBody!.default_max_rating).toBe('PG');
+  });
+
+  // ─── 用户与 Space（FR2-010）──────────────────────────────
+  // 标题始终渲染；表单就绪以「创建 Space」按钮为准（含 MSW delay）
+  // space-default 会在存储区/用户区/家长控制多处出现，断言用 getAllByText
+
+  async function waitUsersSpacesReady() {
+    return screen.findByRole('button', { name: '创建 Space' }, { timeout: 10000 });
+  }
+
+  it('用户与 Space分区展示用户列表与 Space 列表', async () => {
+    renderPage();
+    await waitUsersSpacesReady();
+    // mock 默认 admin 用户
+    expect(await screen.findByText('admin', {}, { timeout: 10000 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建用户' })).toBeInTheDocument();
+    expect(screen.getAllByText('space-default').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('管理成员的 Space', { selector: 'input' })).toBeInTheDocument();
+  });
+
+  it('创建用户成功后列表出现新用户（FR2-010）', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitUsersSpacesReady();
+    await screen.findByText('admin', {}, { timeout: 10000 });
+    fireEvent.change(screen.getByLabelText('新用户名'), { target: { value: 'alice' } });
+    fireEvent.change(screen.getByLabelText('新用户初始密码'), { target: { value: 'secret12' } });
+    await user.click(screen.getByRole('button', { name: '创建用户' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green', title: '已创建' }),
+      );
+    });
+    expect(await screen.findByText('alice')).toBeInTheDocument();
+  });
+
+  it('创建 Space 成功后列表出现新 Space（FR2-010）', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitUsersSpacesReady();
+    fireEvent.change(screen.getByLabelText('新 Space ID'), { target: { value: 'space-work' } });
+    fireEvent.change(screen.getByLabelText('新 Space 名称'), { target: { value: '工作' } });
+    await user.click(screen.getByRole('button', { name: '创建 Space' }));
+    await waitFor(() => {
+      expect(mockNotificationShow).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 'green', title: '已创建' }),
+      );
+    });
+    expect(await screen.findByText('space-work')).toBeInTheDocument();
+    expect(screen.getByText('工作')).toBeInTheDocument();
+  });
+
+  it('非默认 Space owner 列用户 403 时隐藏用户管理（FR2-010）', async () => {
+    server.use(
+      http.get('*/api/users', () =>
+        HttpResponse.json(
+          { code: 'FORBIDDEN', message: '仅默认 Space owner 可管理用户' },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderPage();
+    // 403 分支不渲染「创建用户」，以「创建 Space」+ 无权限文案为就绪信号
+    await waitUsersSpacesReady();
+    expect(
+      await screen.findByText(/不是默认 Space owner，无法管理用户列表/, {}, { timeout: 10000 }),
+    ).toBeInTheDocument();
+    // Space 列表仍可用（多处出现 space-default 属预期）
+    expect(screen.getAllByText('space-default').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '创建用户' })).not.toBeInTheDocument();
   });
 });

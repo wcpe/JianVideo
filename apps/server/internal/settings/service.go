@@ -19,6 +19,12 @@ import (
 const (
 	// KeyRecycleBinPaths 每盘符回收站路径，值为 JSON 字符串（盘符 → 路径）。
 	KeyRecycleBinPaths = "recycle_bin_paths"
+	// KeyRecycleRetentionDays 回收站保留天数（FR2-054）；默认 30；0 表示不自动清理。
+	KeyRecycleRetentionDays = "recycle_retention_days"
+	// KeyRecycleAutoCleanupEnabled 回收站到期自动清理总开关（FR2-054）；默认 true。
+	KeyRecycleAutoCleanupEnabled = "recycle_auto_cleanup_enabled"
+	// KeyRecycleAutoCleanupIntervalSec 自动清理调度周期秒数（FR2-054）；默认 3600；0 关闭定时。
+	KeyRecycleAutoCleanupIntervalSec = "recycle_auto_cleanup_interval_sec"
 	// KeyScanInterval 定时扫描周期（秒），值为字符串形式的整数。
 	KeyScanInterval = "scan_interval"
 	// KeyUpdateChannel 自更新频道：stable=正式版（正式 release）/ prerelease=测试版（最新预发布 dev）。
@@ -94,6 +100,41 @@ func (s *Service) ScanInterval() time.Duration {
 	raw, err := s.Get(KeyScanInterval)
 	if err != nil {
 		return 0
+	}
+	secs, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// RecycleRetentionDays 读取回收站保留天数；缺失或非法回退 30；0 表示不自动清理。
+func (s *Service) RecycleRetentionDays() int {
+	raw, err := s.Get(KeyRecycleRetentionDays)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return 30
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 0 {
+		return 30
+	}
+	return n
+}
+
+// RecycleAutoCleanupEnabled 读取自动清理总开关；默认 true。
+func (s *Service) RecycleAutoCleanupEnabled() bool {
+	raw, err := s.Get(KeyRecycleAutoCleanupEnabled)
+	if err != nil {
+		return true
+	}
+	return ParseBoolSetting(raw, true)
+}
+
+// RecycleAutoCleanupInterval 读取自动清理调度周期；缺失回退 1h；<=0 关闭定时。
+func (s *Service) RecycleAutoCleanupInterval() time.Duration {
+	raw, err := s.Get(KeyRecycleAutoCleanupIntervalSec)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return time.Hour
 	}
 	secs, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || secs <= 0 {

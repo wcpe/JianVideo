@@ -566,6 +566,27 @@ func (s *Service) GetMediaFileByIDInSpace(spaceID string, id int64) (*models.Med
 	return s.mediaRepo.GetMediaFileByID(spaceID, id)
 }
 
+// GetMediaFileByIDInSpaceForViewer 按调用者最高可见分级取媒体（FR2-051）；不可见 → not found。
+func (s *Service) GetMediaFileByIDInSpaceForViewer(spaceID string, id int64, maxContentRating string) (*models.MediaFile, error) {
+	return s.mediaRepo.GetMediaFileByIDForViewer(spaceID, id, maxContentRating)
+}
+
+// UpdateMediaContentRatingInSpace 设置媒体内容分级（FR2-051）；rating 空表示清除。
+func (s *Service) UpdateMediaContentRatingInSpace(spaceID string, id int64, rating string) error {
+	if !models.ValidContentRating(rating) {
+		return fmt.Errorf("非法内容分级")
+	}
+	norm := models.NormalizeContentRating(rating)
+	n, err := s.mediaRepo.UpdateField(normalizeSpaceID(spaceID), id, "content_rating", norm)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // CountThumbnailCandidates 返回当前 Space 可生成缩略图的媒体数量。
 func (s *Service) CountThumbnailCandidates(spaceID string) (int64, error) {
 	return s.mediaRepo.CountThumbnailCandidates(spaceID)
@@ -955,12 +976,14 @@ func (s *Service) MoveMediaFileInSpace(spaceID string, id int64, targetDir strin
 	return mf, nil
 }
 
-// WritebackMediaMetadata 重新提取媒体元数据并回写到库内记录。
+// WritebackMediaMetadata 重新提取媒体元数据并回写到库内记录（文件→库，非 FR2-033 危险写回）。
+// 危险写回原文件请走 EnqueueMetadataWriteback / POST .../metadata/writeback。
 func (s *Service) WritebackMediaMetadata(id int64) (*models.MediaFile, error) {
 	return s.WritebackMediaMetadataInSpace(models.DefaultSpaceID, id)
 }
 
-// WritebackMediaMetadataInSpace 重新提取指定媒体的元数据并回写到库内记录。
+// WritebackMediaMetadataInSpace 重新提取指定媒体的元数据并回写到库内记录（文件→库刷新）。
+// 审计动作仍用 metadata.writeback.* 历史名；与任务类型 metadata.writeback（库→文件）区分见 FR2-033。
 func (s *Service) WritebackMediaMetadataInSpace(spaceID string, id int64) (*models.MediaFile, error) {
 	spaceID = normalizeSpaceID(spaceID)
 	before, err := s.GetMediaFileByIDInSpace(spaceID, id)

@@ -1440,3 +1440,98 @@ func TestUniqueDestPath(t *testing.T) {
 		t.Fatalf("第二个目标应换名避免覆盖, 实际 %s", filepath.Base(second))
 	}
 }
+
+
+// TestListExpiredDeleted_SelectsOnlyExpired 仅选中 deleted_at 早于阈值的项（FR2-054）。
+func TestListExpiredDeleted_SelectsOnlyExpired(t *testing.T) {
+	svc, _ := newTestService(t)
+	oldAt := time.Now().Add(-48 * time.Hour)
+	newAt := time.Now().Add(-1 * time.Hour)
+	old := createSoftDeletedMedia(t, svc, 1, "/tmp/old.mp4", oldAt)
+	_ = createSoftDeletedMedia(t, svc, 1, "/tmp/new.mp4", newAt)
+	before := time.Now().Add(-24 * time.Hour)
+	items, err := svc.ListExpiredDeletedMediaInSpace(models.DefaultSpaceID, before, 50)
+	if err != nil {
+		t.Fatalf("查询过期失败: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != old.ID {
+		t.Fatalf("应仅含过期项 %d, 实际 %+v", old.ID, items)
+	}
+}
+
+// TestAutoCleanupExpired_SkipsMissingDrive 缺盘符路径时跳过该项，不整轮拒绝，记录仍在回收站。
+func TestAutoCleanupExpired_SkipsMissingDrive(t *testing.T) {
+	svc, _ := newTestService(t)
+	deletedAt := time.Now().Add(-48 * time.Hour)
+	mf := createSoftDeletedMedia(t, svc, 1, "D:/media/gone.mkv", deletedAt)
+	before := time.Now().Add(-24 * time.Hour)
+	result, err := svc.AutoCleanupExpiredInSpace(models.DefaultSpaceID, map[string]string{}, before, 50)
+	if err != nil {
+		t.Fatalf("自动清理不应因缺路径整体失败: %v", err)
+	}
+	if result.Candidate != 1 || result.Skipped != 1 || result.Moved != 0 {
+		t.Fatalf("期望 candidate=1 skipped=1 moved=0, 实际 %+v", result)
+	}
+	deleted, err := svc.ListDeletedMediaFilesInSpace(models.DefaultSpaceID)
+	if err != nil || len(deleted) != 1 || deleted[0].ID != mf.ID {
+		t.Fatalf("跳过后软删记录应仍在, deleted=%+v err=%v", deleted, err)
+	}
+}
+
+// TestAutoCleanupExpired_MovesExpiredWithDrive 配置盘符后清理过期项。
+func TestAutoCleanupExpired_MovesExpiredWithDrive(t *testing.T) {
+	svc, _ := newTestService(t)
+	srcDir := t.TempDir()
+	srcFile := filepath.Join(srcDir, "old.mkv")
+	if err := os.WriteFile(srcFile, []byte("old"), 0o644); err != nil {
+		t.Fatalf("写源文件失败: %v", err)
+	}
+	srcSlash := filepath.ToSlash(srcFile)
+	drive := driveOfPath(srcSlash)
+	if drive == "" {
+		t.Skip("当前平台临时目录无盘符，跳过真实移动用例")
+	}
+	deletedAt := time.Now().Add(-48 * time.Hour)
+	mf := createSoftDeletedMedia(t, svc, 1, srcSlash, deletedAt)
+	// 未过期项不应被清
+	fresh := filepath.Join(srcDir, "fresh.mkv")
+	_ = os.WriteFile(fresh, []byte("fresh"), 0o644)
+	_ = createSoftDeletedMedia(t, svc, 1, filepath.ToSlash(fresh), time.Now().Add(-1*time.Hour))
+
+	recycleDir := filepath.Join(srcDir, ".recycle")
+	before := time.Now().Add(-24 * time.Hour)
+	result, err := svc.AutoCleanupExpiredInSpace(models.DefaultSpaceID, map[string]string{drive: filepath.ToSlash(recycleDir)}, before, 50)
+	if err != nil {
+		t.Fatalf("自动清理失败: %v", err)
+	}
+	if result.Moved != 1 || result.Candidate != 1 {
+		t.Fatalf("期望 candidate=1 moved=1, 实际 %+v", result)
+	}
+	if _, err := os.Stat(srcFile); !os.IsNotExist(err) {
+		t.Fatalf("过期源文件应已移走")
+	}
+	deleted, _ := svc.ListDeletedMediaFilesInSpace(models.DefaultSpaceID)
+	if len(deleted) != 1 {
+		t.Fatalf("未过期项应仍在回收站, 实际 %d", len(deleted))
+	}
+	_ = mf
+}
+
+// TestPreviewAutoCleanup_CountsMissingDrives preview 与候选一致且不改数据。
+func TestPreviewAutoCleanup_CountsMissingDrives(t *testing.T) {
+	svc, _ := newTestService(t)
+	deletedAt := time.Now().Add(-72 * time.Hour)
+	mf := createSoftDeletedMedia(t, svc, 1, "E:/x/a.mp4", deletedAt)
+	before := time.Now().Add(-24 * time.Hour)
+	preview, err := svc.PreviewAutoCleanupInSpace(models.DefaultSpaceID, map[string]string{}, before, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Candidate != 1 || preview.Skipped != 1 || len(preview.MediaIDs) != 1 || preview.MediaIDs[0] != mf.ID {
+		t.Fatalf("preview 不符: %+v", preview)
+	}
+	deleted, _ := svc.ListDeletedMediaFilesInSpace(models.DefaultSpaceID)
+	if len(deleted) != 1 {
+		t.Fatal("preview 不得删除记录")
+	}
+}

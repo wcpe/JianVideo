@@ -60,6 +60,10 @@ func (failingCapabilityAuditRecorder) List(context.Context, audit.Query) (audit.
 	return audit.Page{}, nil
 }
 
+func (failingCapabilityAuditRecorder) GetByID(context.Context, int64) (*models.AuditEvent, error) {
+	return nil, errors.New("审计写入失败")
+}
+
 // TestCapabilityService_CacheHit 命中当前版本缓存即返回，from_cache=true，且不触发实测。
 func TestCapabilityService_CacheHit(t *testing.T) {
 	db := newCapabilityTestDB(t)

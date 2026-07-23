@@ -17,6 +17,10 @@ const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
 // 已知设置键，与后端 internal/settings 常量保持一致。
 export const SETTING_KEY_RECYCLE_BIN_PATHS = 'recycle_bin_paths';
+// 回收站保留期与自动清理（FR2-054）
+export const SETTING_KEY_RECYCLE_RETENTION_DAYS = 'recycle_retention_days';
+export const SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED = 'recycle_auto_cleanup_enabled';
+export const SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC = 'recycle_auto_cleanup_interval_sec';
 export const SETTING_KEY_SCAN_INTERVAL = 'scan_interval';
 // 更新频道：stable=正式版（拉正式 release）/ prerelease=候选版（拉最高 RC）
 export const SETTING_KEY_UPDATE_CHANNEL = 'update_channel';
@@ -93,6 +97,9 @@ async function realGetSettingDefinitions(): Promise<SettingDefinition[]> {
 const mockStore: SettingsMap = {
   [SETTING_KEY_SCAN_INTERVAL]: '3600',
   [SETTING_KEY_RECYCLE_BIN_PATHS]: '{"D":"D:/.recycle"}',
+  [SETTING_KEY_RECYCLE_RETENTION_DAYS]: '30',
+  [SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED]: '1',
+  [SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC]: '3600',
   [SETTING_KEY_UPDATE_CHANNEL]: 'stable',
   [SETTING_KEY_TRANSCODE_CODEC_PRIORITY]: '["h264"]',
   [SETTING_KEY_TRANSCODE_HWACCEL_MODE]: 'auto',
@@ -120,6 +127,39 @@ const mockDefinitions: SettingDefinition[] = [
     layer: 'runtime',
     value_type: 'json',
     default_value: '{}',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: SETTING_KEY_RECYCLE_RETENTION_DAYS,
+    label: '回收站保留天数',
+    description: '软删媒体保留天数，超过后可由自动清理处理；0 表示不自动清理。',
+    layer: 'runtime',
+    value_type: 'int',
+    default_value: '30',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: SETTING_KEY_RECYCLE_AUTO_CLEANUP_ENABLED,
+    label: '回收站自动清理',
+    description: '是否启用到期自动清理；关闭后仅可手动清理。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '1',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'library.recycle',
+  },
+  {
+    key: SETTING_KEY_RECYCLE_AUTO_CLEANUP_INTERVAL_SEC,
+    label: '回收站自动清理周期',
+    description: '自动清理调度间隔秒数，0 表示关闭定时（仍可手动触发）。',
+    layer: 'runtime',
+    value_type: 'int',
+    default_value: '3600',
     sensitive: false,
     hot_apply: true,
     consumer: 'library.recycle',

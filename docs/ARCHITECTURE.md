@@ -4,10 +4,10 @@
 
 ## 1. 定位与边界
 
-一款单用户私有视频媒体服务器，将分散在多个硬盘或 NAS 中的视频和图片汇聚到一个 Web 媒体库，通过浏览器直接播放所有格式的视频（不兼容格式自动转码为 HLS/TS 流），并支持图片预览和硬件加速转码降低 CPU 负载。
+一款家庭/小团队私有视频媒体服务器，将分散在多个硬盘或 NAS 中的视频和图片汇聚到一个 Web 媒体库，通过浏览器直接播放所有格式的视频（不兼容格式自动转码为 HLS/TS 流），并支持图片预览和硬件加速转码降低 CPU 负载。
 
 **边界**：
-- 系统仅服务单用户，无多租户、权限管理。
+- 目标 10～50 活跃用户；权限以 **Space 成员角色**（owner/editor/viewer，ADR-0056 / FR2-010）为边界，不做 OAuth/LDAP、单文件 ACL 或联邦多租户。
 - 前端编译产物通过 `go:embed` 内嵌于 Go 二进制，Web 服务器由 Go 统一承载。
 - 不依赖外部数据库服务，元数据使用 SQLite（WAL 模式）本地存储。
 - 不依赖外部消息队列、缓存或容器编排。
@@ -52,18 +52,20 @@
 | 模块 | 职责 | 依赖方向 |
 |---|---|---|
 | `web` | HTTP API 服务、静态文件服务、认证中间件 | → `library`, `transcoder` |
-| `api` | API 路由注册、请求处理器（轻量委托 service；生产路径不直连业务表 GORM，见 FR2-070） | → `library`, `playback`, `subtitle`, `settings`, `tasks` |
-| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、内嵌章节解析与书签 revision CAS（FR2-060）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031）、媒体健康巡检（FR-73）；Media/LibraryPath/mediaTypeRule/Space/chapter/bookmark/metadata/tag/album/cover/view/watch/inference/health 及 summary/next_episode/dedup/file_hash/recycle 等经 repository；**library 生产路径无 `s.db`**；`DBProvider` + `ListSpacesNeedingInferenceBackfill` 供设置事务同事务查询（FR2-070） | → `db` |
+| `api` | API 路由注册、请求处理器（轻量委托 service；生产路径不直连业务表 GORM，见 FR2-070） | → `library`, `playback`, `subtitle`, `settings`, `tasks`, `rollback`, `audit` |
+| `library` | 媒体库管理、目录注册、异步递归扫描与进度状态、扫描任务队列（持久化 + 单 worker 串行 + 重启恢复，FR-29）、定时扫描调度（可配置周期，FR-28）、媒体类型与后缀规则、文件索引、媒体文件 CRUD、目录浏览、缩略图生成、观看状态 revision CAS、继续观看与观看历史（FR2-045）、内嵌章节解析与书签 revision CAS（FR2-060）、媒体时间与 EXIF 提取、文件自带元数据解析与 stale/backfill（图片用 `imagemeta` + 标准库，视频用 ffprobe，FR2-030）、危险写回原文件（FR2-033：`confirm_writeback` + `writeback-snapshots/` + 任务 `metadata.writeback`，仅图片有限字段）、dHash 相似去重与内容哈希精确去重（FR-70 / FR2-061）、本地离线影视信息推断与人工纠正（FR2-031）、媒体健康巡检（FR-73）；Media/LibraryPath/mediaTypeRule/Space/chapter/bookmark/metadata/tag/album/cover/view/watch/inference/health 及 summary/next_episode/dedup/file_hash/recycle 等经 repository；**library 生产路径无 `s.db`**；`DBProvider` + `ListSpacesNeedingInferenceBackfill` 供设置事务同事务查询（FR2-070） | → `db`, `tasks`, `audit` |
 | `playback` | 播放进度追踪、Range 请求处理、会话管理 | → `db`, `library` |
 | `player` | HLS 切片写入、m3u8 索引管理、master playlist 生成 | → `library` |
 | `subtitle` | 统一字幕/音轨聚合、稳定轨道 ID、上传持久化与删除、受限根读取、按请求 WebVTT 转换和来源能力表达（FR2-044） | → `db`, `audit`, `transcoder` |
 | `transcoder` | FFmpeg 转码管道、FR2-008 单档 HLS preview、历史多码率管道（MultiPipeline）、高级编码 fMP4、硬件加速检测/选择、底层字幕格式转换与转码预设存储 | → `tasks`, `storage`, `db` |
-| `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；`Tx`/`AsTx` + `EnqueueTx(ctx, Tx, …)` 供同事务跨域入队（FR2-070）；承载 `transcode.hls.preview` | → `db`, `audit` |
+| `tasks` | 通用持久化任务状态机、优先级领取、取消/重试、进度、幂等键与 WorkerRegistry；`Tx`/`AsTx` + `EnqueueTx(ctx, Tx, …)` 供同事务跨域入队（FR2-070）；承载 `transcode.hls.preview`、`metadata.parse` / `metadata.backfill` / `metadata.writeback`（FR2-033）、导出任务等 | → `db`, `audit` |
 | `storage` | 可重建缓存资产登记、Space/profile/task 路径边界、盘点与异步安全清理；普通 HLS 按 profile、音轨重载按 task 目录登记 | → `tasks`, `db`, `audit` |
 | `watcher` | 文件系统事件监听（fsnotify） | → `library` |
-| `auth` | 单用户登录/会话管理（JWT + bcrypt） | → `db` |
+| `auth` | 登录/会话（JWT + bcrypt）、用户创建与 status；Space 成员访问解析（FR2-010）；登录防爆破限流（FR2-062，进程内滑动窗口） | → `db` |
+| `space` | Space 成员/角色（owner/editor/viewer）、可访问 Space 列表、创建 Space 与成员变更（FR2-010）；有效最高可见分级解析与策略写入（FR2-051） | → `db` |
 | `settings` | 运行期设置真源、类型化 registry、写入校验、默认值回读与敏感值脱敏；`Repository`/`TxRepository` 隔离 GORM（FR2-070）；为回收站、定时扫描、代理、工具路径和上传提供配置真源 | → `db` |
-| `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交 | → `db` |
+| `audit` | 审计事件写入、脱敏与 cursor 分页查询；业务模块通过接口注入，关键变更与事件同事务提交；`GetByID` 供回滚中心定位事件 | → `db` |
+| `rollback` | 操作可回滚中心（FR2-041）：以审计事件为真源，按 action 分发 `ActionReverter`；覆盖 `settings.updated`（非敏感）、`media.deleted`/`media.restored`/`media.renamed`/`media.moved`、写回快照恢复；列表标注 `rollbackable`/`reason_key`，apply 强制 confirm 并写 `rollback.applied|failed`；审计页 UI 二次确认 | → `audit`, `settings`, `library` |
 | `share` | 分享链接 token 生命周期与过期（FR-43）；只管 token，资源存在性/范围判定由 api 层用 `library` 完成，无跨模块耦合 | → `db` |
 | `migration` | 版本化 SQLite schema 迁移、settings blocker/warning 预检、Runner 单步事务原子性、dry-run 计划、迁移前一致性备份、旧任务幂等映射、`schema_migrations` 状态、默认 Space 回填、关键索引校验与系统级审计事件 | → `db`, `models`, `settings` |
 | `db` | SQLite 数据库初始化、GORM 元数据 CRUD | 无业务依赖 |
@@ -71,7 +73,7 @@
 | `netproxy` | 后端出站 HTTP 全局可热更代理 holder（FR-80，`SetProxy`/`ProxyFunc`，原子并发安全） | 无业务依赖 |
 | `dblog` | 可运行时切级别的 GORM 日志器（FR-110，`SetEnabled` 原子开关：默认安静、开启 Info 级） | 仅依赖 gorm logger |
 
-**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `subtitle` / `transcoder` / `settings` / `tasks` → `db`，严格单向，禁止反向。业务数据访问经各域 repository（GORM 实现，ADR-0058 / FR2-070），禁止 `api` 生产代码对业务表直连拼查询；任务入队对外用 `tasks.Tx`（`settings.TxRepository` 可直传，domain 用 `AsTx`）。`subtitle` 仅向下复用 `transcoder` 的无状态格式转换与工具路径，不允许 `transcoder` 反向依赖字幕聚合服务；`config` 和 `auth` 为横切关注点。
+**依赖方向**：`web` → `api` → `library` / `playback` / `player` / `subtitle` / `transcoder` / `settings` / `tasks` / `space` → `db`，严格单向，禁止反向。业务数据访问经各域 repository（GORM 实现，ADR-0058 / FR2-070），禁止 `api` 生产代码对业务表直连拼查询；任务入队对外用 `tasks.Tx`（`settings.TxRepository` 可直传，domain 用 `AsTx`）。`subtitle` 仅向下复用 `transcoder` 的无状态格式转换与工具路径，不允许 `transcoder` 反向依赖字幕聚合服务；`config` 与 `auth`/`space` 为横切关注点（Space 资源经 `auth.SpaceOwnerGuard` 做成员角色守卫）。
 
 ### 2.1 代码目录结构
 
@@ -139,17 +141,41 @@ FR2-063 当前先落在 `apps/*` + `packages/*` 工作区的原型层，不接�
 
 ### 核心实体
 
+**用户（users）** — FR2-010
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 自增主键 |
+| username | TEXT UNIQUE | 登录名 |
+| password_hash | TEXT | bcrypt 哈希，永不 API 回显 |
+| status | TEXT | `active` / `disabled`；禁用后拒绝登录与已持 JWT 鉴权 |
+| created_at | DATETIME | 创建时间 |
+
+用户管理 API（`/api/users`）仅**默认 Space 的 owner** 可调用；创建用户不自动加入任何 Space（需 owner 再 `POST /api/spaces/:id/members`）。
+
+**Space 成员（space_members）** — FR2-010 / FR2-051
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| space_id + user_id | TEXT + INTEGER，联合主键 | 成员关系唯一 |
+| role | TEXT | `owner` / `editor` / `viewer`（ADR-0056） |
+| max_rating | TEXT NULL | 成员最高可见分级（FR2-051）；空=继承 `spaces.default_max_rating` |
+| created_at / updated_at | DATETIME | 创建与更新时间 |
+
 **Space（spaces）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| id | TEXT PK | Space 标识；单用户兼容模式固定默认值 `space-default` |
+| id | TEXT PK | Space 标识；兼容默认值 `space-default` |
 | name | TEXT | Space 名称 |
-| owner_user_id | INTEGER | 默认 owner 线索，当前指向单用户 `users.id` |
+| owner_user_id | INTEGER | Space owner 的 `users.id`；与 `space_members.role=owner` 双写保持一致 |
+| default_max_rating | TEXT | Space 默认最高可见分级（FR2-051）；空表示不限制 |
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
 
-FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 `media_files` 均带非空 `space_id`，缺失 `X-JianVideo-Space-Id` 时使用默认 Space；`auth.SpaceOwnerGuard` 在 Space 资源进入 API handler 前统一校验当前 JWT 用户是否匹配 `spaces.owner_user_id`，非 owner 返回 `403 SPACE_FORBIDDEN`，不存在或非法 Space 分别返回 404/400，且不会回退默认 Space。完整成员/角色矩阵仍留后续迭代。媒体列表、详情、播放、目录浏览、统计、扫描、Space scoped 任务/审计与缓存入口继续由 repository/service 强制带 `space_id`；审计的 `space_id` 查询参数作为实际授权目标，HLS/stream 等非 handler 直出路径在 owner 守卫后还会按 `space_id + media_id` 验证媒体归属，避免仅凭其他 Space 的 owner 身份读取跨 Space 媒体。Web 设置页通过 `GET /api/settings/storage` 展示当前 Space、存储数据目录、SQLite 索引库路径与已注册目录数，并复用媒体库管理页完成目录增删改。
+FR2-007 落最小 Space 归属：`library_paths` 与 `media_files` 均带非空 `space_id`，缺失 `X-JianVideo-Space-Id` 时使用默认 Space。FR2-010 将 `auth.SpaceOwnerGuard` 语义升级为**成员守卫**：须在 `space_members` 中有角色；`GET/HEAD` 至少 `viewer`，写方法至少 `editor`；非成员或角色不足返回 `403 SPACE_FORBIDDEN`；不存在/非法 Space 分别 404/400，且不会静默回退默认 Space。角色枚举 `owner`/`editor`/`viewer`（ADR-0056）。媒体列表、详情、播放等继续由 repository/service 强制 `space_id`；HLS/stream 在守卫后仍按 `space_id + media_id` 校验归属。用户管理（`/api/users`）限默认 Space owner；Space/成员管理见 `/api/spaces*`。
+
+FR2-051 家长控制：有效最高可见级 = 成员 `max_rating`（非空）否则 `spaces.default_max_rating`（皆空=不限制）。列表/详情经 `MediaFilter.MaxContentRating` / `GetMediaFileByIDForViewer` 在 repository 层过滤；越权 id 对外 `404`。UNRATED/空默认可见。改 Space/成员策略需当前密码确认（`auth.VerifyPassword`）。二切前端：详情面板 Badge + 下拉编辑 `content_rating`（`PUT .../content-rating`）；设置页「家长控制」分区配置 Space 默认最高可见级与成员覆盖（`PUT .../parental`、`PUT .../members/:id/max-rating`，家长锁密码确认）。播放/搜索等其余读路径若与列表/详情分叉仍需统一注入 max。
 
 **媒体库目录（library_paths）**
 
@@ -188,6 +214,7 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 | added_at | DATETIME | 入库时间 |
 | modified_at | DATETIME | 文件最后修改时间 |
 | favorite | INTEGER | 收藏标记（FR-41），0/1 |
+| content_rating | TEXT | 内容分级（FR2-051）：`G`/`PG`/`PG-13`/`R`/`UNRATED`；空视为未分级，默认对受限用户可见 |
 | dhash | INTEGER | 感知哈希（FR-70）：基于缩略图的 64 位 dHash，0 表示未计算 |
 | content_hash | TEXT | 内容哈希（FR2-061）：源文件 SHA-256，空表示未计算 |
 | content_hash_algo | TEXT | 内容哈希算法，首批固定 `sha256` |
@@ -217,6 +244,8 @@ FR2-007 落最小 Space 归属与 owner-only 权限边界：`library_paths` 与 
 > 软删除与回收站（FR-25）：删除媒体仅置 `deleted_at`，不物理删除记录、不删除磁盘源文件。`deleted_at` 为普通索引列（非 GORM 软删约定），故服务层在常规列表/计数手工加 `deleted_at IS NULL`（`ListMediaFilesFiltered`、`ListLibraryPathViews` 等），回收站列表查 `deleted_at IS NOT NULL`，还原清空该列。批量软删（FR-69）：`BatchDeleteMediaFiles(ids)` 在单事务内筛出当前仍未软删的有效项，再置 `deleted_at` 并逐项写 `media.deleted` 审计事件；跳过不存在/已软删 id，返回受影响行数；供时间轴、目录浏览与重复项清理消费（进回收站、可还原）。
 >
 > 回收站清理（FR-26）：`CleanupRecycle(drivePaths)` 把全部软删项的磁盘源文件移动到其所在盘符对应的回收站目录、按 `deleted_at` 日期分子目录，移动成功后删除 `media_files` 记录（先移动成功、后删记录保证一致）。盘符→目录映射由 `api` 层从设置键 `recycle_bin_paths`（JSON）解析后传入，`library` 服务不依赖 `settings`、不解析 JSON（职责单一）。校验先行：存在任一软删项所在盘符（含 SMB / 无盘符）未配置则整体拒绝（`ErrRecycleBinPathUnset` → HTTP 409），不移动任何文件。
+>
+> 回收站保留期与自动清理（FR2-054）：全局设置 `recycle_retention_days`（默认 30，`0`=不自动清）、`recycle_auto_cleanup_enabled`、`recycle_auto_cleanup_interval_sec`。`ListExpiredDeleted` + `AutoCleanupExpiredInSpace` 有界处理过期项；**缺盘符跳过单条**（与手动整轮拒绝语义区分）。启动期复用 `ScanScheduler` 骨架做 tick；API `POST /api/library/recycle/auto-cleanup/preview|run`；审计 `recycle.auto_cleanup`。首切调度仅默认 Space。二切前端：设置页回收站分区可改保留天数/开关/周期；回收站页读设置后展示策略摘要，行内按 `deleted_at+retention` 算预计清理日（`formatRecycleExpiryHint`）。Space 级覆盖与多 Space 调度仍待。
 
 **观看状态（watch_states）（FR2-045）**
 
@@ -393,7 +422,7 @@ FR2-031 只做本地离线规则解析，不联网刮削、不下载海报、不
 | name | TEXT | Space 名称 |
 | created_at | DATETIME | 创建时间 |
 
-FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转码任务及相册、分享、健康问题等历史资源补齐 `space_id`，统一回填到默认 Space；默认 owner 取旧库首个用户。迁移同时创建 FR2-007 的 Space/媒体/任务组合索引。完整成员、角色与权限矩阵仍按 ADR-0056 在后续 Space 能力中落地。迁移 `20260708_0006_fr2_037_tasks_center` 保持原有旧任务镜像语义，不改历史 migration ID；FR2-008 另由新增迁移 `20260712_0016_fr2_008_hls_preview_tasks` 把旧 `transcode_tasks` 镜像转换为 `transcode.hls.preview` payload，并保留稳定幂等键 `transcode:<legacy_id>`。运行期旧扫描表仍是兼容执行真源；旧转码 HTTP 入口则已改为直接读写通用 HLS preview 任务，重复迁移或入队不会制造并发重复项。
+FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转码任务及相册、分享、健康问题等历史资源补齐 `space_id`，统一回填到默认 Space；默认 owner 取旧库首个用户。迁移同时创建 FR2-007 的 Space/媒体/任务组合索引。FR2-010 迁移 `20260723_0024_fr2_010_space_members` 增加 `users.status` 与 `space_members`，并为各 Space 的 `owner_user_id` 回填 `role=owner` 成员行。FR2-055 迁移 `20260723_0025_fr2_055_share_allow_download` 增加 `shares.allow_download`。FR2-051 迁移 `20260723_0026_fr2_051_content_rating` 增加 `media_files.content_rating`、`spaces.default_max_rating`、`space_members.max_rating`。迁移 `20260708_0006_fr2_037_tasks_center` 保持原有旧任务镜像语义，不改历史 migration ID；FR2-008 另由新增迁移 `20260712_0016_fr2_008_hls_preview_tasks` 把旧 `transcode_tasks` 镜像转换为 `transcode.hls.preview` payload，并保留稳定幂等键 `transcode:<legacy_id>`。运行期旧扫描表仍是兼容执行真源；旧转码 HTTP 入口则已改为直接读写通用 HLS preview 任务，重复迁移或入队不会制造并发重复项。
 
 **审计事件（audit_events）** — FR2-040
 
@@ -414,6 +443,10 @@ FR2-017 迁移会给既有 `library_paths`、`media_files`、`tags`、扫描/转
 | created_at | DATETIME | 事件时间 |
 
 FR2-040 将 `audit_events` 从迁移最小切片扩展为操作事件真源：配置写入、媒体库创建/更新/删除、媒体删除/还原/改名/移动、元数据回写、扫描/转码任务创建/成功/失败/取消/重试、缓存清理和迁移开始/成功/失败都会写事件。业务模块通过 `audit.Recorder` 接口注入审计服务；必须审计的业务变更在同一个 SQLite 事务内调用 `RecordTx`，审计写入失败时业务事务整体回滚。查询使用 `GET /api/audit/events`，Space scoped 查询默认只返回当前 Space 的 `scope=space` 事件，系统级事件需显式 `scope=system`。
+
+FR2-041 操作可回滚中心：`internal/rollback` 注册 `ActionReverter`，以审计事件为真源做可回滚标注与逆操作。HTTP `GET /api/rollback/events` 返回事件 + `rollbackable` + 稳定 `reason_key`；`POST /api/rollback/apply` 强制 `confirm=true`，按 action 分发 reverter。可回滚：`settings.updated`（运行期非敏感标量；敏感键/脱敏载荷整事件不可回滚）、`media.deleted`→`RestoreMediaFileInSpace`、`media.restored`→`DeleteMediaFileInSpace`、`media.renamed`→`RenameMediaFileInSpace` 改回 `before.file_name`、`media.moved`→`MoveMediaFileInSpace` 移回 `before.file_path` 目录、`metadata.writeback.succeeded`→从审计 metadata 的 `snapshot_path` 经 `RestoreFileFromWritebackSnapshot` 覆盖 `file_path`（缺路径 `missing_snapshot`、快照丢失 `snapshot_gone`，快照保留）。审计脱敏路径含 `****` 时 `path_redacted`。成功/失败分别写 `rollback.applied` / `rollback.failed`。无 before 的老事件、未注册 action、跨 Space 事件分别返回明确错误。前端审计页展示可回滚时间线、`reason_key` 中文提示与二次确认 apply。
+
+FR2-033 危险写回（库→原文件）：HTTP `POST /api/library/media/:id/metadata/writeback` 强制 `confirm_writeback=true`；写回前复制到数据目录 `writeback-snapshots/<space_id>/<media_id>/`；入队 `metadata.writeback`；worker 校验源哈希与快照后，ImageMagick 写临时文件再 rename 替换，失败保留原文件与快照。首切仅图片有限字段（camera/lens/aperture/shutter/iso/gps/notes/display_name）；视频/SMB 拒绝。审计 `metadata.writeback.started|succeeded|failed`。库内「文件→库」重解析仍走 `metadata.parse` / 历史服务方法 `WritebackMediaMetadataInSpace`（不经本 HTTP 危险路径）。
 
 **缓存资产（cache_assets）** — FR2-048
 
@@ -556,7 +589,7 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 
 扫描任务队列以本表为持久化真源，由单 worker 串行执行；任务列表按当前 Space 过滤，服务重启时把残留 `running` 重置为 `pending`，并从 `payload_json` 或 `library_paths` 还原执行目标后重新入队（见 §5.1）。
 
-**分享链接（shares）（FR-43；密码/限次列见 FR-78）**
+**分享链接（shares）（FR-43；密码/限次列见 FR-78；禁下载见 FR2-055）**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -567,9 +600,10 @@ FR2-048 把可重建缓存与可信源数据分开管理。`internal/storage` �
 | password_hash | TEXT | 访问密码的 bcrypt 哈希（FR-78）；空串=无密码，绝不存明文、不回显前端 |
 | max_uses | INTEGER | 最大访问次数（FR-78）；0=无限 |
 | used_count | INTEGER | 已访问次数（FR-78），实际访问资源时原子自增 |
+| allow_download | INTEGER/BOOL | 是否允许公开下载原文件（FR2-055）；默认 true；false 时 download 统一 404 |
 | created_at | DATETIME | 创建时间 |
 
-公开访问以 token 为唯一凭据，过期/撤销即失效；密码 / 限次校验、范围与安全边界见 §5.9。
+公开访问以 token 为唯一凭据，过期/撤销即失效；密码 / 限次 / 禁下载校验、范围与安全边界见 §5.9。
 
 **媒体健康问题（media_health_issues）（FR-73）**
 
@@ -847,7 +881,7 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 
 - 设置以 SQLite `settings` 表为运行期真源，由 `settings.Service` 封装读写：`Get` 供内部消费者读取原始值，`GetAll` 只返回已登记运行期 key 与默认值，`Set`/`SetMany` 写入前经 registry 校验并走主键冲突 upsert，批量写在单事务内原子完成。ADR-0061 取代 ADR-0029 中“任意 key upsert”的部分，未知 key 直接拒绝。
 - `GET /api/settings` 保持 map 形态，返回已登记运行期设置；敏感项非空时只返回 `已设置`，不回显明文。`GET /api/settings/definitions` 返回 key、中文名称、分层、值类型、默认值、敏感性、热应用能力与消费模块，供前端设置页渲染。`PUT /api/settings` 只允许 `layer=runtime` 的 key，任一未知 key、启动固定项或非法类型都会返回 `400 INVALID_SETTING` 且整体不写入。
-- 已登记运行期键包含 `recycle_bin_paths`、`scan_interval`、`update_channel`、`transcode_codec_priority`、`transcode_hwaccel_mode`、`transcode_hwaccel_fallback`、`transcode_abr_ladder`、`ffmpeg_path`、`ffprobe_path`、`magick_path`、`network_proxy`、`debug_log`、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；定时扫描读 `scan_interval`；转码执行器读硬件策略键决定 encoder 与软件回退，FR2-026 ABR 服务读 `transcode_abr_ladder` 决定显式多码率任务的候选档位。
+- 已登记运行期键包含 `recycle_bin_paths`、`recycle_retention_days`、`recycle_auto_cleanup_enabled`、`recycle_auto_cleanup_interval_sec`、`scan_interval`、`update_channel`、`transcode_codec_priority`、`transcode_hwaccel_mode`、`transcode_hwaccel_fallback`、`transcode_abr_ladder`、`ffmpeg_path`、`ffprobe_path`、`magick_path`、`network_proxy`、`debug_log`、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。结构化值以 JSON 字符串存于单 key，由消费方按需解析：回收站清理（FR-26）读 `recycle_bin_paths`（盘符→目录 JSON）解析后传给 `library.CleanupRecycle`；保留期自动清理（FR2-054）读 `recycle_retention_days` / `recycle_auto_cleanup_enabled` / `recycle_auto_cleanup_interval_sec`；定时扫描读 `scan_interval`；转码执行器读硬件策略键决定 encoder 与软件回退，FR2-026 ABR 服务读 `transcode_abr_ladder` 决定显式多码率任务的候选档位。
 - **FFmpeg 路径持久化设置（FR-56）**：`ffmpeg_path`/`ffprobe_path` 让 ffmpeg/ffprobe 路径运行期可配置。`main.go` 启动时先 `resolveTool` 注入（环境变量→同目录捆绑版→PATH），随后若设置非空则覆盖（**持久化设置优先于自动发现**）；`PUT /api/settings` 含这两键时落库后即时调 `transcoder.SetFFmpegPath`/`SetFFprobePath`（ffprobe 同步给 `library`）应用到运行期，保存即生效、无需重启（api→transcoder 依赖方向允许）。
 - **Magick 路径持久化设置（FR-63）**：`magick_path` 让 ImageMagick magick 路径运行期可配置，机制与 FR-56 完全一致——`main.go` 启动时 `resolveTool("JIANVIDEO_MAGICK_PATH", "magick")` 注入后若设置非空则覆盖；`PUT /api/settings` 含 `magick_path`（非空）时落库后即时调 `library.SetMagickPath` 应用到 HEIC/RAW 转换运行期（FR-37），保存即生效、无需重启。`library.magickPath` 与 transcoder 路径全局同为无锁包级变量，写入点仅限启动注入与 PUT 应用，沿用既有并发模型。启动期项（端口/DB 路径/debug 模式）与敏感项（JWT/SMB）保持只读、不做可编辑。
 - **后端出站网络代理（FR-80）**：`network_proxy` 让后端所有外部 HTTP 出站运行期可配置走代理（空=直连），解决直连 GitHub 下载 CDN 不可达。新增独立无业务依赖的 `netproxy` 包持有全局代理（`atomic.Pointer[url.URL]` 无锁并发安全）：`SetProxy(rawURL)` 校验 scheme ∈ {http,https,socks5,socks5h}（均为标准库 `net/http` Transport 原生支持，**无新依赖**）后原子更新、空串清空、非法不覆盖；`ProxyFunc` 供 `http.Transport.Proxy` 使用（无代理返回 nil 走直连）。`update.Service`（首个也是当前唯一的后端出站消费者）的检测 client 与下载 client 各设 `Transport:&http.Transport{Proxy:netproxy.ProxyFunc}`，各自 Timeout 语义不变（检测 30s、下载无整体超时靠 context）。`main.go` 启动期读 `network_proxy` 非空则 `SetProxy` 注入；`PUT /api/settings` 含 `network_proxy` 时先由 registry 校验协议和格式，落库后即时 `netproxy.SetProxy`。API 回读和审计事件只暴露存在性，不返回带凭据代理 URL。依赖方向单向（`api`/`update`/`main` → `netproxy`，`netproxy` 不依赖任何业务模块）。
@@ -856,13 +890,14 @@ FR-77 留下的预设 CRUD 与前端“加入预生成”入口继续保留，�
 - **运行时调试日志开关（FR-110）**：`debug_log` 让 GORM 日志在运行期可切换详细 / 安静。新增独立无业务依赖的 `dblog` 包以 `atomic.Bool` 持有开关：默认安静（Error 级 + 忽略 record-not-found，不刷普通 SQL 与「查无记录」噪音），开启切 Info 级（输出 SQL 与慢查询）。`dblog.Logger` 实现 `gorm/logger.Interface` 并预建「安静 / 详细」两委托 logger，按原子开关选择实际输出者；`LogMode` 以自身开关为唯一真源、忽略 GORM 启动期重设。`main.go` 在 `gorm.Open` 时把该 logger 注入 `gorm.Config.Logger`，启动后读 `settings.DebugLog()` 决定初始级别（重启保持）；`PUT /api/settings` 含 `debug_log` 时落库后即时调注入的 `dbLogger.SetEnabled`（经 `WithDebugLogApply` 回调）切级别，保存即生效、无需重启。区别于启动期只读的 `JIANVIDEO_DEBUG`（gin 模式，运行期不可切，保持原样）。依赖方向单向（`main`/`api` → `dblog`，`dblog` 仅依赖 gorm logger）。
 - 与启动期 `config` 模块职责分离：`config` 管不可变部署参数（环境变量优先），`settings` 管用户运行期可改写的业务配置。环境变量只读查看由 §5.7 `GET /api/system/env` 提供。
 
-### 5.9 分享链接（FR-43；密码/限次增强见 FR-78）
+### 5.9 分享链接（FR-43；密码/限次增强见 FR-78；禁下载见 FR2-055）
 
-- 分享以 SQLite `shares` 表为真源（`token` 主键、`resource_type`、`resource_id`、`expires_at` 可空；密码/限次列 `password_hash`/`max_uses`/`used_count`）。`share.Service` 只管 token 生命周期：`crypto/rand` 生成 32 字节不可枚举 token，`Get` 校验过期（已过期/不存在统一为错误，公开层映射 `404`）。
+- 分享以 SQLite `shares` 表为真源（`token` 主键、`resource_type`、`resource_id`、`expires_at` 可空；密码/限次列 `password_hash`/`max_uses`/`used_count`；`allow_download` 默认 true）。`share.Service` 只管 token 生命周期：`crypto/rand` 生成 32 字节不可枚举 token，`Get` 校验过期（已过期/不存在统一为错误，公开层映射 `404`）。
 - **密码与限次（FR-78，安全核心）**：可选访问密码以 bcrypt 哈希存 `password_hash`（复用 auth 既有 `golang.org/x/crypto/bcrypt`，绝不存明文 / 不回显前端 `json:"-"`），`VerifyPassword` 用 `bcrypt.CompareHashAndPassword` 比对；可选访问限次 `ConsumeUse` 在 GORM 事务内「先检查 `used_count<max_uses` 后 `used_count+1`」原子自增（SQLite 单写者 + 事务防并发超发），`max_uses=0` 为无限不计数。**口径**：密码门禁在 `ShareInfo`（进入页）强制——需密码且未带/带错密码只回 `{requires_password:true}`、不含任何 media/album 元信息（不泄露内容、不区分过期/撤销，便于前端弹密码框）、且**不消费**额度；限次的原子自增与密码二次校验发生在**实际访问资源**（raw/thumbnail/download/stream）时，每次成功访问计一次。密码错 / 限次尽统一映射 `404`。
+- **禁下载（FR2-055）**：`allow_download=false` 时公开 `.../download` 统一 `404`（不区分原因）；公开元信息回显 `allow_download`。前端创建弹窗可关「允许下载原文件」；公开页 `allow_download!==false` 才渲染下载按钮。公开缩略图仅读已有缓存文件，缺失不入队生成。
 - **鉴权受控例外**：`auth.APIGuard` 豁免前缀 `/api/share/`（带尾斜杠，不误伤受保护的管理端点 `/api/shares`）；公开路由内经 `shareAuth` 中间件自校验 token + 过期。
 - **范围隔离（安全核心）**：每个 `/api/share/:token/media/:mediaId/*` 端点都做范围校验 `shareAllowsMedia`——media 分享比对 ID，album 分享查 `library.IsMediaInAlbum`；越权/不在范围/不存在一律 `404`，不区分以免信息泄露。
-- **公开播放的安全边界**：免登视频播放只走 `playback.StreamFile`（渐进式原文件 + Range），**不**把 ffmpeg 转码/HLS 管线开放给匿名访客（防资源滥用/DoS）；需转码才能在浏览器播放的格式可下载原文件。`smb://` 不支持。
+- **公开播放的安全边界**：免登视频播放只走 `playback.StreamFile`（渐进式原文件 + Range），**不**把 ffmpeg 转码/HLS 管线开放给匿名访客（防资源滥用/DoS）；需转码才能在浏览器播放的格式在允许下载时可取原文件。`smb://` 不支持。
 - 资源存在性与范围判定在 api 层用 `library` 完成，`share` 服务不依赖 `library`，保持无跨模块耦合。
 
 ### 5.10 照片地图与旅程轨迹（FR-39 / FR-76）

@@ -53,6 +53,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		lib.GET("/media", h.ListMediaFiles)
 		lib.GET("/media/:id", h.GetMediaFile)
+		// 内容分级（FR2-051）
+		lib.PUT("/media/:id/content-rating", h.UpdateMediaContentRating)
 		lib.GET("/media/:id/covers", h.GetMediaCovers)
 		lib.POST("/media/:id/covers/generate", h.GenerateMediaCovers)
 		lib.PUT("/media/:id/cover", h.SelectMediaCover)
@@ -103,6 +105,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 
 		// 回收站清理（FR-26）：源文件按盘符回收站路径移动并删记录
 		lib.POST("/recycle/cleanup", h.RecycleCleanup)
+		// 回收站到期自动清理（FR2-054）：preview 不改数据；run 有界实跑
+		lib.POST("/recycle/auto-cleanup/preview", h.RecycleAutoCleanupPreview)
+		lib.POST("/recycle/auto-cleanup/run", h.RecycleAutoCleanupRun)
 
 		// 收藏与标签（FR-41）
 		lib.PUT("/media/:id/favorite", h.SetMediaFavorite)
@@ -178,6 +183,25 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		shares.POST("", h.CreateShare)
 		shares.GET("", h.ListShares)
 		shares.DELETE("/:token", h.RevokeShare)
+	}
+
+	// 用户与 Space 成员（FR2-010）
+	users := r.Group("/api/users")
+	{
+		users.GET("", h.ListUsers)
+		users.POST("", h.CreateUser)
+		users.PUT("/:id/status", h.SetUserStatus)
+	}
+	spaces := r.Group("/api/spaces")
+	{
+		spaces.GET("", h.ListSpaces)
+		spaces.POST("", h.CreateSpace)
+		spaces.GET("/:id/members", h.ListSpaceMembers)
+		spaces.POST("/:id/members", h.AddSpaceMember)
+		spaces.DELETE("/:id/members/:user_id", h.RemoveSpaceMember)
+		// 家长控制（FR2-051）
+		spaces.PUT("/:id/parental", h.UpdateSpaceParentalPolicy)
+		spaces.PUT("/:id/members/:user_id/max-rating", h.UpdateMemberMaxRating)
 	}
 
 	// 字幕与观看状态路由（不需要 playback 服务，作用于 media_files）
@@ -269,6 +293,13 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	auditGroup := r.Group("/api/audit")
 	{
 		auditGroup.GET("/events", h.ListAuditEvents)
+	}
+
+	// 操作可回滚中心（FR2-041）
+	rb := r.Group("/api/rollback")
+	{
+		rb.GET("/events", h.ListRollbackEvents)
+		rb.POST("/apply", h.ApplyRollback)
 	}
 
 	// 通用异步任务中心（FR2-037）：新状态为 pending/running/succeeded/failed/canceled。

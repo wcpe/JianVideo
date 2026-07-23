@@ -356,7 +356,7 @@ func TestShare_ManagementAndPublicTokenAreIsolatedBySpace(t *testing.T) {
 		t.Fatalf("Space A 不得列举 Space B 分享: %s", listAW.Body.String())
 	}
 
-	forged, err := shareSvc.CreateInSpace("space-b", models.ShareResourceMedia, mediaA.ID, nil, "", 0)
+	forged, err := shareSvc.CreateInSpace("space-b", models.ShareResourceMedia, mediaA.ID, nil, "", 0, true)
 	if err != nil {
 		t.Fatalf("创建伪造跨 Space 分享失败: %v", err)
 	}
@@ -390,5 +390,75 @@ func TestShare_CreateWithPasswordNotPlaintextInDB(t *testing.T) {
 	got, _ := shareSvc.Get(created.Token)
 	if got.PasswordHash == "" || got.PasswordHash == "top-secret" {
 		t.Fatalf("库中应存 bcrypt 哈希、非明文, 实际 %q", got.PasswordHash)
+	}
+}
+
+
+// TestShare_DisallowDownload allow_download=false 时公开 download 404（FR2-055）。
+func TestShare_DisallowDownload(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "nodl.mp4", "NODL")
+	sh, err := shareSvc.CreateInSpace(models.DefaultSpaceID, models.ShareResourceMedia, mf.ID, nil, "", 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sh.AllowDownload {
+		t.Fatal("AllowDownload 应为 false")
+	}
+	// 元信息仍可访问且回显 allow_download
+	req := httptest.NewRequest("GET", "/api/share/"+sh.Token, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("元信息期望 200, 实际 %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"allow_download":false`)) {
+		t.Fatalf("元信息应含 allow_download=false: %s", w.Body.String())
+	}
+	path := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/download"
+	if code := getStatus(r, path); code != http.StatusNotFound {
+		t.Fatalf("禁下载时期望 404, 实际 %d", code)
+	}
+	// stream 仍可（只禁止 download）
+	// pbSvc 为 nil 时 stream 503，此处仅断言 download 门禁
+}
+
+// TestShare_CreateAllowDownloadField API 创建可传 allow_download。
+func TestShare_CreateAllowDownloadField(t *testing.T) {
+	r, libSvc, _ := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "x.mp4", "X")
+	body := `{"resource_type":"media","resource_id":` + strconv.FormatInt(mf.ID, 10) + `,"allow_download":false}`
+	req := httptest.NewRequest("POST", "/api/shares", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("创建期望 201, 实际 %d %s", w.Code, w.Body.String())
+	}
+	var sh models.Share
+	_ = json.Unmarshal(w.Body.Bytes(), &sh)
+	if sh.AllowDownload {
+		t.Fatalf("应落库 allow_download=false: %+v", sh)
+	}
+}
+
+// TestShare_ThumbnailMissingDoesNotGenerate 公开缩略图缺失不异步生成（成本门）。
+func TestShare_ThumbnailMissingDoesNotGenerate(t *testing.T) {
+	r, libSvc, shareSvc := setupShareRouter(t)
+	mf := realMedia(t, libSvc, "t.jpg", "img")
+	sh, err := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 无缩略图缓存：应 404 THUMBNAIL_NOT_READY，且不 panic / 不 202 GENERATING
+	path := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/thumbnail"
+	req := httptest.NewRequest("GET", path, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("缺失缩略图期望 404, 实际 %d body=%s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("GENERATING")) {
+		t.Fatal("公开路径不得返回 GENERATING（会触发生成队列）")
 	}
 }

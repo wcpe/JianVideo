@@ -30,6 +30,8 @@ type Share struct {
 	// MaxUses 最大访问次数（FR-78）；0 表示无限。
 	MaxUses int `gorm:"default:0" json:"max_uses"`
 	// UsedCount 已访问次数（FR-78），实际访问资源时原子自增。
-	UsedCount int       `gorm:"default:0" json:"used_count"`
-	CreatedAt time.Time `gorm:"index:idx_shares_space_created,priority:2" json:"created_at"`
+	UsedCount int `gorm:"default:0" json:"used_count"`
+	// AllowDownload 是否允许公开端点下载原文件（FR2-055）；默认 true；false 时 download 统一 404。
+	AllowDownload bool `gorm:"not null;default:1" json:"allow_download"`
+	CreatedAt     time.Time `gorm:"index:idx_shares_space_created,priority:2" json:"created_at"`
 }

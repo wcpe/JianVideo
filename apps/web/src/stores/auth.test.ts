@@ -46,6 +46,8 @@ describe('auth store', () => {
       isAuthenticated: false,
       loading: false,
       error: null,
+      errorCode: null,
+      loginRetryAfterSec: null,
       needsSetup: false,
       initialized: false,
     });
@@ -109,6 +111,43 @@ describe('auth store', () => {
     expect(state.loading).toBe(false);
   });
 
+  // FR2-062：429 LOGIN_LOCKED 提取 code 与 Retry-After
+  it('login 429 LOGIN_LOCKED 设置 errorCode 与 loginRetryAfterSec', async () => {
+    mockLogin.mockRejectedValue({
+      response: {
+        status: 429,
+        data: { code: 'LOGIN_LOCKED', message: '登录尝试过于频繁，请稍后再试' },
+        headers: { 'retry-after': '900' },
+      },
+      message: 'Request failed with status code 429',
+    });
+
+    await expect(useAuthStore.getState().login('admin', 'wrong')).rejects.toBeTruthy();
+
+    const state = useAuthStore.getState();
+    expect(state.error).toBe('登录尝试过于频繁，请稍后再试');
+    expect(state.errorCode).toBe('LOGIN_LOCKED');
+    expect(state.loginRetryAfterSec).toBe(900);
+    expect(state.isAuthenticated).toBe(false);
+    expect(state.loading).toBe(false);
+  });
+
+  it('login 非锁定失败不写入 loginRetryAfterSec', async () => {
+    mockLogin.mockRejectedValue({
+      response: {
+        status: 401,
+        data: { code: 'INVALID_CREDENTIALS', message: '用户名或密码错误' },
+        headers: { 'retry-after': '60' },
+      },
+    });
+
+    await expect(useAuthStore.getState().login('admin', 'wrong')).rejects.toBeTruthy();
+
+    const state = useAuthStore.getState();
+    expect(state.errorCode).toBe('INVALID_CREDENTIALS');
+    expect(state.loginRetryAfterSec).toBeNull();
+  });
+
   it('logout 清除状态', async () => {
     // 先登录
     mockLogin.mockResolvedValue(undefined);
@@ -140,11 +179,18 @@ describe('auth store', () => {
   });
 
   it('clearError 清除错误', () => {
-    useAuthStore.setState({ error: 'some error' });
+    useAuthStore.setState({
+      error: 'some error',
+      errorCode: 'LOGIN_LOCKED',
+      loginRetryAfterSec: 60,
+    });
 
     useAuthStore.getState().clearError();
 
-    expect(useAuthStore.getState().error).toBeNull();
+    const state = useAuthStore.getState();
+    expect(state.error).toBeNull();
+    expect(state.errorCode).toBeNull();
+    expect(state.loginRetryAfterSec).toBeNull();
   });
 
   it('init 从 localStorage 恢复登录态', async () => {

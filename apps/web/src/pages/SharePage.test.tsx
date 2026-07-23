@@ -55,6 +55,7 @@ describe('SharePage 公开分享查看页（FR-43）', () => {
       resource_type: 'media',
       expires_at: null,
       media: imageMedia,
+      allow_download: true,
     });
     renderAt('tok1');
 
@@ -62,6 +63,19 @@ describe('SharePage 公开分享查看页（FR-43）', () => {
     expect(img).toHaveAttribute('src', '/api/share/tok1/media/7/raw');
     const dl = screen.getByRole('link', { name: /下载原文件/ });
     expect(dl).toHaveAttribute('href', '/api/share/tok1/media/7/download');
+  });
+
+  it('allow_download=false 时隐藏下载入口（FR2-055）', async () => {
+    mockGetShareInfo.mockResolvedValue({
+      resource_type: 'media',
+      expires_at: null,
+      media: imageMedia,
+      allow_download: false,
+    });
+    renderAt('nodl');
+
+    expect(await screen.findByRole('img', { name: '风景.jpg' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /下载原文件/ })).not.toBeInTheDocument();
   });
 
   it('无效分享展示过期提示', async () => {

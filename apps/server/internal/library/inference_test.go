@@ -549,3 +549,7 @@ func (f failingInferenceAudit) RecordTx(context.Context, *gorm.DB, audit.EventIn
 func (f failingInferenceAudit) List(context.Context, audit.Query) (audit.Page, error) {
 	return audit.Page{}, nil
 }
+
+func (f failingInferenceAudit) GetByID(context.Context, int64) (*models.AuditEvent, error) {
+	return nil, errors.New("审计写入失败")
+}

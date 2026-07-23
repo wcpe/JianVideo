@@ -505,6 +505,17 @@ async function realUpdateMediaNotes(id: number, notes: string): Promise<MediaFil
   }
 }
 
+// 内容分级（FR2-051）：PUT content-rating 返回 204，本地合并 content_rating
+async function realUpdateMediaContentRating(id: number, contentRating: string): Promise<void> {
+  try {
+    await client.put(`/api/library/media/${id}/content-rating`, {
+      content_rating: contentRating,
+    });
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, '更新内容分级失败'), { cause: err });
+  }
+}
+
 // ─── 软删除与回收站（FR-25）──────────────────────────
 
 async function realGetRecycleMediaFiles(): Promise<MediaFile[]> {
@@ -1132,6 +1143,13 @@ async function mockUpdateMediaNotes(id: number, notes: string): Promise<MediaFil
   return f;
 }
 
+async function mockUpdateMediaContentRating(id: number, contentRating: string): Promise<void> {
+  await mockDelay(100);
+  const f = mockMediaFiles.find((m) => m.id === id);
+  if (!f) throw new Error('媒体文件不存在');
+  f.content_rating = contentRating.trim();
+}
+
 async function mockScanLibrary(id: number, _mode: ScanMode = 'incremental'): Promise<ScanResponse> {
   await mockDelay(400);
   // mock 模式仅模拟新增入库，不区分对账（全量对账行为由后端集成测试覆盖）
@@ -1518,6 +1536,30 @@ export function enqueueClipExport(id: number, params: ClipExportParams) {
     : realEnqueueClipExport(id, params);
 }
 
+/** 危险写回入队响应（FR2-033） */
+export interface MetadataWritebackAccepted {
+  status: string;
+  task_id: string;
+}
+
+async function realEnqueueMetadataWriteback(
+  id: number,
+  confirmWriteback: boolean,
+): Promise<MetadataWritebackAccepted> {
+  const res = await client.post<MetadataWritebackAccepted>(
+    `/api/library/media/${id}/metadata/writeback`,
+    { confirm_writeback: confirmWriteback },
+  );
+  return res.data;
+}
+
+/** 危险写回原文件（FR2-033）：必须 confirm_writeback=true */
+export function enqueueMetadataWriteback(id: number, confirmWriteback: boolean) {
+  return useMock
+    ? Promise.resolve({ status: 'pending', task_id: 'mock-metadata-writeback' })
+    : realEnqueueMetadataWriteback(id, confirmWriteback);
+}
+
 /** 导出产物下载 URL（FR2-038/039） */
 export function exportDownloadUrl(taskId: string | number) {
   return `/api/library/exports/${taskId}/download`;
@@ -1545,6 +1587,12 @@ export function updateMediaNotes(id: number, notes: string) {
 
 export function updateDisplayName(id: number, displayName: string) {
   return useMock ? mockUpdateDisplayName(id, displayName) : realUpdateDisplayName(id, displayName);
+}
+/** 设置媒体内容分级（FR2-051）；contentRating 空串清除为未分级 */
+export function updateMediaContentRating(id: number, contentRating: string) {
+  return useMock
+    ? mockUpdateMediaContentRating(id, contentRating)
+    : realUpdateMediaContentRating(id, contentRating);
 }
 // 软删除与回收站（FR-25）
 export function getRecycleMediaFiles() {

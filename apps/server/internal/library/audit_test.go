@@ -195,6 +195,10 @@ func (f failingLibraryAudit) List(context.Context, audit.Query) (audit.Page, err
 	return audit.Page{}, nil
 }
 
+func (f failingLibraryAudit) GetByID(context.Context, int64) (*models.AuditEvent, error) {
+	return nil, errors.New("审计写入失败")
+}
+
 func assertAuditCount(t *testing.T, db *gorm.DB, action string, want int64) {
 	t.Helper()
 	var count int64

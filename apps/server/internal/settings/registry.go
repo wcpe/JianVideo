@@ -86,6 +86,21 @@ var registry = []Definition{
 		Validate: validateJSONObject,
 	},
 	{
+		Key: KeyRecycleRetentionDays, Label: "回收站保留天数", Description: "软删媒体保留天数，超过后可由自动清理处理；0 表示不自动清理。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "30", HotApply: true, Consumer: "library.recycle",
+		Validate: validateNonNegativeInt,
+	},
+	{
+		Key: KeyRecycleAutoCleanupEnabled, Label: "回收站自动清理", Description: "是否启用到期自动清理；关闭后仅可手动清理。",
+		Layer: LayerRuntime, ValueType: ValueBool, DefaultValue: "1", HotApply: true, Consumer: "library.recycle",
+		Validate: validateBool,
+	},
+	{
+		Key: KeyRecycleAutoCleanupIntervalSec, Label: "回收站自动清理周期", Description: "自动清理调度间隔秒数，0 表示关闭定时（仍可手动触发）。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "3600", HotApply: true, Consumer: "library.recycle",
+		Validate: validateNonNegativeInt,
+	},
+	{
 		Key: KeyUpdateChannel, Label: "更新频道", Description: "自更新检查使用的发布频道。",
 		Layer: LayerRuntime, ValueType: ValueEnum, DefaultValue: "stable", HotApply: true, Consumer: "update",
 		Options:  []SettingOption{{Value: "stable", Label: "正式版"}, {Value: "prerelease", Label: "测试版"}},
@@ -232,6 +247,12 @@ func definitionFor(key string) (Definition, bool) {
 	def, ok := registryByKey[key]
 	return def, ok
 }
+
+// DefinitionByKey 返回注册表定义（供回滚中心等跨包判断敏感/层级，FR2-041）。
+func DefinitionByKey(key string) (Definition, bool) {
+	return definitionFor(key)
+}
+
 
 // ValidateStored 使用注册表校验已落库设置，未知 key 交由调用方决定兼容策略。
 func ValidateStored(key, value string) (bool, error) {

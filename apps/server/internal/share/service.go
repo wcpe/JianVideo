@@ -42,13 +42,14 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-// Create 创建默认 Space 分享。
+// Create 创建默认 Space 分享（默认允许下载）。
 func (s *Service) Create(resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int) (*models.Share, error) {
-	return s.CreateInSpace(models.DefaultSpaceID, resourceType, resourceID, expiresAt, password, maxUses)
+	return s.CreateInSpace(models.DefaultSpaceID, resourceType, resourceID, expiresAt, password, maxUses, true)
 }
 
 // CreateInSpace 创建指定 Space 分享：生成加密随机 token 落库。
-func (s *Service) CreateInSpace(spaceID, resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int) (*models.Share, error) {
+// allowDownload=false 时公开 download 端点拒绝（FR2-055）。
+func (s *Service) CreateInSpace(spaceID, resourceType string, resourceID int64, expiresAt *time.Time, password string, maxUses int, allowDownload bool) (*models.Share, error) {
 	if resourceType != models.ShareResourceMedia && resourceType != models.ShareResourceAlbum {
 		return nil, fmt.Errorf("非法分享资源类型: %s", resourceType)
 	}
@@ -71,20 +72,34 @@ func (s *Service) CreateInSpace(spaceID, resourceType string, resourceID int64, 
 	if spaceID == "" {
 		spaceID = models.DefaultSpaceID
 	}
-	sh := &models.Share{
-		Token:        token,
-		SpaceID:      spaceID,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		ExpiresAt:    expiresAt,
-		PasswordHash: passwordHash,
-		MaxUses:      maxUses,
-		CreatedAt:    time.Now(),
+	now := time.Now()
+	// 用 map 写入：GORM struct Create 会省略 bool 零值 false，触发列 DEFAULT 1 盖掉禁下载。
+	row := map[string]any{
+		"token":          token,
+		"space_id":       spaceID,
+		"resource_type":  resourceType,
+		"resource_id":    resourceID,
+		"expires_at":     expiresAt,
+		"password_hash":  passwordHash,
+		"max_uses":       maxUses,
+		"used_count":     0,
+		"allow_download": allowDownload,
+		"created_at":     now,
 	}
-	if err := s.db.Create(sh).Error; err != nil {
+	if err := s.db.Model(&models.Share{}).Create(row).Error; err != nil {
 		return nil, err
 	}
-	return sh, nil
+	return &models.Share{
+		Token:         token,
+		SpaceID:       spaceID,
+		ResourceType:  resourceType,
+		ResourceID:    resourceID,
+		ExpiresAt:     expiresAt,
+		PasswordHash:  passwordHash,
+		MaxUses:       maxUses,
+		AllowDownload: allowDownload,
+		CreatedAt:     now,
+	}, nil
 }
 
 // Get 取分享：不存在返回 ErrShareNotFound，已过期返回 ErrShareExpired。

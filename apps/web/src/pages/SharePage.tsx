@@ -26,8 +26,16 @@ import {
 import { isImageFile, mediaDisplayName } from '@/utils/media';
 import type { ShareInfo, MediaFile } from '@/types';
 
-/** 单个被分享媒体的查看：图片直出、视频渐进式在线播放，附原文件下载（FR-43） */
-function SharedMedia({ token, media }: { token: string; media: MediaFile }) {
+/** 单个被分享媒体的查看：图片直出、视频渐进式在线播放；下载受 allow_download 控制（FR-43/FR2-055） */
+function SharedMedia({
+  token,
+  media,
+  allowDownload = true,
+}: {
+  token: string;
+  media: MediaFile;
+  allowDownload?: boolean;
+}) {
   const isImage = isImageFile(media);
   return (
     <Stack>
@@ -42,17 +50,19 @@ function SharedMedia({ token, media }: { token: string; media: MediaFile }) {
           style={{ width: '100%', maxHeight: '70vh', background: '#000' }}
         />
       )}
-      <Group justify="center">
-        <Button
-          component="a"
-          href={shareDownloadURL(token, media.id)}
-          download
-          variant="light"
-          leftSection={<IconDownload size={16} />}
-        >
-          下载原文件
-        </Button>
-      </Group>
+      {allowDownload && (
+        <Group justify="center">
+          <Button
+            component="a"
+            href={shareDownloadURL(token, media.id)}
+            download
+            variant="light"
+            leftSection={<IconDownload size={16} />}
+          >
+            下载原文件
+          </Button>
+        </Group>
+      )}
     </Stack>
   );
 }
@@ -172,10 +182,13 @@ export default function SharePage() {
       </Center>
     );
 
+  // 缺省视为允许下载（兼容旧分享元信息）
+  const allowDownload = info.allow_download !== false;
+
   return (
     <Container py="xl" size="lg">
       {info.resource_type === 'media' && info.media && (
-        <SharedMedia token={token} media={info.media} />
+        <SharedMedia token={token} media={info.media} allowDownload={allowDownload} />
       )}
 
       {info.resource_type === 'album' && (
@@ -215,7 +228,9 @@ export default function SharePage() {
             centered
             title={selected ? mediaDisplayName(selected) : ''}
           >
-            {selected && <SharedMedia token={token} media={selected} />}
+            {selected && (
+              <SharedMedia token={token} media={selected} allowDownload={allowDownload} />
+            )}
           </Modal>
         </Stack>
       )}

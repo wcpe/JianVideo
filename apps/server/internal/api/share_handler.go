@@ -2,13 +2,16 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
+	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
 )
 
@@ -30,6 +33,8 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		Password string `json:"password"`
 		// MaxUses 可选最大访问次数（FR-78）；0 表示无限。
 		MaxUses int `json:"max_uses"`
+		// AllowDownload 是否允许公开下载（FR2-055）；缺省 true。
+		AllowDownload *bool `json:"allow_download"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_INPUT", "message": "请求参数错误"})
@@ -63,10 +68,31 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		t := time.Now().Add(time.Duration(req.ExpiresInHours) * time.Hour)
 		expiresAt = &t
 	}
-	sh, err := h.share.CreateInSpace(spaceID, req.ResourceType, req.ResourceID, expiresAt, req.Password, req.MaxUses)
+	allowDownload := true
+	if req.AllowDownload != nil {
+		allowDownload = *req.AllowDownload
+	}
+	sh, err := h.share.CreateInSpace(spaceID, req.ResourceType, req.ResourceID, expiresAt, req.Password, req.MaxUses, allowDownload)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "CREATE_FAILED", "message": "创建分享失败"})
 		return
+	}
+	if h.audit != nil {
+		_ = h.audit.Record(c.Request.Context(), audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    "user",
+			ActorID:      actorIDFromContext(c),
+			Action:       "share.created",
+			ResourceType: "share",
+			ResourceID:   sh.Token,
+			After: map[string]any{
+				"resource_type":  sh.ResourceType,
+				"resource_id":    sh.ResourceID,
+				"allow_download": sh.AllowDownload,
+				"max_uses":       sh.MaxUses,
+			},
+		})
 	}
 	c.JSON(http.StatusCreated, sh)
 }
@@ -99,9 +125,21 @@ func (h *Handler) RevokeShare(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.share.RevokeInSpace(spaceID, c.Param("token")); err != nil {
+	token := c.Param("token")
+	if err := h.share.RevokeInSpace(spaceID, token); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "REVOKE_FAILED", "message": "撤销分享失败"})
 		return
+	}
+	if h.audit != nil {
+		_ = h.audit.Record(c.Request.Context(), audit.EventInput{
+			Scope:        audit.ScopeSpace,
+			SpaceID:      spaceID,
+			ActorType:    "user",
+			ActorID:      actorIDFromContext(c),
+			Action:       "share.revoked",
+			ResourceType: "share",
+			ResourceID:   token,
+		})
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -191,6 +229,7 @@ func (h *Handler) ShareInfo(c *gin.Context) {
 		"resource_type":     sh.ResourceType,
 		"expires_at":        sh.ExpiresAt,
 		"requires_password": sh.PasswordHash != "",
+		"allow_download":    sh.AllowDownload,
 	}
 	switch sh.ResourceType {
 	case models.ShareResourceMedia:
@@ -227,21 +266,49 @@ func (h *Handler) ShareRaw(c *gin.Context) {
 }
 
 // ShareThumbnail GET /api/share/:token/media/:mediaId/thumbnail 缩略图。
+// FR2-055：仅读已有缓存文件，缺失返回占位 404，**不**入队生成/转码。
 func (h *Handler) ShareThumbnail(c *gin.Context) {
 	mf := h.resolveShareMedia(c)
 	if mf == nil {
 		return
 	}
-	h.serveThumbnail(c, mf)
+	h.serveShareThumbnailExistingOnly(c, mf)
 }
 
 // ShareDownload GET /api/share/:token/media/:mediaId/download 原文件下载。
+// FR2-055：allow_download=false 时统一 404，不区分原因。
 func (h *Handler) ShareDownload(c *gin.Context) {
+	sh := currentShare(c)
+	if sh != nil && !sh.AllowDownload {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "资源不存在"})
+		return
+	}
 	mf := h.resolveShareMedia(c)
 	if mf == nil {
 		return
 	}
 	h.serveDownload(c, mf)
+}
+
+// serveShareThumbnailExistingOnly 公开分享缩略图：只服务已存在文件，禁止 Ensure/Enqueue/异步生成。
+func (h *Handler) serveShareThumbnailExistingOnly(c *gin.Context, mf *models.MediaFile) {
+	size := library.NormalizeThumbnailSize(parseThumbnailSize(c))
+	if h.thumbnail != nil {
+		coverPath, err := h.thumbnail.CurrentCoverPath(c.Request.Context(), mf.SpaceID, mf.ID)
+		if err == nil && coverPath != "" {
+			if _, statErr := os.Stat(coverPath); statErr == nil {
+				c.File(coverPath)
+				return
+			}
+		}
+	}
+	thumbnailPath := library.ThumbnailPathForSize(mf.FilePath, size)
+	if _, err := os.Stat(thumbnailPath); err == nil {
+		c.File(thumbnailPath)
+		return
+	}
+	// 缺失：占位拒绝，不触发生成队列（FR2-055 匿名成本门）。
+	c.JSON(http.StatusNotFound, gin.H{"code": "THUMBNAIL_NOT_READY", "message": "缩略图不可用"})
 }
 
 // RegisterShareRoutes 注册公开分享路由（免登，APIGuard 已豁免 /api/share/ 前缀）。

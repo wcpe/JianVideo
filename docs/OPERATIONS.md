@@ -80,6 +80,51 @@ curl -X POST http://localhost:8080/api/smb/credentials \
 - **编排探活（FR2-072）**：`GET http://localhost:8080/health`，公开、无需 JWT，返回 `{"status":"ok"}` 即进程可响应。
 - 业务就绪仍依赖库迁移与配置；容器 `docker compose` 默认用上述 `/health` 做 healthcheck。
 
+### HTTPS / 反代与生产密钥（FR2-062）
+
+**默认姿势**：应用只监听内网（如 `127.0.0.1:8080` 或 Docker 内网），**TLS 在反代终止**。不要把未加密的 8080 直接暴露到公网。
+
+**生产启动前检查清单**：
+
+| 项 | 要求 |
+|----|------|
+| `JWT_SECRET` | **必须**设为足够长的随机串；未设置时进程会生成随机值，重启后旧 Cookie 全部失效 |
+| `SMB_MASTER_PASSWORD` | 使用 SMB 时**必须**设强随机主密码；未设置则 SMB 凭据 API 返回 503 |
+| 反代 | 正确转发 `X-Forwarded-For` / `X-Real-IP`（限流按客户端 IP；错误信任会污染限流键） |
+| 监听 | 建议仅绑定内网或 Unix socket，由 Caddy/Nginx 对外 443 |
+
+**Caddy 最小示例**（自动证书，反代到本机 8080）：
+
+```caddy
+media.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+**Nginx 最小示例**（证书路径按实际替换）：
+
+```nginx
+server {
+	listen 443 ssl http2;
+	server_name media.example.com;
+	ssl_certificate     /etc/ssl/certs/media.fullchain.pem;
+	ssl_certificate_key /etc/ssl/private/media.key;
+
+	location / {
+		proxy_pass http://127.0.0.1:8080;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_http_version 1.1;
+		# 大文件上传/下载可按需加大
+		client_max_body_size 0;
+	}
+}
+```
+
+**登录防爆破（应用内）**：同一规范化用户名 + 客户端 IP 在滑动窗口内失败达阈值后返回 `429 LOGIN_LOCKED`（默认约 10 次 / 10 分钟失败 → 锁 15 分钟）。失败响应统一「用户名或密码错误」，不区分用户是否存在。
+
 ### Docker Compose 部署（FR2-072）
 
 骨架在仓库 `deploy/`（多阶段 Dockerfile：前端 → CGO 编译 → Debian + FFmpeg；命名卷挂 `/data`）。

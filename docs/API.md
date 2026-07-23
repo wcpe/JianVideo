@@ -7,13 +7,13 @@
 ## 1. 通用约定
 
 - **协议**：HTTP/HTTPS RESTful API
-- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/api/auth/setup-status`、`/api/auth/setup`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`
+- **认证**：基于 Cookie 的会话认证，登录后返回 `Set-Cookie` 头部（HttpOnly `auth_token`）。除 `/api/auth/login`、`/api/auth/logout`、`/api/auth/setup-status`、`/api/auth/setup`、`/health` 及前端静态资源外，所有 `/api/*` 端点均强制校验 JWT（Cookie `auth_token` 或 `Authorization: Bearer <token>` 任一有效），未携带或无效凭据返回 `401`；用户 `status=disabled` 时即使 JWT 仍有效也返回 `401`（`code: USER_DISABLED`，FR2-010）
 - **编码**：请求/响应体使用 JSON（`Content-Type: application/json`），视频流使用 `video/mp2t`
 - **分页**：列表接口支持 `page`（从 1 开始）和 `page_size`（默认 20，最大 100）参数
 - **时间格式**：ISO 8601（`YYYY-MM-DDTHH:MM:SSZ`）
 - **静态资源**：前端文件通过 `go:embed` 内嵌，由 `/` 路径提供服务
 - **数据库迁移（FR2-017）**：不新增对外 HTTP 迁移端点。v0.20 到 v2 schema 升级在服务启动期由 `internal/migration` 执行；Runner 先做 settings/迁移只读预检，blocker 在备份和任何写入前终止，warning 不阻断。dry-run 计划包含每步影响行数、`blockers`、`warnings`、是否执行及是否已应用。CLI 使用 `jianvideo -migration-dry-run`：向 stdout 打印 JSON 计划后退出，不启动 HTTP 服务、不创建备份、不写业务表、`schema_migrations` 或审计表；仅 warning 时成功退出，存在 blocker 时仍输出计划并以非零状态退出。
-- **Space 头与权限（FR2-007）**：`/api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及播放、`/api/transcode/tasks`、Space scoped `/api/tasks`、`/api/audit/events`、`/api/storage/cache`、`/api/settings/storage` 支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；显式传入不存在的 Space 返回 `404 SPACE_NOT_FOUND`；当前 JWT 用户不是该 Space 的 `owner_user_id` 时返回 `403 SPACE_FORBIDDEN`。审计查询显式携带 `space_id` 时以该查询值作为实际授权目标，不能用默认 Space owner 身份查询其他 Space；stream/HLS 除 owner 校验外还会确认媒体记录属于该 Space。P2 仅实现 owner-only，不暴露成员/角色矩阵；系统级 `scope=system` 任务/审计与非 Space 系统端点不走 Space owner 守卫。
+- **Space 头与权限（FR2-007 / FR2-010）**：`/api/library` 下的媒体列表、详情、目录浏览、统计、扫描、标签、回收站、上传入口，以及播放、`/api/transcode/tasks`、Space scoped `/api/tasks`、`/api/audit/events`、`/api/storage/cache`、`/api/settings/storage` 支持 `X-JianVideo-Space-Id: <space_id>`。缺失时使用默认 `space-default`；显式传入非法格式返回 `400 INVALID_SPACE`；不存在的 Space 返回 `404 SPACE_NOT_FOUND`。**FR2-010**：当前用户须为该 Space 的 `space_members` 成员；`GET/HEAD` 至少 `viewer`，写方法至少 `editor`；非成员 `403 SPACE_FORBIDDEN`（文案「不是该 Space 的成员」或「当前角色无权执行写操作」）。角色：`owner` > `editor` > `viewer`。审计查询显式 `space_id` 时以该值为授权目标。系统级 `scope=system` 与非 Space 系统端点不走 Space 成员守卫。
 
 ## 2. 错误约定
 
@@ -99,7 +99,10 @@
     "username": "string"
   }
   ```
-- **错误**：`401` 用户名或密码错误
+- **错误**：
+  - `401` `INVALID_CREDENTIALS`：用户名或密码错误（**不区分**用户不存在 / 密码错误 / 已禁用，FR2-062）
+  - `429` `LOGIN_LOCKED`：同一用户名（大小写不敏感）+ 客户端 IP 在滑动窗口内失败达阈值（默认 10 次 / 10 分钟 → 锁约 15 分钟）；响应头可含 `Retry-After`（秒）
+- **审计**：失败可记 `auth.login_failed`；触发锁定记 `auth.login_locked`（`ip_hash` 脱敏，无明文 IP）
 
 ### 登出
 
@@ -426,6 +429,25 @@
 - **请求**（可选）：`{"library_id":1}`；省略或传 0 表示当前 Space 全部媒体。
 - **响应**（202）：`{"status":"pending","task_id":124}`
 - **说明**：幂等入队 `metadata.backfill`，按媒体 ID checkpoint 分批推进并更新任务进度；失败由通用任务队列自动重试，已完成媒体不会因重试重复追加元数据记录。
+
+### 危险写回原文件元数据（FR2-033）
+
+> 首切：后端 confirm + 快照 + 任务队列；仅图片有限字段；前端二次确认 UI 二切。  
+> 与 `POST .../metadata/refresh`（文件→库重解析）方向相反：本端点将**库内字段写回磁盘原文件**，高危。
+
+- **方法 / 路径**：`POST /api/library/media/:id/metadata/writeback`（Space 写守卫 editor+）
+- **请求体**：`{ "confirm_writeback": true }`；缺省 / `false` / 非法 body → `400 CONFIRM_REQUIRED`
+- **前端**：详情面板（`MediaDetailPanel`）图片提供「写回原文件元数据」二次确认后调用本端点，并轮询 `GET /api/tasks/:id` 展示终态；视频入口不提供写回。
+- **响应**（202）：`{ "status": "pending", "task_id": "123" }`
+- **行为**：
+  1. 校验媒体为本地图片（视频 → `400 VIDEO_WRITEBACK_UNSUPPORTED`；SMB → `400 UNSUPPORTED_PATH`；无可写字段 → `400 NO_FIELDS`）
+  2. 将原文件复制到数据目录 `writeback-snapshots/<space_id>/<media_id>/<ts>-<name>`
+  3. 入队任务类型 `metadata.writeback`（payload 含源路径、快照路径、源哈希、字段快照）
+  4. worker：校验快照存在且源哈希未变 → ImageMagick 写临时文件 → rename 替换；失败保留原文件与快照
+- **可写字段（首切）**：`camera` / `lens` / `aperture` / `shutter` / `iso` / `gps_lat` / `gps_lon` / `notes` / `display_name`（库内非空才纳入）
+- **审计**：`metadata.writeback.started`（入队）/ `metadata.writeback.succeeded` / `metadata.writeback.failed`
+- **说明**：库内 `WritebackMediaMetadataInSpace`（文件→库刷新）仍可用内部服务调用；HTTP 本路径仅危险写回。历史审计动作名 `metadata.writeback.*` 亦用于库内刷新路径，与任务类型同名但语义以 payload/summary 区分。
+- **错误**：`400 CONFIRM_REQUIRED` / `VIDEO_WRITEBACK_UNSUPPORTED` / `UNSUPPORTED_PATH` / `NOT_IMAGE` / `NO_FIELDS`，`404 NOT_FOUND`，`503 TASKS_UNAVAILABLE`
 
 ### 查询媒体章节（FR2-060）
 
@@ -811,6 +833,22 @@
 - **说明**：对全部软删项，把磁盘源文件移动到其所在盘符对应的回收站目录（取自设置键 `recycle_bin_paths` 的 JSON 映射，盘符大小写不敏感），目标按删除日期分子目录 `<回收站目录>/<deleted_at 日期 YYYY-MM-DD>/<原文件名>`；移动成功后删除 `media_files` 记录。先移动成功、后删记录，保证「记录还在 = 文件未移出库」一致。
 - **校验先行**：只要存在任一软删项所在盘符未配置回收站路径（含 SMB / 无盘符项），整体拒绝，不移动任何文件、不删任何记录。
 - **错误**：`409` 存在盘符未配置回收站路径（message 含缺失盘符），`500` 配置非法 JSON 或清理失败，`503` 设置服务未启用
+
+### 回收站到期自动清理预览（FR2-054）
+
+- **方法 / 路径**：`POST /api/library/recycle/auto-cleanup/preview?limit=50`（鉴权；Space 写守卫：editor+）
+- **说明**：按全局设置 `recycle_retention_days` 计算 `before = now - days`；列出当前 Space 中 `deleted_at < before` 的候选（最多 `limit`，默认 50）。**不改数据**。`days=0` 时候选为 0。
+- **响应**（200）：`{ "candidate", "skipped", "missing_drives", "media_ids", "before", "limit" }`
+  - `skipped` / `missing_drives`：候选中因缺盘符路径将跳过的统计（与实跑一致口径）
+- **错误**：`503` 设置服务未启用
+
+### 回收站到期自动清理执行（FR2-054）
+
+- **方法 / 路径**：`POST /api/library/recycle/auto-cleanup/run?limit=50`（editor+）
+- **说明**：有界实跑；复用单条清理路径。**缺盘符跳过该条**（记 skipped），不整轮 409。开关关或 `recycle_retention_days=0` 时返回 `409 AUTO_CLEANUP_DISABLED`。
+- **响应**（200）：`{ "candidate", "moved", "failed", "skipped", "missing_drives", "media_ids", "before", "limit" }`
+- **审计**：`recycle.auto_cleanup`（汇总计数）
+- **相关设置**：`recycle_retention_days`（默认 30）、`recycle_auto_cleanup_enabled`（默认 true）、`recycle_auto_cleanup_interval_sec`（默认 3600，启动调度周期）
 
 ### 获取图片原始内容
 
@@ -1944,19 +1982,157 @@
 - **说明**：Space scoped 查询默认只返回 `scope=space` 且匹配当前 Space 的事件，不返回 `scope=system` 事件；系统级事件需显式 `scope=system`。响应中的 before/after/metadata 已复用后端审计脱敏策略，密码、令牌、代理凭据和含用户名路径不会明文回显。
 - **错误**：`400` 查询参数无效，`404` Space 不存在，`503` 审计服务未启用
 
-## 分享链接（FR-43）
+### 查询可回滚事件（FR2-041）
 
-分享分两层：**管理端点** `/api/shares`（鉴权后，受 APIGuard 保护）创建/列出/撤销；**公开端点** `/api/share/:token`（免登，APIGuard 豁免 `/api/share/` 前缀）由 token 持有者只读访问。公开端点经 `shareAuth` 校验 token + 过期，并对每个 `:mediaId` 做范围校验——不在分享范围内一律 `404`。分享可选带访问密码与访问限次（FR-78）。
+- **方法 / 路径**：`GET /api/rollback/events`
+- **请求头**：Space scoped 查询可带 `X-JianVideo-Space-Id`；缺省为 `space-default`
+- **查询参数**：
+  - `scope`：可选，传 `system` 时仅查系统级事件；缺省为当前 Space 的 space 事件，并额外合并近期 `settings.updated`（system）。
+  - `days`：可选，回溯天数，默认 `30`。
+  - `cursor` / `limit`：分页（与审计列表同序语义）。
+- **响应**（200）：
+  ```json
+  {
+    "items": [
+      {
+        "id": 1,
+        "scope": "space",
+        "space_id": "space-default",
+        "action": "media.deleted",
+        "resource_type": "media",
+        "resource_id": "42",
+        "before_json": {"id": 42},
+        "after_json": {"deleted_at": "2026-07-08T08:00:00Z"},
+        "created_at": "2026-07-08T08:00:00Z",
+        "rollbackable": true,
+        "reason_key": ""
+      }
+    ],
+    "next_cursor": null
+  }
+  ```
+- **说明**：每条事件附带 `rollbackable` 与稳定 `reason_key`（如 `not_registered` / `missing_before` / `sensitive_keys` / `no_revertable_keys` / `invalid_resource` / `missing_snapshot` / `snapshot_gone` / `path_redacted`）。可回滚动作：`settings.updated`（运行期非敏感标量；敏感键整事件不可回滚）、`media.deleted`→还原、`media.restored`→再软删、`media.renamed`→改回 `before.file_name`、`media.moved`→移回 `before.file_path` 所在目录、`metadata.writeback.succeeded`→从审计 `metadata.snapshot_path` 覆盖回 `file_path`。审计脱敏导致路径含 `****` 时返回 `path_redacted`（无法安全还原磁盘路径）；快照缺失 `missing_snapshot` / 丢失 `snapshot_gone`。前端审计页提供可回滚时间线与二次确认 apply（FR2-041）。
+- **错误**：`400` 查询参数无效，`503` 回滚服务未启用
+
+### 执行回滚（FR2-041）
+
+- **方法 / 路径**：`POST /api/rollback/apply`
+- **请求头**：可带 `X-JianVideo-Space-Id`；space 事件须与事件所属 Space 一致
+- **请求体**：
+  ```json
+  { "event_id": 1, "confirm": true }
+  ```
+- **响应**：`204 No Content`
+- **副作用**：按 action 分发 `ActionReverter` 执行逆操作；成功写审计 `rollback.applied`，失败写 `rollback.failed`（`metadata` 含 `original_action` / 原事件 id）。
+- **错误**：
+  - `400 CONFIRM_REQUIRED`：未传 `confirm=true`
+  - `400 NOT_ROLLBACKABLE`：不可回滚，体含 `reason_key`
+  - `400 ROLLBACK_FAILED`：执行失败
+  - `403 SPACE_FORBIDDEN`：事件不属于当前 Space
+  - `404 NOT_FOUND`：审计事件不存在
+  - `503 ROLLBACK_UNAVAILABLE`：回滚服务未启用
+
+## 用户与 Space 成员（FR2-010）
+
+> 首切：后端 API + 成员守卫；前端管理页后续切片。
+
+### 列出用户
+
+- **方法 / 路径**：`GET /api/users`（鉴权；**默认 Space owner**）
+- **响应**（200）：`{ "items": [ { "id", "username", "status", "created_at" } ] }`
+- **错误**：`403` 非默认 Space owner
+
+### 创建用户
+
+- **方法 / 路径**：`POST /api/users`（默认 Space owner）
+- **请求体**：`{ "username": "alice", "password": "..." }`
+- **响应**（201）：`{ "id", "username", "status" }`
+- **错误**：`400` 用户名已存在/参数无效，`403` 非 owner
+
+### 设置用户状态
+
+- **方法 / 路径**：`PUT /api/users/:id/status`（默认 Space owner）
+- **请求体**：`{ "status": "active" | "disabled" }`
+- **响应**：`204`
+- **错误**：`400` `CANNOT_DISABLE_SELF`（不能禁用当前登录用户）/ 无效状态，`403` 非 owner
+
+### 列出可访问 Space
+
+- **方法 / 路径**：`GET /api/spaces`（鉴权；当前用户成员关系）
+- **响应**（200）：`{ "items": [ { "id", "name", "owner_user_id", "role", "created_at" } ] }`
+
+### 创建 Space
+
+- **方法 / 路径**：`POST /api/spaces`
+- **请求体**：`{ "id": "space-work", "name": "工作" }`（id 限字母数字与 `._-`）
+- **响应**（201）：`{ "id", "name", "owner_user_id", "role": "owner" }`
+- **副作用**：写入 `space_members` owner 行
+
+### 列出 Space 成员
+
+- **方法 / 路径**：`GET /api/spaces/:id/members`（至少 viewer）
+- **响应**（200）：`{ "items": [ { "space_id", "user_id", "role", "created_at", "updated_at" } ] }`
+
+### 添加/更新成员
+
+- **方法 / 路径**：`POST /api/spaces/:id/members`（owner）
+- **请求体**：`{ "user_id": 2, "role": "viewer" }` 或 `{ "username": "alice", "role": "editor" }`
+- **约束**：`role` 为 `editor`|`viewer`（不可经此接口设 owner）
+- **响应**：`204`
+- **审计**：新建 → `space.member_added`；已有成员改角色 → `space.member_role_changed`
+
+### 移除成员
+
+- **方法 / 路径**：`DELETE /api/spaces/:id/members/:user_id`（owner）
+- **响应**：`204`
+- **错误**：`400` 不能移除 owner 行
+
+## 家长控制与内容分级（FR2-051）
+
+> 首切：后端过滤真源 + 管理 API + 密码确认；前端分级标记与家长锁 UI 二切。  
+> 分级枚举：`G` | `PG` | `PG-13` | `R` | `UNRATED`。空/`UNRATED` 对受限用户**默认可见**。  
+> 有效最高可见级：成员 `max_rating` 非空优先，否则 `spaces.default_max_rating`；皆空 = 不限制。
+
+媒体列表 `GET /api/library/media` 与详情 `GET /api/library/media/:id` 按调用者有效等级过滤；不可见媒体对外统一 `404 NOT_FOUND`（不泄露存在性）。媒体对象可含 `content_rating` 字段。
+
+### 设置媒体内容分级
+
+- **方法 / 路径**：`PUT /api/library/media/:id/content-rating`（Space 写守卫 editor+）
+- **请求体**：`{ "content_rating": "PG-13" }`；空串清除为未分级
+- **响应**：`204`
+- **审计**：`media.content_rating_updated`
+- **错误**：`400` 非法分级，`404` 媒体不存在
+
+### 设置 Space 默认最高可见分级
+
+- **方法 / 路径**：`PUT /api/spaces/:id/parental`（owner）
+- **请求体**：`{ "password": "当前用户密码", "default_max_rating": "PG" }`；`default_max_rating` 空串表示不限制
+- **响应**：`204`
+- **审计**：`space.parental_updated`
+- **错误**：`401 PASSWORD_REQUIRED` 密码确认失败，`400` 非法分级，`403` 非 owner
+
+### 设置成员最高可见分级
+
+- **方法 / 路径**：`PUT /api/spaces/:id/members/:user_id/max-rating`（owner）
+- **请求体**：`{ "password": "当前用户密码", "max_rating": "PG" }`；`max_rating` 空串或省略表示清除覆盖（继承 Space 默认）
+- **响应**：`204`
+- **审计**：`space.member_max_rating_updated`
+- **错误**：`401 PASSWORD_REQUIRED`，`404` 成员不存在，`403` 非 owner
+
+## 分享链接（FR-43 / FR2-055）
+
+分享分两层：**管理端点** `/api/shares`（鉴权后，受 APIGuard 保护）创建/列出/撤销；**公开端点** `/api/share/:token`（免登，APIGuard 豁免 `/api/share/` 前缀）由 token 持有者只读访问。公开端点经 `shareAuth` 校验 token + 过期，并对每个 `:mediaId` 做范围校验——不在分享范围内一律 `404`。分享可选带访问密码与访问限次（FR-78）。**FR2-055**：`allow_download` 禁下载；公开缩略图仅读已有缓存、不入队生成；公开路径不开放转码/HLS。
 
 ### 创建分享
 
-- **方法 / 路径**：`POST /api/shares`（鉴权后）
+- **方法 / 路径**：`POST /api/shares`（鉴权后；Space 写守卫 editor+）
 - **请求体**：
   ```json
-  { "resource_type": "media", "resource_id": 12, "expires_in_hours": 168, "password": "可选密码", "max_uses": 0 }
+  { "resource_type": "media", "resource_id": 12, "expires_in_hours": 168, "password": "可选密码", "max_uses": 0, "allow_download": true }
   ```
-  `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。`password` 可选（FR-78），非空则后端以 bcrypt 哈希存储、绝不明文落库/回显；`max_uses` 可选（FR-78），`>0` 设访问次数上限、缺省或 `0` 表示无限。
-- **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "max_uses": 0, "used_count": 0, "created_at": "..." }`（不含密码哈希）
+  `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。`password` 可选（FR-78），非空则后端以 bcrypt 哈希存储、绝不明文落库/回显；`max_uses` 可选（FR-78），`>0` 设访问次数上限、缺省或 `0` 表示无限。`allow_download` 可选（FR2-055），缺省 `true`；`false` 时公开 download 统一 `404`。
+- **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "max_uses": 0, "used_count": 0, "allow_download": true, "created_at": "..." }`（不含密码哈希）
+- **审计**：`share.created`
 - **错误**：`400` 参数错误或非法类型，`404` 被分享资源不存在，`503` 分享服务未启用，`500` 创建失败
 
 ### 列出分享
@@ -1968,13 +2144,14 @@
 
 - **方法 / 路径**：`DELETE /api/shares/:token`（鉴权后）
 - **响应**：`204`
+- **审计**：`share.revoked`
 
 ### 公开访问分享元信息
 
 - **方法 / 路径**：`GET /api/share/:token`（免登）
 - **请求头**（FR-78）：分享设密码时需带 `X-Share-Password: <密码>`。
 - **响应**（200）：
-  - 校验通过——媒体分享 `{ "resource_type": "media", "expires_at": ..., "requires_password": false, "media": {...} }`；相册分享 `{ "resource_type": "album", "expires_at": ..., "requires_password": false, "album": {...}, "items": [...] }`。
+  - 校验通过——媒体分享 `{ "resource_type": "media", "expires_at": ..., "requires_password": false, "allow_download": true, "media": {...} }`；相册分享同理含 `album`/`items`。
   - 需密码且未带/带错密码——`{ "resource_type": "media", "requires_password": true }`，**不含任何 media/album 内容**（供前端弹密码框、不泄露内容、不区分过期/撤销）。本端点不消费访问额度。
 - **错误**：`404` token 不存在/已过期/已撤销
 
@@ -1982,9 +2159,9 @@
 
 - **方法 / 路径**：
   - `GET /api/share/:token/media/:mediaId/raw`（图片在线查看）
-  - `GET /api/share/:token/media/:mediaId/thumbnail`（缩略图）
-  - `GET /api/share/:token/media/:mediaId/download`（原文件下载）
-  - `GET /api/share/:token/media/:mediaId/stream`（视频渐进式在线播放，支持 Range；不开放转码/HLS）
+  - `GET /api/share/:token/media/:mediaId/thumbnail`（缩略图；**仅已有缓存**，缺失 `404 THUMBNAIL_NOT_READY`，不入队生成，FR2-055）
+  - `GET /api/share/:token/media/:mediaId/download`（原文件下载；`allow_download=false` 时 `404`）
+  - `GET /api/share/:token/media/:mediaId/stream`（视频渐进式在线播放，支持 Range；**不开放转码/HLS**）
 - **请求头**（FR-78）：带 `X-Share-Password` 头时校验密码；`<img>`/`<video>` 直链无法带头时不阻断（拿到 `mediaId` 已必过 `ShareInfo` 密码门禁）。
-- **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。每次成功访问对限次分享原子自增一次 `used_count`（FR-78），达到 `max_uses` 后再访问 `404`。
-- **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删/密码错/次数已用尽，`503` 播放服务未启用（stream）
+- **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。每次成功访问对限次分享原子自增一次 `used_count`（FR-78），达到 `max_uses` 后再访问 `404`。匿名路径不得触发 HLS/ABR 转码、导出、AI、缩略图批量重建。
+- **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删/密码错/次数已用尽/禁下载/缩略图未就绪，`503` 播放服务未启用（stream）

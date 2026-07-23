@@ -482,6 +482,10 @@ export default function TimelinePage() {
           setTagId(tag.id);
           setDetailIndex(null);
         }}
+        onContentRatingChange={() => {
+          // 分级变更后刷新列表，使时间轴项与详情态一致（FR2-051）
+          infinite.reload();
+        }}
       />
 
       {/* 批量删除二次确认（FR-69）：删除进回收站，可在回收站还原 */}

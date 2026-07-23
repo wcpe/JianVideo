@@ -81,6 +81,21 @@
 - [`fr2-071-openapi-contract.md`](fr2-071-openapi-contract.md)：OpenAPI 契约闭环（FR2-071，对齐-C）。
 - [`fr2-072-deploy-skeleton.md`](fr2-072-deploy-skeleton.md)：`deploy/` 骨架（FR2-072，对齐-D）。
 
+## P5：`0.26.x` Space、安全与多用户
+
+> 阶段计划见 Dynamic Spec `spec://index.md`（叙述者工作区）与 [`docs/ROADMAP.md`](../ROADMAP.md) §10。  
+> 旧 `share-*.md` / `soft-delete-recycle.md` / `recycle-cleanup.md` 为 v0.20 历史，仅背景引用。
+
+- [`fr2-010-space-users-audit.md`](fr2-010-space-users-audit.md)：Space / 多用户 / 成员角色与审计边界（FR2-010）。
+- [`fr2-062-security-baseline.md`](fr2-062-security-baseline.md)：HTTPS/反代指引、登录防爆破、会话与设备（FR2-062）。
+- [`fr2-054-recycle-retention.md`](fr2-054-recycle-retention.md)：回收站保留期与自动清理（FR2-054）。
+- [`fr2-055-share-enhance.md`](fr2-055-share-enhance.md)：分享增强（禁下载、Space、匿名成本门，FR2-055）。
+- [`fr2-033-metadata-writeback.md`](fr2-033-metadata-writeback.md)：危险元数据回写（快照/队列/二次确认，FR2-033）。
+- [`fr2-041-rollback-center.md`](fr2-041-rollback-center.md)：操作可回滚中心（FR2-041）。
+- [`fr2-051-parental-controls.md`](fr2-051-parental-controls.md)：家长控制与内容分级（FR2-051）。
+
+推荐依赖序：`010 → (062 ∥ 055 ∥ 051)`；`054` 可与 `010` 并行；`033 → 041`。
+
 ## 怎么用
 
 1. 复制 `_template.md` 到 `docs/specs/<feature>.md`。
