@@ -99,18 +99,18 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 	// 注册 API 路由（库路由）
 	api.RegisterRoutes(r, apiHandler)
 
-	// HLS 路由：master 动态读取 + 其余静态文件服务挂载 hlsDir
+	// HLS 路由：master 动态读取 + 其余静态文件服务挂载 hlsDir；注入访客 max（FR2-051）。
 	hlsDir := filepath.Join(filepath.Dir(cfg.DBPath), "hls")
 	if hlsMgr != nil {
-		api.RegisterHLSRoutes(r, hlsMgr, hlsDir, libSvc, tasksvc.NewService(db))
+		api.RegisterHLSRoutesWithMaxRating(r, hlsMgr, hlsDir, libSvc, apiHandler.ViewerMaxContentRating, tasksvc.NewService(db))
 	}
 
 	// 播放路由（可选）：当传入 pbSvc 时挂载 /api/play/:id/stream，
-	// handler 内部查 db 拿到 filePath 后转发给 pbSvc.StreamFile。
+	// handler 内部查 db 拿到 filePath 后转发给 pbSvc.StreamFile（含 max 过滤）。
 	var playbackSvc *playback.Service
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
 		playbackSvc = pbSvc[0]
-		registerStreamRoute(r, libSvc, playbackSvc)
+		registerStreamRoute(r, apiHandler, playbackSvc)
 	}
 
 	// 公开分享路由（FR-43，免登）：APIGuard 已豁免 /api/share/ 前缀，
@@ -151,8 +151,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB, hlsMgr *player.HLSManager, front
 }
 
 // registerStreamRoute 在 web 层挂载 /api/play/:id/stream。
-// 用于 HLS master.m3u8 不可用时的播放降级路径。
-func registerStreamRoute(r *gin.Engine, libSvc *library.Service, pbSvc *playback.Service) {
+// 用于 HLS master.m3u8 不可用时的播放降级路径；按访客 max_rating 过滤（FR2-051）。
+func registerStreamRoute(r *gin.Engine, h *api.Handler, pbSvc *playback.Service) {
 	r.GET("/api/play/:id/stream", func(c *gin.Context) {
 		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 		if err != nil {
@@ -163,7 +163,7 @@ func registerStreamRoute(r *gin.Engine, libSvc *library.Service, pbSvc *playback
 		if spaceID == "" {
 			spaceID = models.DefaultSpaceID
 		}
-		mf, err := libSvc.GetMediaFileByIDInSpace(spaceID, id)
+		mf, err := h.LoadMediaForViewer(c, spaceID, id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 			return

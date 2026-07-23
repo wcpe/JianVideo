@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/api"
 	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
@@ -154,7 +155,7 @@ func TestRegisterStreamRoute_RejectsMediaOutsideRequestedSpace(t *testing.T) {
 	router := gin.New()
 	authSvc := auth.NewService(sqlDB, secret)
 	router.Use(auth.APIGuard(secret, authSvc), auth.SpaceOwnerGuard(authSvc))
-	registerStreamRoute(router, library.NewService(gormDB), playbackSvc)
+	registerStreamRoute(router, api.NewHandler(library.NewService(gormDB)), playbackSvc)
 
 	request := func(username, spaceID string) *httptest.ResponseRecorder {
 		token, tokenErr := auth.GenerateToken(username, secret, time.Hour)
@@ -575,7 +576,6 @@ func TestHealthCheck(t *testing.T) {
 		t.Errorf("期望 200, 得到 %d", w.Code)
 	}
 }
-
 
 // TestSessions_ListAndRevoke 登录签发 sid，列表含当前会话，撤销后旧 JWT 失效（FR2-062）。
 func TestSessions_ListAndRevoke(t *testing.T) {

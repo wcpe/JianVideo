@@ -91,6 +91,8 @@ func (h *Handler) ListAlbumItems(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
+	// 家长控制（FR2-051）：相册成员列表按访客 max 过滤。
+	files = filterMediaByMaxRating(files, h.viewerMaxContentRating(c, spaceID))
 	c.JSON(http.StatusOK, gin.H{"items": files})
 }
 

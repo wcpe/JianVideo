@@ -136,3 +136,36 @@ func TestValidateSession_EmptySIDCompatible(t *testing.T) {
 		t.Fatalf("空 sid 应兼容放行: %v", err)
 	}
 }
+
+func TestRevokeAllSessions_ValidateFails(t *testing.T) {
+	db := setupSessionDB(t)
+	svc := NewService(db, "secret")
+	_, sid1, err := svc.CreateSessionAndToken(1, "alice", "ua-a", "1.1.1.1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sid2, err := svc.CreateSessionAndToken(1, "alice", "ua-b", "1.1.1.2", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := svc.RevokeAllSessions(1)
+	if err != nil {
+		t.Fatalf("RevokeAllSessions: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("期望撤销 2 条, 得到 %d", n)
+	}
+	if err := svc.ValidateSession(sid1, 1); err == nil {
+		t.Fatal("RevokeAll 后 sid1 校验应失败")
+	}
+	if err := svc.ValidateSession(sid2, 1); err == nil {
+		t.Fatal("RevokeAll 后 sid2 校验应失败")
+	}
+	list, err := svc.ListSessions(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("全部撤销后列表应为空: %+v", list)
+	}
+}

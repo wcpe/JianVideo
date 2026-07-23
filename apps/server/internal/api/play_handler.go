@@ -29,6 +29,7 @@ func NewPlayHandler(lib *library.Service, pb *playback.Service) *PlayHandler {
 
 // Stream 处理文件流播放请求（支持 Range）。
 // GET /api/play/:id/stream
+// 注意：生产路径走 web.registerStreamRoute（含 max_rating）；本方法为遗留 PlayHandler。
 func (h *PlayHandler) Stream(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -36,6 +37,7 @@ func (h *PlayHandler) Stream(c *gin.Context) {
 		return
 	}
 
+	// 无 max 上下文时不限制；统一装配点见 web.registerStreamRoute / RegisterPlaybackRoutesWithLibrary。
 	mf, err := h.library.GetMediaFileByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})

@@ -1,6 +1,6 @@
 # 功能规格：Space、用户与审计边界
 
-> 状态：二切 UI 已完成（首切后端 + 设置页用户/Space 管理；owner 转让 / OpenAPI 迁入仍待）　·　关联 PRD：FR2-010　·　阶段：P5 `0.26.x`　·　决策：[ADR-0056](../adr/0056-space-permission-model.md)　·　前置：[fr2-007](fr2-007-storage-index-space.md)、[fr2-040](fr2-040-audit-events.md)
+> 状态：后置切片 owner 转让 + RequireSpaceRole 细挂已完成（OpenAPI 大迁入仍可仅文档）　·　关联 PRD：FR2-010　·　阶段：P5 `0.26.x`　·　决策：[ADR-0056](../adr/0056-space-permission-model.md)　·　前置：[fr2-007](fr2-007-storage-index-space.md)、[fr2-040](fr2-040-audit-events.md)
 
 ## 0. 首切范围（本 PR 只做这些）
 
@@ -14,7 +14,7 @@
 | D | 关键写操作挂 `RequireSpaceRole`（删媒体、扫描、建分享等抽样挂钩，非全量路由一天改完） | ✅ 抽样挂钩 + 矩阵单测 |
 | E | 审计：用户/成员/Space 变更事件 | ✅ |
 | F | 前端「用户与 Space」完整设置页 | ✅ 二切 |
-| G | owner 转让、Space 归档、自助注册 | 二切 |
+| G | owner 转让、Space 归档、自助注册 | ✅ owner 转让；归档/自助注册仍待 |
 
 ## 1. 背景与目标
 
@@ -82,7 +82,9 @@ P2 已落地默认 Space（`space-default`）、资源 `space_id` 与 **owner-on
 - [x] API 集成：viewer 只读、跨 Space 拒绝、禁用登录、旧 JWT `USER_DISABLED`、防自禁用
 - [x] 文档：PRD→开发中、API/CHANGELOG 未发布段
 - [x] 二切 UI：设置页「用户与 Space」——列/建用户、启停、列/建 Space、成员添加/改角色/移除；非默认 Space owner 列用户 403 时仅隐藏用户管理
-- [ ] 二切：owner 转让；RequireSpaceRole 细挂 owner-only 路由；OpenAPI 迁入
+- [x] 后置：owner 转让（`TransferOwner` + `POST .../transfer-owner` + 审计 `space.owner_transferred`）
+- [x] 后置：RequireSpaceRole 细挂 owner-only 路由（members 写 / transfer-owner / parental / max-rating）
+- [ ] OpenAPI 大迁入（最小：docs/API.md 已写清 transfer-owner）
 
 ## 5. 验收标准
 

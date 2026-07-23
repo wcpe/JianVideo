@@ -5,15 +5,39 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/wcpe/JianVideo/internal/audit"
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
+	thumbsvc "github.com/wcpe/JianVideo/internal/thumbnail"
 )
+
+// share.accessed 进程内采样：每 token 在窗口内最多记 1 条，避免公开访问刷爆审计。
+var (
+	shareAccessedLast     sync.Map // token -> time.Time
+	shareAccessedInterval = 60 * time.Second
+)
+
+// setShareAccessedIntervalForTest 覆盖采样间隔，仅供测试；返回还原函数。
+func setShareAccessedIntervalForTest(d time.Duration) (restore func()) {
+	old := shareAccessedInterval
+	shareAccessedInterval = d
+	return func() { shareAccessedInterval = old }
+}
+
+// clearShareAccessedThrottleForTest 清空采样状态，仅供测试。
+func clearShareAccessedThrottleForTest() {
+	shareAccessedLast.Range(func(k, _ any) bool {
+		shareAccessedLast.Delete(k)
+		return true
+	})
+}
 
 // ─── 管理端点（鉴权后 /api/shares，受 APIGuard 保护）─────────────────────
 
@@ -46,10 +70,10 @@ func (h *Handler) CreateShare(c *gin.Context) {
 		return
 	}
 
-	// 校验被分享资源存在且属于当前 Space
+	// 校验被分享资源存在且属于当前 Space；媒体须对创建者可见（FR2-051，公开访问不套访客 max）
 	switch req.ResourceType {
 	case models.ShareResourceMedia:
-		if _, err := h.library.GetMediaFileByIDInSpace(spaceID, req.ResourceID); err != nil {
+		if _, err := h.loadMediaForViewer(c, spaceID, req.ResourceID); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": "RESOURCE_NOT_FOUND", "message": "媒体不存在"})
 			return
 		}
@@ -184,7 +208,8 @@ func (h *Handler) shareAllowsMedia(sh *models.Share, mediaID int64) bool {
 
 // resolveShareMedia 取路径 :mediaId、做范围校验并取媒体记录；任一不满足直接写响应并返回 nil。
 // 越权 / 不在范围 / 不存在一律 404，不区分以免泄露。
-func (h *Handler) resolveShareMedia(c *gin.Context) *models.MediaFile {
+// accessType 为 stream/download/raw/thumbnail，供 share.accessed 审计采样（FR2-055）。
+func (h *Handler) resolveShareMedia(c *gin.Context, accessType string) *models.MediaFile {
 	sh := currentShare(c)
 	mediaID, err := strconv.ParseInt(c.Param("mediaId"), 10, 64)
 	if err != nil {
@@ -211,7 +236,37 @@ func (h *Handler) resolveShareMedia(c *gin.Context) *models.MediaFile {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "分享不存在或已过期"})
 		return nil
 	}
+	// MaxUses=0 时 ConsumeUse 仍成功：accessed 与 used_count 解耦，成功后仍可采样。
+	h.maybeRecordShareAccessed(c, sh, mediaID, accessType)
 	return mf
+}
+
+// maybeRecordShareAccessed 在资源访问成功路径采样写入 share.accessed（每 token 每窗口最多 1 条）。
+// ShareInfo 不调用本函数；无 audit 注入时静默跳过。
+func (h *Handler) maybeRecordShareAccessed(c *gin.Context, sh *models.Share, mediaID int64, accessType string) {
+	if h.audit == nil || sh == nil {
+		return
+	}
+	now := time.Now()
+	if last, ok := shareAccessedLast.Load(sh.Token); ok {
+		if t, ok := last.(time.Time); ok && now.Sub(t) < shareAccessedInterval {
+			return
+		}
+	}
+	shareAccessedLast.Store(sh.Token, now)
+	_ = h.audit.Record(c.Request.Context(), audit.EventInput{
+		Scope:        audit.ScopeSpace,
+		SpaceID:      sh.SpaceID,
+		ActorType:    "anonymous",
+		Action:       "share.accessed",
+		ResourceType: "share",
+		ResourceID:   sh.Token,
+		Metadata: map[string]any{
+			"media_id":    mediaID,
+			"access_type": accessType,
+			"ip_hash":     auth.HashIP(c.ClientIP()),
+		},
+	})
 }
 
 // ShareInfo GET /api/share/:token 返回分享元信息（媒体或相册成员）。
@@ -258,7 +313,7 @@ func (h *Handler) ShareInfo(c *gin.Context) {
 
 // ShareRaw GET /api/share/:token/media/:mediaId/raw 图片在线查看。
 func (h *Handler) ShareRaw(c *gin.Context) {
-	mf := h.resolveShareMedia(c)
+	mf := h.resolveShareMedia(c, "raw")
 	if mf == nil {
 		return
 	}
@@ -268,7 +323,7 @@ func (h *Handler) ShareRaw(c *gin.Context) {
 // ShareThumbnail GET /api/share/:token/media/:mediaId/thumbnail 缩略图。
 // FR2-055：仅读已有缓存文件，缺失返回占位 404，**不**入队生成/转码。
 func (h *Handler) ShareThumbnail(c *gin.Context) {
-	mf := h.resolveShareMedia(c)
+	mf := h.resolveShareMedia(c, "thumbnail")
 	if mf == nil {
 		return
 	}
@@ -283,7 +338,7 @@ func (h *Handler) ShareDownload(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "资源不存在"})
 		return
 	}
-	mf := h.resolveShareMedia(c)
+	mf := h.resolveShareMedia(c, "download")
 	if mf == nil {
 		return
 	}
@@ -301,7 +356,15 @@ func (h *Handler) serveShareThumbnailExistingOnly(c *gin.Context, mf *models.Med
 				return
 			}
 		}
+		// FR2-028 分档缓存路径（认证侧 Ensure 写入处）；只读已有文件，不入队
+		if path, pathErr := thumbsvc.PathFor(h.thumbnail.DataDir(), mf.SpaceID, mf.ID, size); pathErr == nil {
+			if _, statErr := os.Stat(path); statErr == nil {
+				c.File(path)
+				return
+			}
+		}
 	}
+	// 兼容历史 legacy 路径（扫描/旧 GenerateThumbnail 产物）
 	thumbnailPath := library.ThumbnailPathForSize(mf.FilePath, size)
 	if _, err := os.Stat(thumbnailPath); err == nil {
 		c.File(thumbnailPath)
@@ -320,7 +383,7 @@ func RegisterShareRoutes(r *gin.Engine, h *Handler, pbSvc *playback.Service) {
 	grp.GET("/media/:mediaId/thumbnail", h.ShareThumbnail)
 	grp.GET("/media/:mediaId/download", h.ShareDownload)
 	grp.GET("/media/:mediaId/stream", func(c *gin.Context) {
-		mf := h.resolveShareMedia(c)
+		mf := h.resolveShareMedia(c, "stream")
 		if mf == nil {
 			return
 		}

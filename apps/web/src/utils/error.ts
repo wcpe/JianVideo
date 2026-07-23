@@ -26,8 +26,7 @@ export function extractErrorCode(error: unknown): string | null {
  */
 export function extractRetryAfterSeconds(error: unknown): number | null {
   if (!error || typeof error !== 'object' || !('response' in error)) return null;
-  const headers = (error as { response?: { headers?: Record<string, unknown> } }).response
-    ?.headers;
+  const headers = (error as { response?: { headers?: Record<string, unknown> } }).response?.headers;
   if (!headers || typeof headers !== 'object') return null;
   const raw =
     headers['retry-after'] ??

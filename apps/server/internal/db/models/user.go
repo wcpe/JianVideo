@@ -92,7 +92,7 @@ func ListUsers(d *sql.DB) ([]User, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		var out []User
 		for rows.Next() {
 			var u User
@@ -106,7 +106,7 @@ func ListUsers(d *sql.DB) ([]User, error) {
 		}
 		return out, rows.Err()
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []User
 	for rows.Next() {
 		var u User

@@ -476,6 +476,7 @@
   4. worker：校验快照存在且源哈希未变 → ImageMagick 写临时文件 → rename 替换；失败保留原文件与快照
 - **可写字段（首切）**：`camera` / `lens` / `aperture` / `shutter` / `iso` / `gps_lat` / `gps_lon` / `notes` / `display_name`（库内非空才纳入）
 - **审计**：`metadata.writeback.started`（入队）/ `metadata.writeback.succeeded` / `metadata.writeback.failed`
+- **快照保留**：全局设置 `writeback_snapshot_retention_days`（默认 7；`0`=不自动删除）。启动后固定约 24h 周期遍历数据目录 `writeback-snapshots/`，删除 `ModTime` 早于 `now - days` 且位于快照根边界内的普通文件。
 - **说明**：库内 `WritebackMediaMetadataInSpace`（文件→库刷新）仍可用内部服务调用；HTTP 本路径仅危险写回。历史审计动作名 `metadata.writeback.*` 亦用于库内刷新路径，与任务类型同名但语义以 payload/summary 区分。
 - **错误**：`400 CONFIRM_REQUIRED` / `VIDEO_WRITEBACK_UNSUPPORTED` / `UNSUPPORTED_PATH` / `NOT_IMAGE` / `NO_FIELDS`，`404 NOT_FOUND`，`503 TASKS_UNAVAILABLE`
 
@@ -1973,7 +1974,7 @@
   ```
 - **响应**（200）：与 `GET /api/settings` 同结构，返回写入后的全部设置（回读结果）。
 - **说明**：批量 upsert 键值，同一 key 覆盖旧值；所有 key 必须先登记为 `runtime`，并通过 registry 类型校验。任一 key 未知、不可运行期修改或值类型非法时整体返回 `400`，不写入任何设置。提交成功后回读返回，并触发设置变更回调，使定时扫描周期（`scan_interval`）即时重排生效、无需重启（FR-28）。含 `ffmpeg_path`/`ffprobe_path`（非空）时，落库后即时应用到转码运行期（覆盖自动发现），保存即生效（FR-56）；含 `magick_path`（非空）时同理即时应用到 HEIC/RAW 转换运行期，保存即生效（FR-63）；含 `network_proxy` 时写入前校验协议和格式，落库后即时应用到后端出站 HTTP 运行期（空=直连、非空=设代理），支持 http/https/socks5/socks5h，保存即生效（FR-80）。含 `debug_log` 时落库后即时切换 GORM 日志级别（`"1"`/`"true"`=开启详细 SQL/慢查询日志、其余=安静），保存即生效（FR-110）；启动时读取该键决定初始级别，重启后保持。含 `media_inference_enabled` 或 `media_inference_disabled_libraries` 时即时刷新推断配置；若保存后总开关开启，自动为已有媒体入队缺失项增量推断任务，人工推断保持不变（FR2-031）。
-- **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`transcode_hwaccel_mode`（硬件转码策略：`auto/software/nvenc/qsv/amf/vaapi/videotoolbox`）、`transcode_hwaccel_fallback`（硬件失败软件回退，`"1"`=开启、`"0"`=关闭）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`media_inference_enabled`（FR2-031，本地影视信息推断总开关，`"1"`/`"true"`=开启）、`media_inference_disabled_libraries`（FR2-031，按库关闭推断的库 ID JSON 数组）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
+- **已知运行期键**：`scan_interval`（定时扫描周期秒）、`recycle_bin_paths`（盘符→回收站目录 JSON）、`recycle_retention_days` / `recycle_auto_cleanup_enabled` / `recycle_auto_cleanup_interval_sec`（FR2-054）、`writeback_snapshot_retention_days`（FR2-033，写回快照保留天数，默认 7，`0`=不自动删）、`update_channel`（`stable`/`prerelease`）、`transcode_codec_priority`（首选目标编码优先级 JSON 数组）、`transcode_hwaccel_mode`（硬件转码策略：`auto/software/nvenc/qsv/amf/vaapi/videotoolbox`）、`transcode_hwaccel_fallback`（硬件失败软件回退，`"1"`=开启、`"0"`=关闭）、`ffmpeg_path`/`ffprobe_path`（FR-56，可执行文件路径，非空覆盖自动发现）、`magick_path`（FR-63，ImageMagick magick 可执行文件路径，非空覆盖自动发现）、`network_proxy`（FR-80，后端出站网络代理 URL，空=直连，敏感不回显）、`debug_log`（FR-110，运行时调试日志开关，`"1"`=开启 GORM 详细日志、其余=安静）、`media_inference_enabled`（FR2-031，本地影视信息推断总开关，`"1"`/`"true"`=开启）、`media_inference_disabled_libraries`（FR2-031，按库关闭推断的库 ID JSON 数组）、`upload_target_dir`、`upload_naming_rule`、`open_tabs`、`last_opened_path`。
 - **错误**：`400` 请求参数错误、`settings` 为空或配置校验失败（`INVALID_SETTING`），`503` 设置服务未启用，`500` 保存失败
 
 ### 查询审计事件（FR2-040）
@@ -2085,6 +2086,15 @@
 - **请求体**：`{ "status": "active" | "disabled" }`
 - **响应**：`204`
 - **错误**：`400` `CANNOT_DISABLE_SELF`（不能禁用当前登录用户）/ 无效状态，`403` 非 owner
+- **说明**（FR2-062）：`status=disabled` 时联动撤销该用户全部未撤销会话，堵住旧 JWT；审计 `user.disabled` 的 metadata 可含 `sessions_revoked`
+
+### 撤销指定用户全部会话（FR2-062 后置）
+
+- **方法 / 路径**：`DELETE /api/users/:id/sessions`（鉴权；**默认 Space owner**）
+- **说明**：撤销目标用户全部 `revoked_at IS NULL` 的会话；**允许撤自己的全部**（会清 Cookie、强制重登）
+- **响应**（200）：`{ "revoked": N }`（实际撤销条数；无会话表或无可撤时为 `0`）
+- **错误**：`400` `INVALID_ID`，`403` 非默认 Space owner
+- **审计**：`auth.sessions_revoked`，`resource_type=user`，`resource_id` 为用户 id，`metadata.count` 为撤销条数
 
 ### 列出可访问 Space
 
@@ -2116,6 +2126,16 @@
 - **方法 / 路径**：`DELETE /api/spaces/:id/members/:user_id`（owner）
 - **响应**：`204`
 - **错误**：`400` 不能移除 owner 行
+
+### 转让 Space owner
+
+- **方法 / 路径**：`POST /api/spaces/:id/transfer-owner`（仅当前 Space owner）
+- **请求体**：`{ "user_id": 2 }`（目标须已是该 Space 的 active 成员）
+- **响应**：`204`
+- **约束**：禁止转给自己；接收方非成员 → `403 SPACE_FORBIDDEN`；非 owner 调用 → `403`
+- **副作用**（单事务）：`spaces.owner_user_id` → 新 owner；旧 owner 成员行 `role` → `editor`；新 owner 成员行 `role` → `owner`
+- **审计**：`space.owner_transferred`，`resource_type=space`，`metadata.before_owner_user_id` / `metadata.after_owner_user_id`
+- **说明**：owner-only 路由组挂载 `RequireSpaceRole(owner)`（path `:id` 为 Space id）；handler 内再 `RequireRole` 双保险
 
 ## 家长控制与内容分级（FR2-051）
 
@@ -2162,7 +2182,7 @@
   ```
   `resource_type` 为 `media` 或 `album`；`expires_in_hours` 可选，`>0` 设过期、缺省或 `0` 表示永不过期。`password` 可选（FR-78），非空则后端以 bcrypt 哈希存储、绝不明文落库/回显；`max_uses` 可选（FR-78），`>0` 设访问次数上限、缺省或 `0` 表示无限。`allow_download` 可选（FR2-055），缺省 `true`；`false` 时公开 download 统一 `404`。
 - **响应**（201）：`{ "token": "...", "resource_type": "media", "resource_id": 12, "expires_at": "..."|null, "max_uses": 0, "used_count": 0, "allow_download": true, "created_at": "..." }`（不含密码哈希）
-- **审计**：`share.created`
+- **审计**：`share.created`；公开资源成功访问另见 `share.accessed`（采样）
 - **错误**：`400` 参数错误或非法类型，`404` 被分享资源不存在，`503` 分享服务未启用，`500` 创建失败
 
 ### 列出分享
@@ -2194,4 +2214,5 @@
   - `GET /api/share/:token/media/:mediaId/stream`（视频渐进式在线播放，支持 Range；**不开放转码/HLS**）
 - **请求头**（FR-78）：带 `X-Share-Password` 头时校验密码；`<img>`/`<video>` 直链无法带头时不阻断（拿到 `mediaId` 已必过 `ShareInfo` 密码门禁）。
 - **说明**：`:mediaId` 必须在分享范围内（== 被分享媒体，或 ∈ 被分享相册成员），否则 `404`。`smb://` 路径不支持。每次成功访问对限次分享原子自增一次 `used_count`（FR-78），达到 `max_uses` 后再访问 `404`。匿名路径不得触发 HLS/ABR 转码、导出、AI、缩略图批量重建。
+- **审计**：`share.accessed`（FR2-055，进程内采样：每 token 约 60s 最多 1 条）。`Scope=space`，`SpaceID=share.space_id`，`ActorType=anonymous`，`ResourceType=share`，`ResourceID=token`；`metadata` 含 `media_id`、`access_type`（`stream`/`download`/`raw`/`thumbnail`）、`ip_hash`（脱敏）。`ShareInfo` 元信息接口不计次也不记 accessed；`MaxUses=0` 时仍可采样（与 `used_count` 解耦）。
 - **错误**：`400` ID 无效，`404` 不在范围/不存在/已软删/密码错/次数已用尽/禁下载/缩略图未就绪，`503` 播放服务未启用（stream）

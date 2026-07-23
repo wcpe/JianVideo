@@ -185,9 +185,9 @@ func RequireSpaceRole(svc *Service, minRole string) gin.HandlerFunc {
 	}
 }
 
-func roleAtLeast(actual, min string) bool {
+func roleAtLeast(actual, minRole string) bool {
 	rank := map[string]int{"viewer": 1, "editor": 2, "owner": 3}
-	return rank[actual] >= rank[min]
+	return rank[actual] >= rank[minRole]
 }
 
 func authorizeSpaceMember(c *gin.Context, svc *Service) bool {
@@ -235,6 +235,14 @@ func isReadMethod(method string) bool {
 }
 
 func requestedSpaceID(c *gin.Context) (string, bool) {
+	// /api/spaces/:id/... 管理路由：path 上的 :id 即为目标 Space（不依赖请求头）。
+	if pathSpaceID := spaceIDFromSpacesPath(c); pathSpaceID != "" {
+		if validSpaceID(pathSpaceID) {
+			return pathSpaceID, true
+		}
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "INVALID_SPACE", "message": "Space ID 不合法"})
+		return "", false
+	}
 	spaceID := strings.TrimSpace(c.GetHeader(spaceHeader))
 	if c.Request.URL.Path == "/api/audit/events" && c.Query("scope") != "system" {
 		if querySpaceID := strings.TrimSpace(c.Query("space_id")); querySpaceID != "" {
@@ -249,6 +257,30 @@ func requestedSpaceID(c *gin.Context) (string, bool) {
 	}
 	c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "INVALID_SPACE", "message": "Space ID 不合法"})
 	return "", false
+}
+
+// spaceIDFromSpacesPath 从 /api/spaces/:id/... 解析 Space id；列表/创建（无 :id）返回空。
+func spaceIDFromSpacesPath(c *gin.Context) string {
+	// Gin 在匹配路由后 c.Param("id") 可用；RequireSpaceRole 挂在 Group 上时通常已绑定。
+	if id := strings.TrimSpace(c.Param("id")); id != "" && strings.HasPrefix(c.Request.URL.Path, "/api/spaces/") {
+		// 排除误把其它 :id 路由当 Space（本组 path 即为 spaces）。
+		return id
+	}
+	// 中间件若在路由匹配前执行，回退解析 URL。
+	path := c.Request.URL.Path
+	const prefix = "/api/spaces/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == "" {
+		return ""
+	}
+	seg := rest
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		seg = rest[:i]
+	}
+	return strings.TrimSpace(seg)
 }
 
 func currentUsername(c *gin.Context) (string, bool) {

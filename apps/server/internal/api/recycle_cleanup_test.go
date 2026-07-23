@@ -481,3 +481,81 @@ func TestRecycleCleanup_SettingsUnavailable(t *testing.T) {
 		t.Fatalf("未启用设置服务期望 503, 实际 %d", w.Code)
 	}
 }
+
+// TestRecycleAutoCleanupPreview_SpaceRetentionOverride 两 Space 不同 days 的 preview 语义（FR2-054）。
+func TestRecycleAutoCleanupPreview_SpaceRetentionOverride(t *testing.T) {
+	r, libSvc, _, gdb := setupCleanupRouter(t)
+	// Space 表供 resolveSpaceID 校验
+	if err := gdb.AutoMigrate(&models.Space{}); err != nil {
+		t.Fatalf("迁移 spaces 失败: %v", err)
+	}
+	now := time.Now()
+	for _, id := range []string{models.DefaultSpaceID, "space-alt"} {
+		if err := gdb.Create(&models.Space{ID: id, Name: id, OwnerUserID: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+			t.Fatalf("插入 Space %s 失败: %v", id, err)
+		}
+	}
+
+	// 覆盖键未登记注册表，经 gorm 直接写入
+	writeSetting := func(key, value string) {
+		t.Helper()
+		row := models.Setting{Key: key, Value: value, UpdatedAt: now}
+		if err := gdb.Where("key = ?", key).Assign(models.Setting{Value: value, UpdatedAt: now}).
+			FirstOrCreate(&row).Error; err != nil {
+			t.Fatalf("写入设置 %s 失败: %v", key, err)
+		}
+	}
+	// 全局 30 天；space-alt 覆盖 7 天
+	writeSetting(settings.KeyRecycleRetentionDays, "30")
+	writeSetting(settings.KeyRecycleRetentionDays+"@space-alt", "7")
+	writeSetting(settings.KeyRecycleBinPaths, `{}`)
+
+	// 两 Space 各一条软删 10 天前
+	deletedAt := time.Now().Add(-10 * 24 * time.Hour)
+	mfDef, err := libSvc.CreateMediaFileInSpace(models.DefaultSpaceID, 1, "D:/def/old.mp4", 100)
+	if err != nil {
+		t.Fatalf("创建默认 Space 媒体失败: %v", err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", mfDef.ID).Update("deleted_at", deletedAt).Error; err != nil {
+		t.Fatal(err)
+	}
+	mfAlt, err := libSvc.CreateMediaFileInSpace("space-alt", 1, "D:/alt/old.mp4", 100)
+	if err != nil {
+		t.Fatalf("创建 alt Space 媒体失败: %v", err)
+	}
+	if err := gdb.Model(&models.MediaFile{}).Where("id = ?", mfAlt.ID).Update("deleted_at", deletedAt).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	preview := func(spaceID string) (candidate int, mediaIDs []int64) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/library/recycle/auto-cleanup/preview", nil)
+		if spaceID != "" {
+			req.Header.Set("X-JianVideo-Space-Id", spaceID)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("space=%s preview 期望 200, 实际 %d body=%s", spaceID, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Candidate int     `json:"candidate"`
+			MediaIDs  []int64 `json:"media_ids"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("解析失败: %v", err)
+		}
+		return resp.Candidate, resp.MediaIDs
+	}
+
+	// 默认 Space days=30 → 10 天前未过期
+	candDef, _ := preview("")
+	if candDef != 0 {
+		t.Fatalf("默认 Space 保留 30 天不应选中 10 天前项, candidate=%d", candDef)
+	}
+	// space-alt days=7 → 10 天前已过期
+	candAlt, idsAlt := preview("space-alt")
+	if candAlt != 1 || len(idsAlt) != 1 || idsAlt[0] != mfAlt.ID {
+		t.Fatalf("space-alt 保留 7 天应选中其媒体, candidate=%d ids=%v want=%d", candAlt, idsAlt, mfAlt.ID)
+	}
+}

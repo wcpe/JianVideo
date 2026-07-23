@@ -39,6 +39,17 @@ func setupFR2010Router(t *testing.T) (*gin.Engine, *auth.Service, string) {
 		`CREATE TABLE space_members (space_id TEXT NOT NULL, user_id INTEGER NOT NULL, role TEXT NOT NULL, max_rating TEXT, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, PRIMARY KEY (space_id, user_id))`,
 		`CREATE TABLE library_paths (id INTEGER PRIMARY KEY, space_id TEXT NOT NULL DEFAULT 'space-default', path TEXT, name TEXT)`,
 		`CREATE TABLE media_files (id INTEGER PRIMARY KEY, space_id TEXT NOT NULL DEFAULT 'space-default', library_id INTEGER, file_path TEXT, file_name TEXT, deleted_at DATETIME, file_state TEXT)`,
+		// FR2-062：会话表，供禁用联动撤会话与管理员全撤测试
+		`CREATE TABLE auth_sessions (
+			id TEXT PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL,
+			last_seen_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '',
+			ip_hash TEXT NOT NULL DEFAULT '',
+			revoked_at DATETIME
+		)`,
 	} {
 		if err := gdb.Exec(stmt).Error; err != nil {
 			t.Fatalf("建表失败: %v", err)
@@ -249,10 +260,9 @@ func TestFR2010_CannotDisableSelf(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "CANNOT_DISABLE_SELF") {
 		t.Fatalf("响应应含 CANNOT_DISABLE_SELF, body=%s", w.Body.String())
 	}
-	// 确认仍可登录
+	// 确认仍可登录（setup 密码哈希对应 "pass"）
 	if _, err := authSvc.Login("owner", "pass"); err != nil {
-		// owner 密码为 setup 时的 bcrypt "pass"
-		// setup 用的 hash 对应 "pass"
+		t.Fatalf("禁用自己被拒后仍应能登录: %v", err)
 	}
 	// 状态仍为 active
 	u, err := authSvc.FindUserByUsername("owner")
@@ -261,5 +271,197 @@ func TestFR2010_CannotDisableSelf(t *testing.T) {
 	}
 	if u.Status != models.UserStatusActive {
 		t.Fatalf("禁用自己失败后状态应为 active, 实际 %q", u.Status)
+	}
+}
+
+// TestFR2062_OwnerRevokeUserSessions owner 可撤销指定用户全部会话。
+func TestFR2062_OwnerRevokeUserSessions(t *testing.T) {
+	r, authSvc, secret := setupFR2010Router(t)
+	u, err := authSvc.CreateUser("bob", "secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sid1, err := authSvc.CreateSessionAndToken(int64(u.ID), "bob", "ua-a", "10.0.0.1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sid2, err := authSvc.CreateSessionAndToken(int64(u.ID), "bob", "ua-b", "10.0.0.2", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+strconv.Itoa(u.ID)+"/sessions", nil)
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner 撤会话期望 200, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Revoked int64 `json:"revoked"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Revoked != 2 {
+		t.Fatalf("期望 revoked=2, 得到 %d", resp.Revoked)
+	}
+	if err := authSvc.ValidateSession(sid1, int64(u.ID)); err == nil {
+		t.Fatal("撤销后 sid1 应失效")
+	}
+	if err := authSvc.ValidateSession(sid2, int64(u.ID)); err == nil {
+		t.Fatal("撤销后 sid2 应失效")
+	}
+}
+
+// TestFR2062_NonOwnerRevokeUserSessionsForbidden 非 owner 撤会话 403。
+func TestFR2062_NonOwnerRevokeUserSessionsForbidden(t *testing.T) {
+	r, authSvc, secret := setupFR2010Router(t)
+	u, err := authSvc.CreateUser("alice", "secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 加为 viewer
+	body, _ := json.Marshal(map[string]any{"user_id": u.ID, "role": "viewer"})
+	req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/members", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("添加成员期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/users/1/sessions", nil)
+	req.AddCookie(tokenCookie(t, secret, "alice"))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("非 owner 撤会话期望 403, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestFR2010_TransferOwnerAPI_Success owner 转让成功 204，双写生效。
+func TestFR2010_TransferOwnerAPI_Success(t *testing.T) {
+	r, authSvc, secret := setupFR2010Router(t)
+	u, err := authSvc.CreateUser("alice", "secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 加为 editor
+	body, _ := json.Marshal(map[string]any{"user_id": u.ID, "role": "editor"})
+	req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/members", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("添加成员期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+
+	body, _ = json.Marshal(map[string]any{"user_id": u.ID})
+	req = httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/transfer-owner", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("转让期望 204, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+
+	// 原 owner 不再能管理成员
+	body, _ = json.Marshal(map[string]any{"user_id": u.ID, "role": "viewer"})
+	req = httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/members", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("旧 owner 加成员期望 403, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+
+	// 新 owner 可读成员
+	req = httptest.NewRequest(http.MethodGet, "/api/spaces/"+models.DefaultSpaceID+"/members", nil)
+	req.AddCookie(tokenCookie(t, secret, "alice"))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("新 owner 列成员期望 200, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestFR2010_TransferOwnerAPI_Forbidden 非 owner 转让 403。
+func TestFR2010_TransferOwnerAPI_Forbidden(t *testing.T) {
+	r, authSvc, secret := setupFR2010Router(t)
+	u, err := authSvc.CreateUser("alice", "secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"user_id": u.ID, "role": "editor"})
+	req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/members", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("添加成员期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+
+	// alice（editor）尝试转让
+	body, _ = json.Marshal(map[string]any{"user_id": 1})
+	req = httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/transfer-owner", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "alice"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("非 owner 转让期望 403, 得到 %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestFR2062_DisableUserRevokesSessions 禁用用户时联动撤销全部会话。
+func TestFR2062_DisableUserRevokesSessions(t *testing.T) {
+	r, authSvc, secret := setupFR2010Router(t)
+	u, err := authSvc.CreateUser("bob", "secret12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 加为 viewer 以便持 JWT 访问受保护 API
+	body, _ := json.Marshal(map[string]any{"user_id": u.ID, "role": "viewer"})
+	req := httptest.NewRequest(http.MethodPost, "/api/spaces/"+models.DefaultSpaceID+"/members", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("添加成员期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+
+	tok, sid, err := authSvc.CreateSessionAndToken(int64(u.ID), "bob", "ua", "10.0.0.1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobCookie := &http.Cookie{Name: "auth_token", Value: tok}
+
+	body, _ = json.Marshal(map[string]string{"status": "disabled"})
+	req = httptest.NewRequest(http.MethodPut, "/api/users/"+strconv.Itoa(u.ID)+"/status", bytes.NewReader(body))
+	req.AddCookie(tokenCookie(t, secret, "owner"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("禁用期望 204, 得到 %d %s", w.Code, w.Body.String())
+	}
+	if err := authSvc.ValidateSession(sid, int64(u.ID)); err == nil {
+		t.Fatal("禁用后会话应已撤销")
+	}
+
+	// 旧 JWT：USER_DISABLED 优先于 SESSION_REVOKED（中间件先查用户状态）
+	req = httptest.NewRequest(http.MethodGet, "/api/spaces", nil)
+	req.AddCookie(bobCookie)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("禁用后旧 JWT 期望 401, 得到 %d body=%s", w.Code, w.Body.String())
 	}
 }

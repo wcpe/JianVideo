@@ -29,7 +29,7 @@ func (h *Handler) GetTracks(c *gin.Context) {
 		writeSubtitleError(c, err)
 		return
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.loadMediaForViewer(c, spaceID, mediaID)
 	if err != nil {
 		writeSubtitleError(c, subtitle.ErrNotFound)
 		return
@@ -187,6 +187,11 @@ func (h *Handler) subtitleRequest(c *gin.Context) (*subtitle.Service, string, in
 		writeSubtitleError(c, subtitle.ErrInvalid)
 		return nil, "", 0, false
 	}
+	// 读路径：不可见 id → 404（FR2-051）；码与音频重载 NOT_FOUND 对齐
+	if _, err := h.loadMediaForViewer(c, spaceID, mediaID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+		return nil, "", 0, false
+	}
 	return h.subtitle, spaceID, mediaID, true
 }
 
@@ -323,7 +328,7 @@ func (h *Handler) getLegacySubtitles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.loadMediaForViewer(c, spaceID, mediaID)
 	if err != nil {
 		writeSubtitleError(c, subtitle.ErrNotFound)
 		return
@@ -362,7 +367,7 @@ func (h *Handler) GetSubtitleContent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	content, err := h.legacySubtitleContent(spaceID, mediaID, c.Param("track_id"))
+	content, err := h.legacySubtitleContent(spaceID, mediaID, c.Param("track_id"), h.viewerMaxContentRating(c, spaceID))
 	if err != nil {
 		writeSubtitleError(c, err)
 		return
@@ -370,12 +375,12 @@ func (h *Handler) GetSubtitleContent(c *gin.Context) {
 	c.Data(http.StatusOK, "text/vtt; charset=utf-8", []byte(content))
 }
 
-func (h *Handler) legacySubtitleContent(spaceID string, mediaID int64, rawIndex string) (string, error) {
+func (h *Handler) legacySubtitleContent(spaceID string, mediaID int64, rawIndex string, maxRating string) (string, error) {
 	index, err := strconv.Atoi(rawIndex)
 	if err != nil || index < 0 {
 		return "", subtitle.ErrInvalid
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.library.GetMediaFileByIDInSpaceForViewer(spaceID, mediaID, maxRating)
 	if err != nil {
 		return "", subtitle.ErrNotFound
 	}

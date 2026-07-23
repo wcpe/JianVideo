@@ -314,11 +314,7 @@ export function createUser(username: string, password: string) {
 export function setUserStatus(userID: number, status: string) {
   return useMock ? mockSetUserStatus(userID, status) : realSetUserStatus(userID, status);
 }
-export function updateSpaceParental(
-  spaceID: string,
-  password: string,
-  defaultMaxRating: string,
-) {
+export function updateSpaceParental(spaceID: string, password: string, defaultMaxRating: string) {
   return useMock
     ? mockUpdateSpaceParental(spaceID, password, defaultMaxRating)
     : realUpdateSpaceParental(spaceID, password, defaultMaxRating);

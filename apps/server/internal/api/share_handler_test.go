@@ -15,6 +15,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/share"
@@ -23,6 +24,13 @@ import (
 // setupShareRouter 构造注入分享服务的测试路由（管理端点 + 公开端点，pbSvc 置空）。
 func setupShareRouter(t *testing.T) (*gin.Engine, *library.Service, *share.Service) {
 	t.Helper()
+	r, libSvc, shareSvc, _, _ := setupShareRouterWithAudit(t)
+	return r, libSvc, shareSvc
+}
+
+// setupShareRouterWithAudit 同 setupShareRouter，额外注入审计并返回 DB 便于断言。
+func setupShareRouterWithAudit(t *testing.T) (*gin.Engine, *library.Service, *share.Service, audit.Recorder, *gorm.DB) {
+	t.Helper()
 	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
@@ -30,7 +38,7 @@ func setupShareRouter(t *testing.T) (*gin.Engine, *library.Service, *share.Servi
 	sqlDB, _ := gdb.DB()
 	sqlDB.SetMaxOpenConns(1)
 	if err := gdb.AutoMigrate(&models.LibraryPath{}, &models.MediaFile{}, &models.MediaExtension{},
-		&models.Space{}, &models.Album{}, &models.AlbumItem{}, &models.Share{}); err != nil {
+		&models.Space{}, &models.Album{}, &models.AlbumItem{}, &models.Share{}, &models.AuditEvent{}); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
@@ -41,7 +49,8 @@ func setupShareRouter(t *testing.T) (*gin.Engine, *library.Service, *share.Servi
 	}
 	libSvc := library.NewService(gdb)
 	shareSvc := share.NewService(gdb)
-	h := NewHandler(libSvc).WithShareService(shareSvc)
+	rec := audit.NewRecorder(gdb)
+	h := NewHandler(libSvc).WithShareService(shareSvc).WithAudit(rec)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		if spaceID := c.GetHeader("X-JianVideo-Space-Id"); spaceID != "" {
@@ -51,7 +60,18 @@ func setupShareRouter(t *testing.T) (*gin.Engine, *library.Service, *share.Servi
 	})
 	RegisterRoutes(r, h)
 	RegisterShareRoutes(r, h, nil)
-	return r, libSvc, shareSvc
+	return r, libSvc, shareSvc, rec, gdb
+}
+
+func countShareAccessed(t *testing.T, db *gorm.DB, token string) int64 {
+	t.Helper()
+	var n int64
+	if err := db.Model(&models.AuditEvent{}).
+		Where("action = ? AND resource_id = ?", "share.accessed", token).
+		Count(&n).Error; err != nil {
+		t.Fatalf("统计 share.accessed 失败: %v", err)
+	}
+	return n
 }
 
 // realMedia 在临时目录建一个真实文件并入库，返回媒体记录。
@@ -393,7 +413,6 @@ func TestShare_CreateWithPasswordNotPlaintextInDB(t *testing.T) {
 	}
 }
 
-
 // TestShare_DisallowDownload allow_download=false 时公开 download 404（FR2-055）。
 func TestShare_DisallowDownload(t *testing.T) {
 	r, libSvc, shareSvc := setupShareRouter(t)
@@ -460,5 +479,92 @@ func TestShare_ThumbnailMissingDoesNotGenerate(t *testing.T) {
 	}
 	if bytes.Contains(w.Body.Bytes(), []byte("GENERATING")) {
 		t.Fatal("公开路径不得返回 GENERATING（会触发生成队列）")
+	}
+}
+
+// TestShare_AccessedAuditOnResource 成功资源访问产生 share.accessed；ShareInfo 不产生。
+func TestShare_AccessedAuditOnResource(t *testing.T) {
+	clearShareAccessedThrottleForTest()
+	restore := setShareAccessedIntervalForTest(time.Hour)
+	defer restore()
+
+	r, libSvc, shareSvc, _, db := setupShareRouterWithAudit(t)
+	mf := realMedia(t, libSvc, "a.mp4", "AAA")
+	// MaxUses=0 仍成功 ConsumeUse，accessed 与 used_count 解耦。
+	sh, err := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "", 0)
+	if err != nil {
+		t.Fatalf("创建分享失败: %v", err)
+	}
+
+	// ShareInfo 多次：不应记 accessed
+	for i := 0; i < 3; i++ {
+		if code := getStatus(r, "/api/share/"+sh.Token); code != http.StatusOK {
+			t.Fatalf("ShareInfo 期望 200, 实际 %d", code)
+		}
+	}
+	if n := countShareAccessed(t, db, sh.Token); n != 0 {
+		t.Fatalf("ShareInfo 不应产生 share.accessed, 实际 %d", n)
+	}
+
+	dl := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/download"
+	if code := getStatus(r, dl); code != http.StatusOK {
+		t.Fatalf("下载期望 200, 实际 %d", code)
+	}
+	if n := countShareAccessed(t, db, sh.Token); n != 1 {
+		t.Fatalf("成功访问应记 1 条 share.accessed, 实际 %d", n)
+	}
+
+	var ev models.AuditEvent
+	if err := db.Where("action = ? AND resource_id = ?", "share.accessed", sh.Token).First(&ev).Error; err != nil {
+		t.Fatalf("读取审计失败: %v", err)
+	}
+	if ev.Scope != audit.ScopeSpace || ev.ActorType != "anonymous" || ev.ResourceType != "share" {
+		t.Fatalf("审计字段不符: scope=%s actor=%s type=%s", ev.Scope, ev.ActorType, ev.ResourceType)
+	}
+	if ev.SpaceID == nil || *ev.SpaceID != sh.SpaceID {
+		t.Fatalf("SpaceID 应为 %q, 实际 %v", sh.SpaceID, ev.SpaceID)
+	}
+	if !bytes.Contains([]byte(ev.MetadataJSON), []byte(`"access_type":"download"`)) {
+		t.Fatalf("metadata 应含 access_type=download: %s", ev.MetadataJSON)
+	}
+	if !bytes.Contains([]byte(ev.MetadataJSON), []byte(`"media_id"`)) {
+		t.Fatalf("metadata 应含 media_id: %s", ev.MetadataJSON)
+	}
+	if !bytes.Contains([]byte(ev.MetadataJSON), []byte(`"ip_hash"`)) {
+		t.Fatalf("metadata 应含 ip_hash: %s", ev.MetadataJSON)
+	}
+}
+
+// TestShare_AccessedAuditThrottled 同一 token 在采样窗口内不重复记 accessed。
+func TestShare_AccessedAuditThrottled(t *testing.T) {
+	clearShareAccessedThrottleForTest()
+	restore := setShareAccessedIntervalForTest(time.Hour)
+	defer restore()
+
+	r, libSvc, shareSvc, _, db := setupShareRouterWithAudit(t)
+	mf := realMedia(t, libSvc, "b.mp4", "BBB")
+	sh, err := shareSvc.Create(models.ShareResourceMedia, mf.ID, nil, "", 0)
+	if err != nil {
+		t.Fatalf("创建分享失败: %v", err)
+	}
+	dl := "/api/share/" + sh.Token + "/media/" + strconv.FormatInt(mf.ID, 10) + "/download"
+	for i := 0; i < 3; i++ {
+		if code := getStatus(r, dl); code != http.StatusOK {
+			t.Fatalf("第 %d 次下载期望 200, 实际 %d", i+1, code)
+		}
+	}
+	if n := countShareAccessed(t, db, sh.Token); n != 1 {
+		t.Fatalf("节流窗口内应仅 1 条 share.accessed, 实际 %d", n)
+	}
+
+	// 间隔置 0：每次成功访问都记（强制记录路径，便于断言字段可再次写入）。
+	clearShareAccessedThrottleForTest()
+	restore0 := setShareAccessedIntervalForTest(0)
+	defer restore0()
+	if code := getStatus(r, dl); code != http.StatusOK {
+		t.Fatalf("强制路径下载期望 200, 实际 %d", code)
+	}
+	if n := countShareAccessed(t, db, sh.Token); n != 2 {
+		t.Fatalf("间隔 0 时应再记 1 条, 合计 2, 实际 %d", n)
 	}
 }

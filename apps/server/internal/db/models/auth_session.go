@@ -7,15 +7,15 @@ import (
 
 // AuthSession 登录会话（FR2-062）：JWT sid 与撤销状态的真源。
 type AuthSession struct {
-	ID           string     `json:"id"`
-	UserID       int64      `json:"user_id"`
-	CreatedAt    time.Time  `json:"created_at"`
-	LastSeenAt   time.Time  `json:"last_seen_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	UserAgent    string     `json:"user_agent"`
-	IPHash       string     `json:"ip_hash"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	Current      bool       `json:"current,omitempty"` // 仅 API 填充，不入库
+	ID         string     `json:"id"`
+	UserID     int64      `json:"user_id"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastSeenAt time.Time  `json:"last_seen_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	UserAgent  string     `json:"user_agent"`
+	IPHash     string     `json:"ip_hash"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	Current    bool       `json:"current,omitempty"` // 仅 API 填充，不入库
 }
 
 // sessionTimeLayout SQLite datetime 友好格式，便于与 datetime('now') 比较。
@@ -49,7 +49,7 @@ func ListAuthSessionsByUserID(d *sql.DB, userID int64) ([]AuthSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []AuthSession
 	for rows.Next() {
@@ -81,6 +81,18 @@ func RevokeOtherAuthSessions(d *sql.DB, userID int64, keepSessionID string) (int
 	res, err := d.Exec(`
 		UPDATE auth_sessions SET revoked_at = datetime('now')
 		WHERE user_id = ? AND revoked_at IS NULL AND id != ?`, userID, keepSessionID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RevokeAllAuthSessions 撤销指定用户全部尚未撤销的会话（含未过期与已过期）。
+// 返回受影响行数。管理员强制下线 / 禁用用户时调用。
+func RevokeAllAuthSessions(d *sql.DB, userID int64) (int64, error) {
+	res, err := d.Exec(`
+		UPDATE auth_sessions SET revoked_at = datetime('now')
+		WHERE user_id = ? AND revoked_at IS NULL`, userID)
 	if err != nil {
 		return 0, err
 	}

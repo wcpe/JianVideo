@@ -24,7 +24,7 @@ func (h *Handler) CreateHLSABR(c *gin.Context) {
 	if !ok {
 		return
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.loadMediaForViewer(c, spaceID, mediaID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return

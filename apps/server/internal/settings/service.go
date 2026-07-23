@@ -25,6 +25,8 @@ const (
 	KeyRecycleAutoCleanupEnabled = "recycle_auto_cleanup_enabled"
 	// KeyRecycleAutoCleanupIntervalSec 自动清理调度周期秒数（FR2-054）；默认 3600；0 关闭定时。
 	KeyRecycleAutoCleanupIntervalSec = "recycle_auto_cleanup_interval_sec"
+	// KeyWritebackSnapshotRetentionDays 写回快照保留天数（FR2-033）；默认 7；0 表示不自动删除。
+	KeyWritebackSnapshotRetentionDays = "writeback_snapshot_retention_days"
 	// KeyScanInterval 定时扫描周期（秒），值为字符串形式的整数。
 	KeyScanInterval = "scan_interval"
 	// KeyUpdateChannel 自更新频道：stable=正式版（正式 release）/ prerelease=测试版（最新预发布 dev）。
@@ -108,26 +110,82 @@ func (s *Service) ScanInterval() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-// RecycleRetentionDays 读取回收站保留天数；缺失或非法回退 30；0 表示不自动清理。
+// RecycleRetentionDays 读取全局回收站保留天数；缺失或非法回退 30；0 表示不自动清理。
 func (s *Service) RecycleRetentionDays() int {
-	raw, err := s.Get(KeyRecycleRetentionDays)
+	return s.RecycleRetentionDaysForSpace("")
+}
+
+// RecycleRetentionDaysForSpace 读取指定 Space 的回收站保留天数（FR2-054）。
+// 优先 key@spaceID；空/非法则回退全局 key；仍空/非法则默认 30。0 表示该 Space 不自动清理。
+func (s *Service) RecycleRetentionDaysForSpace(spaceID string) int {
+	if v, ok := s.readNonNegIntOverride(KeyRecycleRetentionDays, spaceID); ok {
+		return v
+	}
+	return 30
+}
+
+// RecycleAutoCleanupEnabled 读取全局自动清理总开关；默认 true。
+func (s *Service) RecycleAutoCleanupEnabled() bool {
+	return s.RecycleAutoCleanupEnabledForSpace("")
+}
+
+// RecycleAutoCleanupEnabledForSpace 读取指定 Space 的自动清理开关（FR2-054）。
+// 优先 key@spaceID；空/非法则回退全局 key；默认 true。
+func (s *Service) RecycleAutoCleanupEnabledForSpace(spaceID string) bool {
+	return s.readBoolOverride(KeyRecycleAutoCleanupEnabled, spaceID, true)
+}
+
+// spaceOverrideKey 拼装 Space 级覆盖键：base@spaceID（spaceID 为空时仅返回 base）。
+func spaceOverrideKey(base, spaceID string) string {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		return base
+	}
+	return base + "@" + spaceID
+}
+
+// readNonNegIntOverride 先读 base@spaceID，再读 base；空/非法返回 ok=false。
+func (s *Service) readNonNegIntOverride(base, spaceID string) (int, bool) {
+	if spaceID = strings.TrimSpace(spaceID); spaceID != "" {
+		if n, ok := s.parseNonNegIntSetting(spaceOverrideKey(base, spaceID)); ok {
+			return n, true
+		}
+	}
+	return s.parseNonNegIntSetting(base)
+}
+
+// parseNonNegIntSetting 解析非负整型设置；空/非法返回 ok=false。
+func (s *Service) parseNonNegIntSetting(key string) (int, bool) {
+	raw, err := s.Get(key)
 	if err != nil || strings.TrimSpace(raw) == "" {
-		return 30
+		return 0, false
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || n < 0 {
-		return 30
+		return 0, false
 	}
-	return n
+	return n, true
 }
 
-// RecycleAutoCleanupEnabled 读取自动清理总开关；默认 true。
-func (s *Service) RecycleAutoCleanupEnabled() bool {
-	raw, err := s.Get(KeyRecycleAutoCleanupEnabled)
-	if err != nil {
-		return true
+// readBoolOverride 先读 base@spaceID，再读 base；空/非法对覆盖键跳过，全局键用 defaultValue。
+func (s *Service) readBoolOverride(base, spaceID string, defaultValue bool) bool {
+	if spaceID = strings.TrimSpace(spaceID); spaceID != "" {
+		raw, err := s.Get(spaceOverrideKey(base, spaceID))
+		if err == nil && strings.TrimSpace(raw) != "" {
+			// 覆盖键仅接受明确布尔字面量，非法则继续回退全局
+			switch strings.TrimSpace(strings.ToLower(raw)) {
+			case "1", "true":
+				return true
+			case "0", "false":
+				return false
+			}
+		}
 	}
-	return ParseBoolSetting(raw, true)
+	raw, err := s.Get(base)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return defaultValue
+	}
+	return ParseBoolSetting(raw, defaultValue)
 }
 
 // RecycleAutoCleanupInterval 读取自动清理调度周期；缺失回退 1h；<=0 关闭定时。
@@ -141,6 +199,19 @@ func (s *Service) RecycleAutoCleanupInterval() time.Duration {
 		return 0
 	}
 	return time.Duration(secs) * time.Second
+}
+
+// WritebackSnapshotRetentionDays 读取写回快照保留天数；缺失或非法回退 7；0 表示不自动删除。
+func (s *Service) WritebackSnapshotRetentionDays() int {
+	raw, err := s.Get(KeyWritebackSnapshotRetentionDays)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return 7
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 0 {
+		return 7
+	}
+	return n
 }
 
 // DebugLog 读取运行时调试日志开关（FR-110）：值为 "1"/"true" 视为开启，其余（含空/缺失/出错）视为关闭。

@@ -87,6 +87,12 @@ func (s *Service) RevokeOtherSessions(userID int64, keepSessionID string) error 
 	return err
 }
 
+// RevokeAllSessions 撤销用户全部未撤销会话；返回撤销条数。
+// 管理员强制下线或禁用用户时调用。
+func (s *Service) RevokeAllSessions(userID int64) (int64, error) {
+	return models.RevokeAllAuthSessions(s.db, userID)
+}
+
 // SessionTableReady 检测 auth_sessions 表是否存在（测试/半迁移环境可跳过校验）。
 func (s *Service) SessionTableReady() bool {
 	if s == nil || s.db == nil {
@@ -107,9 +113,9 @@ func newSessionID() (string, error) {
 
 func truncateUA(ua string) string {
 	ua = strings.TrimSpace(ua)
-	const max = 512
-	if len(ua) > max {
-		return ua[:max]
+	const maxUA = 512
+	if len(ua) > maxUA {
+		return ua[:maxUA]
 	}
 	return ua
 }

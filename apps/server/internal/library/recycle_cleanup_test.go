@@ -1441,7 +1441,6 @@ func TestUniqueDestPath(t *testing.T) {
 	}
 }
 
-
 // TestListExpiredDeleted_SelectsOnlyExpired 仅选中 deleted_at 早于阈值的项（FR2-054）。
 func TestListExpiredDeleted_SelectsOnlyExpired(t *testing.T) {
 	svc, _ := newTestService(t)
@@ -1533,5 +1532,56 @@ func TestPreviewAutoCleanup_CountsMissingDrives(t *testing.T) {
 	deleted, _ := svc.ListDeletedMediaFilesInSpace(models.DefaultSpaceID)
 	if len(deleted) != 1 {
 		t.Fatal("preview 不得删除记录")
+	}
+}
+
+// TestPreviewAutoCleanup_TwoSpacesDifferentRetention 两 Space 不同保留天数阈值互不影响（FR2-054）。
+func TestPreviewAutoCleanup_TwoSpacesDifferentRetention(t *testing.T) {
+	svc, db := newTestService(t)
+	const spaceA = "space-a"
+	const spaceB = "space-b"
+	// 各 Space 一条：软删 10 天前
+	deletedAt := time.Now().Add(-10 * 24 * time.Hour)
+	mfA, err := svc.CreateMediaFileInSpace(spaceA, 1, "D:/a/old.mp4", 100)
+	if err != nil {
+		t.Fatalf("创建 SpaceA 媒体失败: %v", err)
+	}
+	if err := db.Model(&models.MediaFile{}).Where("id = ?", mfA.ID).Update("deleted_at", deletedAt).Error; err != nil {
+		t.Fatal(err)
+	}
+	mfB, err := svc.CreateMediaFileInSpace(spaceB, 1, "D:/b/old.mp4", 100)
+	if err != nil {
+		t.Fatalf("创建 SpaceB 媒体失败: %v", err)
+	}
+	if err := db.Model(&models.MediaFile{}).Where("id = ?", mfB.ID).Update("deleted_at", deletedAt).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Space A 保留 7 天 → before = now-7d，10 天前已过期
+	beforeA := time.Now().Add(-7 * 24 * time.Hour)
+	// Space B 保留 30 天 → before = now-30d，10 天前未过期
+	beforeB := time.Now().Add(-30 * 24 * time.Hour)
+
+	prevA, err := svc.PreviewAutoCleanupInSpace(spaceA, map[string]string{}, beforeA, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prevA.Candidate != 1 || prevA.MediaIDs[0] != mfA.ID {
+		t.Fatalf("SpaceA 短保留期应选中 1 项, 实际 %+v", prevA)
+	}
+	prevB, err := svc.PreviewAutoCleanupInSpace(spaceB, map[string]string{}, beforeB, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prevB.Candidate != 0 {
+		t.Fatalf("SpaceB 长保留期不应选中, 实际 %+v", prevB)
+	}
+	// 交叉：用 B 的阈值查 A 也不应选中（同 deleted_at）
+	cross, err := svc.PreviewAutoCleanupInSpace(spaceA, map[string]string{}, beforeB, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cross.Candidate != 0 {
+		t.Fatalf("长阈值下 SpaceA 也不应过期, 实际 %+v", cross)
 	}
 }

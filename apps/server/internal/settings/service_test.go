@@ -116,6 +116,119 @@ func TestScanInterval(t *testing.T) {
 	}
 }
 
+func TestWritebackSnapshotRetentionDays(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+	if got := svc.WritebackSnapshotRetentionDays(); got != 7 {
+		t.Fatalf("默认应为 7, 实际 %d", got)
+	}
+	cases := []struct {
+		raw  string
+		want int
+	}{
+		{"14", 14},
+		{" 3 ", 3},
+		{"0", 0},  // 0=不自动删
+		{"-1", 7}, // 非法回退
+		{"x", 7},  // 非法回退
+		{"", 7},   // 空回退
+	}
+	for _, c := range cases {
+		if err := svc.repo.Upsert(context.Background(), KeyWritebackSnapshotRetentionDays, c.raw); err != nil {
+			t.Fatalf("写入 %q 失败: %v", c.raw, err)
+		}
+		if got := svc.WritebackSnapshotRetentionDays(); got != c.want {
+			t.Fatalf("raw=%q 期望 %d, 实际 %d", c.raw, c.want, got)
+		}
+	}
+}
+
+// TestRecycleRetentionDaysForSpace 覆盖键优先，空/非法回退全局，全局缺失默认 30（FR2-054）。
+func TestRecycleRetentionDaysForSpace(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+	// 全局与覆盖均未设 → 默认 30
+	if got := svc.RecycleRetentionDaysForSpace("space-a"); got != 30 {
+		t.Fatalf("默认期望 30, 实际 %d", got)
+	}
+	if got := svc.RecycleRetentionDays(); got != 30 {
+		t.Fatalf("全局默认期望 30, 实际 %d", got)
+	}
+
+	// 仅全局
+	if err := svc.repo.Upsert(context.Background(), KeyRecycleRetentionDays, "7"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-a"); got != 7 {
+		t.Fatalf("无覆盖应回退全局 7, 实际 %d", got)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-b"); got != 7 {
+		t.Fatalf("另一 Space 也应回退全局 7, 实际 %d", got)
+	}
+
+	// Space A 覆盖 1；Space B 仍回退全局
+	if err := svc.repo.Upsert(context.Background(), spaceOverrideKey(KeyRecycleRetentionDays, "space-a"), "1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-a"); got != 1 {
+		t.Fatalf("覆盖优先期望 1, 实际 %d", got)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-b"); got != 7 {
+		t.Fatalf("无覆盖 Space 应仍为全局 7, 实际 %d", got)
+	}
+	if got := svc.RecycleRetentionDays(); got != 7 {
+		t.Fatalf("全局读取不应受覆盖影响, 实际 %d", got)
+	}
+
+	// 覆盖 0 表示该 Space 不自动清理
+	if err := svc.repo.Upsert(context.Background(), spaceOverrideKey(KeyRecycleRetentionDays, "space-a"), "0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-a"); got != 0 {
+		t.Fatalf("覆盖 0 应生效, 实际 %d", got)
+	}
+
+	// 非法覆盖回退全局
+	if err := svc.repo.Upsert(context.Background(), spaceOverrideKey(KeyRecycleRetentionDays, "space-a"), "xx"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.RecycleRetentionDaysForSpace("space-a"); got != 7 {
+		t.Fatalf("非法覆盖应回退全局 7, 实际 %d", got)
+	}
+}
+
+// TestRecycleAutoCleanupEnabledForSpace 开关覆盖优先与回退（FR2-054）。
+func TestRecycleAutoCleanupEnabledForSpace(t *testing.T) {
+	svc := NewService(setupTestDB(t))
+	// 默认 true
+	if !svc.RecycleAutoCleanupEnabledForSpace("space-a") {
+		t.Fatal("默认应开启")
+	}
+
+	if err := svc.repo.Upsert(context.Background(), KeyRecycleAutoCleanupEnabled, "0"); err != nil {
+		t.Fatal(err)
+	}
+	if svc.RecycleAutoCleanupEnabledForSpace("space-a") {
+		t.Fatal("全局关闭后无覆盖应关闭")
+	}
+
+	if err := svc.repo.Upsert(context.Background(), spaceOverrideKey(KeyRecycleAutoCleanupEnabled, "space-a"), "1"); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.RecycleAutoCleanupEnabledForSpace("space-a") {
+		t.Fatal("Space 覆盖开启应优先")
+	}
+	if svc.RecycleAutoCleanupEnabledForSpace("space-b") {
+		t.Fatal("无覆盖 Space 应仍跟随全局关闭")
+	}
+
+	// 非法覆盖回退全局 false
+	if err := svc.repo.Upsert(context.Background(), spaceOverrideKey(KeyRecycleAutoCleanupEnabled, "space-a"), "maybe"); err != nil {
+		t.Fatal(err)
+	}
+	if svc.RecycleAutoCleanupEnabledForSpace("space-a") {
+		t.Fatal("非法覆盖应回退全局关闭")
+	}
+}
+
 func TestGetAll(t *testing.T) {
 	svc := NewService(setupTestDB(t))
 	_ = svc.Set(KeyScanInterval, "300")

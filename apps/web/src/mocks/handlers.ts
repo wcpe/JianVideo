@@ -1050,10 +1050,7 @@ export const handlers = [
     const body = (await request.json()) as { status?: string };
     const status = (body.status ?? '').trim();
     if (status !== 'active' && status !== 'disabled') {
-      return HttpResponse.json(
-        { code: 'SET_STATUS_FAILED', message: '状态无效' },
-        { status: 400 },
-      );
+      return HttpResponse.json({ code: 'SET_STATUS_FAILED', message: '状态无效' }, { status: 400 });
     }
     if (id === 1 && status === 'disabled') {
       return HttpResponse.json(
@@ -1397,7 +1394,7 @@ export const handlers = [
     if (!file) {
       return HttpResponse.json({ code: 'NOT_FOUND', message: '媒体文件不存在' }, { status: 404 });
     }
-    let confirm = false;
+    let confirm: boolean;
     try {
       const body = (await request.json()) as { confirm_writeback?: boolean };
       confirm = !!body?.confirm_writeback;
@@ -1417,11 +1414,17 @@ export const handlers = [
     const videoExts = new Set(['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v']);
     if (videoExts.has(fmt)) {
       return HttpResponse.json(
-        { code: 'VIDEO_WRITEBACK_UNSUPPORTED', message: '视频仅支持库内元数据，暂不支持写回原文件' },
+        {
+          code: 'VIDEO_WRITEBACK_UNSUPPORTED',
+          message: '视频仅支持库内元数据，暂不支持写回原文件',
+        },
         { status: 400 },
       );
     }
-    return HttpResponse.json({ status: 'pending', task_id: 'mock-writeback-' + id }, { status: 202 });
+    return HttpResponse.json(
+      { status: 'pending', task_id: 'mock-writeback-' + id },
+      { status: 202 },
+    );
   }),
 
   http.get('*/api/library/media/:id/inference', async ({ params }) => {
@@ -2163,7 +2166,7 @@ export const handlers = [
       'media.moved',
       'metadata.writeback.succeeded',
     ]);
-    let items = auditEvents
+    const items = auditEvents
       .filter((event) => {
         if (systemOnly) return event.scope === 'system';
         // 默认：space 事件 + 可回滚的 settings.updated

@@ -1,7 +1,7 @@
 # ADR-0064：门控式 RC/GA 发布与 dev 实验工件
 
 ## 状态
-已接受（取代 [ADR-0032](0032-release-engineering.md) 与 [ADR-0042](0042-prerelease-version-strategy.md)）
+已接受（取代 [ADR-0032](0032-release-engineering.md) 与 [ADR-0042](0042-prerelease-version-strategy.md)；**何时**启用 RC/GA 渠道由 [ADR-0065](0065-pre-1-0-formal-only-release-channels.md) 补充：`1.0.0` 前仅正式版，`1.0.0` 起才推 RC/GA）
 
 ## 背景
 

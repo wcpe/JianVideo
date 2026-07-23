@@ -70,7 +70,7 @@ func (h *Handler) resolveAudioReloadTarget(c *gin.Context, trackID string) (audi
 	if !ok {
 		return audioReloadTarget{}, false
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.loadMediaForViewer(c, spaceID, mediaID)
 	if err != nil {
 		writeAudioReloadNotFound(c)
 		return audioReloadTarget{}, false

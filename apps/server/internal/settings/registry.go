@@ -101,6 +101,11 @@ var registry = []Definition{
 		Validate: validateNonNegativeInt,
 	},
 	{
+		Key: KeyWritebackSnapshotRetentionDays, Label: "写回快照保留天数", Description: "危险写回前快照在数据目录保留的天数，超过后由定时清理删除；0 表示不自动删除。",
+		Layer: LayerRuntime, ValueType: ValueInt, DefaultValue: "7", HotApply: true, Consumer: "library.writeback",
+		Validate: validateNonNegativeInt,
+	},
+	{
 		Key: KeyUpdateChannel, Label: "更新频道", Description: "自更新检查使用的发布频道。",
 		Layer: LayerRuntime, ValueType: ValueEnum, DefaultValue: "stable", HotApply: true, Consumer: "update",
 		Options:  []SettingOption{{Value: "stable", Label: "正式版"}, {Value: "prerelease", Label: "测试版"}},
@@ -252,7 +257,6 @@ func definitionFor(key string) (Definition, bool) {
 func DefinitionByKey(key string) (Definition, bool) {
 	return definitionFor(key)
 }
-
 
 // ValidateStored 使用注册表校验已落库设置，未知 key 交由调用方决定兼容策略。
 func ValidateStored(key, value string) (bool, error) {

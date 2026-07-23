@@ -1,6 +1,6 @@
 # 功能规格：安全基线
 
-> 状态：开发中（首切+二切登录 429 + 会话表/撤销/设置页 UI 已落地）　·　关联 PRD：FR2-062　·　阶段：P5 `0.26.x`　·　前置：[fr2-010](fr2-010-space-users-audit.md)（用户/status 已落地）
+> 状态：开发中（首切+二切+管理员撤会话后置已落地）　·　关联 PRD：FR2-062　·　阶段：P5 `0.26.x`　·　前置：[fr2-010](fr2-010-space-users-audit.md)（用户/status 已落地）
 
 ## 0. 切片范围
 
@@ -13,8 +13,9 @@
 | E | 会话表 `auth_sessions` + JWT `sid` + 列表/撤销 API + 改密撤其它会话 | ✅ 二切 |
 | F | 前端会话管理 UI（设置页账户安全 → 我的设备/会话） | ✅ 二切 |
 | G | 登录页 429 / `LOGIN_LOCKED` 区分展示（橙色锁定 + `Retry-After` 等待提示） | ✅ 二切 |
+| H | 管理员撤销指定用户全部会话：`DELETE /api/users/:id/sessions`；禁用用户联动 `RevokeAllSessions`；审计 `auth.sessions_revoked` | ✅ 后置 |
 
-**首切**：文档 + 登录限流后端。**二切**：G 登录 429 UI + E/F 会话表与设备管理。
+**首切**：文档 + 登录限流后端。**二切**：G 登录 429 UI + E/F 会话表与设备管理。**后置**：H 管理员全撤与禁用联动。
 
 ## 1. 背景与目标
 
@@ -61,12 +62,14 @@
 - [x] 二切：登录页 429/`LOGIN_LOCKED` 橙色锁定 Alert + `Retry-After` 提示；`extractErrorCode`/`extractRetryAfterSeconds`；auth store `errorCode`/`loginRetryAfterSec`；MSW `locked` 演示；vitest
 - [x] 二切：`auth_sessions` 迁移 `20260723_0027`；JWT `sid`；`GET/DELETE /api/me/sessions`；改密撤其它会话；登出撤当前；APIGuard 校验撤销；单测
 - [x] 二切：设置页「我的设备/会话」列表与撤销；MSW；vitest
+- [x] 后置：`RevokeAllAuthSessions` / `RevokeAllSessions`；`DELETE /api/users/:id/sessions`（默认 Space owner，可撤自己）；禁用联动撤会话；审计 `auth.sessions_revoked`；单测
 
 ## 5. 验收标准
 
 - 脚本化连续错误密码达到阈值后出现 429，且响应体不暴露用户是否存在。
 - 撤销会话后携带旧 JWT 访问受保护 API 失败（`401 SESSION_REVOKED`）。
 - 改密后其它会话失效（默认策略，保留当前）。
+- 管理员 `DELETE /api/users/:id/sessions` 后该用户全部会话校验失败；禁用用户时旧会话同步失效。
 - 文档可被运维按步骤完成反代 TLS。
 
 ## 6. 风险 / 待定

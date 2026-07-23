@@ -127,11 +127,21 @@ func (h *Handler) SetUserStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "SET_STATUS_FAILED", "message": err.Error()})
 		return
 	}
+	// 禁用时撤销该用户全部会话，堵住旧 JWT（FR2-062 后置）。
+	var revokedCount int64
+	if req.Status == models.UserStatusDisabled && h.auth.SessionTableReady() {
+		n, revErr := h.auth.RevokeAllSessions(int64(id))
+		if revErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "禁用成功但撤销会话失败"})
+			return
+		}
+		revokedCount = n
+	}
 	action := "user.status_changed"
 	if req.Status == models.UserStatusDisabled {
 		action = "user.disabled"
 	}
-	h.recordSpaceAudit(c, audit.EventInput{
+	auditIn := audit.EventInput{
 		Scope:        audit.ScopeSystem,
 		ActorType:    "user",
 		ActorID:      actorIDFromContext(c),
@@ -140,8 +150,53 @@ func (h *Handler) SetUserStatus(c *gin.Context) {
 		ResourceID:   fmt.Sprintf("%d", id),
 		Before:       userAuditPayload(before),
 		After:        map[string]any{"status": req.Status},
-	})
+	}
+	if req.Status == models.UserStatusDisabled {
+		auditIn.Metadata = map[string]any{"sessions_revoked": revokedCount}
+	}
+	h.recordSpaceAudit(c, auditIn)
 	c.Status(http.StatusNoContent)
+}
+
+// RevokeUserSessions 管理员撤销指定用户全部会话（FR2-062 后置）。
+// 守卫与 ListUsers 相同：默认 Space owner；允许撤自己的全部（强制重登）。
+func (h *Handler) RevokeUserSessions(c *gin.Context) {
+	if h.auth == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AUTH_UNAVAILABLE", "message": "认证服务未启用"})
+		return
+	}
+	if !h.requireDefaultSpaceOwner(c) {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的用户 ID"})
+		return
+	}
+	if !h.auth.SessionTableReady() {
+		// 无会话表时视为无可撤会话
+		c.JSON(http.StatusOK, gin.H{"revoked": 0})
+		return
+	}
+	n, err := h.auth.RevokeAllSessions(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "撤销会话失败"})
+		return
+	}
+	h.recordSpaceAudit(c, audit.EventInput{
+		Scope:        audit.ScopeSystem,
+		ActorType:    "user",
+		ActorID:      actorIDFromContext(c),
+		Action:       "auth.sessions_revoked",
+		ResourceType: "user",
+		ResourceID:   fmt.Sprintf("%d", id),
+		Metadata:     map[string]any{"count": n},
+	})
+	// 若撤的是自己，清 Cookie 强制重登
+	if selfID, ok := h.currentUserID(c); ok && int64(selfID) == id {
+		auth.ClearAuthCookie(c)
+	}
+	c.JSON(http.StatusOK, gin.H{"revoked": n})
 }
 
 // ListSpaces 列出当前用户可访问的 Space。
@@ -333,6 +388,51 @@ func (h *Handler) RemoveSpaceMember(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// TransferSpaceOwner 转让 Space 所有权（仅当前 owner；to 须已是成员）。
+// POST /api/spaces/:id/transfer-owner  body: {"user_id": <int64>}
+func (h *Handler) TransferSpaceOwner(c *gin.Context) {
+	if h.space == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SPACE_UNAVAILABLE", "message": "Space 服务未启用"})
+		return
+	}
+	spaceID := strings.TrimSpace(c.Param("id"))
+	userID, ok := h.currentUserID(c)
+	if !ok {
+		return
+	}
+	// 双保险：中间件已 RequireSpaceRole(owner)，handler 再校验一次。
+	if err := h.space.RequireRole(spaceID, int64(userID), models.SpaceRoleOwner); err != nil {
+		writeSpaceErr(c, err)
+		return
+	}
+	var req struct {
+		UserID int64 `json:"user_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.UserID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_BODY", "message": "请求体无效，需要 user_id"})
+		return
+	}
+	beforeOwner := int64(userID)
+	if err := h.space.TransferOwner(spaceID, int64(userID), req.UserID); err != nil {
+		writeSpaceErr(c, err)
+		return
+	}
+	h.recordSpaceAudit(c, audit.EventInput{
+		Scope:        audit.ScopeSpace,
+		SpaceID:      spaceID,
+		ActorType:    "user",
+		ActorID:      actorIDFromContext(c),
+		Action:       "space.owner_transferred",
+		ResourceType: "space",
+		ResourceID:   spaceID,
+		Metadata: map[string]any{
+			"before_owner_user_id": beforeOwner,
+			"after_owner_user_id":  req.UserID,
+		},
+	})
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) requireDefaultSpaceOwner(c *gin.Context) bool {
 	username, ok := c.Get("username")
 	name, valid := username.(string)
@@ -422,6 +522,8 @@ func writeSpaceErr(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ROLE", "message": "角色无效"})
 	case space.ErrCannotRemoveOwner:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "CANNOT_REMOVE_OWNER", "message": "不能移除 Space owner"})
+	case space.ErrCannotTransferToSelf:
+		c.JSON(http.StatusBadRequest, gin.H{"code": "CANNOT_TRANSFER_TO_SELF", "message": "不能转让给自己"})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "SPACE_ERROR", "message": err.Error()})
 	}

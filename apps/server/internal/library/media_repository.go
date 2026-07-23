@@ -208,10 +208,10 @@ func (r *gormMediaRepository) GetMediaFileByID(spaceID string, id int64) (*model
 func (r *gormMediaRepository) GetMediaFileByIDForViewer(spaceID string, id int64, maxContentRating string) (*models.MediaFile, error) {
 	var mf models.MediaFile
 	q := r.db.Where("space_id = ? AND id = ? AND deleted_at IS NULL AND "+activeFileStateCondition(), normalizeSpaceID(spaceID), id)
-	if max := strings.TrimSpace(maxContentRating); max != "" {
+	if limit := strings.TrimSpace(maxContentRating); limit != "" {
 		q = q.Where(
 			"(content_rating IS NULL OR content_rating = '' OR UPPER(TRIM(content_rating)) = 'UNRATED' OR UPPER(TRIM(content_rating)) IN ?)",
-			contentRatingSQLAllowList(max),
+			contentRatingSQLAllowList(limit),
 		)
 	}
 	if err := q.First(&mf).Error; err != nil {
@@ -648,11 +648,11 @@ func (r *gormMediaRepository) applyMediaFilter(filter MediaFilter) *gorm.DB {
 		query = query.Where("library_id = ?", filter.LibraryID)
 	}
 	// 家长控制（FR2-051）：有 max 时只返回可见分级（UNRATED/空始终可见）。
-	if max := strings.TrimSpace(filter.MaxContentRating); max != "" {
+	if limit := strings.TrimSpace(filter.MaxContentRating); limit != "" {
 		// 空串与 UNRATED 始终放行；其余须在 allowed 列表（max=G 时 allowed=[G]）。
 		query = query.Where(
 			"(content_rating IS NULL OR content_rating = '' OR UPPER(TRIM(content_rating)) = 'UNRATED' OR UPPER(TRIM(content_rating)) IN ?)",
-			contentRatingSQLAllowList(max),
+			contentRatingSQLAllowList(limit),
 		)
 	}
 	if filter.Search != "" {

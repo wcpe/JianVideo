@@ -1,6 +1,6 @@
 # 功能规格：家长控制与内容分级
 
-> 状态：二切 UI 已完成（首切后端 + 详情/设置前端；播放/搜索等其余读路径统一 max 仍待后续）　·　关联 PRD：FR2-051　·　阶段：P5 `0.26.x`　·　前置：[fr2-010](fr2-010-space-users-audit.md)
+> 状态：读路径统一 max 已完成（首切后端 + 二切 UI + 播放/搜索等读路径 max）　·　关联 PRD：FR2-051　·　阶段：P5 `0.26.x`　·　前置：[fr2-010](fr2-010-space-users-audit.md)
 
 ## 0. 首切范围（本 PR 只做这些）
 
@@ -51,7 +51,7 @@
 - [x] 单测矩阵（models / library / space / api）
 - [x] 文档同步（API / ARCHITECTURE / PRD / CHANGELOG）
 - [x] 二切 UI：详情面板分级标记与编辑；设置页 Space 默认/成员上限 + 家长锁
-- [ ] 二切：播放/搜索等其余读路径统一注入 max（若与列表/详情分叉）
+- [x] 二切：播放/搜索等其余读路径统一注入 max（`loadMediaForViewer` + stream/HLS/negotiate/thumbnail/raw/download/v2/列表旁路/CreateShare）
 
 ## 5. 验收标准
 

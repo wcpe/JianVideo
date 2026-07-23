@@ -37,7 +37,9 @@ describe('extractErrorMessage', () => {
 
 describe('extractErrorCode', () => {
   it('从 axios 响应体提取 code', () => {
-    const error = { response: { data: { code: 'LOGIN_LOCKED', message: '登录尝试过于频繁，请稍后再试' } } };
+    const error = {
+      response: { data: { code: 'LOGIN_LOCKED', message: '登录尝试过于频繁，请稍后再试' } },
+    };
     expect(extractErrorCode(error)).toBe('LOGIN_LOCKED');
   });
 
@@ -60,11 +62,11 @@ describe('extractRetryAfterSeconds', () => {
   });
 
   it('支持数字头与非法值回退', () => {
-    expect(
-      extractRetryAfterSeconds({ response: { headers: { 'Retry-After': 60 } } }),
-    ).toBe(60);
+    expect(extractRetryAfterSeconds({ response: { headers: { 'Retry-After': 60 } } })).toBe(60);
     expect(extractRetryAfterSeconds({ response: { headers: { 'retry-after': '0' } } })).toBeNull();
-    expect(extractRetryAfterSeconds({ response: { headers: { 'retry-after': 'abc' } } })).toBeNull();
+    expect(
+      extractRetryAfterSeconds({ response: { headers: { 'retry-after': 'abc' } } }),
+    ).toBeNull();
     expect(extractRetryAfterSeconds({ response: {} })).toBeNull();
   });
 });

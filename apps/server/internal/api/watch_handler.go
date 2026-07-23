@@ -70,6 +70,8 @@ func (h *Handler) WatchHistory(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询观看历史失败"})
 		return
 	}
+	// 家长控制（FR2-051）：观看历史按访客 max 过滤。
+	page.Items = filterWatchMediaByMaxRating(page.Items, h.viewerMaxContentRating(c, spaceID))
 	c.JSON(http.StatusOK, page)
 }
 
@@ -183,6 +185,8 @@ func (h *Handler) ContinueWatching(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
+	// 家长控制（FR2-051）：继续观看按访客 max 过滤。
+	items = filterWatchMediaByMaxRating(items, h.viewerMaxContentRating(c, spaceID))
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
@@ -202,6 +206,8 @@ func (h *Handler) OnThisDay(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
+	// 家长控制（FR2-051）：那年今日按访客 max 过滤。
+	items = filterMediaByMaxRating(items, h.viewerMaxContentRating(c, spaceID))
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
@@ -244,5 +250,7 @@ func (h *Handler) RecentlyViewed(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "INTERNAL", "message": "查询失败"})
 		return
 	}
+	// 家长控制（FR2-051）：最近查看按访客 max 过滤。
+	items = filterMediaByMaxRating(items, h.viewerMaxContentRating(c, spaceID))
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }

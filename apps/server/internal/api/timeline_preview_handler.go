@@ -155,7 +155,7 @@ func (h *Handler) timelineIdentity(c *gin.Context, profileID string) (TimelinePr
 		}
 		return TimelinePreviewIdentity{}, false
 	}
-	if _, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID); err != nil {
+	if _, err := h.loadMediaForViewer(c, spaceID, mediaID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return TimelinePreviewIdentity{}, false
 	}

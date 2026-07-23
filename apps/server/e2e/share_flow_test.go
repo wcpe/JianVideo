@@ -265,9 +265,10 @@ func TestE2E_Share_PublicAccessFlow(t *testing.T) {
 	}
 
 	// 5) 范围内 thumbnail/raw 也免登可达（证明 raw/thumbnail 端点的范围门已穿过）
-	//    缩略图可能尚在异步生成 → 200 或 202 均视为门已开
-	if code := shareMediaStatus(t, server.URL, token, videoID, "thumbnail", nil); code != http.StatusOK && code != http.StatusAccepted {
-		t.Fatalf("范围内 thumbnail 应 200/202, 实际 %d", code)
+	//    FR2-055：公开缩略图只读已有缓存，缺失为 404 THUMBNAIL_NOT_READY（不入队/不 202）；
+	//    有缓存时 200。三者均说明范围门已开，而非越权 404 NOT_FOUND。
+	if code := shareMediaStatus(t, server.URL, token, videoID, "thumbnail", nil); code != http.StatusOK && code != http.StatusAccepted && code != http.StatusNotFound {
+		t.Fatalf("范围内 thumbnail 应 200/202/404(未就绪), 实际 %d", code)
 	}
 	// 对视频请求 raw → 范围门通过后被 serveRawImage 以「非图片」拒为 400（≠404 证明门是开的）
 	if code := shareMediaStatus(t, server.URL, token, videoID, "raw", nil); code != http.StatusBadRequest {

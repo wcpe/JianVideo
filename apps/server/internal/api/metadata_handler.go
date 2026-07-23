@@ -35,7 +35,7 @@ func (h *Handler) RefreshMediaMetadata(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "TASKS_UNAVAILABLE", "message": "任务中心未启用"})
 		return
 	}
-	media, err := h.library.GetMediaFileByIDInSpace(spaceID, mediaID)
+	media, err := h.loadMediaForViewer(c, spaceID, mediaID)
 	if err != nil {
 		metadataReadError(c, err)
 		return
@@ -95,7 +95,15 @@ func (h *Handler) metadataRequestMedia(c *gin.Context) (string, int64, bool) {
 		return "", 0, false
 	}
 	mediaID, ok := parseMediaID(c)
-	return spaceID, mediaID, ok
+	if !ok {
+		return "", 0, false
+	}
+	// 读路径：不可见 id → 404（FR2-051）
+	if _, err := h.loadMediaForViewer(c, spaceID, mediaID); err != nil {
+		metadataReadError(c, err)
+		return "", 0, false
+	}
+	return spaceID, mediaID, true
 }
 
 func metadataReadError(c *gin.Context, err error) {

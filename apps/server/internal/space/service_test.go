@@ -118,6 +118,68 @@ func TestRoleAtLeast(t *testing.T) {
 	}
 }
 
+func TestTransferOwner_SuccessDualWrite(t *testing.T) {
+	svc := NewService(setupSpaceDB(t))
+	now := time.Now()
+	if err := svc.db.Create(&models.SpaceMember{
+		SpaceID: models.DefaultSpaceID, UserID: 2, Role: models.SpaceRoleEditor, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.TransferOwner(models.DefaultSpaceID, 1, 2); err != nil {
+		t.Fatalf("TransferOwner: %v", err)
+	}
+
+	sp, err := svc.GetSpace(models.DefaultSpaceID)
+	if err != nil || sp.OwnerUserID != 2 {
+		t.Fatalf("spaces.owner_user_id 期望 2, 得到 %+v err=%v", sp, err)
+	}
+	role1, err := svc.MemberRole(models.DefaultSpaceID, 1)
+	if err != nil || role1 != models.SpaceRoleEditor {
+		t.Fatalf("旧 owner 应变 editor: role=%q err=%v", role1, err)
+	}
+	role2, err := svc.MemberRole(models.DefaultSpaceID, 2)
+	if err != nil || role2 != models.SpaceRoleOwner {
+		t.Fatalf("新 owner 应变 owner: role=%q err=%v", role2, err)
+	}
+}
+
+func TestTransferOwner_RejectNonMember(t *testing.T) {
+	svc := NewService(setupSpaceDB(t))
+	if err := svc.TransferOwner(models.DefaultSpaceID, 1, 99); err != ErrNotMember {
+		t.Fatalf("非成员期望 ErrNotMember, 得到 %v", err)
+	}
+	// 库未变
+	sp, _ := svc.GetSpace(models.DefaultSpaceID)
+	if sp.OwnerUserID != 1 {
+		t.Fatalf("owner 应仍为 1, 得到 %d", sp.OwnerUserID)
+	}
+}
+
+func TestTransferOwner_RejectNonOwner(t *testing.T) {
+	svc := NewService(setupSpaceDB(t))
+	now := time.Now()
+	if err := svc.db.Create(&models.SpaceMember{
+		SpaceID: models.DefaultSpaceID, UserID: 2, Role: models.SpaceRoleEditor, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.db.Create(&models.SpaceMember{
+		SpaceID: models.DefaultSpaceID, UserID: 3, Role: models.SpaceRoleViewer, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 非 owner（user 2）试图转让
+	if err := svc.TransferOwner(models.DefaultSpaceID, 2, 3); err != ErrForbidden {
+		t.Fatalf("非 owner 期望 ErrForbidden, 得到 %v", err)
+	}
+	// 转给自己
+	if err := svc.TransferOwner(models.DefaultSpaceID, 1, 1); err != ErrCannotTransferToSelf {
+		t.Fatalf("转给自己期望 ErrCannotTransferToSelf, 得到 %v", err)
+	}
+}
+
 func TestEffectiveMaxRating_MemberOverrideAndSpaceDefault(t *testing.T) {
 	svc := NewService(setupSpaceDB(t))
 	now := time.Now()
@@ -128,34 +190,34 @@ func TestEffectiveMaxRating_MemberOverrideAndSpaceDefault(t *testing.T) {
 	}
 
 	// 无限制
-	max, err := svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
-	if err != nil || max != "" {
-		t.Fatalf("默认无限制: max=%q err=%v", max, err)
+	gotMax, err := svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
+	if err != nil || gotMax != "" {
+		t.Fatalf("默认无限制: max=%q err=%v", gotMax, err)
 	}
 
 	if err := svc.SetSpaceDefaultMaxRating(models.DefaultSpaceID, "PG-13"); err != nil {
 		t.Fatal(err)
 	}
-	max, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
-	if err != nil || max != models.ContentRatingPG13 {
-		t.Fatalf("继承 Space 默认: max=%q err=%v", max, err)
+	gotMax, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
+	if err != nil || gotMax != models.ContentRatingPG13 {
+		t.Fatalf("继承 Space 默认: max=%q err=%v", gotMax, err)
 	}
 
 	pg := "PG"
 	if err := svc.SetMemberMaxRating(models.DefaultSpaceID, 2, &pg); err != nil {
 		t.Fatal(err)
 	}
-	max, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
-	if err != nil || max != models.ContentRatingPG {
-		t.Fatalf("成员覆盖: max=%q err=%v", max, err)
+	gotMax, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
+	if err != nil || gotMax != models.ContentRatingPG {
+		t.Fatalf("成员覆盖: max=%q err=%v", gotMax, err)
 	}
 
 	empty := ""
 	if err := svc.SetMemberMaxRating(models.DefaultSpaceID, 2, &empty); err != nil {
 		t.Fatal(err)
 	}
-	max, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
-	if err != nil || max != models.ContentRatingPG13 {
-		t.Fatalf("清除覆盖后继承: max=%q err=%v", max, err)
+	gotMax, err = svc.EffectiveMaxRating(models.DefaultSpaceID, 2)
+	if err != nil || gotMax != models.ContentRatingPG13 {
+		t.Fatalf("清除覆盖后继承: max=%q err=%v", gotMax, err)
 	}
 }

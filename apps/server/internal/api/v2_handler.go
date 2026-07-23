@@ -29,8 +29,9 @@ func (h *Handler) ListMediaV2(c *gin.Context) {
 		pageSize = 100
 	}
 	result, err := h.library.ListMediaFilesPage(library.MediaFilter{
-		SpaceID: spaceID,
-		Sort:    "time_desc",
+		SpaceID:          spaceID,
+		Sort:             "time_desc",
+		MaxContentRating: h.viewerMaxContentRating(c, spaceID),
 	}, library.MediaPageRequest{Page: page, PageSize: pageSize})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, openapi.Error{Code: "INTERNAL", Message: "查询失败"})
@@ -59,7 +60,7 @@ func (h *Handler) GetMediaV2(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, openapi.Error{Code: "INVALID_ID", Message: "无效的媒体 ID"})
 		return
 	}
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, openapi.Error{Code: "NOT_FOUND", Message: "媒体文件不存在"})
 		return

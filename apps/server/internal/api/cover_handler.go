@@ -121,7 +121,15 @@ func (h *Handler) coverRequestScope(c *gin.Context) (string, int64, bool) {
 		return "", 0, false
 	}
 	mediaID, ok := parseMediaID(c)
-	return spaceID, mediaID, ok
+	if !ok {
+		return "", 0, false
+	}
+	// 读路径：不可见 id → 404（FR2-051）
+	if _, err := h.loadMediaForViewer(c, spaceID, mediaID); err != nil {
+		h.writeCoverError(c, err)
+		return "", 0, false
+	}
+	return spaceID, mediaID, true
 }
 
 func (h *Handler) writeCoverError(c *gin.Context, err error) {

@@ -1,6 +1,6 @@
 # 功能规格：分享增强（P5）
 
-> 状态：开发中（首切后端 + 二切前端 UI 已落地；accessed 采样仍待）　·　关联 PRD：FR2-055　·　阶段：P5 `0.26.x`　·　背景：历史 [share-links](share-links.md)、[share-enhance](share-enhance.md)（FR-43/FR-78，不可直接当 v2 排期）　·　前置：FR2-010 成员守卫已落地
+> 状态：开发中（首切后端 + 二切前端 UI + accessed 采样已落地）　·　关联 PRD：FR2-055　·　阶段：P5 `0.26.x`　·　背景：历史 [share-links](share-links.md)、[share-enhance](share-enhance.md)（FR-43/FR-78，不可直接当 v2 排期）　·　前置：FR2-010 成员守卫已落地
 
 ## 0. 首切范围（本 PR 只做这些）
 
@@ -9,7 +9,7 @@
 | A | 模型 `allow_download`（默认 true）+ 迁移 | ✅ |
 | B | 创建 API 接收 `allow_download`；公开 download 在 false 时 403/404 统一口径 | ✅ |
 | C | 公开路径成本门禁：集成测试探针断言访问 share 期间不入队 `transcode`/`hls`/`export`/AI；缩略图缺失不 Enqueue | ✅ |
-| D | 审计 `share.created` / `share.revoked`（accessed 采样二切） | ✅ |
+| D | 审计 `share.created` / `share.revoked` / `share.accessed`（采样） | ✅ |
 | E | 文档：API/CHANGELOG | ✅ |
 | F | 前端创建弹窗禁下载 + 公开页隐藏下载 | ✅ 二切 |
 
@@ -59,7 +59,7 @@
 - [x] 审计 created/revoked
 - [x] 文档同步
 - [x] 二切 UI：创建弹窗「允许下载」开关；公开页按 `allow_download` 隐藏下载
-- [ ] 二切：accessed 采样
+- [x] 二切：accessed 采样
 ## 5. 验收标准
 
 - 自动化：公开分享访问期间 `transcode`/`hls` 任务计数不增加。

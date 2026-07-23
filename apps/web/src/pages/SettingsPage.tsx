@@ -329,11 +329,7 @@ export default function SettingsPage() {
           (err as { status?: number })?.status ??
           (err as { cause?: { response?: { status?: number } } })?.cause?.response?.status;
         const msg = extractErrorMessage(err, '加载用户列表失败');
-        if (
-          status === 403 ||
-          /FORBIDDEN|仅默认 Space owner/i.test(msg) ||
-          msg.includes('仅默认')
-        ) {
+        if (status === 403 || /FORBIDDEN|仅默认 Space owner/i.test(msg) || msg.includes('仅默认')) {
           setUsersForbidden(true);
           setManagedUsers([]);
         } else {
@@ -855,9 +851,7 @@ export default function SettingsPage() {
     try {
       await updateSpaceParental(parentalSpace.id, parentalPassword, defaultMaxRating);
       setParentalPassword('');
-      setParentalSpace((prev) =>
-        prev ? { ...prev, default_max_rating: defaultMaxRating } : prev,
-      );
+      setParentalSpace((prev) => (prev ? { ...prev, default_max_rating: defaultMaxRating } : prev));
       notifications.show({
         color: 'green',
         title: '已保存',
@@ -1245,8 +1239,8 @@ export default function SettingsPage() {
           ) : (
             <Stack gap="lg">
               <Text size="xs" c="dimmed">
-                创建用户限默认 Space owner；创建 Space 后创建者为该 Space owner。成员角色仅
-                editor / viewer（不可经此界面设 owner）。
+                创建用户限默认 Space owner；创建 Space 后创建者为该 Space owner。成员角色仅 editor /
+                viewer（不可经此界面设 owner）。
               </Text>
 
               {/* 用户管理：仅默认 Space owner 可见完整表；403 时提示无权限 */}

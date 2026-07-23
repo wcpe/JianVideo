@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/playback"
@@ -185,23 +186,41 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		shares.DELETE("/:token", h.RevokeShare)
 	}
 
-	// 用户与 Space 成员（FR2-010）
+	// 用户与 Space 成员（FR2-010）；会话全撤（FR2-062 后置）
 	users := r.Group("/api/users")
 	{
 		users.GET("", h.ListUsers)
 		users.POST("", h.CreateUser)
 		users.PUT("/:id/status", h.SetUserStatus)
+		users.DELETE("/:id/sessions", h.RevokeUserSessions)
 	}
 	spaces := r.Group("/api/spaces")
 	{
 		spaces.GET("", h.ListSpaces)
 		spaces.POST("", h.CreateSpace)
+		// 读成员：handler 内 RequireRole(viewer)
 		spaces.GET("/:id/members", h.ListSpaceMembers)
-		spaces.POST("/:id/members", h.AddSpaceMember)
-		spaces.DELETE("/:id/members/:user_id", h.RemoveSpaceMember)
-		// 家长控制（FR2-051）
-		spaces.PUT("/:id/parental", h.UpdateSpaceParentalPolicy)
-		spaces.PUT("/:id/members/:user_id/max-rating", h.UpdateMemberMaxRating)
+
+		// owner-only：挂 RequireSpaceRole；handler 内再 RequireRole 作双保险（FR2-010 后置）。
+		// /api/spaces 不在全局 SpaceOwnerGuard 前缀内，须在此用 path :id 解析 Space。
+		if h != nil && h.auth != nil {
+			ownerOnly := spaces.Group("", auth.RequireSpaceRole(h.auth, models.SpaceRoleOwner))
+			{
+				ownerOnly.POST("/:id/members", h.AddSpaceMember)
+				ownerOnly.DELETE("/:id/members/:user_id", h.RemoveSpaceMember)
+				ownerOnly.POST("/:id/transfer-owner", h.TransferSpaceOwner)
+				// 家长控制（FR2-051）
+				ownerOnly.PUT("/:id/parental", h.UpdateSpaceParentalPolicy)
+				ownerOnly.PUT("/:id/members/:user_id/max-rating", h.UpdateMemberMaxRating)
+			}
+		} else {
+			// 测试装配可能未注入 auth：回退无中间件（handler 内仍校验）。
+			spaces.POST("/:id/members", h.AddSpaceMember)
+			spaces.DELETE("/:id/members/:user_id", h.RemoveSpaceMember)
+			spaces.POST("/:id/transfer-owner", h.TransferSpaceOwner)
+			spaces.PUT("/:id/parental", h.UpdateSpaceParentalPolicy)
+			spaces.PUT("/:id/members/:user_id/max-rating", h.UpdateMemberMaxRating)
+		}
 	}
 
 	// 字幕与观看状态路由（不需要 playback 服务，作用于 media_files）
@@ -329,15 +348,21 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		cache.POST("/clean", h.StorageCacheClean)
 	}
 
-	// 播放路由（可选）
+	// 播放路由（可选）；测试路径注入 library + max，生产 stream 由 web 层挂载。
 	if len(pbSvc) > 0 && pbSvc[0] != nil {
-		RegisterPlaybackRoutes(r, pbSvc[0])
+		RegisterPlaybackRoutesWithLibrary(r, pbSvc[0], h.library, h.ViewerMaxContentRating)
 	}
 }
 
 // RegisterPlaybackRoutes 仅注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // 拆分出来便于在已经走过 RegisterRoutes 的引擎上单独补挂，避免重复注册。
+// 注意：生产 stream 由 web.registerStreamRoute 挂载（含 max_rating）；此处 stream 为测试/兼容降级。
 func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
+	RegisterPlaybackRoutesWithLibrary(r, pbSvc, nil, nil)
+}
+
+// RegisterPlaybackRoutesWithLibrary 同 RegisterPlaybackRoutes，并按 library + max 过滤 stream（FR2-051）。
+func RegisterPlaybackRoutesWithLibrary(r *gin.Engine, pbSvc *playback.Service, libraryService *library.Service, maxRatingResolver func(*gin.Context, string) string) {
 	play := r.Group("/api/play")
 	{
 		play.GET("/:id/stream", func(c *gin.Context) {
@@ -345,7 +370,24 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 			if !ok {
 				return
 			}
-			pbSvc.StreamFile(c.Writer, c.Request, id, "", 0, 0)
+			if libraryService == nil {
+				pbSvc.StreamFile(c.Writer, c.Request, id, "", 0, 0)
+				return
+			}
+			spaceID := c.GetString("space_id")
+			if spaceID == "" {
+				spaceID = models.DefaultSpaceID
+			}
+			maxR := ""
+			if maxRatingResolver != nil {
+				maxR = maxRatingResolver(c, spaceID)
+			}
+			mf, err := libraryService.GetMediaFileByIDInSpaceForViewer(spaceID, id, maxR)
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
+				return
+			}
+			pbSvc.StreamFile(c.Writer, c.Request, id, mf.FilePath, mf.FileSize, mf.Duration)
 		})
 		play.POST("/:id/seek", func(c *gin.Context) {
 			id, ok := parseMediaID(c)
@@ -408,24 +450,34 @@ func RegisterPlaybackRoutes(r *gin.Engine, pbSvc *playback.Service) {
 // master 内容里的 playlist 路径写 "{quality}.m3u8"（与 master 同目录），
 // hls.js 拼出的 URL = /api/play/hls/{mediaID}/{quality}.m3u8 → 正好匹配静态文件。
 // taskServices 可选；未传入时会安全拒绝所有 task-scoped 音轨 HLS URL。
+// maxRatingResolver 可选：解析当前访客 max_rating（FR2-051）；nil 表示不限制分级。
 func RegisterHLSRoutes(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, taskServices ...*tasksvc.Service) {
+	RegisterHLSRoutesWithMaxRating(r, hlsMgr, hlsDir, libraryService, nil, taskServices...)
+}
+
+// RegisterHLSRoutesWithMaxRating 同 RegisterHLSRoutes，并注入访客 max 解析（FR2-051）。
+func RegisterHLSRoutesWithMaxRating(r *gin.Engine, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, maxRatingResolver func(*gin.Context, string) string, taskServices ...*tasksvc.Service) {
 	var taskService *tasksvc.Service
 	if len(taskServices) > 0 {
 		taskService = taskServices[0]
 	}
 	r.GET("/api/play/hls/*path", func(c *gin.Context) {
-		handleHLSRequest(c, hlsMgr, hlsDir, libraryService, taskService)
+		handleHLSRequest(c, hlsMgr, hlsDir, libraryService, taskService, maxRatingResolver)
 	})
 }
 
-func handleHLSRequest(c *gin.Context, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, taskService *tasksvc.Service) {
+func handleHLSRequest(c *gin.Context, hlsMgr *player.HLSManager, hlsDir string, libraryService *library.Service, taskService *tasksvc.Service, maxRatingResolver func(*gin.Context, string) string) {
 	mediaID, rest, ok := parseHLSRequestPath(c)
-	if !ok || !mediaBelongsToRequestedSpace(c, libraryService, mediaID) {
-		return
-	}
 	spaceID := c.GetString("space_id")
 	if spaceID == "" {
 		spaceID = models.DefaultSpaceID
+	}
+	maxR := ""
+	if maxRatingResolver != nil {
+		maxR = maxRatingResolver(c, spaceID)
+	}
+	if !ok || !mediaBelongsToRequestedSpace(c, libraryService, mediaID, maxR) {
+		return
 	}
 	audioRoute, err := parseAudioHLSRoute(rest)
 	if err != nil {
@@ -597,12 +649,14 @@ func serveLegacyMaster(c *gin.Context, hlsMgr *player.HLSManager, mediaID int64)
 	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", []byte(content))
 }
 
-func mediaBelongsToRequestedSpace(c *gin.Context, libraryService *library.Service, mediaID int64) bool {
+// mediaBelongsToRequestedSpace 校验媒体属于当前 Space 且对访客可见（FR2-051）。
+// maxRating 由调用方注入；空表示不限制分级。
+func mediaBelongsToRequestedSpace(c *gin.Context, libraryService *library.Service, mediaID int64, maxRating string) bool {
 	spaceID := c.GetString("space_id")
 	if spaceID == "" {
 		spaceID = models.DefaultSpaceID
 	}
-	if _, err := libraryService.GetMediaFileByIDInSpace(spaceID, mediaID); err != nil {
+	if _, err := libraryService.GetMediaFileByIDInSpaceForViewer(spaceID, mediaID, maxRating); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return false
 	}

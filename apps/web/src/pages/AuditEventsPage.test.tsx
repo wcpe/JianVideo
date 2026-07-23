@@ -52,9 +52,7 @@ describe('AuditEventsPage（FR2-040 / FR2-041）', () => {
           next_cursor: 'cursor-next',
         });
       }),
-      http.get('*/api/rollback/events', () =>
-        HttpResponse.json({ items: [], next_cursor: null }),
-      ),
+      http.get('*/api/rollback/events', () => HttpResponse.json({ items: [], next_cursor: null })),
     );
 
     const user = userEvent.setup();
@@ -106,9 +104,7 @@ describe('AuditEventsPage（FR2-040 / FR2-041）', () => {
           next_cursor: 'cursor-next',
         });
       }),
-      http.get('*/api/rollback/events', () =>
-        HttpResponse.json({ items: [], next_cursor: null }),
-      ),
+      http.get('*/api/rollback/events', () => HttpResponse.json({ items: [], next_cursor: null })),
     );
 
     const user = userEvent.setup();
@@ -138,9 +134,7 @@ describe('AuditEventsPage（FR2-040 / FR2-041）', () => {
 
   it('展示可回滚时间线：可回滚按钮可用，不可回滚禁用并显示原因', async () => {
     server.use(
-      http.get('*/api/audit/events', () =>
-        HttpResponse.json({ items: [], next_cursor: null }),
-      ),
+      http.get('*/api/audit/events', () => HttpResponse.json({ items: [], next_cursor: null })),
       http.get('*/api/rollback/events', () =>
         HttpResponse.json({
           items: [
@@ -195,9 +189,7 @@ describe('AuditEventsPage（FR2-040 / FR2-041）', () => {
   it('二次确认后调用 apply 并提示成功', async () => {
     let appliedBody: { event_id?: number; confirm?: boolean } | null = null;
     server.use(
-      http.get('*/api/audit/events', () =>
-        HttpResponse.json({ items: [], next_cursor: null }),
-      ),
+      http.get('*/api/audit/events', () => HttpResponse.json({ items: [], next_cursor: null })),
       http.get('*/api/rollback/events', () =>
         HttpResponse.json({
           items: [

@@ -23,14 +23,14 @@ import (
 	"github.com/wcpe/JianVideo/internal/auth"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
-	"github.com/wcpe/JianVideo/internal/rollback"
-	"github.com/wcpe/JianVideo/internal/space"
 	"github.com/wcpe/JianVideo/internal/metrics"
 	"github.com/wcpe/JianVideo/internal/playback"
 	"github.com/wcpe/JianVideo/internal/player"
+	"github.com/wcpe/JianVideo/internal/rollback"
 	"github.com/wcpe/JianVideo/internal/settings"
 	"github.com/wcpe/JianVideo/internal/share"
 	"github.com/wcpe/JianVideo/internal/smb"
+	"github.com/wcpe/JianVideo/internal/space"
 	"github.com/wcpe/JianVideo/internal/storage"
 	"github.com/wcpe/JianVideo/internal/subtitle"
 	tasksvc "github.com/wcpe/JianVideo/internal/tasks"
@@ -502,13 +502,29 @@ func (h *Handler) GetMediaFile(c *gin.Context) {
 		return
 	}
 
-	maxR := h.viewerMaxContentRating(c, spaceID)
-	mf, err := h.library.GetMediaFileByIDInSpaceForViewer(spaceID, id, maxR)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, mf)
+}
+
+// loadMediaForViewer 按访客 max_rating 取媒体（FR2-051）；不可见 → not found。
+// 所有「按 media id 读内容」入口应统一走此 helper（公开分享除外）。
+func (h *Handler) loadMediaForViewer(c *gin.Context, spaceID string, id int64) (*models.MediaFile, error) {
+	return h.LoadMediaForViewer(c, spaceID, id)
+}
+
+// LoadMediaForViewer 导出给 web 层 stream 等装配点使用（FR2-051）。
+func (h *Handler) LoadMediaForViewer(c *gin.Context, spaceID string, id int64) (*models.MediaFile, error) {
+	maxR := h.viewerMaxContentRating(c, spaceID)
+	return h.library.GetMediaFileByIDInSpaceForViewer(spaceID, id, maxR)
+}
+
+// ViewerMaxContentRating 导出给 HLS 路由装配使用（FR2-051）。
+func (h *Handler) ViewerMaxContentRating(c *gin.Context, spaceID string) string {
+	return h.viewerMaxContentRating(c, spaceID)
 }
 
 // viewerMaxContentRating 解析当前用户在 Space 的有效最高可见分级；无 space 服务时不限制。
@@ -543,6 +559,34 @@ func (h *Handler) viewerMaxContentRating(c *gin.Context, spaceID string) string 
 		return ""
 	}
 	return maxR
+}
+
+// filterMediaByMaxRating 列表结果按访客 max 过滤（FR2-051）；max 空不限制。
+func filterMediaByMaxRating(items []models.MediaFile, maxR string) []models.MediaFile {
+	if strings.TrimSpace(maxR) == "" {
+		return items
+	}
+	out := make([]models.MediaFile, 0, len(items))
+	for i := range items {
+		if models.ContentVisible(items[i].ContentRating, maxR) {
+			out = append(out, items[i])
+		}
+	}
+	return out
+}
+
+// filterWatchMediaByMaxRating 观看态列表按访客 max 过滤（FR2-051）。
+func filterWatchMediaByMaxRating(items []library.WatchMediaItem, maxR string) []library.WatchMediaItem {
+	if strings.TrimSpace(maxR) == "" {
+		return items
+	}
+	out := make([]library.WatchMediaItem, 0, len(items))
+	for i := range items {
+		if models.ContentVisible(items[i].Media.ContentRating, maxR) {
+			out = append(out, items[i])
+		}
+	}
+	return out
 }
 
 // DeleteMediaFile DELETE /api/library/media/:id
@@ -674,13 +718,13 @@ func (h *Handler) RecycleCleanup(c *gin.Context) {
 }
 
 // RecycleAutoCleanupPreview POST /api/library/recycle/auto-cleanup/preview（FR2-054）
-// 预览本 Space 到期自动清理候选，不改数据。
+// 预览本 Space 到期自动清理候选，不改数据；保留天数/开关按当前 Space ForSpace 解析。
 func (h *Handler) RecycleAutoCleanupPreview(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)
 	if !ok {
 		return
 	}
-	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c)
+	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c, spaceID)
 	if !ok {
 		return
 	}
@@ -700,19 +744,19 @@ func (h *Handler) RecycleAutoCleanupPreview(c *gin.Context) {
 }
 
 // RecycleAutoCleanupRun POST /api/library/recycle/auto-cleanup/run（FR2-054）
-// 执行本 Space 有界到期自动清理；缺盘符跳过单条。
+// 执行本 Space 有界到期自动清理；缺盘符跳过单条；开关与天数按当前 Space ForSpace 解析。
 func (h *Handler) RecycleAutoCleanupRun(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)
 	if !ok {
 		return
 	}
-	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c)
+	drivePaths, before, limit, ok := h.recycleAutoCleanupParams(c, spaceID)
 	if !ok {
 		return
 	}
 	// days=0 或开关关闭：拒绝实跑（preview 仍可看候选）
 	if h.settings != nil {
-		if !h.settings.RecycleAutoCleanupEnabled() || h.settings.RecycleRetentionDays() <= 0 {
+		if !h.settings.RecycleAutoCleanupEnabledForSpace(spaceID) || h.settings.RecycleRetentionDaysForSpace(spaceID) <= 0 {
 			c.JSON(http.StatusConflict, gin.H{
 				"code":    "AUTO_CLEANUP_DISABLED",
 				"message": "自动清理未启用或保留天数为 0",
@@ -755,8 +799,8 @@ func (h *Handler) RecycleAutoCleanupRun(c *gin.Context) {
 	})
 }
 
-// recycleAutoCleanupParams 解析盘符配置、到期阈值与批量上限。
-func (h *Handler) recycleAutoCleanupParams(c *gin.Context) (drivePaths map[string]string, before time.Time, limit int, ok bool) {
+// recycleAutoCleanupParams 解析盘符配置、到期阈值与批量上限（days 按 spaceID ForSpace）。
+func (h *Handler) recycleAutoCleanupParams(c *gin.Context, spaceID string) (drivePaths map[string]string, before time.Time, limit int, ok bool) {
 	if h.settings == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "SETTINGS_UNAVAILABLE", "message": "设置服务未启用"})
 		return nil, time.Time{}, 0, false
@@ -773,10 +817,7 @@ func (h *Handler) recycleAutoCleanupParams(c *gin.Context) (drivePaths map[strin
 			return nil, time.Time{}, 0, false
 		}
 	}
-	days := h.settings.RecycleRetentionDays()
-	if days < 0 {
-		days = 30
-	}
+	days := h.settings.RecycleRetentionDaysForSpace(spaceID)
 	// days=0 时 preview 仍返回「无到期阈值」语义：before=零时刻 → 不选中任何项
 	if days == 0 {
 		before = time.Time{}
@@ -1311,7 +1352,7 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -1390,7 +1431,7 @@ func (h *Handler) GetRawImage(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -1472,7 +1513,7 @@ func (h *Handler) DownloadMediaFile(c *gin.Context) {
 		return
 	}
 
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return
@@ -1527,6 +1568,8 @@ func (h *Handler) BatchDownloadMediaFiles(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "QUERY_FAILED", "message": "查询失败"})
 		return
 	}
+	// 家长控制（FR2-051）：批量下载仅含访客可见分级。
+	files = filterMediaByMaxRating(files, h.viewerMaxContentRating(c, spaceID))
 
 	// 预估总大小：超限在写任何字节前拒绝，便于客户端拿到 JSON 错误而非半截 zip
 	var totalBytes int64

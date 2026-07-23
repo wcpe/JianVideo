@@ -50,7 +50,7 @@ func (h *Handler) Negotiate(c *gin.Context) {
 		"vp9":  req.ClientCaps.VP9,
 	}
 
-	mf, err := h.library.GetMediaFileByIDInSpace(spaceID, id)
+	mf, err := h.loadMediaForViewer(c, spaceID, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND", "message": "媒体文件不存在"})
 		return

@@ -604,7 +604,9 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
   it('视频不展示写回按钮，仅提示库内元数据（FR2-033）', async () => {
     renderPanel([mediaFile({ id: 9, file_name: '电影.mp4', format: 'mp4', duration: 120 })], 0);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).queryByRole('button', { name: '写回原文件元数据' })).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('button', { name: '写回原文件元数据' }),
+    ).not.toBeInTheDocument();
     expect(await within(dialog).findByText(/视频仅支持库内元数据/)).toBeInTheDocument();
   });
 

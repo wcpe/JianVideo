@@ -1,6 +1,6 @@
 # 功能规格：回收站保留期与自动清理
 
-> 状态：开发中（首切后端 + 二切前端 UI 已落地；Space 级覆盖仍待）　·　关联 PRD：FR2-054　·　阶段：P5 `0.26.x`　·　前置：软删/清理实现（历史 [soft-delete-recycle](soft-delete-recycle.md) / [recycle-cleanup](recycle-cleanup.md) 仅作背景）；不依赖多角色，可与 FR2-010 并行
+> 状态：开发中（首切后端 + 二切前端 UI + Space 级覆盖/多 Space 调度已落地）　·　关联 PRD：FR2-054　·　阶段：P5 `0.26.x`　·　前置：软删/清理实现（历史 [soft-delete-recycle](soft-delete-recycle.md) / [recycle-cleanup](recycle-cleanup.md) 仅作背景）；不依赖多角色，可与 FR2-010 并行
 
 ## 0. 首切范围（本 PR 只做这些）
 
@@ -12,7 +12,7 @@
 | D | dry-run API：`POST /api/library/recycle/auto-cleanup/preview` 返回将清理数与缺失盘符 | ✅ |
 | E | 审计汇总 `recycle.auto_cleanup`（moved/failed/skipped）+ 单测 | ✅ |
 | F | 前端设置保留期 + 回收站到期提示 | ✅ 二切 |
-| G | Space 级覆盖（非仅全局默认） | 二切 |
+| G | Space 级覆盖（非仅全局默认）+ 多 Space 调度遍历 | ✅ |
 
 **首切建议**：无前端；验收靠单测 + dry-run/实跑 API。
 
@@ -41,7 +41,7 @@
 
 ## 3. 设计（怎么做）
 
-- settings：Space 覆盖 + 全局默认；解析失败回退默认。
+- settings：Space 覆盖键 `recycle_retention_days@<space_id>` / `recycle_auto_cleanup_enabled@<space_id>` + 全局默认；空/非法回退全局再默认；interval 仍全局。
 - `library`/`storage`：抽取「单条软删项清理」供手动与自动共用。
 - worker：`recycle.retention.tick` 周期入队（启动注册 + 可手动触发 dry-run）。
 - dry-run API：返回将清理的数量与缺失盘符列表，不改数据。
@@ -55,7 +55,7 @@
 - [x] 单测：到期选中、未到期跳过、缺路径跳过不硬删
 - [x] 文档：PRD→开发中、API/CHANGELOG/ARCHITECTURE
 - [x] 二切 UI：设置页保留期/开关/周期；回收站页策略摘要与行内到期提示
-- [ ] 二切：Space 级覆盖；多 Space 调度遍历
+- [x] 二切：Space 级覆盖（`key@space_id`）+ 多 Space 调度遍历
 ## 5. 验收标准
 
 - 将保留期设为 0 天且开关开：不自动清理。

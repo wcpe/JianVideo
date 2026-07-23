@@ -536,18 +536,11 @@ func run() int {
 	scanScheduler.Start()
 	defer scanScheduler.Stop()
 
-	// 回收站到期自动清理调度（FR2-054）：周期来自 settings；days=0 或开关关时 trigger 空跑。
-	// 复用 ScanScheduler 定时骨架；首切仅清理默认 Space（多 Space 遍历二切）。
+	// 回收站到期自动清理调度（FR2-054）：周期仍全局；每 Space 用 ForSpace 解析 days/enabled。
+	// 复用 ScanScheduler 定时骨架；遍历全部 Space，单 Space 失败不阻断其余。
 	recycleRetentionScheduler := library.NewScanScheduler(
 		settingsSvc.RecycleAutoCleanupInterval,
 		func() {
-			if !settingsSvc.RecycleAutoCleanupEnabled() {
-				return
-			}
-			days := settingsSvc.RecycleRetentionDays()
-			if days <= 0 {
-				return
-			}
 			raw, err := settingsSvc.Get(settings.KeyRecycleBinPaths)
 			if err != nil {
 				log.Printf("[WARN] 回收站自动清理读取路径配置失败: %v", err)
@@ -560,36 +553,78 @@ func run() int {
 					return
 				}
 			}
-			before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-			result, err := libSvc.AutoCleanupExpiredInSpace(models.DefaultSpaceID, drivePaths, before, 50)
-			if err != nil {
-				log.Printf("[WARN] 回收站自动清理失败: %v", err)
-				return
+			// 列出全部 Space；表不存在或查询失败时回退默认 Space，保证单 Space 模式仍可清理。
+			spaceIDs := []string{models.DefaultSpaceID}
+			if gormDB.Migrator().HasTable(&models.Space{}) {
+				var ids []string
+				if qerr := gormDB.Model(&models.Space{}).Order("id ASC").Pluck("id", &ids).Error; qerr != nil {
+					log.Printf("[WARN] 回收站自动清理枚举 Space 失败，回退默认: %v", qerr)
+				} else if len(ids) > 0 {
+					spaceIDs = ids
+				}
 			}
-			if result.Candidate > 0 {
-				log.Printf("[INFO] 回收站自动清理: candidate=%d moved=%d failed=%d skipped=%d",
-					result.Candidate, result.Moved, result.Failed, result.Skipped)
-			}
-			if auditSvc != nil && result.Candidate > 0 {
-				_ = auditSvc.Record(context.Background(), audit.EventInput{
-					Scope:        audit.ScopeSpace,
-					SpaceID:      models.DefaultSpaceID,
-					ActorType:    "system",
-					ActorID:      "recycle.retention.tick",
-					Action:       "recycle.auto_cleanup",
-					ResourceType: "recycle",
-					ResourceID:   models.DefaultSpaceID,
-					After: map[string]any{
-						"candidate": result.Candidate, "moved": result.Moved,
-						"failed": result.Failed, "skipped": result.Skipped,
-						"missing_drives": result.MissingDrives,
-					},
-				})
+			for _, spaceID := range spaceIDs {
+				if !settingsSvc.RecycleAutoCleanupEnabledForSpace(spaceID) {
+					continue
+				}
+				days := settingsSvc.RecycleRetentionDaysForSpace(spaceID)
+				if days <= 0 {
+					continue
+				}
+				before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+				result, err := libSvc.AutoCleanupExpiredInSpace(spaceID, drivePaths, before, 50)
+				if err != nil {
+					log.Printf("[WARN] 回收站自动清理失败: space=%s err=%v", spaceID, err)
+					continue
+				}
+				if result.Candidate > 0 {
+					log.Printf("[INFO] 回收站自动清理: space=%s candidate=%d moved=%d failed=%d skipped=%d",
+						spaceID, result.Candidate, result.Moved, result.Failed, result.Skipped)
+				}
+				if auditSvc != nil && result.Candidate > 0 {
+					_ = auditSvc.Record(context.Background(), audit.EventInput{
+						Scope:        audit.ScopeSpace,
+						SpaceID:      spaceID,
+						ActorType:    "system",
+						ActorID:      "recycle.retention.tick",
+						Action:       "recycle.auto_cleanup",
+						ResourceType: "recycle",
+						ResourceID:   spaceID,
+						After: map[string]any{
+							"candidate": result.Candidate, "moved": result.Moved,
+							"failed": result.Failed, "skipped": result.Skipped,
+							"missing_drives": result.MissingDrives,
+						},
+					})
+				}
 			}
 		},
 	)
 	recycleRetentionScheduler.Start()
 	defer recycleRetentionScheduler.Stop()
+
+	// 写回快照保留期清理（FR2-033）：固定 24h 周期；days=0 时 trigger 空跑。
+	// 与 recycle 调度并列注册，改动集中于此块，减少与 recycle 段落的合并冲突。
+	writebackSnapshotCleanupScheduler := library.NewScanScheduler(
+		func() time.Duration { return 24 * time.Hour },
+		func() {
+			days := settingsSvc.WritebackSnapshotRetentionDays()
+			if days <= 0 {
+				return
+			}
+			before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+			n, err := library.CleanupWritebackSnapshots(dataDir, before)
+			if err != nil {
+				log.Printf("[WARN] 写回快照清理失败: %v", err)
+				return
+			}
+			if n > 0 {
+				log.Printf("[INFO] 写回快照清理: removed=%d before=%s", n, before.UTC().Format(time.RFC3339))
+			}
+		},
+	)
+	writebackSnapshotCleanupScheduler.Start()
+	defer writebackSnapshotCleanupScheduler.Stop()
 
 	// 硬件加速能力服务（FR-49）：编码器实测唯一真源 + SQLite 缓存，后台预热。
 	capSvc := transcoder.NewCapabilityService(gormDB)
@@ -701,6 +736,8 @@ func run() int {
 	apiHandler := api.NewHandler(libSvc).WithVersion(version).WithSettings(settingsSvc).WithScanQueue(scanQueue).WithSettingsReload(func() {
 		scanScheduler.Reload()
 		recycleRetentionScheduler.Reload()
+		// writeback 快照清理周期固定 24h，Reload 仅占位；days 热读 settings 无需重启
+		writebackSnapshotCleanupScheduler.Reload()
 	}).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithRollback(rollbackSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc).WithAuth(authSvc).WithSpace(spaceSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，

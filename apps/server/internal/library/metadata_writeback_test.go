@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -129,7 +130,7 @@ func TestWritebackWorker_ToolFailurePreservesOriginal(t *testing.T) {
 
 	orig := writeImageMetadataFn
 	t.Cleanup(func() { writeImageMetadataFn = orig })
-	writeImageMetadataFn = func(ctx context.Context, sourcePath string, fields map[string]string) error {
+	writeImageMetadataFn = func(_ context.Context, _ string, _ map[string]string) error {
 		return errors.New("模拟 magick 失败")
 	}
 
@@ -160,7 +161,7 @@ func TestWritebackWorker_SuccessReplacesWithTool(t *testing.T) {
 
 	orig := writeImageMetadataFn
 	t.Cleanup(func() { writeImageMetadataFn = orig })
-	writeImageMetadataFn = func(ctx context.Context, sourcePath string, fields map[string]string) error {
+	writeImageMetadataFn = func(_ context.Context, sourcePath string, _ map[string]string) error {
 		return os.WriteFile(sourcePath, []byte("written-by-tool"), 0o600)
 	}
 
@@ -176,5 +177,80 @@ func TestWritebackWorker_SuccessReplacesWithTool(t *testing.T) {
 	raw, _ := os.ReadFile(filepath.FromSlash(mf.FilePath))
 	if string(raw) != "written-by-tool" {
 		t.Fatalf("成功后应被工具写入: %q", string(raw))
+	}
+}
+
+// placeWritebackSnapshotFile 在 writeback-snapshots 树内写入测试快照并设置 mtime。
+func placeWritebackSnapshotFile(t *testing.T, base, spaceID string, mediaID int64, name string, mtime time.Time) string {
+	t.Helper()
+	dir := filepath.Join(WritebackSnapshotDir(base), spaceID, strconv.FormatInt(mediaID, 10))
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("建快照目录: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("snapshot-body"), 0o600); err != nil {
+		t.Fatalf("写快照: %v", err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("设 mtime: %v", err)
+	}
+	return path
+}
+
+func TestCleanupWritebackSnapshots_RemovesExpired(t *testing.T) {
+	base := t.TempDir()
+	InitWritebackSnapshotDir(base)
+	oldPath := placeWritebackSnapshotFile(t, base, "space-a", 1, "old.jpg", time.Now().Add(-10*24*time.Hour))
+	freshPath := placeWritebackSnapshotFile(t, base, "space-a", 2, "fresh.jpg", time.Now().Add(-1*time.Hour))
+
+	before := time.Now().Add(-7 * 24 * time.Hour)
+	n, err := CleanupWritebackSnapshots(base, before)
+	if err != nil {
+		t.Fatalf("清理失败: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("应删除 1 个过期快照, got=%d", n)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("过期快照应已删除: %v", err)
+	}
+	if _, err := os.Stat(freshPath); err != nil {
+		t.Fatalf("未过期快照应保留: %v", err)
+	}
+}
+
+func TestCleanupWritebackSnapshots_KeepsRecent(t *testing.T) {
+	base := t.TempDir()
+	InitWritebackSnapshotDir(base)
+	path := placeWritebackSnapshotFile(t, base, "space-b", 9, "recent.jpg", time.Now().Add(-2*time.Hour))
+
+	before := time.Now().Add(-7 * 24 * time.Hour)
+	n, err := CleanupWritebackSnapshots(base, before)
+	if err != nil {
+		t.Fatalf("清理失败: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("未过期不应删除, removed=%d", n)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("未过期快照应存在: %v", err)
+	}
+}
+
+func TestCleanupWritebackSnapshots_ZeroDaysMeansNoOpViaCaller(t *testing.T) {
+	// 调用约定：days=0 时调度侧不调用；本测验证 before 零值时函数空跑。
+	base := t.TempDir()
+	InitWritebackSnapshotDir(base)
+	path := placeWritebackSnapshotFile(t, base, "space-c", 3, "keep.jpg", time.Now().Add(-30*24*time.Hour))
+
+	n, err := CleanupWritebackSnapshots(base, time.Time{})
+	if err != nil {
+		t.Fatalf("零 before 应无错: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("零 before 不应删除, removed=%d", n)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("零 before 应保留文件: %v", err)
 	}
 }

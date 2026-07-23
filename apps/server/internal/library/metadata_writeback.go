@@ -70,6 +70,80 @@ func InitWritebackSnapshotDir(baseDir string) {
 	}
 }
 
+// writebackPathWithin 判断 target 是否严格位于 root 边界内（不含 root 自身）。
+func writebackPathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || filepath.IsAbs(rel) {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// CleanupWritebackSnapshots 删除 writeback-snapshots 下 ModTime 早于 before 的普通文件。
+// 只操作 WritebackSnapshotDir(baseDir) 边界内路径；返回成功删除的文件数。
+// before 零值或 root 不存在时返回 0；跳过目录/符号链接；失败任务关联快照暂不特殊保留（首切按 mtime）。
+func CleanupWritebackSnapshots(baseDir string, before time.Time) (int, error) {
+	if before.IsZero() {
+		return 0, nil
+	}
+	root, err := filepath.Abs(filepath.Clean(WritebackSnapshotDir(baseDir)))
+	if err != nil {
+		return 0, fmt.Errorf("解析写回快照根目录失败: %w", err)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("读取写回快照根目录失败: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return 0, fmt.Errorf("写回快照根不是安全目录: %s", root)
+	}
+
+	removed := 0
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// 单路径错误跳过，不中断整轮
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		absPath, absErr := filepath.Abs(filepath.Clean(path))
+		if absErr != nil || !writebackPathWithin(root, absPath) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		// 仅删除普通文件，跳过符号链接等
+		fi, fiErr := d.Info()
+		if fiErr != nil {
+			return nil
+		}
+		if !fi.Mode().IsRegular() || fi.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if !fi.ModTime().Before(before) {
+			return nil
+		}
+		// #nosec G122 -- absPath 已由 writebackPathWithin 限定在 WritebackSnapshotDir 边界内。
+		if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return nil
+		}
+		removed++
+		return nil
+	})
+	if err != nil {
+		return removed, fmt.Errorf("遍历写回快照目录失败: %w", err)
+	}
+	return removed, nil
+}
+
 // isImageMediaPath 按扩展名判断是否为内置图片类型。
 func isImageMediaPath(path string) bool {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
@@ -146,11 +220,13 @@ func SnapshotMediaFileForWriteback(baseDir, spaceID string, mediaID int64, sourc
 }
 
 func copyFilePreserve(src, dst string) error {
+	// #nosec G304 -- src/dst 由 SnapshotMediaFileForWriteback 限定在媒体路径与 writeback-snapshots 边界内。
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("打开源文件失败: %w", err)
 	}
 	defer func() { _ = in.Close() }()
+	// #nosec G304 -- 同上，dst 位于 WritebackSnapshotDir 下。
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("创建快照失败: %w", err)

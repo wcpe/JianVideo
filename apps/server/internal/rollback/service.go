@@ -37,10 +37,10 @@ const (
 
 // 哨兵错误。
 var (
-	ErrEventNotFound     = errors.New("审计事件不存在")
-	ErrNotRollbackable   = errors.New("事件不可回滚")
-	ErrConfirmRequired   = errors.New("回滚需 confirm=true")
-	ErrSpaceMismatch     = errors.New("事件不属于当前 Space")
+	ErrEventNotFound   = errors.New("审计事件不存在")
+	ErrNotRollbackable = errors.New("事件不可回滚")
+	ErrConfirmRequired = errors.New("回滚需 confirm=true")
+	ErrSpaceMismatch   = errors.New("事件不属于当前 Space")
 )
 
 // ActionReverter 按 action 执行逆操作。
@@ -48,7 +48,7 @@ type ActionReverter interface {
 	// CanRollback 判断事件是否可回滚；不可回滚时返回 reason_key。
 	CanRollback(event *models.AuditEvent) (ok bool, reasonKey string)
 	// Apply 执行回滚；成功后由 Service 写 rollback.applied 审计。
-	Apply(ctx context.Context, event *models.AuditEvent) error
+	Apply(_ context.Context, event *models.AuditEvent) error
 }
 
 // Service 回滚中心。
@@ -92,9 +92,9 @@ func (s *Service) Register(action string, r ActionReverter) {
 
 // EventView 列表项：审计事件 + 可回滚标记。
 type EventView struct {
-	Event         models.AuditEvent `json:"event"`
-	Rollbackable  bool              `json:"rollbackable"`
-	ReasonKey     string            `json:"reason_key,omitempty"`
+	Event        models.AuditEvent `json:"event"`
+	Rollbackable bool              `json:"rollbackable"`
+	ReasonKey    string            `json:"reason_key,omitempty"`
 }
 
 // ListResult 分页结果。
@@ -286,7 +286,7 @@ func (r *settingsUpdatedReverter) CanRollback(event *models.AuditEvent) (bool, s
 	return true, ""
 }
 
-func (r *settingsUpdatedReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *settingsUpdatedReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	if r == nil || r.settings == nil {
 		return errors.New("设置服务未启用")
 	}
@@ -371,7 +371,7 @@ func (r *mediaDeletedReverter) CanRollback(event *models.AuditEvent) (bool, stri
 	return true, ""
 }
 
-func (r *mediaDeletedReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *mediaDeletedReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	if r == nil || r.library == nil {
 		return errors.New("媒体库服务未启用")
 	}
@@ -402,7 +402,7 @@ func (r *mediaRestoredReverter) CanRollback(event *models.AuditEvent) (bool, str
 	return true, ""
 }
 
-func (r *mediaRestoredReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *mediaRestoredReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	if r == nil || r.library == nil {
 		return errors.New("媒体库服务未启用")
 	}
@@ -468,7 +468,7 @@ func (r *mediaRenamedReverter) CanRollback(event *models.AuditEvent) (bool, stri
 	return true, ""
 }
 
-func (r *mediaRenamedReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *mediaRenamedReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	if r == nil || r.library == nil {
 		return errors.New("媒体库服务未启用")
 	}
@@ -534,7 +534,7 @@ func (r *mediaMovedReverter) CanRollback(event *models.AuditEvent) (bool, string
 	return true, ""
 }
 
-func (r *mediaMovedReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *mediaMovedReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	if r == nil || r.library == nil {
 		return errors.New("媒体库服务未启用")
 	}
@@ -595,7 +595,7 @@ func (r *writebackSucceededReverter) CanRollback(event *models.AuditEvent) (bool
 	return true, ""
 }
 
-func (r *writebackSucceededReverter) Apply(ctx context.Context, event *models.AuditEvent) error {
+func (r *writebackSucceededReverter) Apply(_ context.Context, event *models.AuditEvent) error {
 	snap, file, reason := writebackPathsFromEventDetailed(event)
 	if reason != "" {
 		return fmt.Errorf("%w: %s", ErrNotRollbackable, reason)

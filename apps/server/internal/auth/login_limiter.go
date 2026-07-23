@@ -11,9 +11,9 @@ import (
 
 // 登录防爆破默认策略（FR2-062）。
 const (
-	DefaultLoginMaxFailures   = 10
-	DefaultLoginWindow        = 10 * time.Minute
-	DefaultLoginLockDuration  = 15 * time.Minute
+	DefaultLoginMaxFailures  = 10
+	DefaultLoginWindow       = 10 * time.Minute
+	DefaultLoginLockDuration = 15 * time.Minute
 )
 
 // LoginLimiter 按「规范化用户名 + 客户端 IP」滑动窗口限流（进程内）。

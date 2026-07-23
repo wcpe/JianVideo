@@ -37,7 +37,7 @@ func RoleRank(role string) int {
 	}
 }
 
-// RoleAtLeast 判断 actual 是否不低于 min。
-func RoleAtLeast(actual, min string) bool {
-	return RoleRank(actual) >= RoleRank(min)
+// RoleAtLeast 判断 actual 是否不低于 minRole。
+func RoleAtLeast(actual, minRole string) bool {
+	return RoleRank(actual) >= RoleRank(minRole)
 }

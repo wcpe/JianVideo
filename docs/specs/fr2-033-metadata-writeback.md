@@ -1,6 +1,6 @@
 # 功能规格：系统内编辑元数据与危险回写
 
-> 状态：首切 + 前端二次确认已落地（快照保留期清理二切；视频写回二期）　·　关联 PRD：FR2-033　·　阶段：P5 `0.26.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md)、[fr2-040](fr2-040-audit-events.md)；权限见 FR2-010
+> 状态：首切 + 前端二次确认 + 快照保留期清理已落地（视频写回二期）　·　关联 PRD：FR2-033　·　阶段：P5 `0.26.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md)、[fr2-040](fr2-040-audit-events.md)；权限见 FR2-010
 
 ## 0. 首切范围（本 PR 只做这些）
 
@@ -53,7 +53,7 @@
 - [x] 单测：无 confirm 拒绝；视频拒绝；工具失败不损原文件；成功写回；API 202
 - [x] 文档同步（API / CHANGELOG / PRD / ARCHITECTURE）
 - [x] 二切：前端二次确认与任务状态（`MediaDetailPanel` + `enqueueMetadataWriteback`）
-- [ ] 二切：快照保留期清理
+- [x] 二切：快照保留期清理（`writeback_snapshot_retention_days` 默认 7；`CleanupWritebackSnapshots`；24h 调度）
 - [ ] 二期：视频嵌入写回
 
 ## 5. 验收标准

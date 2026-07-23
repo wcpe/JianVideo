@@ -267,7 +267,9 @@ export default function AuditEventsPage() {
                     </Table.Td>
                     <Table.Td>{resourceLabel(event)}</Table.Td>
                     <Table.Td>
-                      <Badge color={event.scope === 'system' ? 'gray' : 'blue'}>{event.scope}</Badge>
+                      <Badge color={event.scope === 'system' ? 'gray' : 'blue'}>
+                        {event.scope}
+                      </Badge>
                     </Table.Td>
                     <Table.Td>
                       {event.rollbackable ? (
@@ -491,7 +493,8 @@ export default function AuditEventsPage() {
         {confirmTarget && (
           <Stack gap="sm">
             <Alert color="orange" icon={<IconAlertCircle size={16} />}>
-              将对该事件执行逆操作，可能改动设置、媒体库索引或磁盘文件。请确认 before/after 摘要后继续。
+              将对该事件执行逆操作，可能改动设置、媒体库索引或磁盘文件。请确认 before/after
+              摘要后继续。
             </Alert>
             <Text size="sm">
               事件 #{confirmTarget.id} · <Code>{confirmTarget.action}</Code>

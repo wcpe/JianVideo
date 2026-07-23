@@ -74,8 +74,9 @@ test.describe('JianVideo 浏览器端到端测试', () => {
     await page.goto('/system?tab=settings');
 
     await expect(page.getByRole('heading', { name: '存储与 Space' })).toBeVisible();
-    await expect(page.getByText('默认 Space')).toBeVisible();
-    await expect(page.getByText('space-default')).toBeVisible();
+    // 设置页多处展示 space-default（存储卡 Code、Space 表、成员 Select），用 first 避免 strict 歧义
+    await expect(page.getByText('默认 Space').first()).toBeVisible();
+    await expect(page.locator('code').filter({ hasText: 'space-default' }).first()).toBeVisible();
     await expect(page.getByText(/\.tmp[\\/]e2e-run[\\/]e2e\.db/).first()).toBeVisible();
 
     await page.getByRole('link', { name: '管理媒体库目录' }).click();

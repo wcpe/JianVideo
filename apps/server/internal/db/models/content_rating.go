@@ -67,9 +67,9 @@ func ContentRatingsAtMost(maxRating string) []string {
 // ContentVisible 判断 mediaRating 对 maxRating 是否可见。
 // maxRating 空表示无上限（全可见）；media 空/UNRATED 默认可见。
 func ContentVisible(mediaRating, maxRating string) bool {
-	max := strings.TrimSpace(maxRating)
-	if max == "" {
+	limit := strings.TrimSpace(maxRating)
+	if limit == "" {
 		return true
 	}
-	return ContentRatingRank(mediaRating) <= ContentRatingRank(max)
+	return ContentRatingRank(mediaRating) <= ContentRatingRank(limit)
 }

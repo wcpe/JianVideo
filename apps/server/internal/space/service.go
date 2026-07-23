@@ -14,12 +14,13 @@ import (
 
 // 哨兵错误。
 var (
-	ErrSpaceNotFound     = errors.New("Space 不存在")
-	ErrNotMember         = errors.New("不是 Space 成员")
-	ErrForbidden         = errors.New("权限不足")
-	ErrInvalidRole       = errors.New("角色无效")
-	ErrUserNotFound      = errors.New("用户不存在")
-	ErrCannotRemoveOwner = errors.New("不能移除 Space owner 成员行")
+	ErrSpaceNotFound        = errors.New("space 不存在")
+	ErrNotMember            = errors.New("不是 space 成员")
+	ErrForbidden            = errors.New("权限不足")
+	ErrInvalidRole          = errors.New("角色无效")
+	ErrUserNotFound         = errors.New("用户不存在")
+	ErrCannotRemoveOwner    = errors.New("不能移除 space owner 成员行")
+	ErrCannotTransferToSelf = errors.New("不能转让给自己")
 )
 
 // Service Space 成员服务。
@@ -101,7 +102,7 @@ func (s *Service) CreateSpace(id, name string, ownerUserID int64) (*models.Space
 		return nil, fmt.Errorf("id 与 name 不能为空")
 	}
 	if !validSpaceID(id) {
-		return nil, fmt.Errorf("Space ID 不合法")
+		return nil, fmt.Errorf("space id 不合法")
 	}
 	now := time.Now()
 	sp := models.Space{ID: id, Name: name, OwnerUserID: ownerUserID, CreatedAt: now, UpdatedAt: now}
@@ -152,6 +153,75 @@ func (s *Service) AddMember(spaceID string, userID int64, role string) (created 
 	return false, s.db.Model(&models.SpaceMember{}).
 		Where("space_id = ? AND user_id = ?", spaceID, userID).
 		Updates(map[string]any{"role": role, "updated_at": now}).Error
+}
+
+// TransferOwner 将 space 所有权从 fromUserID 转给 toUserID（须已是成员）。
+// 单事务：spaces.owner_user_id=to；旧 owner 行 role→editor；新 owner 行 role→owner。
+// 禁止转给自己；to 须 active 成员；from 须为当前 owner。
+func (s *Service) TransferOwner(spaceID string, fromUserID, toUserID int64) error {
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" {
+		spaceID = models.DefaultSpaceID
+	}
+	if fromUserID <= 0 || toUserID <= 0 {
+		return fmt.Errorf("用户 ID 无效")
+	}
+	if fromUserID == toUserID {
+		return ErrCannotTransferToSelf
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var spaces []models.Space
+		if err := tx.Where("id = ?", spaceID).Limit(1).Find(&spaces).Error; err != nil {
+			return err
+		}
+		if len(spaces) == 0 {
+			return ErrSpaceNotFound
+		}
+		if spaces[0].OwnerUserID != fromUserID {
+			return ErrForbidden
+		}
+
+		// 接收方须已是成员（active 成员行）。
+		var toRows []models.SpaceMember
+		if err := tx.Where("space_id = ? AND user_id = ?", spaceID, toUserID).Limit(1).Find(&toRows).Error; err != nil {
+			return err
+		}
+		if len(toRows) == 0 {
+			return ErrNotMember
+		}
+
+		now := time.Now()
+		if err := tx.Model(&models.Space{}).Where("id = ?", spaceID).
+			Updates(map[string]any{"owner_user_id": toUserID, "updated_at": now}).Error; err != nil {
+			return err
+		}
+
+		// 旧 owner → editor（无成员行时补写，兼容半迁移）。
+		var fromRows []models.SpaceMember
+		if err := tx.Where("space_id = ? AND user_id = ?", spaceID, fromUserID).Limit(1).Find(&fromRows).Error; err != nil {
+			return err
+		}
+		if len(fromRows) == 0 {
+			if err := tx.Create(&models.SpaceMember{
+				SpaceID: spaceID, UserID: fromUserID, Role: models.SpaceRoleEditor,
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Model(&models.SpaceMember{}).
+				Where("space_id = ? AND user_id = ?", spaceID, fromUserID).
+				Updates(map[string]any{"role": models.SpaceRoleEditor, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+
+		// 新 owner → owner
+		return tx.Model(&models.SpaceMember{}).
+			Where("space_id = ? AND user_id = ?", spaceID, toUserID).
+			Updates(map[string]any{"role": models.SpaceRoleOwner, "updated_at": now}).Error
+	})
 }
 
 // RemoveMember 移除成员（不可移除 owner 行）。
