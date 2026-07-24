@@ -1,6 +1,6 @@
 # 功能规格：分享增强（P5）
 
-> 状态：开发中（首切后端 + 二切前端 UI + accessed 采样已落地）　·　关联 PRD：FR2-055　·　阶段：P5 `0.26.x`　·　背景：历史 [share-links](share-links.md)、[share-enhance](share-enhance.md)（FR-43/FR-78，不可直接当 v2 排期）　·　前置：FR2-010 成员守卫已落地
+> 状态：已交付@v0.26.0　·　关联 PRD：FR2-055　·　阶段：P5 `0.26.x`　·　背景：历史 [share-links](share-links.md)、[share-enhance](share-enhance.md)（FR-43/FR-78，不可直接当 v2 排期）　·　前置：FR2-010 成员守卫已落地
 
 ## 0. 首切范围（本 PR 只做这些）
 

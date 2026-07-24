@@ -1,6 +1,6 @@
 # 功能规格：Space、用户与审计边界
 
-> 状态：后置切片 owner 转让 + RequireSpaceRole 细挂已完成（OpenAPI 大迁入仍可仅文档）　·　关联 PRD：FR2-010　·　阶段：P5 `0.26.x`　·　决策：[ADR-0056](../adr/0056-space-permission-model.md)　·　前置：[fr2-007](fr2-007-storage-index-space.md)、[fr2-040](fr2-040-audit-events.md)
+> 状态：已交付@v0.26.0（OpenAPI 大迁入仍可仅文档）　·　关联 PRD：FR2-010　·　阶段：P5 `0.26.x`　·　决策：[ADR-0056](../adr/0056-space-permission-model.md)　·　前置：[fr2-007](fr2-007-storage-index-space.md)、[fr2-040](fr2-040-audit-events.md)
 
 ## 0. 首切范围（本 PR 只做这些）
 

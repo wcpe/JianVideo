@@ -1,6 +1,6 @@
 # 功能规格：操作可回滚中心
 
-> 状态：后端 + UI 时间线已落地　·　关联 PRD：FR2-041　·　阶段：P5 `0.26.x`　·　前置：[fr2-040](fr2-040-audit-events.md)；写回恢复依赖 [fr2-033](fr2-033-metadata-writeback.md)
+> 状态：已交付@v0.26.0　·　关联 PRD：FR2-041　·　阶段：P5 `0.26.x`　·　前置：[fr2-040](fr2-040-audit-events.md)；写回恢复依赖 [fr2-033](fr2-033-metadata-writeback.md)
 
 ## 0. 首切范围（本 PR 只做这些）
 

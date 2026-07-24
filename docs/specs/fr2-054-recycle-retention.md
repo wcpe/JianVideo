@@ -1,6 +1,6 @@
 # 功能规格：回收站保留期与自动清理
 
-> 状态：开发中（首切后端 + 二切前端 UI + Space 级覆盖/多 Space 调度已落地）　·　关联 PRD：FR2-054　·　阶段：P5 `0.26.x`　·　前置：软删/清理实现（历史 [soft-delete-recycle](soft-delete-recycle.md) / [recycle-cleanup](recycle-cleanup.md) 仅作背景）；不依赖多角色，可与 FR2-010 并行
+> 状态：已交付@v0.26.0　·　关联 PRD：FR2-054　·　阶段：P5 `0.26.x`　·　前置：软删/清理实现（历史 [soft-delete-recycle](soft-delete-recycle.md) / [recycle-cleanup](recycle-cleanup.md) 仅作背景）；不依赖多角色，可与 FR2-010 并行
 
 ## 0. 首切范围（本 PR 只做这些）
 

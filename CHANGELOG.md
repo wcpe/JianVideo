@@ -8,6 +8,12 @@
 
 ### 变更
 
+### 修复
+
+## 0.26.0（2026-07-24）
+
+### 变更
+
 - **版本渠道策略（ADR-0065）**：`1.0.0` 之前所有公开版本一律为正式版（只推 `v0.Y.Z`）；自 `1.0.0` 起才区分 RC（`X.Y.Z-rc.N`）与 GA（稳定 `X.Y.Z`）。已同步 ROADMAP、CONTRIBUTING、PRD、ARCHITECTURE、FR2-014 规格与范围规则。
 - **FR2-010 Space/用户/成员首切**：`space_members` 角色表（owner/editor/viewer）；Space 资源守卫改为成员校验（读≥viewer、写≥editor）；默认 Space owner 可创建/禁用用户；禁用后拒绝登录且已持 JWT 返回 `401 USER_DISABLED`；Space 列表/创建/成员管理 API；审计事件 `user.*` / `space.*`。
 - **FR2-054 回收站保留期首切**：设置键 `recycle_retention_days` / `recycle_auto_cleanup_enabled` / `recycle_auto_cleanup_interval_sec`；有界到期自动清理（缺盘符跳过单条）；`POST .../auto-cleanup/preview|run`；启动调度 tick + 审计 `recycle.auto_cleanup`。
@@ -34,6 +40,8 @@
 - **FR2-041 二切（UI 时间线）**：审计页「可回滚操作」列表（`GET /api/rollback/events`）；`rollbackable` / 稳定 `reason_key` 中文提示；二次确认 Modal 后 `POST /api/rollback/apply`（`confirm=true`）。
 
 ### 修复
+
+- playback/api/tools/thumbnail/smb/models 覆盖率裕量用例；fr2-035 pause 偶发加固。
 
 ## 0.25.0（2026-07-23）
 
