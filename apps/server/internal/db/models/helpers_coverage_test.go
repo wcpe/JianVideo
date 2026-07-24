@@ -112,10 +112,10 @@ func TestMediaSubtitleTrackBeforeSave(t *testing.T) {
 		t.Fatal("内嵌 StreamIndex<0 应失败")
 	}
 
-	// 外挂：合法
+	// 外挂：合法（用正斜杠避免 Linux filepath.ToSlash 不转反斜杠）
 	side := &MediaSubtitleTrack{
 		ID: "side1", SpaceID: "space-a", MediaID: 9, Source: MediaSubtitleSourceSidecar,
-		Format: "ass", StreamIndex: -1, SourceRef: `Subs\CN.ASS`,
+		Format: "ass", StreamIndex: -1, SourceRef: "Subs/CN.ASS",
 	}
 	if err := side.BeforeSave(nil); err != nil {
 		t.Fatalf("外挂合法应通过: %v", err)
@@ -178,7 +178,7 @@ func TestSafeSubtitleTokenAndNormalizeRef(t *testing.T) {
 	if !safeSubtitleToken("srt") || !safeSubtitleToken("Up_1-2") {
 		t.Fatal("合法 token 应通过")
 	}
-	if normalizeSubtitleSourceRef(` A\B.SRT `) != "a/b.srt" {
-		t.Fatalf("normalize 异常: %q", normalizeSubtitleSourceRef(` A\B.SRT `))
+	if normalizeSubtitleSourceRef(" A/B.SRT ") != "a/b.srt" {
+		t.Fatalf("normalize 异常: %q", normalizeSubtitleSourceRef(" A/B.SRT "))
 	}
 }
