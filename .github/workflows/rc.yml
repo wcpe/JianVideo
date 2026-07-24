@@ -39,6 +39,12 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]] || { echo "错误：RC 的 VERSION 必须形如 X.Y.Z-rc.N。" >&2; exit 1; }
           [ "$REF_NAME" = "v$version" ] || { echo "错误：推送的 tag（$REF_NAME）必须等于 v$version。" >&2; exit 1; }
           source_sha="$(git rev-parse HEAD)"
+          # RC tag 必须落在 main 历史（与正式发布同一发布分支约束）。
+          git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null || git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$source_sha" origin/main; then
+            echo "错误：RC tag 的提交 $source_sha 不在 origin/main 历史中。请先把可发布提交合入 main，再在 main 上打 tag。" >&2
+            exit 1
+          fi
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"

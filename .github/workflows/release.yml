@@ -41,6 +41,13 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "错误：GA 的 VERSION 必须是稳定版 X.Y.Z。" >&2; exit 1; }
           [ "$REF_NAME" = "v$version" ] || { echo "错误：推送的 tag（$REF_NAME）必须等于 v$version。" >&2; exit 1; }
           source_sha="$(git rev-parse HEAD)"
+          # 正式 tag 必须落在 main 历史（FR2-014：main 唯一发布分支）。
+          # 浅克隆/缺 ref 时补抓 main；若不在 main 可达历史则拒绝发布。
+          git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null || git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$source_sha" origin/main; then
+            echo "错误：正式 tag 的提交 $source_sha 不在 origin/main 历史中。请先把可发布提交合入 main，再在 main 上打 tag。" >&2
+            exit 1
+          fi
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"

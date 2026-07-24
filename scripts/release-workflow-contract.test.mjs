@@ -50,6 +50,10 @@ test('实验构建只由 dev push 触发且没有发布权限', () => {
   assert.doesNotMatch(workflows.experimental, /contents: write/)
   assert.doesNotMatch(workflows.experimental, /publish-release\.sh/)
   assert.match(workflows.experimental, /needs: \[prepare, quality\]/)
+  // 稳定 tag 上无新提交时成功跳过，不把流水线打红
+  assert.match(workflows.experimental, /should_build/)
+  assert.match(workflows.experimental, /code" -eq 3/)
+  assert.match(workflows.experimental, /needs\.prepare\.outputs\.should_build == 'true'/)
 })
 
 test('RC 与 GA 由推送 tag 触发，并复用质量门与构建', () => {
@@ -64,6 +68,9 @@ test('RC 与 GA 由推送 tag 触发，并复用质量门与构建', () => {
     assert.match(content, /needs: \[prepare, quality, build\]/)
     assert.match(content, /env:\n\s+REF_NAME: \$\{\{ github\.ref_name \}\}/)
     assert.match(content, /\[ "\$REF_NAME" = "v\$version" \]/)
+    // 正式/候选 tag 必须落在 main 历史
+    assert.match(content, /merge-base --is-ancestor "\$source_sha" origin\/main/)
+    assert.match(content, /不在 origin\/main 历史中/)
   }
 })
 

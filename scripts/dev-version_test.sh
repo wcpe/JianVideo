@@ -30,9 +30,26 @@ assert_fails() {
   fi
 }
 
+assert_exits() {
+  local name="$1"
+  local expected_code="$2"
+  shift 2
+  set +e
+  "$@" >/dev/null 2>&1
+  local code=$?
+  set -e
+  if [ "$code" -eq "$expected_code" ]; then
+    echo "通过：$name（exit $expected_code）"
+    passed=$((passed + 1))
+  else
+    echo "失败：$name，期望 exit $expected_code，实际 $code"
+    failed=$((failed + 1))
+  fi
+}
+
 assert_equal "按稳定 tag 与提交距离生成版本" "0.24.0-dev.3.gabc1234" "$(bash "$script" v0.24.0 3 AbC1234)"
 assert_equal "提交距离变化会改变实验序号" "1.0.0-dev.12.g0011223" "$(bash "$script" v1.0.0 12 0011223)"
-assert_fails "提交距离为零时跳过" bash "$script" v0.24.0 0 abc1234
+assert_exits "提交距离为零时以 3 跳过" 3 bash "$script" v0.24.0 0 abc1234
 assert_fails "拒绝 RC tag 作为稳定基线" bash "$script" v1.0.0-rc.1 2 abc1234
 assert_fails "拒绝非数字提交距离" bash "$script" v1.0.0 two abc1234
 assert_fails "拒绝非法 SHA" bash "$script" v1.0.0 2 xyz

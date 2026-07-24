@@ -20,6 +20,7 @@ jobs:
       source_sha: ${{ steps.meta.outputs.source_sha }}
       version: ${{ steps.meta.outputs.version }}
       artifact_prefix: ${{ steps.meta.outputs.artifact_prefix }}
+      should_build: ${{ steps.meta.outputs.should_build }}
     steps:
       - name: 检出完整历史
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -31,8 +32,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(bash scripts/dev-version.sh)"
+          set +e
+          version="$(bash scripts/dev-version.sh 2>/tmp/dev-version.err)"
+          code=$?
+          set -e
+          if [ -f /tmp/dev-version.err ]; then
+            cat /tmp/dev-version.err >&2 || true
+          fi
+          if [ "$code" -eq 3 ]; then
+            echo "当前提交已是最新稳定 tag，无需实验构建。"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "artifact_prefix=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
           short_sha="$(git rev-parse --short=7 HEAD)"
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
           echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "artifact_prefix=jianvideo-experimental-$short_sha" >> "$GITHUB_OUTPUT"
@@ -40,6 +59,7 @@ jobs:
   quality:
     name: 复用四项质量门
     needs: prepare
+    if: ${{ needs.prepare.outputs.should_build == 'true' }}
     uses: ./.github/workflows/ci.yml
     with:
       source_sha: ${{ needs.prepare.outputs.source_sha }}
@@ -47,6 +67,7 @@ jobs:
   build:
     name: 构建实验工件
     needs: [prepare, quality]
+    if: ${{ needs.prepare.outputs.should_build == 'true' }}
     uses: ./.github/workflows/build.yml
     with:
       source_sha: ${{ needs.prepare.outputs.source_sha }}

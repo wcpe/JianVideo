@@ -25,7 +25,12 @@ else
   count="$(git rev-list --count HEAD)"
 fi
 [[ "$count" =~ ^[0-9]+$ ]] || { echo "错误：提交距离必须是非负整数。" >&2; exit 2; }
-[ "$count" -gt 0 ] || { echo "错误：稳定 tag 之后没有新提交，跳过实验构建。" >&2; exit 1; }
+# 稳定 tag 本身上没有新提交时，不是故障：直接跳过实验版本号生成。
+# 调用方（experimental.yml）应把 exit 3 当作「无实验可构建」并成功结束。
+if [ "$count" -eq 0 ]; then
+  echo "提示：稳定 tag 之后没有新提交，跳过实验构建。" >&2
+  exit 3
+fi
 
 sha="${3:-$(git rev-parse --short=7 HEAD)}"
 [[ "$sha" =~ ^[0-9a-fA-F]{7,40}$ ]] || { echo "错误：提交 SHA 格式无效。" >&2; exit 2; }
