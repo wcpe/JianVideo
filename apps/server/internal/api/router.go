@@ -35,6 +35,22 @@ func parseMediaID(c *gin.Context) (int64, bool) {
 // pbSvc 可选：传入时同时注册播放相关路由（流式 / Seek / 进度 / 缓冲）。
 // hlsMgr 可选：传入时注册 HLS 切片路由。
 func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
+	// AI 可替换管线（FR2-011）
+	aiGroup := r.Group("/api/ai")
+	{
+		aiGroup.GET("/status", h.AIStatus)
+		aiGroup.GET("/models", h.ListAIModels)
+		aiGroup.GET("/nodes", h.ListAINodes)
+		aiGroup.POST("/infer", h.EnqueueAIInfer)
+		aiGroup.GET("/results", h.ListAIResults)
+		aiGroup.POST("/results/rebuild", h.RebuildAIResults)
+		aiGroup.GET("/search", h.SemanticSearchAI)
+		aiGroup.POST("/search", h.SemanticSearchAI)
+		aiGroup.POST("/results/:id/confirm", h.ConfirmAIResult)
+		aiGroup.POST("/results/:id/reject", h.RejectAIResult)
+		aiGroup.GET("/duplicates", h.ListAIDuplicates)
+	}
+
 	mediaTypes := r.Group("/api/media-types")
 	{
 		mediaTypes.GET("", h.ListMediaTypes)

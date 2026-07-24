@@ -211,6 +211,38 @@ describe('DuplicatesPage', () => {
     expect(await screen.findByText('相似A.jpg')).toBeVisible();
   });
 
+  it('AI 相似 Tab 列出候选组并展示相似度（FR2-012）', async () => {
+    server.use(
+      http.get('*/api/library/duplicates/exact', () => HttpResponse.json({ groups: [] })),
+      http.get('*/api/ai/duplicates', () =>
+        HttpResponse.json({
+          items: [{ media_ids: [41, 42], score: 0.97, model_id: 'stub-embed-v1' }],
+        }),
+      ),
+      http.get('*/api/library/media/41', () => HttpResponse.json(makeMedia(41, 'AI候选A.jpg'))),
+      http.get('*/api/library/media/42', () => HttpResponse.json(makeMedia(42, 'AI候选B.jpg'))),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: 'AI 相似' }));
+    expect(await screen.findByText('AI候选A.jpg')).toBeVisible();
+    expect(screen.getByText('AI候选B.jpg')).toBeVisible();
+    expect(screen.getByText(/相似度 97/)).toBeVisible();
+  });
+
+  it('AI 未启用时展示关闭提示（FR2-012）', async () => {
+    server.use(
+      http.get('*/api/library/duplicates/exact', () => HttpResponse.json({ groups: [] })),
+      http.get('*/api/ai/duplicates', () =>
+        HttpResponse.json({ code: 'AI_DISABLED', message: 'AI 能力未启用' }, { status: 503 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: 'AI 相似' }));
+    expect(await screen.findByText(/AI 未启用/)).toBeVisible();
+  });
+
   it('点击回填精确哈希调用任务端点并保留相似扫描入口', async () => {
     let backfillCalled = false;
     let similarScanCalled = false;

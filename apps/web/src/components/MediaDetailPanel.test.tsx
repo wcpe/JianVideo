@@ -23,6 +23,9 @@ const mockEnqueueMetadataWriteback = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ status: 'pending', task_id: 'wb-1' }),
 );
 const mockUpdateMediaContentRating = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockListAIResults = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockConfirmAIResult = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockRejectAIResult = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/api/library', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/library')>();
   return {
@@ -37,6 +40,11 @@ vi.mock('@/api/library', async (importOriginal) => {
     updateMediaContentRating: mockUpdateMediaContentRating,
   };
 });
+vi.mock('@/api/ai', () => ({
+  listAIResults: mockListAIResults,
+  confirmAIResult: mockConfirmAIResult,
+  rejectAIResult: mockRejectAIResult,
+}));
 // 封面任务轮询与写回状态依赖 getTask，必须桩掉以免打真实 /api/tasks
 vi.mock('@/api/tasks', () => ({ getTask: mockGetTask }));
 const mockNotificationShow = vi.hoisted(() => vi.fn());
@@ -101,11 +109,51 @@ describe('MediaDetailPanel 文件详情面板（FR-34）', () => {
     mockGetMediaCovers.mockResolvedValue({ cover: null, candidates: [] });
     mockGenerateMediaCovers.mockResolvedValue({ status: 'pending', task_id: 1 });
     mockGetTask.mockResolvedValue({ status: 'succeeded', error: null });
+    mockListAIResults.mockResolvedValue([]);
+    mockConfirmAIResult.mockResolvedValue(undefined);
+    mockRejectAIResult.mockResolvedValue(undefined);
   });
 
   it('关闭态（initialIndex=null）不渲染对话框', () => {
     renderPanel([mediaFile({})], null);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('展示 AI 结果并可确认/驳回（FR2-012）', async () => {
+    mockListAIResults.mockResolvedValueOnce([
+      {
+        id: 101,
+        space_id: 's1',
+        media_id: 7,
+        task_type: 'ocr',
+        model_id: 'stub-ocr-v1',
+        model_version: '1.0.0',
+        node_id: 'stub-local',
+        batch_id: 'b1',
+        payload_json: '{"text":"hello"}',
+        manual: false,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    const user = userEvent.setup();
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg', format: 'jpg' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('ocr')).toBeVisible();
+    expect(within(dialog).getByText(/hello/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: '确认' }));
+    expect(mockConfirmAIResult).toHaveBeenCalledWith(101);
+    await within(dialog).findByText('已确认');
+  });
+
+  it('AI 关闭时仅提示不阻断详情（FR2-012）', async () => {
+    mockListAIResults.mockRejectedValueOnce({
+      response: { data: { code: 'AI_DISABLED', message: 'AI 能力未启用' } },
+    });
+    renderPanel([mediaFile({ id: 7, file_name: '风景.jpg', format: 'jpg' })], 0);
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('AI 未启用')).toBeVisible();
+    expect(within(dialog).getByRole('link', { name: /下载原文件/ })).toBeVisible();
   });
 
   it('图片：左侧渲染 raw 预览，右侧提供下载原文件入口', async () => {

@@ -217,6 +217,11 @@ var registry = []Definition{
 		Validate: validatePositiveIntArrayJSON,
 	},
 	{
+		Key: KeyAIEnabled, Label: "AI 能力总开关", Description: "启用可替换 AI 推理管线；未配置模型/节点时仍拒绝入队。",
+		Layer: LayerRuntime, ValueType: ValueBool, DefaultValue: "0", HotApply: true, Consumer: "ai",
+		Validate: validateBool,
+	},
+	{
 		Key: "server_port", Label: "监听端口", Description: "服务启动时确定的 HTTP 监听端口，运行期不可修改。",
 		Layer: LayerStartup, ValueType: ValueInt, DefaultValue: "", HotApply: false, Consumer: "config",
 		Validate: validatePort,

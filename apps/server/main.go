@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wcpe/JianVideo/config"
+	"github.com/wcpe/JianVideo/internal/ai"
 	"github.com/wcpe/JianVideo/internal/api"
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/auth"
@@ -489,6 +490,13 @@ func run() int {
 	}
 	taskWorkers := tasksvc.NewWorkerRegistry(taskSvc)
 	registerTaskWorkers(taskWorkers, taskSvc, libSvc, dataDir)
+	aiSvc := ai.NewService(ai.NewGormRepository(gormDB), settingsSvc).WithTasks(taskSvc).WithAudit(auditSvc)
+	// 开发/单测友好：注册 stub 节点实现（表内节点由 Seed 或管理 API 写入；此处仅内存 handler）
+	aiSvc.RegisterNode(ai.NewStubNode("stub-local"))
+	if err := ai.RegisterAIWorker(taskWorkers, aiSvc); err != nil {
+		log.Printf("[ERROR] 注册 AI worker 失败: %v", err)
+		return 1
+	}
 	libSvc.WithScanChangeHook(libSvc.MetadataScanChangeHook(taskSvc, taskWorkers.Wake))
 	libSvc.WithInferenceCompensation(api.NewInferenceCompensationEnqueuer(taskSvc), taskWorkers.Wake)
 	if err := cacheSvc.RegisterWorkers(taskWorkers); err != nil {
@@ -738,7 +746,7 @@ func run() int {
 		recycleRetentionScheduler.Reload()
 		// writeback 快照清理周期固定 24h，Reload 仅占位；days 热读 settings 无需重启
 		writebackSnapshotCleanupScheduler.Reload()
-	}).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithRollback(rollbackSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc).WithAuth(authSvc).WithSpace(spaceSvc)
+	}).WithShareService(shareSvc).WithCapabilityService(capSvc).WithPlayback(pbSvc).WithStartTime(startTime).WithDBPath(cfg.DBPath).WithHealthService(healthSvc).WithTranscodePresets(presetStore, nil).WithHLSPreview(hlsPreview).WithHLSABR(abrService).WithHLSPreSlice(hlsDir, hlsMgr).WithDebugLogApply(dbLogger.SetEnabled).WithMetrics(metricsSampler).WithAudit(auditSvc).WithRollback(rollbackSvc).WithTasks(taskSvc).WithTaskWorkers(taskWorkers).WithTools(toolsManager).WithCache(cacheSvc).WithThumbnail(thumbnailSvc).WithTimelinePreview(timelineGateway).WithSubtitle(subtitleSvc).WithAuth(authSvc).WithSpace(spaceSvc).WithAI(aiSvc)
 
 	// 启动文件监听（FR-03）：对所有已注册本地目录开启 fsnotify 实时监听，
 	// 新增/删除文件 500ms 去抖后自动入库/移除；失败仅记日志，不阻断启动。

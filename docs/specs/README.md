@@ -96,6 +96,15 @@
 
 推荐依赖序：`010 → (062 ∥ 055 ∥ 051)`；`054` 可与 `010` 并行；`033 → 041`。
 
+## P6：`0.27.x` AI 索引、搜索与审核
+
+> 阶段目标见 [`docs/ROADMAP.md`](../ROADMAP.md) §11；契约见 [ADR-0059](../adr/0059-ai-pipeline-vector-index.md)。
+
+- [`fr2-011-ai-pipeline.md`](fr2-011-ai-pipeline.md)：AI 可替换管线——模型注册、推理节点、结果表、默认关闭门、重建（FR2-011）。
+- [`fr2-012-ai-search-review.md`](fr2-012-ai-search-review.md)：向量语义搜索、结构化 AI 能力、AI 去重与审核流（FR2-012）。
+
+推荐依赖序：`011 → 012`（012 的 embedding/搜索/审核建立在 011 管线与关闭门之上）。
+
 ## 怎么用
 
 1. 复制 `_template.md` 到 `docs/specs/<feature>.md`。

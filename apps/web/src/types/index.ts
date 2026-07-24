@@ -259,6 +259,29 @@ export interface FileHashBackfillResponse {
   task_id: string;
 }
 
+/** AI 结果行（FR2-011 / FR2-012） */
+export interface AIResult {
+  id: number;
+  space_id: string;
+  media_id: number;
+  task_type: string;
+  model_id: string;
+  model_version: string;
+  node_id: string;
+  batch_id: string;
+  payload_json: string;
+  manual: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** AI 相似候选组（FR2-012）：仅 media id + 相似度，需再解析媒体摘要 */
+export interface AIDuplicateGroup {
+  media_ids: number[];
+  score: number;
+  model_id: string;
+}
+
 /** 标签（FR-41） */
 export interface Tag {
   id: number;

@@ -600,6 +600,37 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.media_inference_enabled).toBe('0');
   });
 
+  it('展示 AI 能力总开关默认关闭并保存开启状态（FR2-011）', async () => {
+    const user = userEvent.setup();
+    let putBody: { settings: Record<string, string> } | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            scan_interval: '3600',
+            recycle_bin_paths: '{"D":"D:/.recycle"}',
+            ai_enabled: '0',
+          },
+        }),
+      ),
+      http.put('*/api/settings', async ({ request }) => {
+        putBody = (await request.json()) as { settings: Record<string, string> };
+        return HttpResponse.json({ settings: putBody.settings });
+      }),
+    );
+
+    renderPage();
+    const aiSwitch = await screen.findByRole('switch', { name: 'AI 能力总开关' });
+    expect(aiSwitch).not.toBeChecked();
+    expect(screen.getByRole('heading', { name: 'AI' })).toBeVisible();
+
+    await user.click(aiSwitch);
+    await user.click(screen.getByRole('button', { name: '保存设置' }));
+
+    await waitFor(() => expect(putBody).not.toBeNull());
+    expect(putBody!.settings.ai_enabled).toBe('1');
+  });
+
   it('兼容合法布尔大小写并提供按媒体库关闭入口', async () => {
     const user = userEvent.setup();
     let putBody: { settings: Record<string, string> } | null = null;

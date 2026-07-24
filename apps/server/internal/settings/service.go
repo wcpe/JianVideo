@@ -71,6 +71,8 @@ const (
 	KeyMediaInferenceDisabledLibraries = "media_inference_disabled_libraries"
 	// KeyMediaInferenceGeneration 是推断设置有效变化的内部递增代次，不通过设置注册表对外暴露。
 	KeyMediaInferenceGeneration = "media_inference_generation"
+	// KeyAIEnabled AI 能力总开关（FR2-011），默认关闭。
+	KeyAIEnabled = "ai_enabled"
 )
 
 // Service 运行期设置业务逻辑。

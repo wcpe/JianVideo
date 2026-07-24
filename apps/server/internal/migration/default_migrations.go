@@ -248,6 +248,22 @@ func DefaultMigrations() []Migration {
 			Up:          migrateFR2062AuthSessions,
 			Validate:    validateFR2062AuthSessions,
 		},
+		{
+			ID:          "20260724_0028_fr2_011_ai_pipeline",
+			Description: "FR2-011：ai_models / ai_inference_nodes / ai_results 表",
+			SafeToRetry: true,
+			Estimate:    estimateFR2011AIPipeline,
+			Up:          migrateFR2011AIPipeline,
+			Validate:    validateFR2011AIPipeline,
+		},
+		{
+			ID:          "20260724_0029_fr2_012_ai_embeddings",
+			Description: "FR2-012：ai_embeddings 嵌入式向量表",
+			SafeToRetry: true,
+			Estimate:    estimateFR2012AIEmbeddings,
+			Up:          migrateFR2012AIEmbeddings,
+			Validate:    validateFR2012AIEmbeddings,
+		},
 	}
 }
 
@@ -1926,6 +1942,127 @@ func validateFR2062AuthSessions(_ context.Context, db *gorm.DB) (Validation, err
 		}
 	}
 	return Validation{Summary: "FR2-062 auth_sessions 会话表已就绪"}, nil
+}
+
+func estimateFR2011AIPipeline(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	var total int64
+	for _, table := range []string{"ai_models", "ai_inference_nodes", "ai_results"} {
+		if !tableExists(db, table) {
+			continue
+		}
+		var n int64
+		if err := db.Table(table).Count(&n).Error; err != nil {
+			return StepPlan{}, err
+		}
+		total += n
+	}
+	return StepPlan{EstimatedRows: total}, nil
+}
+
+func migrateFR2011AIPipeline(_ context.Context, tx *gorm.DB) error {
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS ai_models (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			task_type TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'available',
+			endpoint TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_models_task_type ON ai_models(task_type)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS ai_inference_nodes (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			endpoint TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 0,
+			task_types_json TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS ai_results (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			space_id TEXT NOT NULL,
+			media_id INTEGER NOT NULL,
+			task_type TEXT NOT NULL,
+			model_id TEXT NOT NULL,
+			model_version TEXT NOT NULL,
+			node_id TEXT NOT NULL DEFAULT '',
+			batch_id TEXT NOT NULL DEFAULT '',
+			payload_json TEXT NOT NULL DEFAULT '{}',
+			manual INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_results_space_media ON ai_results(space_id, media_id)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_results_space_type ON ai_results(space_id, task_type)`).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_results_batch ON ai_results(batch_id)`).Error
+}
+
+func validateFR2011AIPipeline(_ context.Context, db *gorm.DB) (Validation, error) {
+	for _, table := range []string{"ai_models", "ai_inference_nodes", "ai_results"} {
+		if !tableExists(db, table) {
+			return Validation{}, fmt.Errorf("%s 表不存在", table)
+		}
+	}
+	return Validation{Summary: "FR2-011 AI 管线表已就绪"}, nil
+}
+
+func estimateFR2012AIEmbeddings(_ context.Context, db *gorm.DB) (StepPlan, error) {
+	if !tableExists(db, "ai_embeddings") {
+		return StepPlan{EstimatedRows: 0}, nil
+	}
+	var n int64
+	if err := db.Table("ai_embeddings").Count(&n).Error; err != nil {
+		return StepPlan{}, err
+	}
+	return StepPlan{EstimatedRows: n}, nil
+}
+
+func migrateFR2012AIEmbeddings(_ context.Context, tx *gorm.DB) error {
+	if err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS ai_embeddings (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			space_id TEXT NOT NULL,
+			media_id INTEGER NOT NULL,
+			model_id TEXT NOT NULL,
+			model_version TEXT NOT NULL,
+			dim INTEGER NOT NULL,
+			batch_id TEXT NOT NULL DEFAULT '',
+			vector BLOB NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(space_id, media_id, model_id)
+		)`).Error; err != nil {
+		return err
+	}
+	if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_emb_space_model ON ai_embeddings(space_id, model_id)`).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_emb_batch ON ai_embeddings(batch_id)`).Error
+}
+
+func validateFR2012AIEmbeddings(_ context.Context, db *gorm.DB) (Validation, error) {
+	if !tableExists(db, "ai_embeddings") {
+		return Validation{}, fmt.Errorf("ai_embeddings 表不存在")
+	}
+	return Validation{Summary: "FR2-012 ai_embeddings 向量表已就绪"}, nil
 }
 
 func estimateFR2055ShareAllowDownload(_ context.Context, db *gorm.DB) (StepPlan, error) {

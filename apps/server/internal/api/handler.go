@@ -21,6 +21,7 @@ import (
 
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/auth"
+	aisvc "github.com/wcpe/JianVideo/internal/ai"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/metrics"
@@ -106,6 +107,9 @@ type Handler struct {
 
 	// 操作可回滚中心（FR2-041）：未注入时相关端点 503。
 	rollback *rollback.Service
+
+	// AI 可替换管线（FR2-011）：未注入时 /api/ai 返回 503。
+	ai *aisvc.Service
 }
 
 // NewHandler 创建处理器。
@@ -183,6 +187,12 @@ func (h *Handler) WithAudit(rec audit.Recorder) *Handler {
 // WithRollback 注入回滚中心（FR2-041）。
 func (h *Handler) WithRollback(svc *rollback.Service) *Handler {
 	h.rollback = svc
+	return h
+}
+
+// WithAI 注入 AI 可替换管线服务（FR2-011）。
+func (h *Handler) WithAI(svc *aisvc.Service) *Handler {
+	h.ai = svc
 	return h
 }
 

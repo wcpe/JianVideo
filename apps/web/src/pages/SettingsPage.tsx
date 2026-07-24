@@ -40,6 +40,7 @@ import {
   SETTING_KEY_DEBUG_LOG,
   SETTING_KEY_MEDIA_INFERENCE_ENABLED,
   SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES,
+  SETTING_KEY_AI_ENABLED,
   parseBooleanSetting,
   SETTING_KEY_UPLOAD_TARGET_DIR,
   SETTING_KEY_UPLOAD_NAMING_RULE,
@@ -100,6 +101,7 @@ const SETTINGS_ANCHORS = [
   { id: 'set-parental', label: '家长控制' },
   { id: 'set-scan', label: '扫描' },
   { id: 'set-inference', label: '影视信息' },
+  { id: 'set-ai', label: 'AI' },
   { id: 'set-upload', label: '上传' },
   { id: 'set-network', label: '网络' },
   { id: 'set-tools', label: '工具路径' },
@@ -167,6 +169,8 @@ export default function SettingsPage() {
     new Set(),
   );
   const [inferenceLibraries, setInferenceLibraries] = useState<LibraryPath[]>([]);
+  // AI 能力总开关（FR2-011）：默认关闭；未启用时 AI API 返回 503 AI_DISABLED
+  const [aiEnabled, setAiEnabled] = useState(false);
   // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
   const [uploadTargetDir, setUploadTargetDir] = useState('');
   const [uploadNamingRule, setUploadNamingRule] = useState('');
@@ -403,6 +407,7 @@ export default function SettingsPage() {
         setInferenceDisabledLibraries(
           parseDisabledInferenceLibraries(data[SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]),
         );
+        setAiEnabled(parseBooleanSetting(data[SETTING_KEY_AI_ENABLED], false));
         setUploadTargetDir(data[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
         setUploadNamingRule(data[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       })
@@ -585,6 +590,7 @@ export default function SettingsPage() {
         [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]: serializeDisabledInferenceLibraries(
           inferenceDisabledLibraries,
         ),
+        [SETTING_KEY_AI_ENABLED]: aiEnabled ? '1' : '0',
         [SETTING_KEY_UPLOAD_TARGET_DIR]: uploadTargetDir,
         [SETTING_KEY_UPLOAD_NAMING_RULE]: uploadNamingRule,
       };
@@ -615,6 +621,7 @@ export default function SettingsPage() {
       setInferenceDisabledLibraries(
         parseDisabledInferenceLibraries(updated[SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]),
       );
+      setAiEnabled(parseBooleanSetting(updated[SETTING_KEY_AI_ENABLED], false));
       setUploadTargetDir(updated[SETTING_KEY_UPLOAD_TARGET_DIR] ?? '');
       setUploadNamingRule(updated[SETTING_KEY_UPLOAD_NAMING_RULE] ?? '');
       notifications.show({
@@ -646,6 +653,7 @@ export default function SettingsPage() {
     debugLog,
     mediaInferenceEnabled,
     inferenceDisabledLibraries,
+    aiEnabled,
     uploadTargetDir,
     uploadNamingRule,
     networkProxyMasked,
@@ -1655,6 +1663,28 @@ export default function SettingsPage() {
                     ))}
                   </Stack>
                 )}
+              </Stack>
+            </Card>
+
+            {/* AI 分区（FR2-011）：默认关闭的总开关；未启用时后端 AI API 返回 503 AI_DISABLED */}
+            <Title id="set-ai" order={3}>
+              AI
+            </Title>
+            <Card withBorder padding="md" radius="md">
+              <Stack gap="xs">
+                <Switch
+                  label="AI 能力总开关"
+                  aria-label="AI 能力总开关"
+                  description={settingDescription(
+                    SETTING_KEY_AI_ENABLED,
+                    '启用可替换 AI 推理管线（搜索、OCR、去重与审核）。默认关闭；未配置模型/节点时即使开启也会拒绝入队。',
+                  )}
+                  checked={aiEnabled}
+                  onChange={(e) => setAiEnabled(e.currentTarget.checked)}
+                />
+                <Text size="xs" c="dimmed">
+                  AI 结果可重建；人工确认（manual）的结果不会被 rebuild 删除。
+                </Text>
               </Stack>
             </Card>
 

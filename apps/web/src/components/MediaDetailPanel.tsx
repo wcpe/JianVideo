@@ -76,14 +76,16 @@ import {
   selectMediaCover,
   updateMediaContentRating,
 } from '@/api/library';
+import { confirmAIResult, listAIResults, rejectAIResult } from '@/api/ai';
 import { getTask } from '@/api/tasks';
-import { extractErrorMessage } from '@/utils/error';
+import { extractErrorCode, extractErrorMessage } from '@/utils/error';
 import {
   CONTENT_RATING_OPTIONS,
   contentRatingBadgeColor,
   formatContentRatingLabel,
 } from '@/utils/content-rating';
 import type {
+  AIResult,
   MediaCoversResponse,
   MediaFile,
   MediaInference,
@@ -441,6 +443,92 @@ function InferenceSection({
   );
 }
 
+/** AI 结果审核（FR2-012）：列表 + 确认/驳回；关闭门仅提示，不阻断详情 */
+function AIResultsSection({
+  results,
+  loading,
+  error,
+  busyID,
+  onConfirm,
+  onReject,
+}: {
+  results: AIResult[];
+  loading: boolean;
+  error: string | null;
+  busyID: number | null;
+  onConfirm: (id: number) => void;
+  onReject: (id: number) => void;
+}) {
+  return (
+    <>
+      <Divider my={4} label="AI 结果" labelPosition="left" />
+      {loading && (
+        <Text size="xs" c="dimmed">
+          加载 AI 结果中…
+        </Text>
+      )}
+      {!loading && error && (
+        <Text size="xs" c="dimmed" role="status">
+          {error}
+        </Text>
+      )}
+      {!loading && !error && results.length === 0 && (
+        <Text size="xs" c="dimmed">
+          暂无 AI 结果
+        </Text>
+      )}
+      {!loading &&
+        !error &&
+        results.map((item) => (
+          <Stack key={item.id} gap={4} mb={6} aria-label={`AI 结果 ${item.id}`}>
+            <Group gap="xs" wrap="wrap">
+              <Badge size="sm" variant="light" color="grape">
+                {item.task_type}
+              </Badge>
+              {item.manual ? (
+                <Badge size="sm" color="teal">
+                  已确认
+                </Badge>
+              ) : (
+                <Badge size="sm" color="gray" variant="outline">
+                  待审
+                </Badge>
+              )}
+              <Text size="xs" c="dimmed">
+                {item.model_id}
+              </Text>
+            </Group>
+            <Text size="xs" lineClamp={3} style={{ wordBreak: 'break-all' }}>
+              {item.payload_json || '{}'}
+            </Text>
+            {!item.manual && (
+              <Group gap="xs">
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color="teal"
+                  loading={busyID === item.id}
+                  onClick={() => onConfirm(item.id)}
+                >
+                  确认
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color="red"
+                  loading={busyID === item.id}
+                  onClick={() => onReject(item.id)}
+                >
+                  驳回
+                </Button>
+              </Group>
+            )}
+          </Stack>
+        ))}
+    </>
+  );
+}
+
 /**
  * 文件详情面板（FR-34）：左侧预览（图片可滚轮缩放 / 视频内嵌播放器直接播放，FR-102）、右侧元数据，
  * 支持全屏切换、←/→ 上下一项、Esc 关闭。EXIF 区块由 FR-38 在右侧补充。
@@ -491,6 +579,10 @@ export default function MediaDetailPanel({
   const [inference, setInference] = useState<MediaInference | null>(null);
   const [inferenceLoading, setInferenceLoading] = useState(false);
   const [inferenceError, setInferenceError] = useState<string | null>(null);
+  const [aiResults, setAIResults] = useState<AIResult[]>([]);
+  const [aiLoading, setAILoading] = useState(false);
+  const [aiError, setAIError] = useState<string | null>(null);
+  const [aiBusyID, setAIBusyID] = useState<number | null>(null);
   const [covers, setCovers] = useState<MediaCoversResponse>({ cover: null, candidates: [] });
   const [coverGenerating, setCoverGenerating] = useState(false);
   // 幻灯片自动轮播开关（FR-105）
@@ -723,6 +815,78 @@ export default function MediaDetailPanel({
       active = false;
     };
   }, [file]);
+
+  // FR2-012：按媒体加载 AI 结果；AI 关闭时仅提示，不阻断详情
+  useEffect(() => {
+    let active = true;
+    setAIResults([]);
+    setAIError(null);
+    setAILoading(false);
+    setAIBusyID(null);
+    if (!file)
+      return () => {
+        active = false;
+      };
+    setAILoading(true);
+    void listAIResults(file.id)
+      .then((items) => {
+        if (!active) return;
+        setAIResults(items);
+        setAIError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setAIResults([]);
+        const code = extractErrorCode(err);
+        if (code === 'AI_DISABLED' || code === 'AI_UNAVAILABLE') {
+          setAIError('AI 未启用');
+        } else {
+          setAIError(extractErrorMessage(err, '加载 AI 结果失败'));
+        }
+      })
+      .finally(() => {
+        if (active) setAILoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [file]);
+
+  const handleConfirmAI = useCallback(async (id: number) => {
+    setAIBusyID(id);
+    try {
+      await confirmAIResult(id);
+      setAIResults((prev) => prev.map((r) => (r.id === id ? { ...r, manual: true } : r)));
+      notifications.show({ color: 'green', message: '已确认 AI 结果', autoClose: 2500 });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '确认失败',
+        message: extractErrorMessage(err, '确认 AI 结果失败'),
+        autoClose: 4000,
+      });
+    } finally {
+      setAIBusyID(null);
+    }
+  }, []);
+
+  const handleRejectAI = useCallback(async (id: number) => {
+    setAIBusyID(id);
+    try {
+      await rejectAIResult(id);
+      setAIResults((prev) => prev.filter((r) => r.id !== id));
+      notifications.show({ color: 'green', message: '已驳回 AI 结果', autoClose: 2500 });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '驳回失败',
+        message: extractErrorMessage(err, '驳回 AI 结果失败'),
+        autoClose: 4000,
+      });
+    } finally {
+      setAIBusyID(null);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1318,6 +1482,14 @@ export default function MediaDetailPanel({
                 inference={inference}
                 loading={inferenceLoading}
                 error={inferenceError}
+              />
+              <AIResultsSection
+                results={aiResults}
+                loading={aiLoading}
+                error={aiError}
+                busyID={aiBusyID}
+                onConfirm={handleConfirmAI}
+                onReject={handleRejectAI}
               />
               <EmbeddedMetadataInfo
                 items={embeddedMetadata}

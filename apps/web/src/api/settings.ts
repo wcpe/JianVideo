@@ -41,6 +41,8 @@ export const SETTING_KEY_DEBUG_LOG = 'debug_log';
 // 本地离线影视信息推断设置（FR2-031）
 export const SETTING_KEY_MEDIA_INFERENCE_ENABLED = 'media_inference_enabled';
 export const SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES = 'media_inference_disabled_libraries';
+// AI 能力总开关（FR2-011），默认关闭
+export const SETTING_KEY_AI_ENABLED = 'ai_enabled';
 
 /** 按后端设置注册表口径解析合法布尔值，非法值使用默认值。 */
 export function parseBooleanSetting(raw: string | undefined, defaultValue: boolean): boolean {
@@ -106,6 +108,7 @@ const mockStore: SettingsMap = {
   [SETTING_KEY_TRANSCODE_HWACCEL_FALLBACK]: '1',
   [SETTING_KEY_MEDIA_INFERENCE_ENABLED]: '1',
   [SETTING_KEY_MEDIA_INFERENCE_DISABLED_LIBRARIES]: '[]',
+  [SETTING_KEY_AI_ENABLED]: '0',
 };
 
 const mockDefinitions: SettingDefinition[] = [
@@ -286,6 +289,17 @@ const mockDefinitions: SettingDefinition[] = [
     sensitive: false,
     hot_apply: true,
     consumer: 'library.inference',
+  },
+  {
+    key: SETTING_KEY_AI_ENABLED,
+    label: 'AI 能力总开关',
+    description: '启用可替换 AI 推理管线；未配置模型/节点时仍拒绝入队。',
+    layer: 'runtime',
+    value_type: 'bool',
+    default_value: '0',
+    sensitive: false,
+    hot_apply: true,
+    consumer: 'ai',
   },
   {
     key: SETTING_KEY_DEBUG_LOG,
