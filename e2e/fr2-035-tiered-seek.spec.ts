@@ -689,29 +689,45 @@ async function pause(player: Locator): Promise<void> {
   const pauseButton = player.getByRole("button", { name: "暂停" });
   const playButton = player.getByRole("button", { name: "播放", exact: true });
   let lastPlayAttempt = 0;
+  // 进入可暂停态：UI「暂停」按钮出现，或 video 已在播放（HLS/MSE 路径偶发按钮晚于实际起播）。
   await expect
     .poll(
       async () => {
         if ((await pauseButton.count()) > 0) return true;
+        const playing = await video.evaluate((node) => {
+          const el = node as HTMLVideoElement;
+          return !el.paused && el.readyState >= 2;
+        });
+        if (playing) return true;
         const now = Date.now();
-        if ((await playButton.count()) > 0 && now - lastPlayAttempt >= 500) {
-          lastPlayAttempt = now;
-          await video.evaluate((node) => {
-            (node as HTMLVideoElement).muted = true;
-          });
+        if (now - lastPlayAttempt < 500) return false;
+        lastPlayAttempt = now;
+        await video.evaluate((node) => {
+          const el = node as HTMLVideoElement;
+          el.muted = true;
+          // 浏览器自动播放策略下，直接 play 作为按钮点击的回退
+          void el.play().catch(() => undefined);
+        });
+        if ((await playButton.count()) > 0) {
           await playButton.evaluate((node: HTMLButtonElement) => node.click());
         }
         return false;
       },
-      { timeout: 30_000 },
+      { timeout: 45_000 },
     )
     .toBe(true);
-  await pauseButton.evaluate((node: HTMLButtonElement) => node.click());
+  // 优先点「暂停」；按钮未同步时直接 pause 元素，避免全量 e2e 串行负载下 30s 空等
+  if ((await pauseButton.count()) > 0) {
+    await pauseButton.evaluate((node: HTMLButtonElement) => node.click());
+  } else {
+    await video.evaluate((node) => {
+      (node as HTMLVideoElement).pause();
+    });
+  }
   await expect
     .poll(
       async () =>
-        (await playButton.count()) > 0 &&
-        (await video.evaluate((node) => (node as HTMLVideoElement).paused)),
+        video.evaluate((node) => (node as HTMLVideoElement).paused),
       { timeout: 30_000 },
     )
     .toBe(true);

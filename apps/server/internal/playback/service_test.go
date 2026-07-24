@@ -188,3 +188,36 @@ func TestStreamFile_InvalidSMBPath(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// TestActiveSessions 验证活跃会话计数（FR-119 指标采样依赖）。
+func TestActiveSessions(t *testing.T) {
+	s := NewService()
+	t.Cleanup(s.Stop)
+
+	assert.Equal(t, 0, s.ActiveSessions())
+	s.GetOrCreateSession(1, 60, 100)
+	s.GetOrCreateSession(2, 60, 100)
+	assert.Equal(t, 2, s.ActiveSessions())
+}
+
+// TestGetClientIP 验证 RemoteAddr 带端口与裸地址两种形态。
+func TestGetClientIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.10:54321"
+	assert.Equal(t, "203.0.113.10", getClientIP(req))
+
+	req.RemoteAddr = "2001:db8::1"
+	assert.Equal(t, "2001:db8::1", getClientIP(req))
+}
+
+// TestSmbReadSeekerClose_NoCloser 验证底层无 Closer 时 Close 不报错。
+func TestSmbReadSeekerClose_NoCloser(t *testing.T) {
+	rs := &smbReadSeeker{ReadSeeker: &nopSeek{}}
+	require.NoError(t, rs.Close())
+}
+
+// nopSeek 仅实现 io.ReadSeeker，用于 Close 分支覆盖。
+type nopSeek struct{}
+
+func (nopSeek) Read(_ []byte) (int, error)     { return 0, nil }
+func (nopSeek) Seek(int64, int) (int64, error) { return 0, nil }
