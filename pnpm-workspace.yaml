@@ -8,8 +8,8 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   esbuild: true
-# 钉死 brace-expansion 安全版本，消除 audit high（GHSA-mh99-v99m-4gvg）
-# 仅覆盖受影响的 5.x 线（<=5.0.7），不强制 2.x 升主版本以免破坏 minimatch@9
+# 仅钉受影响的 brace-expansion 5.x（<=5.0.7），不覆盖 minimatch@9 使用的 2.x。
 overrides:
-  'brace-expansion@<=5.0.7': 5.0.8
+  'brace-expansion@5': 5.0.8
+  # react-router 安全修复：RSC CSRF GHSA-qwww-vcr4-c8h2（patched >=8.3.0）
   react-router: 8.3.0
