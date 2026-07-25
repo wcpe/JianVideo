@@ -8,12 +8,6 @@
 
 ### 变更
 
-### 修复
-
-## 0.27.0（2026-07-25）
-
-### 变更
-
 - **FR2-011 AI 可替换管线首切**：`ai_models` / `ai_inference_nodes` / `ai_results` 表与迁移；设置键 `ai_enabled`（默认关闭）；`ai.infer` 通用队列任务 + stub 节点；API `/api/ai/status|models|nodes|infer|results|results/rebuild`；Space 隔离与 manual 重建保护。
 - **FR2-011 二切（设置页总开关）**：设置页「AI」分区可热切换 `ai_enabled`（默认关）；保存即生效，未启用时 AI API 仍返回 `503 AI_DISABLED`。
 - **FR2-011 后置（模型/节点列表与启用）**：设置页 AI 区展示已注册模型与推理节点；`PUT /api/ai/models/:id/status`（available/disabled）、`PUT /api/ai/nodes/:id/enabled`；审计 `ai.model.status_updated` / `ai.node.enabled_updated`。

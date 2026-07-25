@@ -4,7 +4,7 @@
 
 ## 状态
 
-开发中 · v0.27.0（见根目录 `VERSION`）。v2 能力与分期见 [`docs/PRD.md`](docs/PRD.md) / [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+开发中 · v0.26.0（见根目录 `VERSION`）。v2 能力与分期见 [`docs/PRD.md`](docs/PRD.md) / [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
 ## 架构一览
 
