@@ -97,10 +97,17 @@
 
 ### 8.1 正式版发布流程（`0.y.z` 与 `1.0.0` 稳定 tag 通用）
 
-1. 在可发布提交上准备 `VERSION=X.Y.Z`，CHANGELOG 有对应非空稳定版本段。
-2. 打并推送 tag `vX.Y.Z`；`release.yml` 校验 VERSION 与 tag 一致、Release 不存在，再跑四项质量门与 Linux/Windows 构建。
-3. 通过后为该 tag 创建 draft Release，回下载校验后公开为正式版（`prerelease=false`、latest）。
-4. 修复不得覆盖既有 tag；需要时递增 patch 再发新正式版。
+**强制顺序（先绿后发，详见 `.claude/rules/release-discipline.md`）：**
+
+0. **普通 commit 合入 `dev`，且 `dev` 实验构建 / 四项质量门全绿**（有 run 证据）。禁止用 `chore(release)` 去试 CI。
+1. **经 PR 提升到 `main`**（走分支保护：必需 checks + reviews）。**禁止**为推 `main` 临时关闭或修改分支保护。
+2. 确认 **`main` 上该提交质量门也绿**。
+3. 仅在以上全绿后，在可发布提交上准备 `VERSION=X.Y.Z`，CHANGELOG 有对应非空稳定版本段（独立 `chore(release)` commit）。
+4. **确认 release commit 已在 `origin/main` 历史**，再打并推送 tag `vX.Y.Z`；`release.yml` 校验 VERSION 与 tag 一致、Release 不存在，再跑四项质量门与 Linux/Windows 构建。
+5. 通过后为该 tag 创建 draft Release，回下载校验后公开为正式版（`prerelease=false`、latest）。
+6. 修复不得覆盖既有 tag；需要时递增 patch 再发新正式版。
+
+错误发版：删错误 tag + `git revert` 元数据 + PR 回流 `main`，**不** force-push、**不**改保护。
 
 ### 8.2 RC 发布流程（**仅自 `1.0.0` 起**）
 

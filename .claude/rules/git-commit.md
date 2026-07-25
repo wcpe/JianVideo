@@ -74,6 +74,7 @@ feat: 完成第一期核心转码功能
 - **独立可编译**：每个 commit 落地后代码都能编译 / 构建通过，不留"半截"提交。
 - **只做一件事**：一个 commit 只对应一个功能点 / 一个修复 / 一次重构，无关改动不混入。
 - **不混类型**：不在同一 commit 里混 `feat` / `fix` / `refactor`——各自独立提交。
+- **发版元数据单独提交**：`chore(release)` 只承载 VERSION/CHANGELOG/README 定稿，且**仅在**目标提交的 CI 已全绿、可发布提交已在 `main` 历史之后才允许（纪律见 `release-discipline.md`）。**禁止**用 release commit 试 CI。
 
 ✅ 正确（拆成独立、各自可编译、各做一件事）
 ```
