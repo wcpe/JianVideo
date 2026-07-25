@@ -54,6 +54,56 @@ func (h *Handler) ListAINodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": nodes})
 }
 
+// UpdateAIModelStatus 更新模型 available/disabled。
+func (h *Handler) UpdateAIModelStatus(c *gin.Context) {
+	if h.ai == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AI_UNAVAILABLE", "message": "AI 服务未启用"})
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的模型 ID"})
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "需要 status"})
+		return
+	}
+	if err := h.ai.SetModelStatus(c.Request.Context(), id, body.Status, actorIDFromContext(c)); err != nil {
+		writeAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// UpdateAINodeEnabled 更新节点启用状态。
+func (h *Handler) UpdateAINodeEnabled(c *gin.Context) {
+	if h.ai == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AI_UNAVAILABLE", "message": "AI 服务未启用"})
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_ID", "message": "无效的节点 ID"})
+		return
+	}
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "需要 enabled"})
+		return
+	}
+	if err := h.ai.SetNodeEnabled(c.Request.Context(), id, *body.Enabled, actorIDFromContext(c)); err != nil {
+		writeAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // EnqueueAIInfer 入队 AI 推理。
 func (h *Handler) EnqueueAIInfer(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)

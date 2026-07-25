@@ -1,6 +1,6 @@
 # 功能规格：AI 可替换管线
 
-> 状态：开发中（首切骨架已落地；设置页 `ai_enabled` 开关已落地；模型/节点只读列表 UI 可后置）　·　关联 PRD：FR2-011　·　阶段：P6 `0.27.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md) / [0055](../adr/0055-task-queue-persistence.md) / [0056](../adr/0056-space-permission-model.md) / [0058](../adr/0058-data-layer-abstraction.md)
+> 状态：开发中（首切骨架 + 设置页总开关 + 模型/节点列表与启用已落地）　·　关联 PRD：FR2-011　·　阶段：P6 `0.27.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md) / [0055](../adr/0055-task-queue-persistence.md) / [0056](../adr/0056-space-permission-model.md) / [0058](../adr/0058-data-layer-abstraction.md)
 
 ## 0. 切片范围
 
@@ -11,7 +11,7 @@
 | C | **AI 默认关闭门**：未配置模型/节点/显式启用时 API 与 worker 整体拒绝 | ✅ |
 | D | 结果表写入 + 审计元数据（model/version/Space/批次）；重建入口（整批删可重建结果） | ✅ |
 | E | 单测：默认关闭；启用后入队；结果按 Space 隔离；重建不覆盖 `manual=true` | ✅ |
-| F | 设置页：AI 总开关、模型/节点列表只读与启用 | ✅ 总开关；模型/节点列表后置 |
+| F | 设置页：AI 总开关、模型/节点列表只读与启用 | ✅ |
 | G | 具体模型运行时绑定（人脸/OCR 等） | 不做（归 FR2-012 首切） |
 
 **首切建议**：只搭可替换管线骨架与默认关闭门；不绑死任何具体模型实现。
@@ -80,7 +80,7 @@ P6 要把 AI 能力放进主线，但必须可替换、可审计、默认可关�
 - [x] 单测矩阵（见 §5）
 - [x] 文档：API / ARCHITECTURE / PRD 状态 / CHANGELOG（API 摘要见 CHANGELOG + 本 spec）
 - [x] 二切：设置页 AI 总开关（`ai_enabled`）
-- [ ] 后置：设置页模型/节点只读列表与启用 UI
+- [x] 后置：设置页模型/节点只读列表与启用 UI（`PUT /api/ai/models/:id/status`、`PUT /api/ai/nodes/:id/enabled`）
 
 ## 5. 验收标准
 

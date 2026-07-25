@@ -46,6 +46,7 @@ import {
   SETTING_KEY_UPLOAD_NAMING_RULE,
 } from '@/api/settings';
 import { getLibraryPaths } from '@/api/library';
+import { getAIStatus, updateAIModelStatus, updateAINodeEnabled } from '@/api/ai';
 import {
   getEnvVars,
   detectFFmpeg,
@@ -71,6 +72,7 @@ import {
   type SpaceMember,
   type SpaceSummary,
 } from '@/api/space';
+import type { AIModel, AINode } from '@/types';
 import AnchorNav from '@/components/AnchorNav';
 import { useAuthStore } from '@/stores/auth';
 import { extractErrorMessage } from '@/utils/error';
@@ -171,6 +173,13 @@ export default function SettingsPage() {
   const [inferenceLibraries, setInferenceLibraries] = useState<LibraryPath[]>([]);
   // AI 能力总开关（FR2-011）：默认关闭；未启用时 AI API 返回 503 AI_DISABLED
   const [aiEnabled, setAiEnabled] = useState(false);
+  // AI 模型/节点只读列表与启用（FR2-011 后置）
+  const [aiModels, setAIModels] = useState<AIModel[]>([]);
+  const [aiNodes, setAINodes] = useState<AINode[]>([]);
+  const [aiCatalogLoading, setAICatalogLoading] = useState(false);
+  const [aiCatalogError, setAICatalogError] = useState<string | null>(null);
+  const [aiModelBusyID, setAIModelBusyID] = useState<string | null>(null);
+  const [aiNodeBusyID, setAINodeBusyID] = useState<string | null>(null);
   // Web 上传默认落盘目录与命名规则（FR-149）：目录须为已注册本地库目录或其子目录
   const [uploadTargetDir, setUploadTargetDir] = useState('');
   const [uploadNamingRule, setUploadNamingRule] = useState('');
@@ -422,6 +431,31 @@ export default function SettingsPage() {
     };
   }, []);
 
+  // 挂载时加载 AI 模型/节点目录（FR2-011 后置）；失败不阻塞设置页
+  useEffect(() => {
+    let active = true;
+    setAICatalogLoading(true);
+    setAICatalogError(null);
+    getAIStatus()
+      .then((status) => {
+        if (!active) return;
+        setAIModels(status.models ?? []);
+        setAINodes(status.nodes ?? []);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setAIModels([]);
+        setAINodes([]);
+        setAICatalogError(extractErrorMessage(err, '加载 AI 模型/节点失败'));
+      })
+      .finally(() => {
+        if (active) setAICatalogLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // 挂载时加载本地库目录（FR-149）：供「默认上传位置」下拉，失败静默（仍可手填后端校验）
   useEffect(() => {
     let active = true;
@@ -658,6 +692,53 @@ export default function SettingsPage() {
     uploadNamingRule,
     networkProxyMasked,
   ]);
+
+  const handleToggleAIModel = useCallback(async (model: AIModel, nextEnabled: boolean) => {
+    const status = nextEnabled ? 'available' : 'disabled';
+    setAIModelBusyID(model.id);
+    try {
+      await updateAIModelStatus(model.id, status);
+      setAIModels((prev) => prev.map((m) => (m.id === model.id ? { ...m, status } : m)));
+      notifications.show({
+        color: 'green',
+        message: nextEnabled ? `已启用模型 ${model.name}` : `已停用模型 ${model.name}`,
+        autoClose: 2500,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '更新模型失败',
+        message: extractErrorMessage(err, '更新模型状态失败'),
+        autoClose: 4000,
+      });
+    } finally {
+      setAIModelBusyID(null);
+    }
+  }, []);
+
+  const handleToggleAINode = useCallback(async (node: AINode, nextEnabled: boolean) => {
+    setAINodeBusyID(node.id);
+    try {
+      await updateAINodeEnabled(node.id, nextEnabled);
+      setAINodes((prev) =>
+        prev.map((n) => (n.id === node.id ? { ...n, enabled: nextEnabled } : n)),
+      );
+      notifications.show({
+        color: 'green',
+        message: nextEnabled ? `已启用节点 ${node.name}` : `已停用节点 ${node.name}`,
+        autoClose: 2500,
+      });
+    } catch (err) {
+      notifications.show({
+        color: 'red',
+        title: '更新节点失败',
+        message: extractErrorMessage(err, '更新节点状态失败'),
+        autoClose: 4000,
+      });
+    } finally {
+      setAINodeBusyID(null);
+    }
+  }, []);
 
   // 检测当前输入的 ffmpeg 路径是否可用（保存前先验）
   const handleDetect = useCallback(async () => {
@@ -1685,6 +1766,102 @@ export default function SettingsPage() {
                 <Text size="xs" c="dimmed">
                   AI 结果可重建；人工确认（manual）的结果不会被 rebuild 删除。
                 </Text>
+                <Divider my={4} />
+                <Text size="sm" fw={500}>
+                  已注册模型
+                </Text>
+                {aiCatalogLoading ? (
+                  <Text size="xs" c="dimmed">
+                    加载模型列表…
+                  </Text>
+                ) : aiCatalogError ? (
+                  <Text size="xs" c="dimmed" role="status">
+                    {aiCatalogError}
+                  </Text>
+                ) : aiModels.length === 0 ? (
+                  <Text size="xs" c="dimmed">
+                    暂无已注册模型（开发环境可 seed stub）。
+                  </Text>
+                ) : (
+                  <Stack gap="xs">
+                    {aiModels.map((model) => (
+                      <Group key={model.id} justify="space-between" wrap="nowrap" gap="sm">
+                        <Stack gap={2} style={{ minWidth: 0 }}>
+                          <Group gap="xs" wrap="wrap">
+                            <Text size="sm" fw={500}>
+                              {model.name}
+                            </Text>
+                            <Badge size="sm" variant="light">
+                              {model.task_type}
+                            </Badge>
+                            <Badge
+                              size="sm"
+                              color={model.status === 'available' ? 'teal' : 'gray'}
+                              variant={model.status === 'available' ? 'filled' : 'outline'}
+                            >
+                              {model.status === 'available' ? '可用' : '停用'}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed" lineClamp={1}>
+                            {model.id} · v{model.version}
+                          </Text>
+                        </Stack>
+                        <Switch
+                          aria-label={`模型 ${model.name} 启用`}
+                          checked={model.status === 'available'}
+                          disabled={aiModelBusyID === model.id}
+                          onChange={(e) => handleToggleAIModel(model, e.currentTarget.checked)}
+                        />
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
+                <Text size="sm" fw={500} mt="xs">
+                  推理节点
+                </Text>
+                {aiCatalogLoading ? (
+                  <Text size="xs" c="dimmed">
+                    加载节点列表…
+                  </Text>
+                ) : aiCatalogError ? null : aiNodes.length === 0 ? (
+                  <Text size="xs" c="dimmed">
+                    暂无推理节点。
+                  </Text>
+                ) : (
+                  <Stack gap="xs">
+                    {aiNodes.map((node) => (
+                      <Group key={node.id} justify="space-between" wrap="nowrap" gap="sm">
+                        <Stack gap={2} style={{ minWidth: 0 }}>
+                          <Group gap="xs" wrap="wrap">
+                            <Text size="sm" fw={500}>
+                              {node.name}
+                            </Text>
+                            <Badge size="sm" variant="light">
+                              {node.kind}
+                            </Badge>
+                            <Badge
+                              size="sm"
+                              color={node.enabled ? 'teal' : 'gray'}
+                              variant={node.enabled ? 'filled' : 'outline'}
+                            >
+                              {node.enabled ? '已启用' : '已停用'}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed" lineClamp={1}>
+                            {node.id}
+                            {node.endpoint ? ` · ${node.endpoint}` : ''}
+                          </Text>
+                        </Stack>
+                        <Switch
+                          aria-label={`节点 ${node.name} 启用`}
+                          checked={node.enabled}
+                          disabled={aiNodeBusyID === node.id}
+                          onChange={(e) => handleToggleAINode(node, e.currentTarget.checked)}
+                        />
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
               </Stack>
             </Card>
 

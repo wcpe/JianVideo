@@ -2221,6 +2221,50 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  // ─── AI 状态 / 模型 / 节点（FR2-011） ───────────────────
+  http.get('*/api/ai/status', async () => {
+    await delay(50);
+    return HttpResponse.json({
+      enabled: settingsStore.ai_enabled === '1',
+      models: [
+        {
+          id: 'stub-ocr-v1',
+          name: 'Stub OCR',
+          version: '1.0.0',
+          task_type: 'ocr',
+          status: 'available',
+          endpoint: '',
+        },
+        {
+          id: 'stub-embed-v1',
+          name: 'Stub Embedding',
+          version: '1.0.0',
+          task_type: 'embedding',
+          status: 'available',
+          endpoint: '',
+        },
+      ],
+      nodes: [
+        {
+          id: 'stub-local',
+          name: 'Stub Local',
+          kind: 'local',
+          endpoint: '',
+          enabled: true,
+          task_types_json: '["ocr","embedding"]',
+        },
+      ],
+    });
+  }),
+  http.put('*/api/ai/models/:id/status', async () => {
+    await delay(40);
+    return HttpResponse.json({ ok: true });
+  }),
+  http.put('*/api/ai/nodes/:id/enabled', async () => {
+    await delay(40);
+    return HttpResponse.json({ ok: true });
+  }),
+
   // ─── 运行期设置 ────────────────────────────────────────
 
   http.get('*/api/settings/storage', async () => {

@@ -631,6 +631,68 @@ describe('SettingsPage', () => {
     expect(putBody!.settings.ai_enabled).toBe('1');
   });
 
+  it('展示 AI 模型/节点列表并可切换启用（FR2-011 后置）', async () => {
+    const user = userEvent.setup();
+    let modelStatus: string | null = null;
+    let nodeEnabled: boolean | null = null;
+    server.use(
+      http.get('*/api/settings', () =>
+        HttpResponse.json({
+          settings: {
+            scan_interval: '3600',
+            recycle_bin_paths: '{"D":"D:/.recycle"}',
+            ai_enabled: '1',
+          },
+        }),
+      ),
+      http.get('*/api/ai/status', () =>
+        HttpResponse.json({
+          enabled: true,
+          models: [
+            {
+              id: 'stub-ocr-v1',
+              name: 'Stub OCR',
+              version: '1.0.0',
+              task_type: 'ocr',
+              status: 'available',
+              endpoint: '',
+            },
+          ],
+          nodes: [
+            {
+              id: 'stub-local',
+              name: 'Stub Local',
+              kind: 'local',
+              endpoint: '',
+              enabled: true,
+              task_types_json: '["ocr","embedding"]',
+            },
+          ],
+        }),
+      ),
+      http.put('*/api/ai/models/:id/status', async ({ request }) => {
+        const body = (await request.json()) as { status: string };
+        modelStatus = body.status;
+        return HttpResponse.json({ ok: true });
+      }),
+      http.put('*/api/ai/nodes/:id/enabled', async ({ request }) => {
+        const body = (await request.json()) as { enabled: boolean };
+        nodeEnabled = body.enabled;
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText('Stub OCR')).toBeVisible();
+    expect(screen.getByText('Stub Local')).toBeVisible();
+
+    await user.click(screen.getByRole('switch', { name: '模型 Stub OCR 启用' }));
+    await waitFor(() => expect(modelStatus).toBe('disabled'));
+
+    await user.click(screen.getByRole('switch', { name: '节点 Stub Local 启用' }));
+    await waitFor(() => expect(nodeEnabled).toBe(false));
+  });
+
   it('兼容合法布尔大小写并提供按媒体库关闭入口', async () => {
     const user = userEvent.setup();
     let putBody: { settings: Record<string, string> } | null = null;

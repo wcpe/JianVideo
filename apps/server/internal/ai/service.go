@@ -123,6 +123,74 @@ func (s *Service) Status(ctx context.Context) (enabled bool, modelsList []models
 	return enabled, modelsList, nodes, nil
 }
 
+// SetModelStatus 设置模型 available/disabled（FR2-011 设置页启用开关）。
+func (s *Service) SetModelStatus(ctx context.Context, modelID, status, actorID string) error {
+	modelID = strings.TrimSpace(modelID)
+	status = strings.TrimSpace(status)
+	if modelID == "" {
+		return ErrInvalidInput
+	}
+	if status != models.AIModelStatusAvailable && status != models.AIModelStatusDisabled {
+		return ErrInvalidInput
+	}
+	m, err := s.repo.GetModel(ctx, modelID)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return ErrNotFound
+	}
+	if m.Status == status {
+		return nil
+	}
+	before := m.Status
+	m.Status = status
+	m.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpsertModel(ctx, m); err != nil {
+		return err
+	}
+	if s.audit != nil {
+		_ = s.audit.Record(ctx, audit.EventInput{
+			Scope: audit.ScopeSystem, ActorType: "user", ActorID: actorID,
+			Action: "ai.model.status_updated", ResourceType: "ai_model", ResourceID: modelID,
+			Metadata: map[string]any{"before": before, "after": status, "task_type": m.TaskType},
+		})
+	}
+	return nil
+}
+
+// SetNodeEnabled 设置推理节点启用状态。
+func (s *Service) SetNodeEnabled(ctx context.Context, nodeID string, enabled bool, actorID string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return ErrInvalidInput
+	}
+	n, err := s.repo.GetNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if n == nil {
+		return ErrNotFound
+	}
+	if n.Enabled == enabled {
+		return nil
+	}
+	before := n.Enabled
+	n.Enabled = enabled
+	n.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpsertNode(ctx, n); err != nil {
+		return err
+	}
+	if s.audit != nil {
+		_ = s.audit.Record(ctx, audit.EventInput{
+			Scope: audit.ScopeSystem, ActorType: "user", ActorID: actorID,
+			Action: "ai.node.enabled_updated", ResourceType: "ai_node", ResourceID: nodeID,
+			Metadata: map[string]any{"before": before, "after": enabled, "kind": n.Kind},
+		})
+	}
+	return nil
+}
+
 // EnsureReady 校验 AI 已启用且存在可用模型与节点。
 func (s *Service) EnsureReady(ctx context.Context) error {
 	if !s.isEnabled() {

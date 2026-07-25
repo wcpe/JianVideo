@@ -209,6 +209,45 @@ func TestEmbeddingInfer_WritesVector(t *testing.T) {
 	_ = task
 }
 
+func TestSetModelStatusAndNodeEnabled(t *testing.T) {
+	db := openAITestDB(t)
+	_ = db.Exec(`INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`, settings.KeyAIEnabled, "1").Error
+	svc := ai.NewService(ai.NewGormRepository(db), settings.NewService(db))
+	if err := svc.SeedStubFixture(context.Background()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", models.AIModelStatusDisabled, "u"); err != nil {
+		t.Fatalf("disable model: %v", err)
+	}
+	m, _ := ai.NewGormRepository(db).GetModel(context.Background(), "stub-ocr-v1")
+	if m == nil || m.Status != models.AIModelStatusDisabled {
+		t.Fatal("模型应为 disabled")
+	}
+	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", "nope", "u"); err == nil {
+		t.Fatal("非法 status 应失败")
+	}
+	if err := svc.SetNodeEnabled(context.Background(), "stub-local", false, "u"); err != nil {
+		t.Fatalf("disable node: %v", err)
+	}
+	n, _ := ai.NewGormRepository(db).GetNode(context.Background(), "stub-local")
+	if n == nil || n.Enabled {
+		t.Fatal("节点应关闭")
+	}
+	// 全关后 EnsureReady 失败
+	if err := svc.EnsureReady(context.Background()); err != ai.ErrAIDisabled {
+		t.Fatalf("应 AI_DISABLED: %v", err)
+	}
+	if err := svc.SetNodeEnabled(context.Background(), "stub-local", true, "u"); err != nil {
+		t.Fatalf("enable node: %v", err)
+	}
+	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", models.AIModelStatusAvailable, "u"); err != nil {
+		t.Fatalf("enable model: %v", err)
+	}
+	if err := svc.EnsureReady(context.Background()); err != nil {
+		t.Fatalf("恢复后应可用: %v", err)
+	}
+}
+
 func TestConfirmRejectAndDuplicates(t *testing.T) {
 	db := openAITestDB(t)
 	_ = db.Exec(`INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`, settings.KeyAIEnabled, "1").Error

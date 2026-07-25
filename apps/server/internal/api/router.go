@@ -40,7 +40,9 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 	{
 		aiGroup.GET("/status", h.AIStatus)
 		aiGroup.GET("/models", h.ListAIModels)
+		aiGroup.PUT("/models/:id/status", h.UpdateAIModelStatus)
 		aiGroup.GET("/nodes", h.ListAINodes)
+		aiGroup.PUT("/nodes/:id/enabled", h.UpdateAINodeEnabled)
 		aiGroup.POST("/infer", h.EnqueueAIInfer)
 		aiGroup.GET("/results", h.ListAIResults)
 		aiGroup.POST("/results/rebuild", h.RebuildAIResults)

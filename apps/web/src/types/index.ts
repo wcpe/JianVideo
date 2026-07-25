@@ -275,6 +275,30 @@ export interface AIResult {
   updated_at: string;
 }
 
+/** AI 模型注册表行（FR2-011） */
+export interface AIModel {
+  id: string;
+  name: string;
+  version: string;
+  task_type: string;
+  status: 'available' | 'disabled' | string;
+  endpoint: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** AI 推理节点（FR2-011） */
+export interface AINode {
+  id: string;
+  name: string;
+  kind: string;
+  endpoint: string;
+  enabled: boolean;
+  task_types_json: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 /** AI 相似候选组（FR2-012）：仅 media id + 相似度，需再解析媒体摘要 */
 export interface AIDuplicateGroup {
   media_ids: number[];

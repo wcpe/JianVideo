@@ -10,6 +10,7 @@
 
 - **FR2-011 AI 可替换管线首切**：`ai_models` / `ai_inference_nodes` / `ai_results` 表与迁移；设置键 `ai_enabled`（默认关闭）；`ai.infer` 通用队列任务 + stub 节点；API `/api/ai/status|models|nodes|infer|results|results/rebuild`；Space 隔离与 manual 重建保护。
 - **FR2-011 二切（设置页总开关）**：设置页「AI」分区可热切换 `ai_enabled`（默认关）；保存即生效，未启用时 AI API 仍返回 `503 AI_DISABLED`。
+- **FR2-011 后置（模型/节点列表与启用）**：设置页 AI 区展示已注册模型与推理节点；`PUT /api/ai/models/:id/status`（available/disabled）、`PUT /api/ai/nodes/:id/enabled`；审计 `ai.model.status_updated` / `ai.node.enabled_updated`。
 - **FR2-012 AI 搜索与 OCR 通路首切**：嵌入式 `ai_embeddings` 表（float32 BLOB + 余弦检索，无外部向量库）；`task_type=embedding` 写入向量；`GET/POST /api/ai/search` 语义搜索；结构化能力锁定 stub **OCR**（经同一 `ai.infer`）；rebuild 同步删向量。
 - **FR2-012 二切（后端审核/去重）**：`POST /api/ai/results/:id/confirm` 写 `manual=true`（rebuild 不删）；`POST /api/ai/results/:id/reject` 仅删非 manual；`GET /api/ai/duplicates` 同 Space 余弦相似候选组（默认阈值 0.92，不自动删媒体）；审计 `ai.result.confirmed|rejected`。
 - **FR2-012 二切（前端最小 UI）**：重复项页新增「AI 相似」Tab（并列哈希去重，不自动删）；详情面板「AI 结果」区支持确认/驳回；AI 关闭时仅提示不阻断详情。
