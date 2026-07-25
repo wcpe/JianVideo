@@ -19,9 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	aisvc "github.com/wcpe/JianVideo/internal/ai"
 	"github.com/wcpe/JianVideo/internal/audit"
 	"github.com/wcpe/JianVideo/internal/auth"
-	aisvc "github.com/wcpe/JianVideo/internal/ai"
 	"github.com/wcpe/JianVideo/internal/db/models"
 	"github.com/wcpe/JianVideo/internal/library"
 	"github.com/wcpe/JianVideo/internal/metrics"

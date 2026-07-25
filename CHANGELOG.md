@@ -17,6 +17,8 @@
 
 ### 修复
 
+- **CI 质量门**：`gofmt` 整理 `api/handler.go` import；`internal/ai` 补 package 注释；`brace-expansion` 钉到 `>=5.0.8`；`react-router` 以 override 升到 `8.3.0` 消除 audit high。
+
 ## 0.26.0（2026-07-24）
 
 ### 变更

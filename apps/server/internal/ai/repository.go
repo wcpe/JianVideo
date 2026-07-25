@@ -1,3 +1,4 @@
+// Package ai 提供 AI 可替换管线与搜索审核的数据访问与服务实现。
 package ai
 
 import (
