@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Stack, Group, Text, Button, Loader, Center, Paper, Badge, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconTrash, IconScan, IconCopyOff, IconFingerprint, IconSparkles } from '@tabler/icons-react';
+import {
+  IconTrash,
+  IconScan,
+  IconCopyOff,
+  IconFingerprint,
+  IconSparkles,
+} from '@tabler/icons-react';
 import * as libApi from '@/api/library';
 import { listAIDuplicates } from '@/api/ai';
 import PageHeader from '@/components/PageHeader';
@@ -46,23 +52,26 @@ export default function DuplicatesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [aiDisabledHint, setAIDisabledHint] = useState<string | null>(null);
 
-  const resolveAIGroups = useCallback(async (raw: AIDuplicateGroup[]): Promise<AIResolvedGroup[]> => {
-    const out: AIResolvedGroup[] = [];
-    for (const group of raw) {
-      const items: MediaFile[] = [];
-      for (const id of group.media_ids) {
-        try {
-          items.push(await libApi.getMediaFile(id));
-        } catch {
-          /* 个别媒体不可见时跳过，保留其余成员 */
+  const resolveAIGroups = useCallback(
+    async (raw: AIDuplicateGroup[]): Promise<AIResolvedGroup[]> => {
+      const out: AIResolvedGroup[] = [];
+      for (const group of raw) {
+        const items: MediaFile[] = [];
+        for (const id of group.media_ids) {
+          try {
+            items.push(await libApi.getMediaFile(id));
+          } catch {
+            /* 个别媒体不可见时跳过，保留其余成员 */
+          }
+        }
+        if (items.length >= 2) {
+          out.push({ score: group.score, model_id: group.model_id, items });
         }
       }
-      if (items.length >= 2) {
-        out.push({ score: group.score, model_id: group.model_id, items });
-      }
-    }
-    return out;
-  }, []);
+      return out;
+    },
+    [],
+  );
 
   const load = useCallback(
     async (targetMode: DuplicateMode) => {
@@ -223,7 +232,11 @@ export default function DuplicatesPage() {
       <IconSparkles size={16} />
     );
   const actionHandler =
-    mode === 'exact' ? handleExactBackfill : mode === 'similar' ? handleSimilarScan : handleAIRefresh;
+    mode === 'exact'
+      ? handleExactBackfill
+      : mode === 'similar'
+        ? handleSimilarScan
+        : handleAIRefresh;
   const showHeaderAction = groups.length > 0 || mode === 'ai';
   const tabColor = mode === 'exact' ? 'blue' : mode === 'similar' ? 'purple' : 'grape';
 
