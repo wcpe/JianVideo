@@ -12,6 +12,7 @@ import {
   Drawer,
   Box,
   NativeSelect,
+  Switch,
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -34,6 +35,7 @@ import BatchActionsModals from '@/components/BatchActionsModals';
 import { useBatchActions } from '@/hooks/useBatchActions';
 import { extractErrorMessage } from '@/utils/error';
 import * as libApi from '@/api/library';
+import { semanticSearch, type SearchHit } from '@/api/ai';
 import type { TimelineGranularity } from '@/utils/timeline';
 import type { MediaFile } from '@/types';
 
@@ -104,6 +106,11 @@ export default function TimelinePage() {
   const [deleting, setDeleting] = useState(false);
   // 移动端筛选抽屉开合（FR-86）：窄屏将筛选控件收进抽屉，搜索框常驻
   const [filterDrawerOpened, filterDrawer] = useDisclosure(false);
+  // 语义搜索（FR2-012）：AI 向量语义搜索模式开关
+  const [semanticMode, setSemanticMode] = useState(false);
+  const [semanticHits, setSemanticHits] = useState<MediaFile[]>([]);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticError, setSemanticError] = useState<string | null>(null);
   // 窄屏判断（FR-143）：仅窄屏启用下拉刷新；取 Mantine sm 断点（48em），SSR/未知回退桌面态
   const isNarrow = useMediaQuery('(max-width: 48em)') ?? false;
   const infinite = useInfiniteMedia({
@@ -127,6 +134,47 @@ export default function TimelinePage() {
     // 仅随 URL search 变化联动；setSearchInput 稳定，无需入依赖以免每次渲染重置用户态
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearch]);
+
+  // 语义搜索：当 semanticMode 且 searchInput 非空时调 AI 搜索并解析 media
+  useEffect(() => {
+    const q = infinite.searchInput.trim();
+    if (!semanticMode || !q) {
+      setSemanticHits([]);
+      setSemanticError(null);
+      return;
+    }
+    let active = true;
+    setSemanticLoading(true);
+    setSemanticError(null);
+    void semanticSearch(q, 20)
+      .then(async (hits: SearchHit[]) => {
+        const files: MediaFile[] = [];
+        for (const hit of hits) {
+          try {
+            files.push(await libApi.getMediaFile(hit.media_id));
+          } catch {
+            /* 个别 media 不可见时跳过 */
+          }
+        }
+        if (active) setSemanticHits(files);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSemanticHits([]);
+        const code = (err as { response?: { data?: { code?: string } } })?.response?.data?.code;
+        setSemanticError(
+          code === 'AI_DISABLED' || code === 'AI_UNAVAILABLE'
+            ? 'AI 未启用'
+            : extractErrorMessage(err, '语义搜索失败'),
+        );
+      })
+      .finally(() => {
+        if (active) setSemanticLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [semanticMode, infinite.searchInput]);
 
   // 批量操作（FR-91）：加相册 / 打标签 / 打包下载
   const batch = useBatchActions();
@@ -360,18 +408,30 @@ export default function TimelinePage() {
       <PageHeader
         title="时间轴"
         actions={
-          // 手动刷新（FR-67）：重载首页数据
-          <Tooltip label="刷新">
-            <ActionIcon
-              variant="default"
-              size="lg"
-              aria-label="刷新"
-              loading={infinite.loading}
-              onClick={() => infinite.reload()}
-            >
-              <IconRefresh size={18} />
-            </ActionIcon>
-          </Tooltip>
+          <Group gap="xs">
+            {/* 语义搜索切换（FR2-012）：AI 向量搜索模式 */}
+            <Tooltip label={semanticMode ? '语义搜索已开启' : '语义搜索'}>
+              <Switch
+                size="md"
+                aria-label="语义搜索"
+                label="语义搜索"
+                checked={semanticMode}
+                onChange={(e) => setSemanticMode(e.currentTarget.checked)}
+              />
+            </Tooltip>
+            {/* 手动刷新（FR-67）：重载首页数据 */}
+            <Tooltip label="刷新">
+              <ActionIcon
+                variant="default"
+                size="lg"
+                aria-label="刷新"
+                loading={infinite.loading}
+                onClick={() => infinite.reload()}
+              >
+                <IconRefresh size={18} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         }
       />
 
@@ -445,35 +505,63 @@ export default function TimelinePage() {
 
       {/* 下拉刷新（FR-143）：仅窄屏启用，页面顶部下拉松手重载首屏；桌面（enabled=false）纯透传 */}
       <PullToRefresh enabled={isNarrow} onRefresh={() => infinite.reload()}>
-        <TimelineView
-          ref={timelineRef}
-          mediaFiles={infinite.items}
-          loading={infinite.loading && infinite.items.length === 0}
-          error={infinite.error}
-          customImageExtensions={exts}
-          onErrorClose={() => infinite.setError(null)}
-          onOpenFile={handleOpen}
-          onToggleFavorite={handleToggleFavorite}
-          onLoadMore={infinite.loadMore}
-          hasMore={infinite.hasMore}
-          loadingMore={infinite.loading && infinite.items.length > 0}
-          granularity={granularity}
-          filtered={filterActive}
-          onClearFilter={clearFilters}
-          onBatchDelete={(ids) => setPendingDelete(ids)}
-          onDeleteOne={(f) => setPendingDelete([f.id])}
-          onBatchAddToAlbum={batch.openAddToAlbum}
-          onBatchAddTag={batch.openAddTag}
-          onBatchDownload={batch.download}
-          onBatchTranscode={batch.openTranscode}
-          onBatchMove={batch.openMove}
-        />
+        {semanticMode && infinite.searchInput.trim() ? (
+          <TimelineView
+            ref={timelineRef}
+            mediaFiles={semanticHits}
+            loading={semanticLoading}
+            error={semanticError}
+            customImageExtensions={exts}
+            onErrorClose={() => setSemanticError(null)}
+            onOpenFile={handleOpen}
+            onToggleFavorite={handleToggleFavorite}
+            hasMore={false}
+            loadingMore={false}
+            granularity={granularity}
+            filtered
+            onClearFilter={() => {
+              setSemanticMode(false);
+              infinite.setSearchInput('');
+            }}
+            onBatchDelete={(ids) => setPendingDelete(ids)}
+            onDeleteOne={(f) => setPendingDelete([f.id])}
+            onBatchAddToAlbum={batch.openAddToAlbum}
+            onBatchAddTag={batch.openAddTag}
+            onBatchDownload={batch.download}
+            onBatchTranscode={batch.openTranscode}
+            onBatchMove={batch.openMove}
+          />
+        ) : (
+          <TimelineView
+            ref={timelineRef}
+            mediaFiles={infinite.items}
+            loading={infinite.loading && infinite.items.length === 0}
+            error={infinite.error}
+            customImageExtensions={exts}
+            onErrorClose={() => infinite.setError(null)}
+            onOpenFile={handleOpen}
+            onToggleFavorite={handleToggleFavorite}
+            onLoadMore={infinite.loadMore}
+            hasMore={infinite.hasMore}
+            loadingMore={infinite.loading && infinite.items.length > 0}
+            granularity={granularity}
+            filtered={filterActive}
+            onClearFilter={clearFilters}
+            onBatchDelete={(ids) => setPendingDelete(ids)}
+            onDeleteOne={(f) => setPendingDelete([f.id])}
+            onBatchAddToAlbum={batch.openAddToAlbum}
+            onBatchAddTag={batch.openAddTag}
+            onBatchDownload={batch.download}
+            onBatchTranscode={batch.openTranscode}
+            onBatchMove={batch.openMove}
+          />
+        )}
       </PullToRefresh>
 
       <BatchActionsModals state={batch.modalState} />
 
       <MediaDetailPanel
-        files={infinite.items}
+        files={semanticMode && semanticHits.length > 0 ? semanticHits : infinite.items}
         initialIndex={detailIndex}
         onClose={() => setDetailIndex(null)}
         customImageExtensions={exts}

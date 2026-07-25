@@ -33,6 +33,7 @@ import {
   IconStethoscope,
   IconCopy,
   IconChartBar,
+  IconRobot,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconLicense,
@@ -172,6 +173,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { path: '/inspect', label: '巡检', icon: IconStethoscope },
     // 感知哈希去重（FR-70）：检出近似重复媒体、批量清理候选
     { path: '/duplicates', label: '重复项', icon: IconCopy },
+    // AI 审核列表（FR2-012）：Space 级 AI 结果审核与批量确认/驳回
+    { path: '/ai-review', label: 'AI 审核', icon: IconRobot },
     // 观看热力与统计（FR-75）：观看次数、续播位置热力、最近观看时间线
     { path: '/stats', label: '统计', icon: IconChartBar },
     // 转码预设与预生成队列（FR-77）：自定义编码/分辨率预设、预热首播
@@ -209,6 +212,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         '/recycle',
         '/inspect',
         '/duplicates',
+        '/ai-review',
         '/transcode',
         '/tasks',
         '/storage-cache',

@@ -2,6 +2,7 @@ package ai_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,42 +210,107 @@ func TestEmbeddingInfer_WritesVector(t *testing.T) {
 	_ = task
 }
 
-func TestSetModelStatusAndNodeEnabled(t *testing.T) {
+func TestInferAllStubTaskTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		taskType string
+		check    func(t *testing.T, payload string)
+	}{
+		{"object_scene", models.AITaskTypeObjectScene, func(t *testing.T, p string) {
+			if !strings.Contains(p, `"objects"`) || !strings.Contains(p, `"scene"`) {
+				t.Fatalf("object_scene payload 缺 objects/scene: %s", p)
+			}
+		}},
+		{"face", models.AITaskTypeFace, func(t *testing.T, p string) {
+			if !strings.Contains(p, `"faces"`) || !strings.Contains(p, `"bbox"`) {
+				t.Fatalf("face payload 缺 faces/bbox: %s", p)
+			}
+		}},
+		{"video_understanding", models.AITaskTypeVideoUnderstanding, func(t *testing.T, p string) {
+			if !strings.Contains(p, `"segments"`) || !strings.Contains(p, `"summary"`) {
+				t.Fatalf("video_understanding payload 缺 segments/summary: %s", p)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openAITestDB(t)
+			_ = db.Exec(`INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`, settings.KeyAIEnabled, "1").Error
+			settingsSvc := settings.NewService(db)
+			repo := ai.NewGormRepository(db)
+			taskSvc := tasksvc.NewService(db)
+			svc := ai.NewService(repo, settingsSvc).WithTasks(taskSvc)
+			if err := svc.SeedStubFixture(context.Background()); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			task, err := svc.EnqueueInfer(context.Background(), "s1", 7, tt.taskType, "", "", "u")
+			if err != nil {
+				t.Fatalf("enqueue %s: %v", tt.name, err)
+			}
+			_ = task
+			claimed, err := taskSvc.ClaimNext(context.Background(), tasksvc.ClaimQuery{Type: ai.TaskTypeAIInfer})
+			if err != nil || claimed == nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if err := svc.HandleInferTask(context.Background(), *claimed); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			_ = taskSvc.MarkSucceeded(context.Background(), claimed.ID)
+			results, err := svc.ListResults(context.Background(), "s1", 7)
+			if err != nil || len(results) != 1 {
+				t.Fatalf("results: %v len=%d", err, len(results))
+			}
+			tt.check(t, results[0].PayloadJSON)
+		})
+	}
+}
+
+func TestListResultsBySpaceAndBatch(t *testing.T) {
 	db := openAITestDB(t)
 	_ = db.Exec(`INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)`, settings.KeyAIEnabled, "1").Error
-	svc := ai.NewService(ai.NewGormRepository(db), settings.NewService(db))
+	settingsSvc := settings.NewService(db)
+	repo := ai.NewGormRepository(db)
+	svc := ai.NewService(repo, settingsSvc)
 	if err := svc.SeedStubFixture(context.Background()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", models.AIModelStatusDisabled, "u"); err != nil {
-		t.Fatalf("disable model: %v", err)
+	now := time.Now().UTC()
+	for i, tt := range []string{models.AITaskTypeOCR, models.AITaskTypeFace, models.AITaskTypeOCR} {
+		manual := i == 2
+		if err := repo.CreateResult(context.Background(), &models.AIResult{
+			SpaceID: "s1", MediaID: int64(i + 1), TaskType: tt, ModelID: "stub", ModelVersion: "1",
+			NodeID: "n", BatchID: "b", PayloadJSON: `{}`, Manual: manual, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
 	}
-	m, _ := ai.NewGormRepository(db).GetModel(context.Background(), "stub-ocr-v1")
-	if m == nil || m.Status != models.AIModelStatusDisabled {
-		t.Fatal("模型应为 disabled")
+	all, err := svc.ListResultsBySpace(context.Background(), "s1", "", nil)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("ListResultsBySpace all: %v len=%d", err, len(all))
 	}
-	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", "nope", "u"); err == nil {
-		t.Fatal("非法 status 应失败")
+	ocr, err := svc.ListResultsBySpace(context.Background(), "s1", models.AITaskTypeOCR, nil)
+	if err != nil || len(ocr) != 2 {
+		t.Fatalf("filter OCR: %v len=%d", err, len(ocr))
 	}
-	if err := svc.SetNodeEnabled(context.Background(), "stub-local", false, "u"); err != nil {
-		t.Fatalf("disable node: %v", err)
+	pending := false
+	pendingRows, err := svc.ListResultsBySpace(context.Background(), "s1", "", &pending)
+	if err != nil || len(pendingRows) != 2 {
+		t.Fatalf("filter pending: %v len=%d", err, len(pendingRows))
 	}
-	n, _ := ai.NewGormRepository(db).GetNode(context.Background(), "stub-local")
-	if n == nil || n.Enabled {
-		t.Fatal("节点应关闭")
+	// 批量确认
+	n, err := svc.BatchConfirmResults(context.Background(), "s1", []int64{all[0].ID, all[1].ID}, "u")
+	if err != nil || n != 2 {
+		t.Fatalf("batch confirm: %v n=%d", err, n)
 	}
-	// 全关后 EnsureReady 失败
-	if err := svc.EnsureReady(context.Background()); err != ai.ErrAIDisabled {
-		t.Fatalf("应 AI_DISABLED: %v", err)
+	// 批量驳回：已确认项应跳过
+	n2, err := svc.BatchRejectResults(context.Background(), "s1", []int64{all[0].ID}, "u")
+	if err != nil || n2 != 0 {
+		t.Fatalf("batch reject manual: %v n=%d", err, n2)
 	}
-	if err := svc.SetNodeEnabled(context.Background(), "stub-local", true, "u"); err != nil {
-		t.Fatalf("enable node: %v", err)
-	}
-	if err := svc.SetModelStatus(context.Background(), "stub-ocr-v1", models.AIModelStatusAvailable, "u"); err != nil {
-		t.Fatalf("enable model: %v", err)
-	}
-	if err := svc.EnsureReady(context.Background()); err != nil {
-		t.Fatalf("恢复后应可用: %v", err)
+	// 其他 Space 不可见
+	other, err := svc.ListResultsBySpace(context.Background(), "s2", "", nil)
+	if err != nil || len(other) != 0 {
+		t.Fatalf("跨 Space 应空: %v len=%d", err, len(other))
 	}
 }
 

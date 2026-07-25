@@ -1,6 +1,6 @@
 # 功能规格：AI 可替换管线
 
-> 状态：开发中（首切骨架 + 设置页总开关 + 模型/节点列表与启用已落地）　·　关联 PRD：FR2-011　·　阶段：P6 `0.27.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md) / [0055](../adr/0055-task-queue-persistence.md) / [0056](../adr/0056-space-permission-model.md) / [0058](../adr/0058-data-layer-abstraction.md)
+> 状态：已交付@v0.27.0（首切骨架 + 设置页总开关 + 模型/节点列表启用 + 全部 stub task_type 已落地）　·　关联 PRD：FR2-011　·　阶段：P6 `0.27.x`　·　前置：[fr2-037](fr2-037-task-queue-center.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md) / [0055](../adr/0055-task-queue-persistence.md) / [0056](../adr/0056-space-permission-model.md) / [0058](../adr/0058-data-layer-abstraction.md)
 
 ## 0. 切片范围
 

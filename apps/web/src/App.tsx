@@ -20,6 +20,7 @@ import AlbumsPage from './pages/AlbumsPage';
 import RecyclePage from './pages/RecyclePage';
 import InspectPage from './pages/InspectPage';
 import DuplicatesPage from './pages/DuplicatesPage';
+import AIReviewPage from './pages/AIReviewPage';
 // 统计页懒加载（ADR-0045）：仅此页引入 Recharts 图表库，按路由 code-split，
 // 让 recharts 落入独立 chunk、不进主包（否则主包超 PWA 预缓存 2MiB 上限）。
 const StatsPage = lazy(() => import('./pages/StatsPage'));
@@ -183,6 +184,17 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <DuplicatesPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          {/* AI 审核列表（FR2-012） */}
+          <Route
+            path="/ai-review"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <AIReviewPage />
                 </AppLayout>
               </ProtectedRoute>
             }

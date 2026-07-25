@@ -104,6 +104,20 @@ func (r *GormRepository) ListResultsByMedia(ctx context.Context, spaceID string,
 	return rows, err
 }
 
+// ListResultsBySpace 按 Space 列全部结果，支持可选 task_type 与 manual 过滤。
+func (r *GormRepository) ListResultsBySpace(ctx context.Context, spaceID string, taskType string, manual *bool) ([]models.AIResult, error) {
+	q := r.db.WithContext(ctx).Where("space_id = ?", spaceID)
+	if strings.TrimSpace(taskType) != "" {
+		q = q.Where("task_type = ?", taskType)
+	}
+	if manual != nil {
+		q = q.Where("manual = ?", *manual)
+	}
+	var rows []models.AIResult
+	err := q.Order("id desc").Find(&rows).Error
+	return rows, err
+}
+
 // CreateResult 写入结果。
 func (r *GormRepository) CreateResult(ctx context.Context, res *models.AIResult) error {
 	if res == nil {

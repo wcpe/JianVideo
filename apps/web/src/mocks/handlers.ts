@@ -2251,7 +2251,7 @@ export const handlers = [
           kind: 'local',
           endpoint: '',
           enabled: true,
-          task_types_json: '["ocr","embedding"]',
+          task_types_json: '["ocr","embedding","object_scene","face","video_understanding"]',
         },
       ],
     });
@@ -2263,6 +2263,74 @@ export const handlers = [
   http.put('*/api/ai/nodes/:id/enabled', async () => {
     await delay(40);
     return HttpResponse.json({ ok: true });
+  }),
+  http.get('*/api/ai/results', async ({ request }) => {
+    await delay(60);
+    const url = new URL(request.url);
+    if (url.searchParams.get('media_id')) {
+      return HttpResponse.json({ items: [] });
+    }
+    // Space 级列表 mock
+    return HttpResponse.json({
+      items: [
+        {
+          id: 101,
+          space_id: 'space-default',
+          media_id: 1,
+          task_type: 'ocr',
+          model_id: 'stub-ocr-v1',
+          model_version: '1.0.0',
+          node_id: 'stub-local',
+          batch_id: 'b1',
+          payload_json: '{"text":"stub text"}',
+          manual: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 102,
+          space_id: 'space-default',
+          media_id: 2,
+          task_type: 'face',
+          model_id: 'stub-face-v1',
+          model_version: '1.0.0',
+          node_id: 'stub-local',
+          batch_id: 'b2',
+          payload_json: '{"faces":[{"bbox":[0.1,0.2,0.3,0.4],"confidence":0.9}]}',
+          manual: false,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 103,
+          space_id: 'space-default',
+          media_id: 3,
+          task_type: 'object_scene',
+          model_id: 'stub-object-scene-v1',
+          model_version: '1.0.0',
+          node_id: 'stub-local',
+          batch_id: 'b3',
+          payload_json: '{"scene":"日常生活","objects":[{"label":"猫","confidence":0.85}]}',
+          manual: true,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+  }),
+  http.post('*/api/ai/results/batch/confirm', async ({ request }) => {
+    await delay(40);
+    const body = (await request.json()) as { ids: number[] };
+    return HttpResponse.json({ confirmed: body.ids.length });
+  }),
+  http.post('*/api/ai/results/batch/reject', async ({ request }) => {
+    await delay(40);
+    const body = (await request.json()) as { ids: number[] };
+    return HttpResponse.json({ rejected: body.ids.length });
+  }),
+  http.post('*/api/ai/search', async () => {
+    await delay(60);
+    return HttpResponse.json({ items: [] });
   }),
 
   // ─── 运行期设置 ────────────────────────────────────────

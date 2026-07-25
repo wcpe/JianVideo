@@ -142,7 +142,7 @@ func (h *Handler) EnqueueAIInfer(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"status": task.Status, "task_id": task.ID})
 }
 
-// ListAIResults 列 media 的 AI 结果。
+// ListAIResults 列 AI 结果：media_id 存在时按 media 查，否则按 Space 查全部。
 func (h *Handler) ListAIResults(c *gin.Context) {
 	spaceID, ok := h.resolveSpaceID(c)
 	if !ok {
@@ -152,12 +152,27 @@ func (h *Handler) ListAIResults(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AI_UNAVAILABLE", "message": "AI 服务未启用"})
 		return
 	}
-	mediaID, err := strconv.ParseInt(strings.TrimSpace(c.Query("media_id")), 10, 64)
-	if err != nil || mediaID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "需要 media_id"})
+	mediaID, _ := strconv.ParseInt(strings.TrimSpace(c.Query("media_id")), 10, 64)
+	if mediaID > 0 {
+		items, err := h.ai.ListResults(c.Request.Context(), spaceID, mediaID)
+		if err != nil {
+			writeAIError(c, err)
+			return
+		}
+		if items == nil {
+			items = []models.AIResult{}
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
 		return
 	}
-	items, err := h.ai.ListResults(c.Request.Context(), spaceID, mediaID)
+	// Space 级列表：支持可选 task_type / manual 过滤
+	taskType := strings.TrimSpace(c.Query("task_type"))
+	var manualPtr *bool
+	if raw := strings.TrimSpace(c.Query("manual")); raw != "" {
+		b := raw == "1" || strings.EqualFold(raw, "true")
+		manualPtr = &b
+	}
+	items, err := h.ai.ListResultsBySpace(c.Request.Context(), spaceID, taskType, manualPtr)
 	if err != nil {
 		writeAIError(c, err)
 		return
@@ -304,6 +319,56 @@ func (h *Handler) ListAIDuplicates(c *gin.Context) {
 		groups = []ai.DuplicateGroup{}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": groups})
+}
+
+// BatchConfirmAIResults 批量确认 AI 结果。
+func (h *Handler) BatchConfirmAIResults(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if h.ai == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AI_UNAVAILABLE", "message": "AI 服务未启用"})
+		return
+	}
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "需要 ids"})
+		return
+	}
+	n, err := h.ai.BatchConfirmResults(c.Request.Context(), spaceID, body.IDs, actorIDFromContext(c))
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"confirmed": n})
+}
+
+// BatchRejectAIResults 批量驳回 AI 结果。
+func (h *Handler) BatchRejectAIResults(c *gin.Context) {
+	spaceID, ok := h.resolveSpaceID(c)
+	if !ok {
+		return
+	}
+	if h.ai == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "AI_UNAVAILABLE", "message": "AI 服务未启用"})
+		return
+	}
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_REQUEST", "message": "需要 ids"})
+		return
+	}
+	n, err := h.ai.BatchRejectResults(c.Request.Context(), spaceID, body.IDs, actorIDFromContext(c))
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rejected": n})
 }
 
 func writeAIError(c *gin.Context, err error) {

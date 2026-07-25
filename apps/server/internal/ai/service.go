@@ -61,6 +61,7 @@ type Repository interface {
 	GetNode(ctx context.Context, id string) (*models.AIInferenceNode, error)
 	UpsertNode(ctx context.Context, n *models.AIInferenceNode) error
 	ListResultsByMedia(ctx context.Context, spaceID string, mediaID int64) ([]models.AIResult, error)
+	ListResultsBySpace(ctx context.Context, spaceID string, taskType string, manual *bool) ([]models.AIResult, error)
 	CreateResult(ctx context.Context, r *models.AIResult) error
 	DeleteNonManualResults(ctx context.Context, spaceID string, mediaID int64, taskType, batchID string) (int64, error)
 	UpsertEmbedding(ctx context.Context, e *models.AIEmbedding) error
@@ -366,6 +367,14 @@ func (s *Service) ListResults(ctx context.Context, spaceID string, mediaID int64
 	return s.repo.ListResultsByMedia(ctx, spaceID, mediaID)
 }
 
+// ListResultsBySpace 按 Space 查全部结果，支持可选过滤（审核列表页）。
+func (s *Service) ListResultsBySpace(ctx context.Context, spaceID, taskType string, manual *bool) ([]models.AIResult, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.ListResultsBySpace(ctx, spaceID, taskType, manual)
+}
+
 // RebuildResults 删除非 manual 结果（可重建）。
 func (s *Service) RebuildResults(ctx context.Context, spaceID string, mediaID int64, taskType, batchID, actorID string) (int64, error) {
 	if !s.isEnabled() {
@@ -549,19 +558,25 @@ func RegisterAIWorker(registry *tasksvc.WorkerRegistry, svc *Service) error {
 	return registry.Register(TaskTypeAIInfer, tasksvc.DefaultConcurrency(TaskTypeAIInfer), svc.HandleInferTask)
 }
 
-// SeedStubFixture 写入 stub 模型与节点（测试/开发用）。
+// SeedStubFixture 写入全部 stub 模型与节点（测试/开发用）。
 func (s *Service) SeedStubFixture(ctx context.Context) error {
 	now := time.Now().UTC()
 	for _, m := range []models.AIModel{
 		{ID: "stub-ocr-v1", Name: "Stub OCR", Version: "1.0.0", TaskType: models.AITaskTypeOCR, Status: models.AIModelStatusAvailable, CreatedAt: now, UpdatedAt: now},
 		{ID: "stub-embed-v1", Name: "Stub Embedding", Version: "1.0.0", TaskType: models.AITaskTypeEmbedding, Status: models.AIModelStatusAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "stub-object-scene-v1", Name: "Stub Object/Scene", Version: "1.0.0", TaskType: models.AITaskTypeObjectScene, Status: models.AIModelStatusAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "stub-face-v1", Name: "Stub Face Detection", Version: "1.0.0", TaskType: models.AITaskTypeFace, Status: models.AIModelStatusAvailable, CreatedAt: now, UpdatedAt: now},
+		{ID: "stub-video-understanding-v1", Name: "Stub Video Understanding", Version: "1.0.0", TaskType: models.AITaskTypeVideoUnderstanding, Status: models.AIModelStatusAvailable, CreatedAt: now, UpdatedAt: now},
 	} {
 		mm := m
 		if err := s.repo.UpsertModel(ctx, &mm); err != nil {
 			return err
 		}
 	}
-	typesJSON, _ := json.Marshal([]string{models.AITaskTypeOCR, models.AITaskTypeEmbedding})
+	typesJSON, _ := json.Marshal([]string{
+		models.AITaskTypeOCR, models.AITaskTypeEmbedding,
+		models.AITaskTypeObjectScene, models.AITaskTypeFace, models.AITaskTypeVideoUnderstanding,
+	})
 	node := &models.AIInferenceNode{
 		ID: "stub-local", Name: "Stub Local Node", Kind: models.AINodeKindLocal,
 		Endpoint: "", Enabled: true, TaskTypesJSON: string(typesJSON), CreatedAt: now, UpdatedAt: now,

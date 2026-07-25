@@ -1,6 +1,6 @@
 # 功能规格：AI 搜索、去重与审核流
 
-> 状态：开发中（首切+二切：向量搜索/OCR/去重候选/确认驳回 API + 设置开关 + 重复项 AI Tab + 详情审核区已落地；模型列表/人脸等后置）　·　关联 PRD：FR2-012　·　阶段：P6 `0.27.x`　·　前置：[fr2-011](fr2-011-ai-pipeline.md) · [fr2-061](fr2-061-file-hash-dedup.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md)
+> 状态：已交付@v0.27.0（首切+二切+后置全量：向量搜索/全 task_type stub/去重候选/确认驳回/批量审核/语义搜索入口/审核列表页/模型节点管理已落地）　·　关联 PRD：FR2-012　·　阶段：P6 `0.27.x`　·　前置：[fr2-011](fr2-011-ai-pipeline.md) · [fr2-061](fr2-061-file-hash-dedup.md) · ADR：[0059](../adr/0059-ai-pipeline-vector-index.md)
 
 ## 0. 切片范围
 
@@ -9,10 +9,10 @@
 | A | 嵌入式向量索引隔离点（sqlite-vec 或本地向量文件，ADR-0059）；`ai_embeddings` 表/存储 + repository | ✅ |
 | B | embedding 任务：`task_type=embedding` 经 FR2-011 管线入队；写入向量；按 Space 隔离 | ✅ |
 | C | 语义搜索 API：`q` + Space + 可选 media 类型；返回相似度排序列表 | ✅ |
-| D | **一种**结构化能力走通（默认 **OCR** 或 **对象/场景** 二选一，实现时锁一种 stub+可选真实后端） | ✅ |
+| D | **一种**结构化能力走通（默认 **OCR** 或 **对象/场景** 二选一，实现时锁一种 stub+可选真实后端） | ✅ 全部 stub：OCR + object_scene + face + video_understanding |
 | E | AI 去重：基于 embedding 相似度候选 + 与 FR2-061 哈希去重结果并列展示（不替代哈希） | ✅ API + 重复项「AI 相似」Tab |
-| F | 审核流：结果列表、人工确认/驳回（写 `manual`）、批量操作与审计 | ✅ confirm/reject API + 详情面板审核区；批量后置 |
-| G | 人脸、视频理解完整产品化、多模型热切换 UI | 后置 / 可分期 |
+| F | 审核流：结果列表、人工确认/驳回（写 `manual`）、批量操作与审计 | ✅ confirm/reject + 批量 + 详情面板审核区 + 独立审核列表页 |
+| G | 人脸、视频理解完整产品化、多模型热切换 UI | ✅ stub（face detection-only + video_understanding）；模型/节点热切换已落地 |
 
 **首切建议**：向量检索 + 一种可测的结构化 task_type + 默认关闭仍生效；人脸/审核 UI 后置。
 
@@ -74,7 +74,10 @@
 - [x] 二切（后端）：审核 `POST /api/ai/results/:id/confirm|reject`（confirm→`manual=true`；reject 仅非 manual；审计）
 - [x] 二切（前端）：设置页 `ai_enabled` 开关（随 FR2-011）
 - [x] 二切（前端）：去重候选「AI 相似」Tab + 详情面板确认/驳回
-- [ ] 后置：人脸 / 视频理解 / 多模型切换；审核列表筛选与批量操作
+- [x] 后置：object_scene / face / video_understanding stub（全部 task_type 落地）
+- [x] 后置：语义搜索前端入口（时间轴「语义搜索」开关）
+- [x] 后置：审核列表页（`/ai-review`）与批量确认/驳回
+- [x] 后置：模型/节点列表与启用（FR2-011）
 
 ## 5. 验收标准
 

@@ -50,6 +50,8 @@ func RegisterRoutes(r *gin.Engine, h *Handler, pbSvc ...*playback.Service) {
 		aiGroup.POST("/search", h.SemanticSearchAI)
 		aiGroup.POST("/results/:id/confirm", h.ConfirmAIResult)
 		aiGroup.POST("/results/:id/reject", h.RejectAIResult)
+		aiGroup.POST("/results/batch/confirm", h.BatchConfirmAIResults)
+		aiGroup.POST("/results/batch/reject", h.BatchRejectAIResults)
 		aiGroup.GET("/duplicates", h.ListAIDuplicates)
 	}
 

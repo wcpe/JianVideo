@@ -167,3 +167,45 @@ func (s *Service) FindDuplicateCandidates(ctx context.Context, spaceID string, t
 	}
 	return out, nil
 }
+
+// BatchConfirmResults 批量确认（跳过已确认或失败项，返回成功计数）。
+func (s *Service) BatchConfirmResults(ctx context.Context, spaceID string, ids []int64, actorID string) (int, error) {
+	if !s.isEnabled() {
+		return 0, ErrAIDisabled
+	}
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" || len(ids) == 0 {
+		return 0, ErrInvalidInput
+	}
+	count := 0
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if err := s.ConfirmResult(ctx, spaceID, id, actorID); err == nil {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// BatchRejectResults 批量驳回（跳过 manual 或失败项，返回成功计数）。
+func (s *Service) BatchRejectResults(ctx context.Context, spaceID string, ids []int64, actorID string) (int, error) {
+	if !s.isEnabled() {
+		return 0, ErrAIDisabled
+	}
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID == "" || len(ids) == 0 {
+		return 0, ErrInvalidInput
+	}
+	count := 0
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if err := s.RejectResult(ctx, spaceID, id, actorID); err == nil {
+			count++
+		}
+	}
+	return count, nil
+}
