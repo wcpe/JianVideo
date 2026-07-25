@@ -13,5 +13,6 @@
 | [comments.md](comments.md) | 注释中文 |
 | [config-files.md](config-files.md) | YAML 配置规范 |
 | [git-commit.md](git-commit.md) | 提交规范与文档入库边界 |
+| [release-discipline.md](release-discipline.md) | **发版漂移**：先 CI 全绿再发版；禁止用 release commit 试 CI；禁止改/绕过 main 分支保护 |
 
 > 完整演进与维护流程见 [../../docs/CONTRIBUTING.md](../../docs/CONTRIBUTING.md)。
