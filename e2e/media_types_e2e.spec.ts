@@ -6,7 +6,7 @@ import { ensureSetup, login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const screenshotDir = ".tmp/screenshots/fr2-025";
+const screenshotDir = ".tmp/screenshots/media-types";
 
 test.describe("媒体类型规则端到端", () => {
   test.describe.configure({ timeout: 60000 });

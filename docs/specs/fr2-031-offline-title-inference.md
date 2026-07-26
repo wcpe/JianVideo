@@ -100,7 +100,7 @@ API：
 - FR2-031 race：`go test -race ./internal/api ./internal/library ./internal/settings ./internal/tasks -run 'Inference|MediaInference' -count=1` 通过。
 - 前端相关测试：`npm --prefix frontend test -- src/pages/TimelinePage.test.tsx src/pages/SettingsPage.test.tsx src/utils/media.test.ts` 通过，3 个文件共 53 个测试。
 - 前端静态门：`npm --prefix frontend run typecheck`、`npm --prefix frontend run lint` 均通过；`go vet ./...` 通过。
-- 真服务 E2E：`npx playwright test e2e/fr2-031-offline-title-inference.spec.ts --workers=1` 通过，Chromium 2/2；串行执行用于避免两个用例同时重置共享真服务数据。
+- 真服务 E2E：`npx playwright test e2e/offline_title_inference_e2e.spec.ts --workers=1` 通过，Chromium 2/2；串行执行用于避免两个用例同时重置共享真服务数据。
 
 ## 7. 风险 / 待定
 

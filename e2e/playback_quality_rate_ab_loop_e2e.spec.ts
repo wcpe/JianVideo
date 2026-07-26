@@ -1,3 +1,4 @@
+// 覆盖 PRD 清晰度、省流量、倍速与 A-B 循环
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { login } from "./helpers";
 import {
@@ -11,8 +12,8 @@ import {
 test.describe.configure({ mode: "serial" });
 test.use({ serviceWorkers: "block" });
 
-const STANDARD_FILE = "fr2-057-standard.mp4";
-const HIGH_ONLY_FILE = "fr2-057-high-only.mp4";
+const STANDARD_FILE = "quality-rate-abloop-standard.mp4";
+const HIGH_ONLY_FILE = "quality-rate-abloop-high-only.mp4";
 const ABR_LADDER_SETTING = "transcode_abr_ladder";
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 const DATA_SAVER_OBSERVATION_MS = 10_000;
@@ -30,7 +31,7 @@ interface WatchStateRequest {
   reason?: string;
 }
 
-test("FR2-057 真实 HLS 覆盖清晰度、省流量、倍速与 A-B 循环", async ({
+test("真实 HLS 覆盖清晰度、省流量、倍速与 A-B 循环", async ({
   page,
 }) => {
   test.setTimeout(540_000);
@@ -62,8 +63,8 @@ test("FR2-057 真实 HLS 覆盖清晰度、省流量、倍速与 A-B 循环", as
             }),
         },
       ],
-      label: "FR2-057 清晰度倍速循环 E2E",
-      prefix: "fr2-057-",
+      label: "清晰度倍速循环 E2E",
+      prefix: "quality-rate-abloop-",
     },
     async ({ mediaByName }) => {
       const standardID = requiredMediaID(mediaByName, STANDARD_FILE);

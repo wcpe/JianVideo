@@ -1,3 +1,4 @@
+// 覆盖 PRD FR2-022 外部工具下载与代理
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -15,9 +16,9 @@ import { login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const screenshotDir = ".tmp/screenshots/fr2-022";
-const fixtureDir = ".tmp/fr2-022-tool-fixture";
-const toolVersion = "fr2-022-e2e";
+const screenshotDir = ".tmp/screenshots/tool-download-proxy";
+const fixtureDir = ".tmp/tool-download-proxy-fixture";
+const toolVersion = "tool-download-proxy-e2e";
 const screenshotSuffix = process.env.FR2_022_SCREENSHOT_SUFFIX || "real";
 
 test("工具下载通过自定义本机源安装、写设置并可查任务审计", async ({ page }) => {

@@ -1,3 +1,4 @@
+// 覆盖 PRD 分档缩略图生成
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
@@ -8,7 +9,7 @@ import { login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const screenshotDir = ".tmp/screenshots/fr2-028";
+const screenshotDir = ".tmp/screenshots/thumbnail-tiers";
 const hasFfmpeg = (() => {
   try {
     execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
@@ -20,9 +21,9 @@ const hasFfmpeg = (() => {
 
 test("真实图片与视频完成三档任务生成、缓存登记和页面刷新", async ({ page }) => {
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实图片与视频素材");
-  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-fr2-028-"));
-  const imageName = "fr2-028-image.jpg";
-  const videoName = "fr2-028-video.mp4";
+  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-thumbnail-tiers-"));
+  const imageName = "thumbnail-tiers-image.jpg";
+  const videoName = "thumbnail-tiers-video.mp4";
   let libraryID = 0;
 
   try {
@@ -34,7 +35,7 @@ test("真实图片与视频完成三档任务生成、缓存登记和页面刷�
       data: {
         path: mediaDir.replace(/\\/g, "/"),
         type: "local",
-        label: "FR2-028 缩略图 E2E",
+        label: "缩略图 E2E",
       },
     });
     expect(created.ok()).toBeTruthy();

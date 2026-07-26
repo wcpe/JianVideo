@@ -1,3 +1,4 @@
+// 覆盖 PRD 章节跳转与书签
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { copyFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -6,7 +7,7 @@ import { hasFfmpeg, withMediaLibrary } from "./media-playback-fixtures";
 
 test.use({ serviceWorkers: "block" });
 
-const VIDEO_FILE = "fr2-060-chapters-bookmarks.mp4";
+const VIDEO_FILE = "chapters-bookmarks-chapters-bookmarks.mp4";
 const CHAPTER_FIXTURE = resolve(
   "apps/server/internal/library/testdata/chapters/embedded-chapters-three.mp4",
 );
@@ -21,7 +22,7 @@ type BookmarkDTO = {
   title: string;
 };
 
-test("FR2-060 真实媒体覆盖章节跳转与书签完整生命周期", async ({ page }) => {
+test("真实媒体覆盖章节跳转与书签完整生命周期", async ({ page }) => {
   test.setTimeout(180_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 与真实后端解析内嵌章节");
   await login(page);
@@ -35,8 +36,8 @@ test("FR2-060 真实媒体覆盖章节跳转与书签完整生命周期", async 
           write: (path) => copyFileSync(CHAPTER_FIXTURE, path),
         },
       ],
-      label: "FR2-060 章节书签 E2E",
-      prefix: "fr2-060-",
+      label: "章节书签 E2E",
+      prefix: "chapters-bookmarks-",
     },
     async ({ mediaByName }) => {
       const mediaID = requiredMediaID(mediaByName, VIDEO_FILE);

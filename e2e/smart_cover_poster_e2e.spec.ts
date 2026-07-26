@@ -1,3 +1,4 @@
+// 覆盖 PRD 智能封面/海报
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -20,9 +21,9 @@ const hasFfmpeg = (() => {
 
 test('详情页选择封面后同步列表，清理缓存仍保留语义并可重建', async ({ page }) => {
   test.setTimeout(120000);
-  test.skip(!hasFfmpeg, '需要真实 ffmpeg/ffprobe 素材完成 FR2-059 E2E');
-  const mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-fr2-059-'));
-  const videoName = 'fr2-059-smart-cover.mp4';
+  test.skip(!hasFfmpeg, '需要真实 ffmpeg/ffprobe 素材完成 E2E');
+  const mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-cover-poster-'));
+  const videoName = 'cover-poster-smart-cover.mp4';
   let libraryID = 0;
 
   try {
@@ -135,11 +136,11 @@ async function createLibrary(request: APIRequestContext, mediaDir: string): Prom
     data: {
       path: mediaDir.replace(/\\/g, '/'),
       type: 'local',
-      label: 'FR2-059 智能封面专项 E2E',
+      label: '智能封面专项 E2E',
     },
   });
   if (!response.ok()) {
-    throw new Error(`创建 FR2-059 媒体库失败: HTTP ${response.status()} ${await response.text()}`);
+    throw new Error(`创建 媒体库失败: HTTP ${response.status()} ${await response.text()}`);
   }
   return ((await response.json()) as { id: number }).id;
 }

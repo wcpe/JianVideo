@@ -1,3 +1,4 @@
+// 覆盖 PRD 文件级哈希去重
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { login } from './helpers';
 
 test.use({ serviceWorkers: 'block' });
 
-const screenshotDir = '.tmp/screenshots/fr2-061';
+const screenshotDir = '.tmp/screenshots/file-hash-dedup';
 const hasFfmpeg = (() => {
   try {
     execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });
@@ -20,7 +21,7 @@ const hasFfmpeg = (() => {
 test('精确内容哈希去重可回填、展示并保留相似重复入口', async ({ page }) => {
   test.setTimeout(90000);
   test.skip(!hasFfmpeg, '未检测到 ffmpeg，跳过真实媒体精确去重 E2E');
-  const mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-fr2-061-'));
+  const mediaDir = mkdtempSync(join(tmpdir(), 'jianvideo-dedup-'));
   let libraryID = 0;
 
   try {
@@ -34,7 +35,7 @@ test('精确内容哈希去重可回填、展示并保留相似重复入口', as
       data: {
         path: mediaDir.replace(/\\/g, '/'),
         type: 'local',
-        label: 'FR2-061 精确重复库',
+        label: '精确重复库',
       },
     });
     expect(createLib.ok()).toBeTruthy();

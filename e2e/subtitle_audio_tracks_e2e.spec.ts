@@ -1,3 +1,4 @@
+// 覆盖 PRD 字幕与音轨枚举/切换
 import {
   expect,
   test,
@@ -24,9 +25,9 @@ import { writeSubtitleAudioVideoFixture } from "./media-playback-fixtures";
 test.use({ serviceWorkers: "block" });
 test.describe.configure({ mode: "serial" });
 
-const VIDEO_BASENAME = "fr2-044-subtitle-audio-tracks";
-const SINGLE_AUDIO_BASENAME = "fr2-044-single-audio";
-const IMAGE_SUBTITLE_BASENAME = "fr2-044-image-subtitle";
+const VIDEO_BASENAME = "subtitle-audio-tracks";
+const SINGLE_AUDIO_BASENAME = "single-audio";
+const IMAGE_SUBTITLE_BASENAME = "image-subtitle";
 const IMAGE_SUBTITLE_CODEC = "hdmv_pgs_subtitle";
 const CUE_TIME = 2;
 
@@ -35,7 +36,7 @@ function requireMediaTools(): void {
     execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
     execFileSync("ffprobe", ["-version"], { stdio: "ignore" });
   } catch {
-    throw new Error("FR2-044 真实验收缺少 ffmpeg 或 ffprobe");
+    throw new Error("真实验收缺少 ffmpeg 或 ffprobe");
   }
 }
 
@@ -139,7 +140,7 @@ test("真实后端枚举字幕音轨并完成 API 与播放器主路径", async 
         primaryFailure
           ? [primaryFailure.error, ...cleanupFailures]
           : cleanupFailures,
-        primaryFailure ? "FR2-044 验证或清理失败" : "FR2-044 清理失败",
+        primaryFailure ? "验证或清理失败" : "清理失败",
       );
     }
   }
@@ -222,7 +223,7 @@ interface TrackManifest {
 }
 
 function createFixture(): Fixture {
-  const root = mkdtempSync(join(tmpdir(), "jianvideo-fr2-044-"));
+  const root = mkdtempSync(join(tmpdir(), "jianvideo-subtitle-"));
   const mediaDir = join(root, "media");
   const uploadDir = join(root, "uploads");
   mkdirSync(mediaDir);
@@ -546,7 +547,7 @@ async function configureSoftwareTranscoding(
     snapshot.transcode_hwaccel_fallback === undefined ||
     snapshot.transcode_hwaccel_mode === undefined
   ) {
-    throw new Error("FR2-044 无法保存完整的全局转码设置快照");
+    throw new Error("无法保存完整的全局转码设置快照");
   }
   await updateTranscodingSettings(request, {
     transcode_hwaccel_fallback: "1",
@@ -581,7 +582,7 @@ async function deleteLibrary(
   const response = await request.delete(`/api/library/paths/${libraryID}`);
   if (!response.ok()) {
     throw new Error(
-      `删除 FR2-044 媒体库 ${libraryID} 失败：HTTP ${response.status()} ${await response.text()}`,
+      `删除 媒体库 ${libraryID} 失败：HTTP ${response.status()} ${await response.text()}`,
     );
   }
 }
@@ -594,7 +595,7 @@ async function createLibrary(
     data: {
       path: mediaDir.replace(/\\/g, "/"),
       type: "local",
-      label: "FR2-044 字幕音轨真实 E2E",
+      label: "字幕音轨真实 E2E",
     },
   });
   expect(response.ok()).toBeTruthy();

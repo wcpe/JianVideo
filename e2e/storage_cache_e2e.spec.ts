@@ -5,7 +5,7 @@ import { login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const screenshotDir = ".tmp/screenshots/fr2-048";
+const screenshotDir = ".tmp/screenshots/storage-cache";
 
 async function waitForTask(request: APIRequestContext, taskID: number) {
   await expect
@@ -17,14 +17,14 @@ async function waitForTask(request: APIRequestContext, taskID: number) {
     .toBe("succeeded");
 }
 
-test.describe("存储与缓存管理端到端（FR2-048）", () => {
+test.describe("存储与缓存管理端到端（）", () => {
   test.beforeEach(() => {
     mkdirSync(screenshotDir, { recursive: true });
   });
 
   test("真实服务支持异步盘点、dry-run 与清理终态闭环", async ({ page }) => {
     const metadataTempDir = join(".tmp", "e2e-run", "metadata_temp");
-    const cachePath = join(metadataTempDir, "fr2-048-e2e.cache");
+    const cachePath = join(metadataTempDir, "storage-cache-e2e.cache");
     mkdirSync(metadataTempDir, { recursive: true });
     writeFileSync(cachePath, "cache-temp");
 

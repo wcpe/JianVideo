@@ -20,6 +20,14 @@
 - **何时跑**：单元 / 集成随每次改动；`pnpm run quality` 必须包含 Playwright E2E，发版前至少完整跑一遍。
 - **真实服务 E2E 隔离**：当前 Playwright 套件共享单一真实服务、SQLite、任务队列和运行期设置，默认固定单 worker 串行执行；每次启动使用全新的专用数据根，禁止用提高 worker 数掩盖隔离边界。
 
+### 1.1.1 E2E 命名（强制，按能力不按工单）
+
+- **文件名按产品能力 / 用户路径**，格式 `{能力域}_{场景}_e2e.spec.ts`（例：`subtitle_audio_tracks_e2e.spec.ts`、`playback_tiered_seek_e2e.spec.ts`）。
+- **禁止**新建 `fr2-xxx-*.spec.ts`、`pN-*.spec.ts` 等以 FR/期号为前缀的 E2E 文件。
+- `test(...)` / `test.describe(...)` 标题写**中文业务行为**，不写 `FR2-xxx`。
+- FR 追溯只放在文件头注释：`// 覆盖 PRD FR2-0xx …`；fixture 名、tmpdir、截图目录、label 也用能力名，不嵌 FR 号。
+- 旧 `fr2-*` 文件已全部迁到能力名；发现残留按本条改，不新增。
+
 ### 1.2 Go 覆盖率策略
 
 - `pnpm run go:coverage` 是 Go 覆盖率权威门禁，默认要求有语句统计的包达到 **60%**。

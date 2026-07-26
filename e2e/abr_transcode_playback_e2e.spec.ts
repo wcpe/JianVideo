@@ -1,3 +1,4 @@
+// 覆盖 PRD ABR 转码与自适应播放
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp } from "node:fs/promises";
@@ -12,8 +13,8 @@ test("显式任务生成多档 HLS、逐档登记缓存并在直连失败后回�
 }) => {
   const fixtureRoot = resolve(".tmp/e2e-run/fixtures");
   await mkdir(fixtureRoot, { recursive: true });
-  const mediaDir = await mkdtemp(join(fixtureRoot, "fr2-026-"));
-  const mediaPath = join(mediaDir, "fr2-026-abr.mp4");
+  const mediaDir = await mkdtemp(join(fixtureRoot, "abr-transcode-"));
+  const mediaPath = join(mediaDir, "abr-transcode-abr.mp4");
   let libraryID = 0;
   try {
     writeVideoFixture(mediaPath);
@@ -22,7 +23,7 @@ test("显式任务生成多档 HLS、逐档登记缓存并在直连失败后回�
       data: {
         path: mediaDir.replace(/\\/g, "/"),
         type: "local",
-        label: "FR2-026 ABR E2E",
+        label: "ABR E2E",
       },
     });
     expect(library.ok()).toBeTruthy();

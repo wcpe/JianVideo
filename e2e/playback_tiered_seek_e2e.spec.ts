@@ -1,3 +1,4 @@
+// 覆盖 PRD 阶梯定位
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { login } from "./helpers";
 import {
@@ -12,9 +13,9 @@ import {
 test.describe.configure({ mode: "serial" });
 test.use({ serviceWorkers: "block" });
 
-const EXACT_FILE = "fr2-035-exact.mp4";
-const LONG_FILE = "fr2-035-long.mp4";
-const TS_FILE = "fr2-035-long.ts";
+const EXACT_FILE = "tiered-seek-exact.mp4";
+const LONG_FILE = "tiered-seek-long.mp4";
+const TS_FILE = "tiered-seek-long.ts";
 const LONG_DURATION = 130;
 const INITIAL_FRAME_STEP_REQUEST_ID = 0;
 const SECOND_TIERS = [0.5, 1, 5, 30, 60] as const;
@@ -71,7 +72,7 @@ const MIXED_OPERATIONS = [
   [60, "next"],
 ] as const;
 
-test("FR2-035 六档定位覆盖 exact 入口、边界与三路径混合操作", async ({
+test("六档定位覆盖 exact 入口、边界与三路径混合操作", async ({
   page,
 }) => {
   test.setTimeout(480_000);
@@ -111,8 +112,8 @@ test("FR2-035 六档定位覆盖 exact 入口、边界与三路径混合操作",
             }),
         },
       ],
-      label: "FR2-035 六档定位 E2E",
-      prefix: "fr2-035-",
+      label: "六档定位 E2E",
+      prefix: "tiered-seek-",
     },
     async ({ mediaByName }) => {
       const exactID = requiredMediaID(mediaByName, EXACT_FILE);
@@ -284,7 +285,7 @@ async function waitForFrameStepResult(
       { timeout: 15_000 },
     )
     .toBeGreaterThan(previousRequestId);
-  if (!observation) throw new Error("FR2-035 未取得本次逐帧命令结果");
+  if (!observation) throw new Error("未取得本次逐帧命令结果");
   return observation;
 }
 
@@ -317,7 +318,7 @@ async function waitForExactFrameStep(
       result: expect.stringMatching(/^\d+:completed:exact-verified:\d+:ok$/u),
       status: "completed",
     });
-  if (!observation) throw new Error("FR2-035 未取得原子逐帧快照");
+  if (!observation) throw new Error("未取得原子逐帧快照");
   expect(observation.requestId).toBeGreaterThan(previousRequestId);
   return observation;
 }
@@ -365,7 +366,7 @@ async function verifyExactFrameRace(
         { timeout: 15_000 },
       )
       .toBe(true);
-    if (!terminalSnapshot) throw new Error("FR2-035 未取得竞态原子终态快照");
+    if (!terminalSnapshot) throw new Error("未取得竞态原子终态快照");
     validateExactFrameRace(
       terminalSnapshot.results,
       terminalSnapshot.result,
@@ -419,7 +420,7 @@ function collectNewFrameStepResults(
 
 function requireFrameStepResult(value: string | null): FrameStepObservation {
   const parsed = parseFrameStepResult(value);
-  if (!parsed) throw new Error(`FR2-035 逐帧结果协议无效：${value ?? "缺失"}`);
+  if (!parsed) throw new Error(`逐帧结果协议无效：${value ?? "缺失"}`);
   return parsed;
 }
 

@@ -1,3 +1,4 @@
+// 覆盖 PRD 跨设备续播与 revision 隔离
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -6,8 +7,8 @@ import { BASE_URL, ensureSetup, login } from './helpers';
 
 test.use({ serviceWorkers: 'block' });
 
-test('FR2-045 双上下文续播、revision 冲突与 Space 隔离', async ({ browser }) => {
-  const mediaDir = join(process.cwd(), '.tmp', 'fr2-045-e2e');
+test('双上下文续播、revision 冲突与 Space 隔离', async ({ browser }) => {
+  const mediaDir = join(process.cwd(), '.tmp', 'cross-device-watch-e2e');
   const mediaPath = join(mediaDir, 'cross-device-watch-state.mp4');
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
@@ -23,7 +24,7 @@ test('FR2-045 双上下文续播、revision 冲突与 Space 隔离', async ({ br
 
     const library = await pageA.request.post('/api/library/paths', {
       data: {
-        label: 'FR2-045 跨设备续播 E2E',
+        label: '跨设备续播 E2E',
         path: mediaDir.replace(/\\/g, '/'),
         type: 'local',
       },

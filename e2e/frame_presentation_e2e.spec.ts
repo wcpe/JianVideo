@@ -1,3 +1,4 @@
+// 覆盖 PRD FR2-034/058 逐帧展示与平台接线
 import {
   expect,
   test,
@@ -150,12 +151,12 @@ test("真实协商契约驱动 UI 连续精确逐帧", async ({ page }) => {
   }
 });
 
-test("FR2-058 原生平台接线与移动手势", async ({ page }) => {
+test("原生平台接线与移动手势", async ({ page }) => {
   test.setTimeout(240_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实手势测试视频");
   await installPlatformStubs(page);
   const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-p3-platform-"));
-  const mediaPath = join(mediaDir, "fr2-058-platform-video.mp4");
+  const mediaPath = join(mediaDir, "frame-presentation-platform-video.mp4");
   let libraryID = 0;
 
   try {

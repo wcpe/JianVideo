@@ -52,7 +52,7 @@ test('媒体库内容分型可创建、展示与更新', async ({ page }) => {
       .toBe('series');
 
     mkdirSync('.tmp/screenshots', { recursive: true });
-    await page.screenshot({ path: '.tmp/screenshots/fr2-052-library-kinds-real.png', fullPage: true });
+    await page.screenshot({ path: '.tmp/screenshots/library-kinds-real.png', fullPage: true });
   } finally {
     if (createdId) await page.request.delete(`/api/library/paths/${createdId}`);
     rmSync(dir, { recursive: true, force: true });

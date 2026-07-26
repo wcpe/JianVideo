@@ -1,3 +1,4 @@
+// 覆盖 PRD 帧定位路径
 import {
   expect,
   test,
@@ -23,12 +24,12 @@ test.use({ serviceWorkers: "block" });
 const FRAME_RATE = 30;
 const VIDEO_DURATION = 8;
 const CONTINUOUS_STEPS = 4;
-const FMP4_FILE = "fr2-034-fmp4-numbered.webm";
-const TS_FILE = "fr2-034-mpegts-numbered.ts";
+const FMP4_FILE = "frame-paths-fmp4-numbered.webm";
+const TS_FILE = "frame-paths-mpegts-numbered.ts";
 const CODEC_PRIORITY_SETTING = "transcode_codec_priority";
 const HW_ACCEL_SETTING = "transcode_hwaccel_mode";
 
-test("FR2-034 真实 VP9 fMP4 HLS 连续前后逐帧", async ({ page }) => {
+test("真实 VP9 fMP4 HLS 连续前后逐帧", async ({ page }) => {
   test.setTimeout(300_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成编号帧并产出真实 fMP4 HLS");
   await login(page);
@@ -42,8 +43,8 @@ test("FR2-034 真实 VP9 fMP4 HLS 连续前后逐帧", async ({ page }) => {
           write: (path) => writeNumberedVp9Video(path),
         },
       ],
-      label: "FR2-034 真实 fMP4 HLS 逐帧 E2E",
-      prefix: "fr2-034-fmp4-",
+      label: "真实 fMP4 HLS 逐帧 E2E",
+      prefix: "frame-paths-fmp4-",
     },
     async ({ mediaByName }) => {
       const mediaID = requiredMediaID(mediaByName, FMP4_FILE);
@@ -73,7 +74,7 @@ test("FR2-034 真实 VP9 fMP4 HLS 连续前后逐帧", async ({ page }) => {
   );
 });
 
-test("FR2-034 真实 MPEG-TS 直连经 mpegts.js 连续前后逐帧", async ({ page }) => {
+test("真实 MPEG-TS 直连经 mpegts.js 连续前后逐帧", async ({ page }) => {
   test.setTimeout(300_000);
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成编号帧 MPEG-TS");
   await login(page);
@@ -87,8 +88,8 @@ test("FR2-034 真实 MPEG-TS 直连经 mpegts.js 连续前后逐帧", async ({ p
           write: (path) => writeNumberedTransportStream(path),
         },
       ],
-      label: "FR2-034 真实 MPEG-TS 逐帧 E2E",
-      prefix: "fr2-034-ts-",
+      label: "真实 MPEG-TS 逐帧 E2E",
+      prefix: "frame-paths-ts-",
     },
     async ({ mediaByName }) => {
       const mediaID = requiredMediaID(mediaByName, TS_FILE);

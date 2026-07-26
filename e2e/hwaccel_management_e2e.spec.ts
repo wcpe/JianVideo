@@ -1,14 +1,15 @@
+// 覆盖 PRD FR2-056 硬件加速管理
 import { test, expect } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureSetup, login } from './helpers';
 
-const screenshotDir = process.env.FR2056_SCREENSHOT_DIR || join('.tmp', 'screenshots', 'fr2-056');
+const screenshotDir = process.env.HWACCEL_SCREENSHOT_DIR || join('.tmp', 'screenshots', 'hwaccel');
 
 test.use({ serviceWorkers: 'block' });
 test.describe.configure({ mode: 'serial' });
 
-test.describe('FR2-056 硬件转码加速管理面板', () => {
+test.describe('硬件转码加速管理面板', () => {
   test.beforeEach(async ({ page }) => {
     mkdirSync(screenshotDir, { recursive: true });
     await ensureSetup(page.request);

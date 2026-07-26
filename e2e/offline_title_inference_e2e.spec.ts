@@ -1,3 +1,4 @@
+// 覆盖 PRD 离线影视标题推断
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -7,7 +8,7 @@ import { ensureSetup, login } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
-const screenshotDir = ".tmp/screenshots/fr2-031";
+const screenshotDir = ".tmp/screenshots/offline-title-inference";
 const hasFfmpeg = (() => {
   try {
     execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
@@ -21,7 +22,7 @@ test("本地离线推断可人工纠正且 backfill 不覆盖人工值", async (
   test.setTimeout(90000);
   test.skip(!hasFfmpeg, "未检测到 ffmpeg，跳过真实服务播放页推断 E2E");
 
-  const dir = mkdtempSync(join(tmpdir(), "jianvideo-fr2-031-e2e-"));
+  const dir = mkdtempSync(join(tmpdir(), "jianvideo-title-inference-e2e-"));
   const fileName = "Show.Name.S01E02.Pilot.mp4";
   let libraryID = 0;
   let mediaID = 0;
@@ -57,7 +58,7 @@ test("本地离线推断可人工纠正且 backfill 不覆盖人工值", async (
       data: {
         path: dir.replace(/\\/g, "/"),
         type: "local",
-        label: "FR2-031 E2E 剧集库",
+        label: "E2E 剧集库",
         library_kind: "series",
       },
     });
@@ -132,9 +133,9 @@ test("设置页可按媒体库关闭并在重新开启后由真实 worker 补齐
   test.setTimeout(120000);
   test.skip(!hasFfmpeg, "未检测到 ffmpeg，跳过真实服务设置回填 E2E");
 
-  const dir = mkdtempSync(join(tmpdir(), "jianvideo-fr2-031-settings-e2e-"));
+  const dir = mkdtempSync(join(tmpdir(), "jianvideo-title-inference-settings-e2e-"));
   const fileName = "Library.Scope.Movie.2026.mp4";
-  const libraryLabel = `FR2-031 E2E 范围库 ${process.pid}-${Date.now()}`;
+  const libraryLabel = `E2E 范围库 ${process.pid}-${Date.now()}`;
   let libraryID = 0;
 
   try {

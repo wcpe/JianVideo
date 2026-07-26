@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const baseUrl = process.env.WIKI_BASE_URL ?? 'http://127.0.0.1:4175';
-const screenshotDir = path.resolve(process.env.WIKI_SCREENSHOT_DIR ?? '.tmp/e2e/fr2-005');
+const screenshotDir = path.resolve(process.env.WIKI_SCREENSHOT_DIR ?? '.tmp/e2e/wiki-museum');
 const desktopScreenshot = path.join(screenshotDir, 'wiki-desktop.png');
 const mobileScreenshot = path.join(screenshotDir, 'wiki-mobile.png');
 
@@ -63,7 +63,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('FR2-005 wiki E2E 失败');
+  console.error('wiki E2E 失败');
   console.error(error);
   process.exit(1);
 });

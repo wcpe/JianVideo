@@ -1,3 +1,4 @@
+// 覆盖 PRD FR2-027 扫描、监听与增量更新
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,11 +9,11 @@ import { BASE_URL, login } from './helpers';
 
 test.use({ serviceWorkers: 'block' });
 
-const screenshotDir = '.tmp/screenshots/fr2-027';
+const screenshotDir = '.tmp/screenshots/scan-watch';
 
 test('全量扫描将丢失文件标记为 missing 并从常规列表隐藏', async ({ page }) => {
-  const mediaDir = await mkdtemp(join(tmpdir(), 'jianvideo-fr2-027-'));
-  const mediaPath = join(mediaDir, 'fr2-027-scan.mp4');
+  const mediaDir = await mkdtemp(join(tmpdir(), 'jianvideo-scan-watch-'));
+  const mediaPath = join(mediaDir, 'scan-watch-scan.mp4');
   let libraryID = 0;
 
   try {
@@ -101,7 +102,7 @@ function writeMediaFixture(path: string) {
       { stdio: 'ignore' },
     );
   } catch {
-    writeFileSync(path, Buffer.from('fr2-027'));
+    writeFileSync(path, Buffer.from('scan-watch'));
   }
 }
 

@@ -1,3 +1,4 @@
+// 覆盖 PRD HLS 预览与转码队列
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -11,8 +12,8 @@ test.use({ serviceWorkers: "block" });
 test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失败时回退播放", async ({
   page,
 }) => {
-  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-fr2-008-"));
-  const mediaPath = join(mediaDir, "fr2-008-preview.mp4");
+  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-hls-preview-"));
+  const mediaPath = join(mediaDir, "hls-preview-preview.mp4");
   let libraryID = 0;
 
   try {
@@ -24,7 +25,7 @@ test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失�
       data: {
         path: mediaDir.replace(/\\/g, "/"),
         type: "local",
-        label: "FR2-008 HLS E2E",
+        label: "HLS E2E",
       },
     });
     expect(createLibrary.ok()).toBeTruthy();
@@ -49,7 +50,7 @@ test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失�
 
     const presetResponse = await page.request.post("/api/transcode/presets", {
       data: {
-        name: "FR2-008 单档 H.264",
+        name: "单档 H.264",
         codec: "h264",
         width: 640,
         height: 480,
@@ -155,7 +156,7 @@ test("真实视频经统一任务生成单档 HLS、登记缓存并在直连失�
     await page.goto(`/play/${media.id}`);
     await expect.poll(() => requestedHLS, { timeout: 15000 }).toBe(true);
     await page.screenshot({
-      path: ".tmp/screenshots/fr2-008-hls-preview.png",
+      path: ".tmp/screenshots/hls-preview.png",
       fullPage: true,
     });
   } finally {

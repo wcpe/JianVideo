@@ -118,7 +118,7 @@ test.describe('任务中心端到端', () => {
     await page.getByRole('button', { name: '查询' }).click();
     await expect(page.getByText('transcode.hls')).toBeVisible();
     await expect(page.getByText('编码器不可用')).toBeVisible();
-    await page.screenshot({ path: `${screenshotDir}/fr2-037-task-center-mock.png`, fullPage: true });
+    await page.screenshot({ path: `${screenshotDir}/task-center-mock.png`, fullPage: true });
   });
 
   test('真实服务中扫描任务进入任务中心', async ({ page }) => {
@@ -145,7 +145,7 @@ test.describe('任务中心端到端', () => {
       await page.goto('/tasks');
       await expect(page.getByRole('heading', { name: '任务中心' })).toBeVisible();
       await expect(page.getByText('library.scan').first()).toBeVisible({ timeout: 10000 });
-      await page.screenshot({ path: `${screenshotDir}/fr2-037-task-center-real.png`, fullPage: true });
+      await page.screenshot({ path: `${screenshotDir}/task-center-real.png`, fullPage: true });
     } finally {
       if (libraryID) await page.request.delete(`/api/library/paths/${libraryID}`);
       rmSync(dir, { recursive: true, force: true });

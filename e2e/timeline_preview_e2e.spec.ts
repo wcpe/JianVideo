@@ -1,3 +1,4 @@
+// 覆盖 PRD 时间轴预览
 import {
   expect,
   test,
@@ -26,8 +27,8 @@ const hasFfmpeg = (() => {
 
 test("真实视频生成多页时间轴预览并验证桌面与触摸仿真交互", async ({ page }) => {
   test.skip(!hasFfmpeg, "需要 ffmpeg 生成真实长视频素材");
-  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-fr2-029-"));
-  const mediaPath = join(mediaDir, "fr2-029-timeline-preview.mp4");
+  const mediaDir = await mkdtemp(join(tmpdir(), "jianvideo-timeline-preview-"));
+  const mediaPath = join(mediaDir, "timeline-preview-timeline-preview.mp4");
   let libraryID = 0;
 
   try {
@@ -98,7 +99,7 @@ async function createLibrary(
     data: {
       path: mediaDir.replace(/\\/g, "/"),
       type: "local",
-      label: "FR2-029 时间轴预览 E2E",
+      label: "时间轴预览 E2E",
     },
   });
   expect(response.ok()).toBeTruthy();
