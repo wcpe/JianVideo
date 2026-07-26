@@ -713,11 +713,15 @@ async function loadCompleteManifest(
     ((await refresh.json()) as { task_id: number }).task_id,
   );
   let manifest = first;
+  // 元数据刷新任务完成后，嵌入轨枚举偶发仍有短延迟；默认 5s 在 CI 上不够
   await expect
-    .poll(async () => {
-      manifest = await getManifest(request, mediaID);
-      return hasExpectedEmbeddedTracks(manifest, embeddedSubtitleCount);
-    })
+    .poll(
+      async () => {
+        manifest = await getManifest(request, mediaID);
+        return hasExpectedEmbeddedTracks(manifest, embeddedSubtitleCount);
+      },
+      { timeout: 30_000 },
+    )
     .toBe(true);
   return manifest;
 }
