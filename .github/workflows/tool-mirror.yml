@@ -34,6 +34,20 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 创建 transport draft release（仅发布时）
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 同 run 跨 job cache 实测不可靠：产物走 draft release 运输，
+          # 用 run 专属 tag，发布成功后连 tag 一起清理。
+          if gh release view "transport-${{ github.run_id }}-${{ github.run_attempt }}" >/dev/null 2>&1; then
+            echo "复用已有 transport draft"
+          else
+            gh release create "transport-${{ github.run_id }}-${{ github.run_attempt }}" --draft --title transport --notes "tool-mirror artifact transport"
+          fi
       - name: 运行离线测试与静态契约
         shell: bash
         run: |
@@ -154,7 +168,7 @@ jobs:
           - {runner: macos-15, id: macos-aarch64, expected_os: macOS, expected_arch: ARM64}
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: read
+      contents: write
       id-token: write
       attestations: write
     steps:
@@ -202,11 +216,14 @@ jobs:
           python scripts/tool-mirror/tool_mirror.py manifest "$RUNNER_TEMP/payload" "$RUNNER_TEMP/payload/manifest.json"
           python scripts/tool-mirror/verify-artifact.py "$RUNNER_TEMP/payload/manifest.json" "$RUNNER_TEMP/payload"
           python scripts/tool-mirror/tool_mirror.py package "$RUNNER_TEMP/payload" "$RUNNER_TEMP/jianvideo-tools-${{ matrix.id }}.zip"
-      - name: 上传构建产物
-        uses: actions/cache/save@v4
-        with:
-          key: jianvideo-tools-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/jianvideo-tools-${{ matrix.id }}.zip
+      - name: 上传构建产物到 transport draft
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "transport-${{ github.run_id }}-${{ github.run_attempt }}" "${{ runner.temp }}/jianvideo-tools-${{ matrix.id }}.zip" --clobber
       - name: 生成构建来源证明
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
@@ -226,37 +243,21 @@ jobs:
     steps:
       - name: 检出发布脚本
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: 下载全部六格 ZIP
-        uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-linux-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-windows-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v4
-        with:
-          key: jianvideo-tools-macos-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist
-          fail-on-cache-miss: true
+      - name: 下载全部六格 ZIP 并校验
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "transport-${{ github.run_id }}-${{ github.run_attempt }}" -D dist --clobber
+          count="$(find dist -type f -name 'jianvideo-tools-*.zip' | wc -l)"
+          [ "${count}" -eq 6 ] || { echo "::error::六格 ZIP 不齐：实得 ${count}"; exit 1; }
+          ls -l dist/
+      - name: 删除 transport draft 及临时 tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "transport-${{ github.run_id }}-${{ github.run_attempt }}" -y --cleanup-tag
 
       - name: 创建草稿、回下载证明并发布
         shell: bash

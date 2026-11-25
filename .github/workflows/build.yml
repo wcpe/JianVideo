@@ -16,13 +16,17 @@ on:
         description: Actions 工件名称前缀
         required: true
         type: string
+      release_tag:
+        description: 产物上传到的 draft release tag
+        required: true
+        type: string
       artifact_retention_days:
         description: Actions 工件保留天数
         required: true
         type: number
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -74,9 +78,12 @@ jobs:
           go build -C apps/server -trimpath -ldflags "-s -w -X main.version=${RELEASE_VERSION}" -o "$(pwd)/dist/$out" .
           (cd dist && sha256sum "$out" > "jianvideo-${{ matrix.goos }}-amd64.sha256")
       - name: 上传固定源码构建工件
-        uses: actions/cache/save@v4
-        with:
-          key: ${{ inputs.artifact_prefix }}-${{ matrix.goos }}-amd64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/jianvideo-${{ matrix.goos }}-amd64*
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # draft release 产物通道：同 run 跨 job cache 实测不可靠
+        run: |
+          set -euo pipefail
+          gh release upload "${{ inputs.release_tag }}" dist/jianvideo-${{ matrix.goos }}-amd64* --clobber
           if-no-files-found: error
           retention-days: ${{ inputs.artifact_retention_days }}

@@ -48,6 +48,19 @@ jobs:
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: 创建 draft release 作为产物通道
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "::error::Release ${TAG_NAME} 已存在，拒绝污染" >&2
+            exit 1
+          fi
+          gh release create "${TAG_NAME}" --draft --title "${TAG_NAME}" --notes "release pipeline in progress"
           echo "artifact_prefix=jianvideo-rc-${source_sha:0:7}" >> "$GITHUB_OUTPUT"
       - name: 预检 RC Release 与序号
         shell: bash
@@ -74,6 +87,7 @@ jobs:
       source_sha: ${{ needs.prepare.outputs.source_sha }}
       version: ${{ needs.prepare.outputs.version }}
       artifact_prefix: ${{ needs.prepare.outputs.artifact_prefix }}
+      release_tag: ${{ needs.prepare.outputs.tag }}
       artifact_retention_days: 14
 
   publish:
@@ -89,18 +103,20 @@ jobs:
           ref: ${{ needs.prepare.outputs.source_sha }}
           fetch-depth: 0
       - name: 下载全部平台工件
-        uses: actions/cache/restore@v4
-        with:
-          key: ${{ needs.prepare.outputs.artifact_prefix }}-linux-amd64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts
-          fail-on-cache-miss: true
-
-      - name: 还原 windows 平台工件
-        uses: actions/cache/restore@v4
-        with:
-          key: ${{ needs.prepare.outputs.artifact_prefix }}-windows-amd64-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts
-          fail-on-cache-miss: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "${TAG_NAME}" -D artifacts --clobber
+          ls -l artifacts/
+      - name: 移除运输用 draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag }}
+        run: gh release delete "${TAG_NAME}" -y
       - name: 生成 RC 发布说明
         shell: bash
         run: bash scripts/changelog-extract.sh "${{ needs.prepare.outputs.version }}" CHANGELOG.md > release-notes.md
@@ -110,3 +126,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: bash scripts/publish-release.sh publish-from-tag artifacts "${{ needs.prepare.outputs.tag }}" "${{ needs.prepare.outputs.source_sha }}" rc release-notes.md
+
+  cleanup-draft:
+    needs: [prepare, publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: 清理未发布的 draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [ -n "${TAG_NAME}" ] || exit 0
+          if gh release view "${TAG_NAME}" --json isDraft --jq '.isDraft' 2>/dev/null | grep -q '^true$'; then
+            gh release delete "${TAG_NAME}" -y
+            echo "已清理残留 draft ${TAG_NAME}"
+          fi
