@@ -74,9 +74,9 @@ jobs:
           go build -C apps/server -trimpath -ldflags "-s -w -X main.version=${RELEASE_VERSION}" -o "$(pwd)/dist/$out" .
           (cd dist && sha256sum "$out" > "jianvideo-${{ matrix.goos }}-amd64.sha256")
       - name: 上传固定源码构建工件
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/cache/save@v4
         with:
-          name: ${{ inputs.artifact_prefix }}-${{ matrix.goos }}-amd64
+          key: ${{ inputs.artifact_prefix }}-${{ matrix.goos }}-amd64-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/jianvideo-${{ matrix.goos }}-amd64*
           if-no-files-found: error
           retention-days: ${{ inputs.artifact_retention_days }}

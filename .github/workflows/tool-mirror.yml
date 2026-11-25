@@ -88,15 +88,6 @@ jobs:
           python scripts/tool-mirror/tool_mirror.py assert-runner --runner "${{ matrix.runner }}" --runner-os "$RUNNER_OS" --runner-arch "$RUNNER_ARCH"
           python scripts/tool-mirror/tool_mirror.py discover "$EVIDENCE" --runner "${{ matrix.runner }}"
           python -c 'import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); print(hashlib.sha256(p.read_bytes()).hexdigest(), p.name)' "$EVIDENCE" > "$EVIDENCE.sha256"
-      - name: 上传工具链发现证据
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: tool-mirror-discovery-${{ matrix.id }}
-          path: |
-            ${{ runner.temp }}/tool-mirror-discovery-${{ matrix.id }}.json
-            ${{ runner.temp }}/tool-mirror-discovery-${{ matrix.id }}.json.sha256
-          if-no-files-found: error
-          retention-days: 30
 
   preflight:
     name: 正式预检 ${{ matrix.id }}
@@ -212,12 +203,10 @@ jobs:
           python scripts/tool-mirror/verify-artifact.py "$RUNNER_TEMP/payload/manifest.json" "$RUNNER_TEMP/payload"
           python scripts/tool-mirror/tool_mirror.py package "$RUNNER_TEMP/payload" "$RUNNER_TEMP/jianvideo-tools-${{ matrix.id }}.zip"
       - name: 上传构建产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/cache/save@v4
         with:
-          name: jianvideo-tools-${{ matrix.id }}
+          key: jianvideo-tools-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/jianvideo-tools-${{ matrix.id }}.zip
-          if-no-files-found: error
-          retention-days: 7
       - name: 生成构建来源证明
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
@@ -238,11 +227,37 @@ jobs:
       - name: 检出发布脚本
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: 下载全部六格 ZIP
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/cache/restore@v4
         with:
-          pattern: jianvideo-tools-*
+          key: jianvideo-tools-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist
-          merge-multiple: true
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          key: jianvideo-tools-linux-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          key: jianvideo-tools-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          key: jianvideo-tools-windows-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          key: jianvideo-tools-macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v4
+        with:
+          key: jianvideo-tools-macos-aarch64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+          fail-on-cache-miss: true
+
       - name: 创建草稿、回下载证明并发布
         shell: bash
         env:
